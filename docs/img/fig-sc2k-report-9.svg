@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 210" role="img" aria-label="The two-pass terrain raise. The first pass walks the tiles that would have to move and marks each one in XBIT bit 3, returning false if any tile is at the height ceiling or in a military zone. The second pass walks the marks, clears each one, and raises the tile if the treasury can pay."><style>:root{--body:#2C3335;--gold:#9A6712;--gold-bg:#F0E4CC;--moss:#5C7530;--muted:#5D6663; color-scheme:light dark}@media(prefers-color-scheme:dark){:root{--body:#C6CDC9;--gold:#DDA43E;--gold-bg:#2A2318;--moss:#9AB962;--muted:#8B9491;}}text{font-family:Helvetica Neue,Helvetica,Arial,sans-serif}</style>
+        <defs><marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+
+        <text x="40" y="30" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="currentColor">``$8758`` — test and mark</text>
+        <g stroke="currentColor" stroke-width="1.1" fill="none">
+          <rect x="40" y="44" width="46" height="46"/><rect x="86" y="44" width="46" height="46"/>
+          <rect x="132" y="44" width="46" height="46"/><rect x="178" y="44" width="46" height="46"/>
+          <rect x="224" y="44" width="46" height="46"/>
+        </g>
+        <g fill="var(--gold-bg)" stroke="var(--gold)" stroke-width="1.5">
+          <rect x="40" y="44" width="46" height="46"/><rect x="86" y="44" width="46" height="46"/>
+          <rect x="132" y="44" width="46" height="46"/>
+        </g>
+        <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" text-anchor="middle">
+          <text x="63"  y="72" fill="var(--gold)">bit 3</text>
+          <text x="109" y="72" fill="var(--gold)">bit 3</text>
+          <text x="155" y="72" fill="var(--gold)">bit 3</text>
+          <text x="201" y="72" fill="var(--muted)">—</text>
+          <text x="247" y="72" fill="var(--muted)">—</text>
+        </g>
+        <text x="40" y="110" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="var(--muted)">recurses into every lower orthogonal neighbour</text>
+        <text x="40" y="128" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="var(--muted)">refuses at altitude 30, or beside a military zone</text>
+
+        <line x1="300" y1="67" x2="360" y2="67" stroke="currentColor" stroke-width="1.2" marker-end="url(#ar3)"/>
+        <text x="330" y="56" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="var(--muted)" text-anchor="middle">true</text>
+
+        <text x="380" y="30" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="currentColor">``$896C`` — consume and raise</text>
+        <g stroke="currentColor" stroke-width="1.1" fill="none">
+          <rect x="380" y="44" width="46" height="46"/><rect x="426" y="44" width="46" height="46"/>
+          <rect x="472" y="44" width="46" height="46"/><rect x="518" y="44" width="46" height="46"/>
+          <rect x="564" y="44" width="46" height="46"/>
+        </g>
+        <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" text-anchor="middle" fill="var(--moss)">
+          <text x="403" y="72">+1</text><text x="449" y="72">+1</text><text x="495" y="72">+1</text>
+        </g>
+        <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" text-anchor="middle" fill="var(--muted)">
+          <text x="541" y="72">—</text><text x="587" y="72">—</text>
+        </g>
+        <text x="380" y="110" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="var(--muted)">clears the mark on entry, so a mark is spent once</text>
+        <text x="380" y="128" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="var(--muted)">costs 25 a tile, and the neighbours rise before the check</text>
+
+        <rect x="40" y="150" width="820" height="44" fill="var(--gold-bg)"/>
+        <text x="56" y="170" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12.5" fill="var(--body)">A failed test leaves its marks behind. The next test over that ground returns true at once.</text>
+        <text x="56" y="186" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12.5" fill="var(--body)">The volcano depends on that, so tidying the marks away diverges within a few eruptions.</text>
+      </svg>

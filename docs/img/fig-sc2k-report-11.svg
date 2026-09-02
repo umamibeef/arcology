@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 260" role="img" aria-label="The square spiral used by the fire, riot and firestorm searches. Starting at a centre tile, the walk steps one tile, turns, steps one tile, turns, then steps two, and the leg length grows by one on every second turn, tracing a widening square."><style>:root{--gold:#9A6712;--gold-bg:#F0E4CC;--muted:#5D6663;--rule:#D9DCD6; color-scheme:light dark}@media(prefers-color-scheme:dark){:root{--gold:#DDA43E;--gold-bg:#2A2318;--muted:#8B9491;--rule:#272E2F;}}text{font-family:Helvetica Neue,Helvetica,Arial,sans-serif}</style>
+        <defs><marker id="ar5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+        <g stroke="var(--rule)" stroke-width=".8" fill="none">
+          <path d="M180 20 h240 M180 50 h240 M180 80 h240 M180 110 h240 M180 140 h240 M180 170 h240 M180 200 h240 M180 230 h240"/>
+          <path d="M180 20 v210 M210 20 v210 M240 20 v210 M270 20 v210 M300 20 v210 M330 20 v210 M360 20 v210 M390 20 v210 M420 20 v210"/>
+        </g>
+        <rect x="285" y="110" width="30" height="30" fill="var(--gold-bg)" stroke="var(--gold)" stroke-width="1.5"/>
+        <path d="M300 125 L270 125 L270 95 L330 95 L330 155 L240 155 L240 65 L360 65 L360 185 L210 185 L210 35 L390 35"
+              fill="none" stroke="var(--gold)" stroke-width="2" stroke-linejoin="round" marker-end="url(#ar5)"/>
+        <text x="300" y="252" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="var(--muted)" text-anchor="middle">leg lengths 1, 1, 2, 2, 3, 3, 4, 4 …</text>
+
+        <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="13" fill="currentColor">
+          <text x="480" y="46" font-weight="600">what each search takes</text>
+        </g>
+        <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12.5" fill="currentColor">
+          <text x="480" y="76">``$38002``  riot     road and road-like, dry, empty</text>
+          <text x="480" y="100">``$37C66``  storm    anything at all, 65 tiles of it</text>
+          <text x="480" y="124">``$38290``  fire     XBLD ≥ $70, a large building</text>
+        </g>
+        <text x="480" y="156" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12.5" fill="var(--muted)">The fire starts within twenty tiles of the view</text>
+        <text x="480" y="174" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12.5" fill="var(--muted)">centre and gives up at leg 64. If it finds nothing,</text>
+        <text x="480" y="192" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12.5" fill="var(--muted)">it draws up to two hundred tiles anywhere instead.</text>
+        <text x="480" y="210" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12.5" fill="var(--muted)">The two searches use different generators.</text>
+      </svg>

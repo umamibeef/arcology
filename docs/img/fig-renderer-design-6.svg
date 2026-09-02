@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 186" role="img" aria-label="A continuous zoom scale from 0.125 to 4 times, showing which of the three hand-drawn art sets is used across each part of the range, with crossfade bands, compared with the original game's three fixed stops."><style>:root{--gold:#9A6712; color-scheme:light dark}@media(prefers-color-scheme:dark){:root{--gold:#DDA43E;}}text{font-family:Helvetica Neue,Helvetica,Arial,sans-serif}</style>
+      <text x="20" y="22" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10.5" letter-spacing="1.4" fill="currentColor" opacity=".55">PROPOSED — CONTINUOUS</text>
+
+      <rect x="60" y="36" width="174" height="34" fill="none" stroke="currentColor" stroke-width="1.4"/>
+      <text x="147" y="58" text-anchor="middle" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11.5" fill="currentColor">8 px art</text>
+
+      <rect x="258" y="36" width="100" height="34" fill="none" stroke="currentColor" stroke-width="1.4"/>
+      <text x="308" y="58" text-anchor="middle" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11.5" fill="currentColor">16 px art</text>
+
+      <rect x="382" y="36" width="298" height="34" fill="none" stroke="currentColor" stroke-width="1.6"/>
+      <text x="531" y="58" text-anchor="middle" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11.5" fill="currentColor">32 px art</text>
+      <line x1="432" y1="36" x2="432" y2="70" style="stroke:var(--gold)" stroke-width="1.6"/>
+
+      <rect x="234" y="36" width="24" height="34" fill="currentColor" opacity=".16"/>
+      <rect x="358" y="36" width="24" height="34" fill="currentColor" opacity=".16"/>
+      <text x="246" y="88" text-anchor="middle" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="9.5" fill="currentColor" opacity=".55">fade</text>
+      <text x="370" y="88" text-anchor="middle" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="9.5" fill="currentColor" opacity=".55">fade</text>
+      <text x="432" y="88" text-anchor="middle" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="9.5" style="fill:var(--gold)">1:1</text>
+
+      <line x1="60" y1="106" x2="700" y2="106" stroke="currentColor" stroke-width="1.2"/>
+      <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10.5" fill="currentColor" text-anchor="middle">
+        <line x1="60"  y1="102" x2="60"  y2="110" stroke="currentColor" stroke-width="1.2"/><text x="60"  y="126">0.125×</text>
+        <line x1="184" y1="102" x2="184" y2="110" stroke="currentColor" stroke-width="1.2"/><text x="184" y="126">0.25×</text>
+        <line x1="308" y1="102" x2="308" y2="110" stroke="currentColor" stroke-width="1.2"/><text x="308" y="126">0.5×</text>
+        <line x1="432" y1="102" x2="432" y2="110" stroke="currentColor" stroke-width="1.2"/><text x="432" y="126">1×</text>
+        <line x1="556" y1="102" x2="556" y2="110" stroke="currentColor" stroke-width="1.2"/><text x="556" y="126">2×</text>
+        <line x1="680" y1="102" x2="680" y2="110" stroke="currentColor" stroke-width="1.2"/><text x="680" y="126">4×</text>
+      </g>
+
+      <text x="20" y="158" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10.5" letter-spacing="1.4" fill="currentColor" opacity=".55">ORIGINAL — THREE STOPS</text>
+      <g style="fill:var(--gold)">
+        <circle cx="184" cy="176" r="5"/><circle cx="308" cy="176" r="5"/><circle cx="432" cy="176" r="5"/>
+      </g>
+      <line x1="184" y1="176" x2="432" y2="176" style="stroke:var(--gold)" stroke-width="1.2" stroke-dasharray="3 4" opacity=".55"/>
+    <rect x="60" y="36" width="174" height="34" fill="none" stroke="currentColor" stroke-width="1.4"/><rect x="258" y="36" width="100" height="34" fill="none" stroke="currentColor" stroke-width="1.4"/><rect x="382" y="36" width="298" height="34" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>

@@ -1,0 +1,115 @@
+/*  The report's own vocabulary, carried over to Sphinx.  The palette
+    follows furo's variables so both themes work without a second set. */
+:root{
+  --sc-accent:#9A6712; --sc-teal:#236C7C; --sc-moss:#5C7530; --sc-rust:#9C462C;
+  --sc-panel:var(--color-background-secondary);
+  --sc-line:var(--color-background-border);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --sc-accent:#DDA43E; --sc-teal:#5AB2C4; --sc-moss:#9AB962; --sc-rust:#D07C5E}
+}
+:root[data-theme="dark"], body[data-theme="dark"]{
+  --sc-accent:#DDA43E; --sc-teal:#5AB2C4; --sc-moss:#9AB962; --sc-rust:#D07C5E}
+
+/*  a mechanism card: a routine, its addresses, and what it does */
+.card{background:var(--sc-panel);border:1px solid var(--sc-line);
+      border-radius:9px;padding:18px 20px;margin:18px 0}
+.card > :first-child{margin-top:0}
+.card > :last-child{margin-bottom:0}
+
+/*  the address line under a heading */
+.where, .addr, .cap, .sechead{font-family:var(--font-stack);
+      font-size:.82rem;color:var(--color-foreground-muted);margin:0 0 12px}
+.where p, .addr p, .cap p, .sechead p{margin:0}
+
+/*  rubrics are used for the "where" strapline under each section title */
+p.rubric{font-family:var(--font-stack);font-size:.8rem;
+      font-weight:500;letter-spacing:.015em;
+      color:var(--color-foreground-muted);
+      border:0;margin:-8px 0 18px;text-transform:none}
+
+/*  the phase clock reads as a table but should look like a schedule */
+table.clock td:first-child{font-family:var(--font-stack--monospace);
+      font-size:.78rem;letter-spacing:.06em;color:var(--sc-accent);
+      text-transform:uppercase;white-space:nowrap}
+table.clock td:nth-child(2){font-weight:600}
+
+/*  inline SVG figures come through `raw:: html` */
+figure.fig, .fig{background:var(--sc-panel);border:1px solid var(--sc-line);
+      border-radius:7px;padding:18px 16px;margin:18px 0;overflow-x:auto}
+figure.fig svg, .fig svg{display:block;margin:0 auto;max-width:100%;height:auto}
+figure.fig figcaption{font-size:.85rem;color:var(--color-foreground-muted);
+      text-align:center;margin:12px auto 0;max-width:62ch;line-height:1.5}
+svg .lbl,svg .lbl-b,svg .lbl-k,svg .lbl-g,svg .num,svg .cap,svg text{
+      font-family:Helvetica Neue,Helvetica,Arial,sans-serif}
+svg .lbl{font-size:11.5px;fill:var(--color-foreground-muted)}
+svg .lbl-b{font-size:11.5px;fill:var(--color-foreground-primary);font-weight:600}
+svg .lbl-k{font-size:11.5px;fill:var(--sc-teal);font-weight:600}
+svg .lbl-g{font-size:11.5px;fill:var(--sc-accent);font-weight:600}
+svg .num{font-size:13px;fill:var(--color-foreground-primary);font-weight:600}
+svg .cap{font-size:11px;fill:var(--color-foreground-muted);letter-spacing:.08em;
+      text-transform:uppercase;font-weight:600}
+/*  the palette tokens the figures were drawn against */
+figure.fig, .fig{
+  --surface:var(--color-background-primary); --rule:var(--color-background-border);
+  --rule-soft:var(--color-background-border); --muted:var(--color-foreground-muted);
+  --ink:var(--color-foreground-primary); --faint:var(--color-foreground-muted);
+  --gold:var(--sc-accent); --gold-bg:var(--color-background-secondary);
+  --water:var(--sc-teal); --water-bg:color-mix(in srgb,var(--sc-teal) 14%,transparent);
+  --moss:var(--sc-moss); --moss-bg:color-mix(in srgb,var(--sc-moss) 14%,transparent);
+  --rust:var(--sc-rust); --rust-bg:color-mix(in srgb,var(--sc-rust) 14%,transparent);
+}
+
+/*  screenshots of the renderer keep their pixels sharp */
+.box img, figure img{image-rendering:pixelated;border:1px solid var(--sc-line);
+      border-radius:4px}
+
+/*  wide tables scroll rather than pushing the page sideways */
+table.docutils{display:block;overflow-x:auto;max-width:100%}
+table.docutils td, table.docutils th{vertical-align:top}
+
+/*  headline figures under a masthead.  Equal heights, so one label that
+    wraps to a second line does not make its whole row taller. */
+.stats .sd-card{text-align:center;height:100%;display:flex;
+      flex-direction:column;justify-content:center}
+.stats .sd-col{display:flex}
+.stats .sd-card-title{font-size:1.35rem;font-weight:700;margin:0}
+.stats .sd-card-body{padding:14px 12px}
+.stats .sd-card-body p{font-size:.85rem;color:var(--color-foreground-muted);margin:4px 0 0}
+
+/*  address references into the appendix keep their monospace look */
+a.reference.internal code, a.reference.internal span.std-ref,
+a.reference.internal:has(> span.std-ref){font-family:var(--font-stack--monospace)}
+a.reference.internal .std-ref{font-family:var(--font-stack--monospace);font-size:.92em}
+
+/*  ---- the three subtitle roles ---------------------------------------
+    .eyebrow  a label above the content: what kind of thing this is
+    .lede     the opening statement, set larger than body text
+    .dec-body a design decision, led by its "Take"                        */
+
+.eyebrow, .eyebrow p{font-family:var(--font-stack);
+      font-size:.72rem;font-weight:600;line-height:1.5;
+      letter-spacing:.11em;text-transform:uppercase;
+      color:var(--color-foreground-muted)}
+.eyebrow{margin:0 0 14px}
+.eyebrow p{margin:0}
+h1 + .eyebrow{margin-top:-12px}
+h2 + .eyebrow, h3 + .eyebrow, h4 + .eyebrow{margin:-10px 0 14px}
+
+.lede, .lede p{font-size:1.06rem;line-height:1.65;
+      color:var(--color-foreground-secondary)}
+.lede{margin:0 0 24px;max-width:68ch}
+.lede p{margin:0 0 .6em}
+.lede p:last-child{margin-bottom:0}
+.lede strong{color:var(--color-foreground-primary);font-weight:650}
+
+/*  the Take is the answer; everything after it is the reasoning */
+.dec-body{margin:0 0 26px}
+.dec-body > p:first-of-type{font-size:1.02rem;line-height:1.6;
+      border-left:3px solid var(--sc-accent);background:var(--sc-panel);
+      border-radius:0 7px 7px 0;padding:13px 17px;margin:0 0 16px}
+.dec-body > p:first-of-type > strong:first-child{display:block;
+      font-family:var(--font-stack);font-size:.68rem;font-weight:700;
+      letter-spacing:.12em;text-transform:uppercase;
+      color:var(--sc-accent);margin:0 0 6px}

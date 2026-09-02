@@ -1,0 +1,83 @@
+---
+AlignAfterOpenBracket: Align              # Aligns the values in consecutive lines after an open bracket.
+AlignArrayOfStructures: Left              # Align arrays of structs
+AlignConsecutiveAssignments: true         # Align consecutive assignments.
+AlignConsecutiveDeclarations: true        # Align consecutive declarations.
+AlignConsecutiveMacros: true              # Align consecutive macros.
+AlignEscapedNewlines: Left                # Alignment for escaped newlines.
+AlignOperands: true                       # Align operands in expressions.
+AlignTrailingComments: true               # Align trailing comments in consecutive lines.
+AllowAllArgumentsOnNextLine: true         # Allow placing all function arguments on the next line.
+AllowAllConstructorInitializersOnNextLine: true # Allow all constructor initializers on the next line.
+AllowAllParametersOfDeclarationOnNextLine: true # Allow all parameters of a declaration on the next line.
+AlwaysBreakAfterReturnType: None          # Don't force line break after the return type.
+AlwaysBreakBeforeMultilineStrings: false  # Don't force line break before multiline strings.
+AlwaysBreakTemplateDeclarations: Yes      # Always break template declarations.
+BinPackArguments: false                   # Don't bin pack arguments.
+BinPackParameters: false                  # Disable bin-packing of function parameters.
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterClass:      true
+  AfterControlStatement: true
+  AfterEnum:       true
+  AfterFunction:   true
+  AfterNamespace:  true
+  AfterObjCDeclaration: true
+  AfterStruct:     true
+  AfterUnion:      true
+  AfterExternBlock: false
+  BeforeCatch:     true
+  BeforeElse:      true
+  IndentBraces:    false
+  SplitEmptyFunction: false
+  SplitEmptyRecord: false
+  SplitEmptyNamespace: false
+BreakBeforeInheritanceComma: false        # Don't break before an inheritance comma.
+BreakInheritanceList: BeforeComma         # Break inheritance list before the comma.
+BreakBeforeTernaryOperators: true         # Break before ternary operators.
+ColumnLimit: 0                            # No column limit
+CommentPragmas:  '^ IWYU pragma:'         # Regular expression to match special comment pragmas.
+ContinuationIndentWidth: 4                # Indent width for continuation lines.
+Cpp11BracedListStyle: true
+DeriveLineEnding: false                   # Don't derive line ending from the input file.
+DerivePointerAlignment: false             # Don't derive pointer alignment from the input file.
+DisableFormat:   false                    # Don't disable formatting.
+FixNamespaceComments: true                # Add or fix existing namespace comments.
+IncludeBlocks:   Preserve                 # Preserve include blocks as they are.
+IndentCaseBlocks: true                    # Indent 'switch' blocks, corresponds to --indent-switches.
+IndentCaseLabels: true                    # Don't indent 'case' labels inside the 'switch' blocks.
+IndentGotoLabels: true                    # Don't indent goto labels.
+IndentPPDirectives: BeforeHash            # Indent preprocessor blocks, corresponds to --indent-preproc-block.
+IndentWidth:     4                        # Indent with 4 spaces, corresponds to --indent=spaces=4.
+IndentWrappedFunctionNames: false         # Don't indent wrapped function names.
+KeepEmptyLinesAtTheStartOfBlocks: true    # Keep empty lines at the start of blocks.
+MaxEmptyLinesToKeep: 1                    # Maximum number of consecutive empty lines to keep.
+NamespaceIndentation: None                # No extra indentation for namespaces.
+PenaltyBreakAssignment: 2                 # Penalty for breaking assignments.
+PenaltyBreakBeforeFirstCallParameter: 1   # Penalty for breaking before the first call parameter.
+PenaltyBreakComment: 300                  # Penalty for breaking comments.
+PenaltyBreakFirstLessLess: 120            # Penalty for breaking a line before the first '<<'.
+PenaltyBreakString: 1000                  # Penalty for breaking string literals.
+PenaltyExcessCharacter: 1000000           # Penalty for characters exceeding the column limit.
+PenaltyReturnTypeOnItsOwnLine: 60         # Penalty for return type on its own line.
+PointerAlignment: Right                   # Pointer alignment, corresponds to --align-pointer=name and --align-reference=name.
+ReflowComments:  true                     # Reflow multiline comments.
+SortIncludes:    true                     # Sort include directives.
+SortUsingDeclarations: true               # Sort using declarations.
+SpaceAfterCStyleCast: false               # No space after C-style casts.
+SpaceAfterLogicalNot: false               # No space after logical not operator.
+SpaceAfterTemplateKeyword: true           # Space after the 'template' keyword.
+SpaceBeforeAssignmentOperators: true      # Space before assignment operators, part of --pad-oper.
+SpaceBeforeCtorInitializerColon: true     # Space before constructor initializer colon.
+SpaceBeforeParens: ControlStatements      # Space before parentheses in control statements, part of --pad-header.
+SpaceBeforeRangeBasedForLoopColon: true   # Space before colon in range-based for loop.
+SpaceInEmptyParentheses: false            # No space in empty parentheses.
+SpacesBeforeTrailingComments: 1           # One space before trailing comments.
+SpacesInAngles:  false                    # No spaces inside angle brackets.
+SpacesInContainerLiterals: true           # Spaces in container literals.
+SpacesInCStyleCastParentheses: false      # No spaces inside C-style cast parentheses.
+SpacesInParentheses: false                # No spaces inside parentheses.
+SpacesInSquareBrackets: false             # No spaces inside square brackets.
+TabWidth:        4                        # Tab width, corresponds to --indent=spaces=4.
+UseTab:          Never                    # Never use tabs for indentation, corresponds to --indent=spaces=4.
+...

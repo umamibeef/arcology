@@ -1,0 +1,73 @@
+# ---------------------------------------------------------------------
+#  Arcology
+#
+#  The rule behind most of this: nothing derived from the SimCity 2000
+#  binary or its resources goes in the repository.  Not because it is
+#  large -- because it is not ours to publish.  Every one of these is
+#  reproducible from your own copy of the game with a documented command.
+# ---------------------------------------------------------------------
+
+# Build trees.  The project builds from the root into build/.
+/build/
+build/
+cmake-build-*/
+
+# Sphinx output.
+docs/_build/
+
+# ---- extracted from the game -----------------------------------------
+#  tools/import_assets.py rebuilds all of this from the application's
+#  resource fork.  See the README.
+/assets/tiles*.png
+/assets/tiles*.json
+/assets/atlas.json
+/assets/ui.png
+/assets/ui.json
+/assets/sounds/
+/assets/themes/
+
+#  Resource forks copied out of the game or out of a theme file.
+/rsrc/
+
+#  The documentation's figures: 32 MB of frames rendered from the game's
+#  own sprite art.  The city files carry no art and do ship; these are
+#  Maxis's pixels, composited, and do not.
+#
+#  Rebuild them after importing assets:
+#      python3 tools/gen_previews.py
+#
+#  media/*.gif is deliberately NOT here -- two screenshots on the front
+#  page is a different proposition from a 32 MB gallery, and a README
+#  that shows nothing until you have built the project shows nothing to
+#  most people who look at it.
+/docs/img/preview/
+
+#  Disassembly, the A5 image, dumps, closeups: all of it is derived from
+#  the binary, and tools/ regenerates it.
+/out/
+
+# ---- generated locally, cheap to remake -------------------------------
+#  Oracle checkpoints.  A pickled 8 MB machine each, and only meaningful
+#  to the interpreter version that wrote them.
+/out/ckpt/
+
+#  The showcase's intermediate frames.  The GIFs beside them ARE checked
+#  in -- they are what the README shows -- but the full-resolution PNGs
+#  they were assembled from are not.
+media/.frames/
+
+#  The assistant's own directory.  .claude/CLAUDE.md is the fullest
+#  technical record the project has, but it is written AS INSTRUCTIONS
+#  to an assistant -- working notes, quoted conversation, dead ends --
+#  and that is not project documentation.  docs/ is.
+/.claude/
+
+# ---- the usual -------------------------------------------------------
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+*.swp
+*~
+compile_commands.json
+.cache/

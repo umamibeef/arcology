@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 990 320" role="img" aria-label="The frame pipeline: the tileset and the descriptor table feed a per-tile sweep, which emits blits to one of three blitters; the plain blitter writes every pixel, while the traffic and shadow blitters read the frame buffer back before writing."><style>:root{ color-scheme:light dark}@media(prefers-color-scheme:dark){:root{}}text{font-family:Helvetica Neue,Helvetica,Arial,sans-serif}</style>
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <g fill="none" stroke="currentColor" stroke-width="1.3">
+    <rect x="10"  y="40"  width="176" height="66"  rx="5"/>
+    <rect x="10"  y="150" width="176" height="60"  rx="5"/>
+    <rect x="246" y="40"  width="232" height="170" rx="5"/>
+    <rect x="520" y="14"  width="230" height="64"  rx="5"/>
+    <rect x="520" y="98"  width="230" height="64"  rx="5"/>
+    <rect x="520" y="182" width="230" height="64"  rx="5"/>
+    <rect x="810" y="98"  width="160" height="64"  rx="5"/>
+  </g>
+  <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="currentColor">
+    <text x="26" y="66" font-weight="600">TSET</text>
+    <text x="26" y="88" opacity=".7">1448 sprites</text>
+
+    <text x="26" y="176" font-weight="600">``$1226``</text>
+    <text x="26" y="198" opacity=".7">descriptors</text>
+
+    <text x="262" y="66" font-weight="600">per-tile sweep</text>
+    <text x="262" y="94" opacity=".7">``$16FF8`` 32px</text>
+    <text x="262" y="116" opacity=".7">``$161DC`` under</text>
+    <text x="262" y="148" opacity=".7">back to front</text>
+    <text x="262" y="180" opacity=".7">emits blits</text>
+
+    <text x="536" y="40" font-weight="600">``$18E96``</text>
+    <text x="536" y="62" opacity=".7">writes every pixel</text>
+
+    <text x="536" y="124" font-weight="600">``$19004`` traffic</text>
+    <text x="536" y="146" opacity=".7">writes onto $91 only</text>
+
+    <text x="536" y="208" font-weight="600">``$19B76`` shadow</text>
+    <text x="536" y="230" opacity=".7">darkens 100..110</text>
+
+    <text x="826" y="124" font-weight="600">frame buffer</text>
+    <text x="826" y="146" opacity=".7">``$120C``, 8bpp</text>
+  </g>
+  <g stroke="currentColor" stroke-width="1.3" fill="none">
+    <path d="M750 46 L766 46"/>
+    <path d="M750 130 L766 130"/>
+    <path d="M750 214 L766 214"/>
+    <path d="M766 46 L766 214"/>
+  </g>
+  <g stroke="currentColor" stroke-width="1.3" fill="none" marker-end="url(#ar)">
+    <path d="M186 73 L240 73"/>
+    <path d="M186 180 L214 180 L214 116 L240 116"/>
+    <path d="M478 60 L502 60 L502 46 L514 46"/>
+    <path d="M478 125 L514 130"/>
+    <path d="M478 190 L502 190 L502 214 L514 214"/>
+    <path d="M766 130 L804 130"/>
+  </g>
+  <g stroke="currentColor" stroke-width="1.3" fill="none" stroke-dasharray="5 4">
+    <path d="M890 162 L890 292 L604 292"/>
+  </g>
+  <g stroke="currentColor" stroke-width="1.3" fill="none" stroke-dasharray="5 4" marker-end="url(#ar)">
+    <path d="M604 292 L604 246"/>
+    <path d="M604 180 L604 162"/>
+  </g>
+  <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="currentColor" opacity=".62">
+    <text x="192" y="66">art</text>
+    <text x="484" y="112">blits</text>
+    <text x="772" y="122">pixels</text>
+    <text x="750" y="286" text-anchor="middle">read back</text>
+  </g>
+</svg>
