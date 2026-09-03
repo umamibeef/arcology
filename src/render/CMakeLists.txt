@@ -113,7 +113,9 @@ if(SDL3_FOUND)
 
     add_executable(arcology
         a_main.c                          # the dispatcher
-        r_app.c r_gpu.c r_log.cpp r_adapt.c r_mesh.c r_shaders.c r_sound.c
+        r_app.c r_gpu.c r_log.cpp r_adapt.c r_shaders.c r_sound.c
+        r_mesh.c r_mesh_tile.c r_mesh_emit.c r_mesh_net.c r_mesh_seg.c
+        r_mesh_hiway.c r_mesh_check.c r_traffic.c
         r_atlasdump.c r_softmain.c)       # --atlas and --soft
     #  sc2kdev links sc2kcore PUBLIC, so naming both here would put the
     #  archive on the link line twice.
