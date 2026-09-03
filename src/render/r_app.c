@@ -32,6 +32,7 @@
 
 #include <SDL3/SDL.h>
 
+#include "arc_version.h"
 #include "arco.h"
 #include "r_adapt.h"
 #include "r_atlas.h"
@@ -42,7 +43,26 @@
 #include "r_soft.h"
 #include "r_sound.h"
 #include "r_ui.h"
+#ifndef _WIN32
+    #include <sys/utsname.h>
+#endif
 #include "sc2k.h"
+
+/*  The platform, for the banner: what SDL calls it, the kernel and
+ *  the machine where uname can say, and the SDL this is running on. */
+static void platform_line(char *out, size_t n)
+{
+    const int v = SDL_GetVersion();
+#ifdef _WIN32
+    snprintf(out, n, "%s %s, SDL %d.%d.%d", SDL_GetPlatform(), sizeof(void *) == 8 ? "x64" : "x86", SDL_VERSIONNUM_MAJOR(v), SDL_VERSIONNUM_MINOR(v), SDL_VERSIONNUM_MICRO(v));
+#else
+    struct utsname u;
+    if (uname(&u) == 0)
+        snprintf(out, n, "%s, %s %s %s, SDL %d.%d.%d", SDL_GetPlatform(), u.sysname, u.release, u.machine, SDL_VERSIONNUM_MAJOR(v), SDL_VERSIONNUM_MINOR(v), SDL_VERSIONNUM_MICRO(v));
+    else
+        snprintf(out, n, "%s, SDL %d.%d.%d", SDL_GetPlatform(), SDL_VERSIONNUM_MAJOR(v), SDL_VERSIONNUM_MINOR(v), SDL_VERSIONNUM_MICRO(v));
+#endif
+}
 
 /*  Nanoseconds from SDL_GetTicksNS as milliseconds, for the log. */
 #define NS_MS(ns) ((double)(ns) / 1e6)
@@ -1359,6 +1379,7 @@ int r_game_main(int argc, char **argv)
                    "  --scroll X,Y  the canvas pixel at the top-left\n"
                    "  --shot FILE   render one frame to a PNG and exit\n"
                    "  --run N       advance N frames headless\n"
+                   "  --version     the version, one line\n"
                    "\n"
                    "  arcology --modes   lists the developer modes\n",
                    argv[0]);
@@ -1456,7 +1477,15 @@ int r_game_main(int argc, char **argv)
             "/_/ |_/_/  \\__/\\___/_/\\___/\\_, /\\_, /",
             "                          /___//___/",
         };
+        char plat[160], line[256];
         r_log_banner(BANNER, 5);
+        platform_line(plat, sizeof plat);
+        snprintf(line, sizeof line, "\nArcology %s -- the SimCity 2000 simulation, reconstructed\n%s\n\n", ARC_VERSION_FULL, plat);
+        r_log_raw(line);
+        r_log_raw("SimCity 2000 is copyright (c) 1993-1995 Maxis, now part of Electronic Arts Inc.\n"
+                  "Not affiliated with, endorsed by, or connected to Electronic Arts or Maxis.\n"
+                  "Arcology is copyright (c) 2026 the Arcology authors, MIT licence.\n"
+                  "https://github.com/umamibeef/arcology\n\n");
     }
     if (check)
         R_NOTE("init", "arcology, check against %s", check_out ? check_out : "the original");

@@ -65,6 +65,11 @@ void r_log(RLogLevel lvl, const char *source, const char *fmt, ...);
  *  the same colour rules as the log, so NO_COLOR gets the plain text. */
 void r_log_banner(const char *const *lines, int n);
 
+/*  Text verbatim to the log's stream -- no stamp, no level, no colour.
+ *  The lines under the banner.  Kept here rather than as an fputs in
+ *  the caller so the choice of stream stays in one place. */
+void r_log_raw(const char *text);
+
 #ifdef __cplusplus
 }
 #endif

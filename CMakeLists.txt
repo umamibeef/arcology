@@ -17,7 +17,7 @@
 # ====================================================================
 cmake_minimum_required(VERSION 3.16)
 project(arcology_all
-        VERSION 0.1
+        VERSION 0.1.0
         DESCRIPTION "Arcology -- the SimCity 2000 simulation, reconstructed"
         LANGUAGES C CXX)
 
@@ -28,6 +28,28 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 #  src/render pulls in ../sim itself, so adding it is enough to build
 #  the simulation, the renderer and the executable.
 add_subdirectory(src/render)
+
+# ---- the version --------------------------------------------------------
+#  Semver is the VERSION above, and that is the only place it is typed.
+#  The commit, whether the tree was clean and the commit's date come from
+#  git on EVERY build, through cmake/version.cmake, into a generated
+#  header: build/generated/arc_version.h.  The script rewrites the file
+#  only when its content changes, so nothing recompiles for nothing.
+#  The banner and --version read it; a_main.c and r_app.c include it.
+set(ARC_VERSION_H "${CMAKE_BINARY_DIR}/generated/arc_version.h")
+add_custom_target(arc_version ALL
+    COMMAND ${CMAKE_COMMAND}
+            -DSRC=${CMAKE_SOURCE_DIR}
+            -DOUT=${ARC_VERSION_H}
+            -DVERSION=${PROJECT_VERSION}
+            -P ${CMAKE_SOURCE_DIR}/cmake/version.cmake
+    BYPRODUCTS ${ARC_VERSION_H}
+    COMMENT "the version header"
+    VERBATIM)
+if(TARGET arcology)
+    add_dependencies(arcology arc_version)
+    target_include_directories(arcology PRIVATE "${CMAKE_BINARY_DIR}/generated")
+endif()
 
 # ---- the README's animations ----------------------------------------
 #  The GIFs at the top of README.md are real frames of this build, so

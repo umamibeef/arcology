@@ -20,6 +20,8 @@
  *  all mean what they look like.  Anything not in the table below goes
  *  to the game, which is the only mode a player ever wants.
  * ==================================================================== */
+#include "arc_version.h"
+
 #include <stdio.h>
 #include <string.h>
 
@@ -33,16 +35,7 @@ int r_game_main(int argc, char **argv);
  *  list silently launches the game instead, which looks like the
  *  checker hanging. */
 static const char *const ARC_DEV_MODES[] = {
-    "--verify",    "--bits",      "--water",     "--roundtrip",
-    "--convert",   "--micro",      "--allocmicro",
-    "--findmisc",  "--riot",      "--demolish1", "--averages",
-    "--advisor",   "--clock",     "--graph",     "--things",
-    "--demolish",  "--terrain",   "--raise",     "--settile",
-    "--footprint", "--scenario",  "--dump-growth-all",
-    "--dump-growth", "--trace-growth", "--growth", "--economy",
-    "--budget",    "--dump",      "--cycles",    "--rng",
-    NULL
-};
+    "--verify", "--bits", "--water", "--roundtrip", "--convert", "--micro", "--allocmicro", "--findmisc", "--riot", "--demolish1", "--averages", "--advisor", "--clock", "--graph", "--things", "--demolish", "--terrain", "--raise", "--settile", "--footprint", "--scenario", "--dump-growth-all", "--dump-growth", "--trace-growth", "--growth", "--economy", "--budget", "--dump", "--cycles", "--rng", NULL};
 
 static void arc_usage(void)
 {
@@ -52,6 +45,7 @@ static void arc_usage(void)
         "  arcology                    open the load menu\n"
         "  arcology <city>             open a city\n"
         "  arcology --help             the game's options\n"
+        "  arcology --version          the version, one line\n"
         "\n"
         "developer modes:\n"
         "  arcology --verify <dir>...  the verification report\n"
@@ -78,6 +72,11 @@ int main(int argc, char **argv)
         if (!strcmp(argv[1], "--modes"))
         {
             arc_usage();
+            return 0;
+        }
+        if (!strcmp(argv[1], "--version"))
+        {
+            printf("arcology %s\n", ARC_VERSION_FULL);
             return 0;
         }
         for (i = 0; ARC_DEV_MODES[i]; i++)

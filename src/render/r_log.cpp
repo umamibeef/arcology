@@ -395,6 +395,12 @@ extern "C" void r_log_banner(const char *const *lines, int n)
     std::fputs(buf.c_str(), stderr);
 }
 
+extern "C" void r_log_raw(const char *text)
+{
+    std::call_once(g_once, setup);
+    std::fputs(text, stderr);
+}
+
 void r_log(RLogLevel lvl, const char *source, const char *fmt, ...)
 {
     char    buf[1024];
