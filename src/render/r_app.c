@@ -1733,7 +1733,7 @@ int r_game_main(int argc, char **argv)
         char plat[160], line[256];
         r_log_banner(BANNER, 5);
         platform_line(plat, sizeof plat);
-        snprintf(line, sizeof line, "\n\nArcology %s -- the SimCity 2000 simulation, reconstructed\n%s\n\n", ARC_VERSION_FULL, plat);
+        snprintf(line, sizeof line, "\nArcology %s -- the SimCity 2000 simulation, reconstructed\n%s\n\n", ARC_VERSION_FULL, plat);
         r_log_raw(line);
         r_log_raw("SimCity 2000 is copyright (c) 1993-1995 Maxis, now part of Electronic Arts Inc.\n"
                   "Not affiliated with, endorsed by, or connected to Electronic Arts or Maxis.\n"
