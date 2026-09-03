@@ -5,7 +5,7 @@ Dynamic Road System Spec — North American Roads on a Square Grid
 
 .. container:: eyebrow
 
-   Reference · the user's specification, brought in whole; updated 2 September 2026 with 3.16, the signal operation, Part 6, the hardware, and the multi-track crossing rules of 3.15
+   Reference · the user's specification, brought in whole; updated 2 September 2026 with Part 7, the raised highways
 
 .. container:: lede
 
@@ -664,7 +664,8 @@ Part 4 — Recommended implementation order
 5. Furniture placement pass (single arc-length walk per segment, one rule table).
 6. Elevation/bridges/tunnels, then ramps as a macro; railway crossings (3.15) once rail tiles exist.
 7. Rail (Part 5): reuse the centerline/offset/band pipeline; add the turnout node type, multi-tile arc claiming, and the signal-block pass.
-8. Wear, climate, age variants as decal/material swaps keyed off segment metadata.
+8. Raised highways (Part 7): air/ground occupancy split first, then ramps as profiles with air claims, then the connector primitive (run–curve–run) and per-movement interchange assembly.
+9. Wear, climate, age variants as decal/material swaps keyed off segment metadata.
 
 --------------
 
@@ -1044,3 +1045,327 @@ Ballast           clean / fouled / weedy by class and age                       
 -  Signs: ``sign_stop_{750,900}``, ``sign_yield``, ``sign_speed_{us,ca}``, ``sign_warn_diamond_*``, ``sign_streetname_blade``, ``sign_streetname_box``, ``sign_reg_plate_300x450``, ``sign_crossbuck_{us,ca}``, ``sign_advance_rr_{us,ca}``, ``sign_ens``, ``sign_oneway``, ``sign_dne``
 -  Furniture: ``hydrant``, ``bench_{park,steel}``, ``bin_{mesh,bigbelly}``, ``busstop_post``, ``bus_shelter_4m``, ``paystation``, ``meter_single``, ``bikerack_u``, ``bollard_{fixed,removable}``, ``mailbox_{usps,cpc}``, ``tree_grate_1.5``, ``tree_guard``, ``cabinet_controller_{nema,332}``, ``cabinet_telecom``, ``padmount_transformer``, ``catchbasin_{curb,grate}``, ``manhole_{600,700}``
 -  Curb kit (procedural, not meshes): profiles for barrier, rolled, depressed; ramp profiles; joint decals.
+
+--------------
+
+Part 7 — Raised highways (elevated freeways)
+--------------------------------------------
+
+Scope: a grade-separated, two-direction freeway carried on a viaduct, built from **2×2 tile segments**. Ramps connect it to surface roads; interchanges connect it to other raised highways at X and T junctions. Nominal tile = 15 m for the arithmetic below; if your tile is different, the lane bake and the ramp lengths (in tiles) scale with it.
+
+7.1 The baked cross-section
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Deck width = 2 tiles = 30 m. That fits the common urban-viaduct section, which is what we bake:
+
+====================================================================== ========
+Element (outer → centre, one direction)                                Width
+====================================================================== ========
+Outer parapet / barrier (F-shape concrete, 0.81 m tall)                0.5
+Outer shoulder                                                         2.4
+Lane 3 (outer / merge lane)                                            3.7
+Lane 2                                                                 3.7
+Lane 1 (inner)                                                         3.7
+Inner shoulder                                                         0.6
+Half of median barrier (single-slope, 1.07 m tall, light poles on top) 0.3
+**Half deck**                                                          **14.9**
+====================================================================== ========
+
+Two directions → 29.8 m, leaving 0.1 m each side inside the 30 m footprint. **3 + 3 through lanes is the bake.** Everything else in Part 7 derives from this: lane count, shoulder space for a merge taper, where the lights go.
+
+If your tile is smaller than ~13.5 m, drop to 2 + 2 lanes with full shoulders (2+2+shoulders = 12.6 m per direction) rather than squeezing lane widths — a 3.0 m freeway lane looks wrong at speed.
+
+Fixed elements on the deck (rendered per 2×2 segment, arc-length parameterised like Part 3):
+
+-  Lane lines: dashed white 3/9 (``4.5/13.5`` if you scale with the 15 m tile), solid white right edge line, **solid yellow left edge line** against the median barrier — this yellow-left / white-right pair is the most recognisable freeway marking cue.
+-  RPMs on the lane lines every 12 m, white; red-backed on the wrong-way face at ramp junctions.
+-  Median barrier: continuous single-slope concrete with light poles every 45 m (twin-arm cobra heads, 12 m), glare screen optional, drainage slots at the base.
+-  Parapets: continuous, with a 0.3 m curb lip and steel rail on top on older viaducts (the "T-rail" look), plain concrete on new ones; scuppers every 30 m draining to a downspout that runs down a pier.
+-  Expansion joints every 3–4 segments (finger joints across the whole deck, a dark line with steel teeth).
+-  Overhead sign gantries: full-span truss on both parapets, at least at 2 segments before every exit and at every lane drop; cantilever gantries for single-lane exits.
+-  Deck lighting on the median only; no lighting from the parapets except at interchanges.
+
+7.2 Structure
+~~~~~~~~~~~~~
+
+-  **Deck**: post-tensioned concrete box girder (single cell, 2.4 m deep, sloped webs, the modern default) or steel plate girders (4–6 girders, 2.0 m deep, older/grey-green paint) on a 0.25 m slab. Deck underside is flat for the box girder, ribbed for plate girders. Bottom of deck = ``elevation``; road surface = ``elevation + deckDepth + 0.25``.
+-  **Clearance**: 5.0 m minimum from any surface road crown to the bottom of the deck (5.3 for truck routes; 7.0 over rail); so a raised highway sits at ``elevation ≥ 5.0 + deckDepth`` above the highest thing below it — practically **7.5–8 m to the road surface** for a box girder. This number drives every ramp length in 7.3.
+-  **Piers**: one per segment boundary (span = 2 tiles = 30 m; box girders can do 2 segments = 60 m if you want fewer columns). Choose the pier type from what's underneath:
+
+   -  Nothing / lot / verge: single hammerhead pier (1.8 m octagonal column, 1.5 m deep cap the full deck width) in the deck centreline.
+   -  Surface road running parallel under the deck: two-column bent placed in the road's median or outside its curbs; never in a lane.
+   -  Surface road crossing under the deck: straddle bent (portal frame) with the columns outside the road's curbs, or a span long enough to clear the road with the hammerhead landing in a corner lot.
+   -  Rail under: straddle bent only, 7 m clearance.
+   -  Water: 2-column bents on pile caps; add a fender.
+
+-  **Ground transition**: the highway leaves grade over an MSE wall approach (panelled retaining walls, 1 segment per ~2.5 m of rise at 4%: 4 segments to reach 8 m — or 3 segments at 6% for a game-scale compromise), then the first abutment. Alternatively depressed-to-raised via a bridge over a cross street.
+-  **Noise walls**: on the outer parapet wherever residential lots are within 2 tiles (2.4–4.0 m tall panels, concrete or absorptive, on the parapet top).
+-  **Under-deck zone**: the ground tiles beneath a raised highway keep their ground use, but with ``underDeck = true``: lots there may hold only parking, storage, low industrial, or a surface road; building height capped at ``elevation − 1``; chain-link fence around pier bases; permanent shadow decal; drainage grates; graffiti aging on piers.
+
+7.3 Ramps — 1×1 in data, rendered with whatever air is free
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Hard constraint.** A ramp is one 1×1 tile adjacent to a deck edge, connected to a surface road on its far side. The data does not grow. An interchange (or another ramp, or the map edge) may sit on the very next tile along the deck. So the renderer never *requires* extra tiles; it *opportunistically* uses free air beside the deck, and degrades gracefully to a form that fits in the ramp tile
+alone.
+
+**The arithmetic the renderer is fighting.** Deck surface ≈ 7.5 m above the surface road. A straight descent inside one 15 m tile is a 50% grade — not drawable. Path length is the only lever: 6% needs ~125 m, 8% ~95 m, 12% ~65 m, 16% ~47 m. Every form below is just a way of packing path length into the tiles available.
+
+**Occupancy layers.** Every tile has ``ground`` (what's there) and ``air`` (a height band that's claimed). The ramp tile claims ground. Anything else the ramp uses is an air claim on a neighbour — legal on any tile whose tallest ground object is below the ramp's ``zMin`` there, and *always* legal on tiles that are only lots, roads, rail, or verge. Air claims by an interchange template count as
+occupied.
+
+**Step 1 — orient.** The ramp tile touches the deck on one side; that side's deck direction (EB/WB) is the one the ramp serves (the lane it is adjacent to). ``ON`` ramps join in the direction of travel; ``OFF`` ramps leave in it. Upstream = against that direction.
+
+**Step 2 — scan for free air along the deck on the ramp's side.**
+
+-  ``D`` = number of consecutive free-air tiles immediately **downstream** of the ramp tile, along the deck edge, capped at 8.
+-  ``U`` = same, **upstream**, capped at 2.
+-  A tile is "free" if it has no air claim in ``[0, zDeck+1]`` and no ground object taller than the ramp would be there (the ramp is lowest far from the deck, so this is usually satisfied). Interchange templates, other ramps' outriggers and the map edge count as occupied.
+-  ON ramps use ``D`` for the climb and the merge (vehicles must arrive at the deck heading with traffic) and ``U`` only for the hairpin. OFF ramps are the exact mirror: swap upstream/downstream.
+
+**Step 3 — pick the ramp form.** (ON ramp described; OFF is mirrored.)
+
+======================= ================================================================================================================================================================================================= ===================== ======= ========================================================================
+``D``                   Form                                                                                                                                                                                              Climb path            Grade   Merge
+======================= ================================================================================================================================================================================================= ===================== ======= ========================================================================
+≥ 6                     **Parallel** — climb over the first ``min(D − 2, 6)`` downstream tiles, 1-tile offset from the parapet, turn in at the last one                                                                   4–6 tiles + ramp tile 6–8 %   Outrigger over the next 2 tiles + 1-tile taper (or aux lane, see Step 4)
+4–5                     **Short parallel** — climb over ``D − 2`` tiles, compressed                                                                                                                                       2–3 tiles + ramp tile 12–15 % Outrigger over the remaining 2 tiles, no taper if an interchange follows
+2–3 and ``U ≥ 1``       **Hairpin** — climb west over one upstream tile, 180° turn (R = 5.5 m), climb back east across the top of the ramp tile, join the deck at the ramp tile                                           ~50 m                 ~15 %   Outrigger over the ``D`` downstream tiles
+2–3 and ``U = 0``, or 1 **Helix + turn-in** (the "one extra tile in air" case) — 1.25-turn spiral in the ramp tile (R = 6 m centreline; see *Helix geometry* below), climb-out and turn-in over the first downstream tile 47 + 15 ≈ 62 m        ~12 %   Outrigger over what's left of ``D``; aux lane or shoulder if none
+0                       **Pure helix** — 1.25 turns in the ramp tile, joining the deck edge at the ramp tile itself                                                                                                       ~47 m                 ~16 %   Shoulder merge, or the downstream interchange's aux lane (Step 4)
+======================= ================================================================================================================================================================================================= ===================== ======= ========================================================================
+
+**Helix geometry (surface ramps only — a game compromise; interchange connectors in 7.4 never use it).** A helix is a circular ramp of centreline radius ``R`` that gains ``rise`` metres while turning ``n`` full turns plus a net heading change ``θ``.
+
+-  **Turn count is set by vertical clearance, not grade.** Where the spiral passes over itself, the two deck levels need ≥ 5.0 m clear (4.5 m vehicle + 0.5 m deck). So ``n = floor(rise / 5.0)`` full turns at most: for ``rise ≈ 7.4–7.5 m`` that is exactly **one** full turn. With the 90° net turn a deck-to-deck or surface-to-deck helix is therefore **1.25 turns**, no more and no less (0.25 turns
+   would be a 9 m path at 80 %).
+-  **Path and grade**: ``L = 2πR × 1.25``; at ``R = 6 m``, ``L ≈ 47 m``, grade ≈ 16 % for 7.5 m. Larger ``R`` helps linearly but the tile bounds it: the outer parapet must stay inside the tile, so ``R + 2.5 (lane half-width + parapet) + c ≤ tile``, where ``c`` is the centre offset below.
+-  **The ramp is the outer lane.** (This rule also governs every interchange connector in 7.4.) A diverge is a *split of the deck's outer lane*, not a structure beside the deck: at the gore the outer lane becomes an option lane (through or exit, marked with a split arrow), the ramp lane peels away across the outer shoulder and out through an opening in the parapet, and the through deck keeps its 3
+   lanes. A merge is the reverse: the ramp lane arrives alongside the outer shoulder and yields into the outer lane. Every helix, loop and direct connector is constructed from the **outer lane centreline** — 4.75 m inside the parapet line (0.5 parapet + 2.4 shoulder + 1.85 half-lane) on the baked deck.
+-  **Tangent construction** (this is what places the helix in its tile): the entry tangent is the lower deck's outer-lane centreline; the exit tangent is the line the ramp must reach at the top (for a surface ramp: 2.5 m outside the deck's parapet, from where it merges). The circle is tangent to both: centre at ``R`` from the outer-lane centreline, i.e. ``R − 4.75`` m **outside** the lower deck's
+   parapet (1.25 m at R = 6), and ``2.5 + R`` = 8.5 m from the upper deck's parapet. The first quarter-turn therefore lies over the lower deck's own outer lane and shoulder — it *is* the gore: deck-level pavement, the parapet interrupted, the shoulder ending at a hatched wedge and a crash cushion. The exit straight runs ``tile − 1.25`` ≈ 13.7 m along the upper deck's outside, 2.5 m off its
+   parapet, at the upper level.
+-  **Clearance checks that bound the circle**: (a) no part of the spiral below ``upperLevel`` may lie within the upper deck's footprint (its underside is only 5.0 m above the lower deck), so the circle's near edge stays ≥ 2.5 m outside the upper deck's parapet — that is the 8.5 m; (b) the spiral's second pass over its own gore, one full turn later, is at ≈ 5.9 m and needs ≥ 5.0 m clear over the
+   deck surface: 5.9 − 0.5 (ramp deck) = 5.4 m, OK — this is the only place it is permitted over the lower deck; (c) the outer parapet of the spiral stays inside the tile: ``(R − 4.75) + R + 2.5 ≤ tile`` on the lower-deck axis and ``8.5 + R + 2.5 ≤ tile`` on the upper-deck axis — at a 15 m tile, ``R ≤ 6.0``. So ``R = 6`` is the maximum, not a choice.
+-  **Merge at the top.** The exit straight ends at the block edge beside the upper deck's arm; the ramp lane runs along the outside of the parapet and merges into the outer lane through an opening, using the 2.4 m shoulder over the next tile(s) as the acceleration lane: a YIELD-controlled merge if no free air exists for an outrigger (7.3 Step 4), a proper outrigger merge lane if it does. Lane
+   balance on the receiving deck is preserved either way: the ramp joins the outer lane, it doesn't add one.
+-  **Lane balance at the gore.** With the fixed deck there is no added exit lane, so the outer lane is an option lane and the through count stays 3. Where free air exists upstream of the gore, the standard "lanes out = lanes in + 1" form applies instead: an outrigger adds a dedicated exit lane over 2 tiles (wide-dotted line, "EXIT ONLY" arrow), and the outer lane stays through-only.
+-  **Turn direction** is that of the movement: right turns spiral clockwise in plan (right-hand traffic), so the entry tangent is on the approach's right side and the exit tangent on the receiving deck's right side. The single quadrant/tile satisfying both is the one the movement uses.
+-  **Profile**: entry straight flat, then a constant grade around the spiral, then flat exit; 3 m vertical curves at each change. Superelevate 6 % toward the centre drum.
+-  **Look**: a 4 m concrete drum in the middle carries the inner edge; the outer edge is a parapet with a light every 90°; chevron signs at the entry; 15–20 km/h advisory.
+
+Rules that make the forms look right:
+
+-  Helix/hairpin loops always turn *toward* the deck (the top of the spiral faces the deck edge) so the last quarter-turn becomes the turn-in.
+-  Inside of a helix: a circular retaining wall/column drum (concrete, 4 m diameter) to hide the tight geometry; outside: parapet with lighting on the outer face every 90°.
+-  Vertical curve of 5 m at both ends of any ramp profile so the surface junction and the turn-in aren't creased.
+-  A ramp at 15 % gets a 20 km/h advisory sign, one at 11 % a 30 km/h; the ramp meter (urban) sits at the bottom of the helix on the ground tile.
+-  OFF ramps prefer the parallel forms more strongly (a car leaving at 100 km/h needs deceleration length): if fewer than 3 upstream tiles are free, the deceleration lane is provided on the deck by Step 4, and the helix does the rest.
+
+**Step 4 — the merge/diverge lane lives on the deck, never in the ramp tile.** The deck is 2 tiles wide with a 2.4 m outer shoulder; an acceleration lane needs 3.7 m. So the deck grows a one-lane **outrigger** (air claim on the tile beside the deck) for the merge:
+
+-  Downstream of an ON ramp: outrigger for the tiles left over after the climb (up to 4) then a 1-tile taper. If none are left, the shoulder itself is striped as a very short merge (the honest-but-ugly fallback) and a "MERGE" sign is placed on the deck 1 tile upstream.
+-  **When the next thing downstream is an interchange or an OFF ramp** (the "interchange right after" case — *interchange* here and throughout 7.3 means a 7.4 highway-to-highway T or X template): do *not* taper. Every 7.4 template begins each approach with a **right-side diverge** — the right-turn ramp, or the flyover/loop connector for the left turn, which also leaves to the right — so there is
+   always a diverge for the aux lane to feed. The outrigger continues as an **auxiliary lane** straight into the interchange's own diverge/outrigger — the ON-ramp lane becomes the "EXIT ONLY" lane for the next exit. This is standard freeway design for close spacing and needs no extra tiles, because the interchange already has that air claimed. The only additions are a wide-dotted lane line for the
+   whole aux lane and an "EXIT ONLY" panel on the interchange's advance gantry.
+-  Upstream of an OFF ramp: the mirror — outrigger deceleration lane over the tiles left over after the descent; if an ON ramp or interchange merge is immediately upstream, it's the same aux lane seen from the other end.
+-  Outrigger tiles are air claims only; they never fail on ground content. They can fail on a competing air claim — then fall back to the shoulder-merge and warn.
+
+**Step 5 — surface end.** The ground tile's far edge meets the surface road as a T (yield/stop/signal per 3.4), with the "FREEWAY ENTRANCE" / shield sign, and "DO NOT ENTER — WRONG WAY" facing the road on OFF ramps. If the surface road is a LOCAL, warn (real ramps land on collectors and up) but render.
+
+**What the renderer stores.** Nothing new in the ramp data: the form, air claims, and outrigger are all derived on each edit from ``D``/``U`` and cached on the deck segments. Deleting the interchange next door will silently upgrade the ramp from helix to parallel on the next recompute — that's the intended behaviour, not a bug.
+
+**Surface interchange types** (pairs of ramps at one cross street) are unchanged in kind — diamond, SPUI, parclo, folded diamond, frontage-road slips — but each ramp of the pair is rendered independently by the steps above, so a diamond whose ramps have 6 free tiles gets parallel ramps and one squeezed against an interchange gets a helix on that corner. Constraints kept: gore spacing ≥ 3 segments;
+ON→OFF within 4 segments = aux lane; no touchdown within 1 tile of a rail crossing.
+
+7.4 Highway-to-highway interchanges (X and T)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Reference forms follow AASHTO's *Policy on Geometric Design of Highways and Streets* (the set summarised at transportgeography.org: trumpet, three-way/directional T, single-quadrant, diamond, SPUI, cloverleaf, partial cloverleaf, stack). Diamond, SPUI and parclo are *service* interchanges (freeway ↔ surface road) and are handled by ramp pairs in 7.3; the single-quadrant type needs surface signals
+and is not generated between two raised highways. This section is about *system* interchanges between two raised 2×2 highways: trumpet and directional T at a T; cloverleaf, partial cloverleaf, turbine and stack at an X.
+
+**7.4.1 The connector primitive — every ramp in every form is this**
+
+A connector carries one turning movement from the outer lane of deck A to the outer lane of deck B. It is always built from three pieces, and *the length lives in the runs, not in the curve*:
+
+::
+
+   connector = run_A  +  curve  +  run_B
+
+-  ``run_A``: leaves deck A's outer lane at a gore (option lane split, or a dedicated exit lane on an outrigger where air permits), and runs **parallel to deck A**, 1 tile outboard of A's parapet, over the tiles beside A's arm. This is where it changes elevation.
+-  ``curve``: a circular arc (R by type, below) in the quadrant between A and B. Superelevated, mostly constant grade or flat.
+-  ``run_B``: runs parallel to deck B, 1 tile outboard, finishes the elevation change, and merges into B's outer lane (outrigger acceleration lane if air permits, otherwise a yield merge over B's shoulder).
+
+Elevation change per connector: between a lower and an upper deck it is one level, **Δ = 7.4 m**; a flyover that crosses *above* the upper deck needs two levels from the lower deck (14.8 m) or one from the upper. Length needed at the design grade: ``L = Δ / g`` — 7.4 m at 6 % = 125 m ≈ 8 tiles of run; at 8 % ≈ 6 tiles. A loop or a large-radius curve contributes its arc length to ``L``.
+
+Connector types and radii (15 m tiles):
+
+================================ ======================== ================================================================================== ===== ===== ======================================================================
+Type                             Movement                 Curve                                                                              Speed Lanes Tiles of run needed (``run_A + run_B``, at 8 %)
+================================ ======================== ================================================================================== ===== ===== ======================================================================
+**Outer (right-turn) connector** right                    quarter-circle, R = 2–4 tiles (30–60 m)                                            40–60 1     6 − (arc length ÷ 15), min 2
+**Loop**                         left, via 270°           R = 2–3 tiles (30–45 m) centreline                                                 30–40 1     0–2 — a 270° loop at R = 2 tiles is 94 m, nearly the whole Δ by itself
+**Semi-directional flyover**     left                     leaves right, curves ~90° at R = 4–6 tiles (60–90 m), crosses over the interchange 60–80 1–2   10–12 (two levels: 14.8 m at 8 %)
+**Directional flyover**          left, leaves on the left R = 6+ tiles                                                                       80    2     10–12
+================================ ======================== ================================================================================== ===== ===== ======================================================================
+
+**Air needed, in tiles.** For each arm of the crossing define ``L_side`` = number of consecutive free-air tiles in the 1-tile strip outboard of that arm, on the side in question, counted from the 4×4 block outward (the 7.3 free-air test; cap 12). For each quadrant define ``Q`` = side of the largest free square anchored at the quadrant's corner tile (cap 8). A connector for a movement A→B via
+quadrant q is buildable iff:
+
+::
+
+   Q(q) ≥ Q_min(type)   and   L_A(right side) + L_B(right side) ≥ runs_needed(type, Q)
+
+with ``Q_min`` = 2 for an outer connector (a 30 m quadrant holds a R = 2-tile quarter-circle), 4 for a loop (R = 2 tiles + width), 5 for a semi-directional flyover. Larger ``Q`` lets the curve absorb more of ``L``, reducing the runs needed; the renderer picks the largest R that fits.
+
+**7.4.2 The reference forms, in tiles**
+
+================================= ======== =========================== ===================================================================== ===================================================================================== ========================================================================================== ==================================================================================
+Form                              Junction Levels / overpasses         Left turns by                                                         Footprint (land + air)                                                                Weaving                                                                                    When selected
+================================= ======== =========================== ===================================================================== ===================================================================================== ========================================================================================== ==================================================================================
+**Trumpet**                       T        2 levels, 1 overpass        one loop (the stem's or the through's) + one semi-directional flyover loop quadrant 5×5, flyover across the through deck, runs of 6–8 tiles along both legs none on mainline                                                                           T with ``Q ≥ 5`` in one stem-side quadrant
+**Directional T (three-way)**     T        3 levels, 3 overpasses      two semi-directional flyovers                                         6×6 land + 10–12 tile runs each leg                                                   none                                                                                       T with ``Q ≥ 5`` nowhere but long ``L`` on all legs
+**Cloverleaf**                    X        2 levels, 1 overpass        four loops                                                            4 quadrants of ``Q ≥ 5`` → ~12×12; +1 tile each side for C-D roads                    between adjacent loops: only the crossing width (~2 segments) — add C-D roads if ``L ≥ 4`` all four ``Q ≥ 5``
+**Partial cloverleaf (parclo)**   X        2 levels                    loops in 2 quadrants, others unbuilt or via outer connectors          2 quadrants ``Q ≥ 5``                                                                 in the loop pair                                                                           two adjacent or two opposite quadrants ``Q ≥ 5``
+**Turbine**                       X        3 levels                    four semi-directional flyovers spiralling around the centre           ~10×10 land, runs 10–12 tiles                                                         none                                                                                       four ``Q ≥ 5`` and long ``L`` on all arms; preferred over cloverleaf when both fit
+**Stack**                         X        4 levels, ramps up to ~28 m four semi-directional flyovers crossing at the centre                 ~8×8 land but runs of 12–16 tiles per leg                                             none                                                                                       ``Q ≥ 3`` and ``L ≥ 12`` on every arm; the landmark option
+**Compact in-band stack (7.4.6)** X or T   up to 4 levels              flyovers inside the bands                                             the 4×4 block + 14–20 tiles of each leg's own band                                    none                                                                                       **default** — needs no outboard air
+**Grade separation only**         X or T   2 levels, 1 overpass        none                                                                  the 4×4 block                                                                         —                                                                                          the floor: legs too short for 7.4.6
+================================= ======== =========================== ===================================================================== ===================================================================================== ========================================================================================== ==================================================================================
+
+Mixed forms are normal: the renderer starts from the in-band stack of 7.4.6 and upgrades each of the 8 (X) or 6 (T) movements independently by 7.4.1 where outboard air exists, and *names* the result afterwards (four loops → cloverleaf; two loops + two flyovers → parclo-plus, etc.). A movement that cannot be built is simply absent: the sim removes it from routing and the advance gantry gets a "NO
+ACCESS TO " panel. Through movements are never affected.
+
+**7.4.3 Which quadrant, which side.** With right-hand traffic every connector leaves deck A on its right and joins deck B on its right. The quadrant for a right turn A→B is the one on A's right *before* the crossing (which is also on B's right after it): with an E–W lower deck and N–S upper, SW = EB→SB, SE = NB→EB, NE = WB→NB, NW = SB→WB. A loop for the left turn A→B sits in the quadrant on A's
+right *after* the crossing (EB→NB loops in SE). A semi-directional flyover for A→B leaves in A's right-turn quadrant, curves over the crossing, and lands in B's right-side strip. Left-hand exits are not generated.
+
+**7.4.4 Levels and the mainline profile.** Lower deck L1 ≈ 7.5 m over ground, upper L2 = L1 + 7.4, flyover level L3 = L2 + 7.4, stack L4 = L3 + 7.4. The upper deck climbs to L2 on its own approach segments at ≤ 4 % (3 segments) or ≤ 6 % (2 segments); if a neighbouring interchange leaves fewer, warn and steepen to 8 %. Mainline through lanes stay 3+3 at every level; the only lane arithmetic is at
+gores and merges: with free air, "lanes out = lanes in + 1" via a 2-tile outrigger exit lane; with none, the outer lane is an option lane.
+
+**7.4.5 Selection procedure (per interchange, on every edit)**
+
+1. Compute ``Q`` for each quadrant and ``L`` for each arm side.
+2. For each turning movement, in priority order (right turns first, then left turns), pick the cheapest connector type that satisfies 7.4.1 with the air available, allocate its tiles (air claims), and mark them used. Right turns take the quadrant curve first because loops and flyovers need the outer connector's position free at the gore.
+3. If both a loop and a flyover fit for a left turn, prefer the loop when ``Q ≥ 5`` and the arm's ``L < 10``, else the flyover (avoids the cloverleaf weave when the runs exist).
+4. Where two loops would be adjacent on the same deck (EB's loop entry followed by WB's… i.e. a cloverleaf pair) and ``L ≥ 4`` on that side, build a collector–distributor road: a 1-tile ramp parallel to the mainline connecting the two loop terminals, with the weave moved onto it.
+5. Name the form from the movements built; emit gantries (two advance per exit, exit-direction at the gore, pull-through for the mainline), crash cushions at gores, barriers continuous through the runs.
+6. Movements not built: sign them as unavailable and drop them from routing. If none are built, the interchange is a grade separation only — one overpass and nothing else.
+
+**Right-side exits, always.** Every turning movement in every form leaves the mainline on the right — the outer connector directly, the loop or semi-directional flyover by first peeling off right. This is what lets an on-ramp's aux lane (7.3, Step 4) always find a diverge to run into.
+
+**Shared rules for every interchange**
+
+-  Gore spacing on the mainline: exit gores ≥ 3 segments apart; an interchange's last entrance and the next interchange's first exit ≥ 6 segments apart (else insert a C-D road).
+-  Lane balance: at a diverge, lanes out = lanes in + 1 where an outrigger exists; at a merge, lanes in = lanes out + 1. Lane drops happen only on the outer lane, after a merge, with a 2-segment taper and a "LANE ENDS" gantry sign.
+-  Signing: 2 gantries before each exit (½ and ¼ mile equivalent: 4 and 2 segments), the exit-direction gantry at the gore, a pull-through sign for the mainline on the same gantry, route shields and cardinal directions ("NORTH 99 / Vancouver"), then a confirmation "shield + direction" 1 segment after each merge.
+-  Piers under a crossing: the L2 highway's piers land in the L1 highway's median (a single tall column between the two barriers) or outside its parapets — never over a lane. Flyover piers sit in ramp gores or in the L0 verge.
+-  Barriers are continuous; at a diverge the gore gets a crash cushion (yellow sand barrels on old, a steel attenuator on new); at a merge the two parapets join with a short flare.
+-  Under-deck zones inside an interchange become a single "interchange land" lot: grass, stormwater pond, maintenance access, no buildings.
+-  Curve rules from 3.10 apply with ``R_min``: mainline 3 tiles (45 m — already generous), outer connector 2 tiles, loop 2 tiles centreline, 2-lane connector 3 tiles. Superelevate everything at 4–6 %.
+
+**7.4.6 The tight-constraint form: the compact in-band stack (default)**
+
+7.4.1–7.4.5 describe what to build when there is free air outboard of the decks. The data guarantees none of that. What it *does* guarantee is: the 4×4 block, each leg's own 2-wide band for as many segments as it runs, and the air column above those tiles (and below the upper deck's). The one interchange family that lives entirely inside that is a **stack whose connectors run within their own
+highway's band** — the outer lane at deck level, then a viaduct directly above the outer-lane strip — and cross the 4×4 as flyovers over the crossing. It is the default; the outboard forms of 7.4.2 are upgrades applied per movement when outboard air happens to exist.
+
+*Slots.* Inside each 15 m half-deck the outer lane + outer shoulder + parapet form a 6.6 m **outer strip**. The strip has three usable levels: S0 = the deck surface (the outer lane itself), S1 = +7.4 m above it, S2 = +14.8 m. Under the upper deck's strip there is a further slot at its −7.4 m (= the lower deck's level), 5.0 m clear beneath the box girder. Connectors on S1/S2 are 3.0 m lanes with
+0.4 m barriers on a 3.8 m viaduct; two fit side by side in the strip (7.6 m > 6.6 m only by borrowing 1 m of lane 2's line — accept, and mark the through lanes 3.5 m for that stretch). Piers land on the parapet line.
+
+*Lane arithmetic (the honest cost).* On every approach the outer lane becomes an **exit-only lane** (split arrow, wide-dotted line) and the through deck is **2 lanes** from there to the far side of the interchange, where the entering connector becomes the new outer lane and through returns to 3. This is exactly what a cloverleaf or stack does with a 3-lane deck and no auxiliary lanes; nothing is
+invented.
+
+*Approach leg (tiles counted back from the 4×4 edge, 8 % grades, Δ = 7.4 m per level):*
+
+1. ``−13``: split arrow in the outer lane; through drops to 2 lanes.
+2. ``−13 → −12``: the exit lane widens to two 3.0 m connector lanes over the outer strip at deck level — inboard = right-turn connector, outboard = left-turn connector. Gore with a nose and a crash cushion at ``−12``.
+3. ``−12 → 0``: the **left connector** (outboard) climbs 14.8 m to S2 = the flyover level. It is above 5.0 m from ``−8`` on.
+4. ``−6 → 0``: the **right connector** (inboard) climbs 7.4 m to S1, which is the *upper deck's* level when the leg is the lower deck. (When the leg is the upper deck, the right connector instead **descends** 7.4 m in the slot under its own strip, to the lower deck's level.)
+5. Beneath the climbing connectors the strip is dead width (no shoulder); "NO SHOULDER" signing, piers every tile.
+
+*In the 4×4 block:*
+
+-  **Right turns** arrive at the receiving deck's level, on the inboard slot line (4.75 m inside the parapet), and turn 90° through the **corner tile**: a quarter-circle tangent to the two outer-lane lines, centre at (4.75 + R) inside each parapet line measured toward the quadrant — with a 15 m corner tile, ``R = 15 m`` centreline, 30 km/h, 1 lane. It exits onto the receiving deck's outer strip at
+   that deck's level — and since that deck's own outer lane has already left as *its* right-turn exit, the arriving connector simply *is* the new outer lane from the block edge onward (merge over 2 tiles, wide-dotted, then solid).
+-  **Left turns** cross the block as **quarter-circle flyovers** from the approach's outboard slot to the receiving leg's outboard slot, tangent to both outboard-strip centrelines (13.4 m from the crossing centre: the 15 m half-deck less 1.65 m). The midpoint of such an arc lies ``13.4 − 0.293 R`` from the centre, on the arc's own side — so at R ≈ 45 m the arc passes through the centre, and two
+   arcs of a point-symmetric pair at the same level would collide there. **The pair radius is therefore fixed at R = 60 m**: each arc passes 4.2 m *beyond* the centre onto the far side, the two arcs of a pair are 8.4 m apart at the middle and ≥ 17 m apart near the corner tiles, and the tangent points fall 17 m (1.1 tiles) outside the block on each leg's own outboard strip — still inside the band.
+   Smaller radii (≤ 32 m) also avoid the centre but bring the pair within 2.5 m beside the corner tiles, so they are not used. Speed 55 km/h, 1 lane. Assignment: the two lower-deck legs' left connectors (EB→NB, WB→SB) share L3; the two upper-deck legs' (NB→WB, SB→EB) share L4; the pairs cross each other 7.4 m apart. The block therefore carries L1, L2, L3, L4 — a four-level stack in a 60 m square,
+   the flyovers overhanging the block edges by a tile on each leg.
+-  **Departure leg**: a left flyover lands on the outboard slot of the receiving leg and descends to that deck's level over 6 tiles (from one level up) or 18 tiles (from two levels up: an upper-leg flyover at L4 landing on a lower-deck leg); the right connector is already at deck level. At ``+2`` the two entering lanes merge (left connector yields to right) into one, which is the deck's new outer
+   lane; through is 3 lanes again from ``+3``. Gantries: "EXIT ONLY" over the outer lane at ``−13`` and ``−9``; exit-direction gantry at ``−12`` with a two-way split panel; pull-through for the mainline.
+
+*What each leg needs.* ``N_leg`` = number of tiles of the leg's own band available before the next node. Right turn only: ``N ≥ 8`` (6 climb + 2 gore). Right + left: ``N ≥ 14``. Departure with a 2-level descent: ``N ≥ 20``. When ``N`` is short, degrade in this order, per leg: (1) steepen to 10 % with a warning; (2) drop the left-turn movements on that leg; (3) drop the right turns; (4) grade
+separation only for that leg's movements. The other legs keep whatever they can build — mixed results are normal.
+
+*Right-turn note.* R = 15 m at 30 km/h is tight for a system interchange; it is what a 15 m corner tile allows and is comparable to urban loop ramps. If the receiving leg's outboard air happens to be free (7.3 free-air test), the renderer widens the curve into it (R = 30 m, Q-style) — an upgrade, never a requirement.
+
+*Structure.* Connector viaducts are 3.8 m wide single-cell boxes on single columns at the parapet line, 1 per tile; the L3/L4 flyovers over the block sit on 2-column bents planted in the lower deck's median (between barriers) and in the corner tiles. Barriers continuous; light poles on the outer barrier of the highest flyover; the under-slot connector beneath the upper deck has its own parapet and
+lighting and reads as a tunnel-like gallery — the recognisable look of an urban stacked junction.
+
+*Why this and not a helix or a corner-tile ramp.* A 7.4 m level change needs ~95 m of path at 8 %; the band provides it along the leg, which is where real connectors put it. Corner tiles handle only the flat 90° turn, which is all a 15 m tile can honestly do.
+
+**7.4.7 Ramps inside an interchange's runs — one strip, one occupant**
+
+The 2-tile band has a single outer strip per side, and an interchange's connectors occupy it — at deck level and in the air above — from ``−13`` on the approach to ``+3`` (right-turn side) or ``+18`` (left-turn side) on the departure. A 1×1 ON or OFF ramp tile may sit adjacent to any tile of that range; the data doesn't prevent it. The strip cannot serve both, so: **the interchange owns the strip;
+the ramp adapts.** Precedence, per ramp, on every recompute:
+
+1. **Slide the merge out of the run** (needs outboard air). The ramp's landing tile stays where it is, but its parallel run (7.3 form) continues alongside the deck — *outside* the parapet, in outboard air — until it reaches a tile where lane 3 exists: upstream of ``−14`` for an ON ramp, downstream of ``+3`` for an OFF ramp. There it merges/diverges normally and its traffic can go anywhere. This is
+   the real-world answer (ramps are kept out of the interchange's influence area) and it is used whenever the 7.3 free-air scan finds the outboard tiles free from the ramp tile to that point.
+2. **Ramp-to-ramp** (no outboard air). The ramp joins the connector system instead of the mainline. It arrives from outside the parapet, so the lane it meets first is the **outboard slot = the left-turn connector**:
+
+   -  ON ramp at tile ``t`` on the approach: it merges into the left connector at the connector's elevation there, ``h(t) = 14.8 m × (t + 12) / 12`` for ``−12 ≤ t ≤ 0`` (0 for ``t < −12``). The ramp's own form is computed by 7.3 with ``rise = zDeck + h(t)``; the helix turn count follows the 5 m-per-turn rule (a 20 m rise is a 4.25-turn helix — legal, ugly, and honestly what the data asked for).
+      Its traffic can use **only the left-turn movement** of that leg — and, if ``t ≤ −12`` where both connector lanes are still at deck level, the right turn as well via a lane change. Sign at the ramp entrance: "TO ONLY — NO ACCESS TO ". The sim removes the through movement for that ramp.
+   -  OFF ramp at tile ``t`` on the departure: mirror — it can only leave from the descending left connector, so only vehicles that arrived by that left turn can use it, until ``+3`` where lane 3 is restored and a normal exit is possible. Sign on the connector: "EXIT to ".
+   -  A ramp tile at ``−5 … −1`` meets the left connector at 8–14 m and the right connector at 0–7 m directly beneath it; only the left is reachable from outside. A ramp tile at ``−12 … −6`` meets both lanes at deck level (weave permitted, 2-tile minimum weaving length or a "NO LANE CHANGE" solid line).
+
+3. **Infeasible** (rise beyond what any 7.3 form can build, or the ramp tile is inside the 4×4 block itself): the ramp renders as a stub with an "END" barricade and is removed from routing; validation warns "ramp inside interchange".
+
+*What the 2×2 segment renders.* Nothing changes in data. The segment adjacent to the ramp tile renders the ramp's merge piece; the connectors are rendered as per-segment pieces along the leg (each 2×2 segment holds the slice of every connector crossing it, with continuity of profile and edge across segment boundaries), so a ramp joining a connector mid-leg is just an extra gore on that segment's
+slice. Priority 1's outboard run is an air claim on the tiles beside the segments it passes, exactly as in 7.3.
+
+*Through-lane count.* Priority 2 never adds a lane to the deck: lane 3 is already gone from ``−13``, and the ramp-to-ramp merge happens on the connector, so the 2-lane through section is unaffected. Priority 1 merges into lane 3 upstream of the split, where 3 lanes exist.
+
+7.5 Placement and data model
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+::
+
+   HighwaySegment {                 // one 2×2 block
+     elevation, deckType: BOX | PLATE
+     connections: 4-bit mask over the 4 neighbouring 2×2 blocks (N/E/S/W) +
+                  diagonal blocks for 45° runs (same band-clipping as 3.9,
+                  band width = 2 tiles)
+     shape:  STRAIGHT | CURVE_R{n} | DIAG | RAMP_OUTRIGGER_{L|R} | LANE_DROP | INTERCHANGE
+     outriggers: [{ side, from, to, kind: MERGE | DIVERGE | AUX }]
+     gantries: [...]                // derived
+   }
+
+   RampTile {                       // 1×1
+     kind: ON | OFF | CONNECTOR
+     lanes: 1 | 2
+     zStart, zEnd                   // per tile, from the profile
+     airClaims: [{ tile, zMin, zMax }]   // tiles this tile's deck passes over
+     groundClaim: bool              // touchdown or pier tile
+   }
+
+   Interchange {
+     kind: DIAMOND | SPUI | PARCLO | TRUMPET | DIRECTIONAL_T | TURBINE | CLOVERLEAF | STACK
+     origin, rotation, mirror
+     template → emits HighwaySegments, RampTiles, air claims, piers, gantries
+   }
+
+Placement flow: the player draws highway blocks (2×2 snapping) and ramps as 1×1 paths from a deck edge to a surface road. On each edit: (1) classify blocks like road tiles (the corner/curve rules at 2-tile band width; a 90° corner needs a 3-block arc, so an L-shaped draw auto-expands); (2) for each ramp path, build the profile from ``zDeck`` to 0 at ≤ max grade — if the path is too short, **extend
+it in air** along the same heading and show the extension ghosted until the player confirms or redraws; (3) compute outriggers on the adjacent highway blocks; (4) compute air claims and reject if a claim intersects an existing building above ``zMin``; (5) place piers, gantries, signs.
+
+7.6 Validation (raised highways)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+-  Reject: ramp grade > 16% (nothing fits, not even a helix — only possible if the ramp tile isn't adjacent to a deck edge); ramp with no reachable deck edge; ramp touching down on a LOCAL or ALLEY; two mainline gores < 2 segments apart; a pier landing in a lane, a rail track, or a crossing; interchange template overlapping another interchange's air claims; highway block adjacent to a highway
+   block at a different elevation without a transition segment.
+-  Warn: ramp form is hairpin or helix (grade > 10%); shoulder-merge fallback used; weave < 4 segments without an aux lane; exit without 2 advance gantries (map edge); noise wall missing next to residential; loop ramp on a route flagged for trucks.
+
+7.7 Rendering notes
+~~~~~~~~~~~~~~~~~~~
+
+-  Shadows: bake a soft deck shadow decal onto the ground tiles under every air claim (offset by sun angle if you have one); it's the cheapest cue that something is raised.
+-  Underside detail: box-girder soffit is flat with drain pipes and utility conduits; plate-girder soffit shows the girder lines — a single normal map per deck type.
+-  Ramps use the same parapet/barrier material as the deck but with a smaller profile; ramp lighting is pole-on-parapet every 40 m on the outer side only.
+-  Interchanges are the one place a 2×2 grid shows — hide it with the curve rules (nothing on an interchange is orthogonal) and by letting air claims be arbitrary polygons rather than tile squares.
