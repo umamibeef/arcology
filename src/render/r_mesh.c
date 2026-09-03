@@ -1810,6 +1810,761 @@ static int near_crossing(const RCity *c, V2 pos)
 
 static float s_zorig[8192];
 
+/* ---- cuts: the ground dug out under a sunken road ---------------------- */
+
+/*  The outline in plan of every road quad in a cut.  After the networks
+ *  are built, every face of the surface inside one of them is clipped
+ *  away along its edges (the user: "when you go INTO the terrain, you
+ *  must allow it to bend as well... there is clipping from the terrain
+ *  because it hasn't been dug out"); the retaining walls the loft draws
+ *  from the ground down to the road's edge close the sides. */
+typedef struct
+{
+    float x[4], y[4];
+} CutPoly;
+static CutPoly  *s_cuts;
+static uint32_t  s_n_cuts, s_cap_cuts;
+static uint32_t *s_cut_start, *s_cut_list; /* per tile, the cuts whose box touches it */
+
+static int cut_record(const float a0[2], const float a1[2], const float b0[2], const float b1[2])
+{
+    CutPoly *p;
+    /*  A quad that continues the last outline straight on, its near edge
+     *  the last one's far edge and its sides on the same lines, extends
+     *  it, up to a tile: fewer outlines, fewer lines splitting the
+     *  ground, and none of the slivers thinner than the watertight
+     *  check's quantum that the loft's stations a hair each side of
+     *  every tile line had made. */
+    if (s_n_cuts)
+    {
+        CutPoly *q  = &s_cuts[s_n_cuts - 1];
+        float    dx = b0[0] - a0[0], dy = b0[1] - a0[1], ex = q->x[3] - q->x[0], ey = q->y[3] - q->y[0];
+        float    len = sqrtf(ex * ex + ey * ey) + sqrtf(dx * dx + dy * dy);
+        if (fabsf(q->x[3] - a0[0]) < 1e-3f && fabsf(q->y[3] - a0[1]) < 1e-3f && fabsf(q->x[2] - a1[0]) < 1e-3f && fabsf(q->y[2] - a1[1]) < 1e-3f &&
+            fabsf(dx * ey - dy * ex) < 1e-3f * (len > 1e-3f ? len : 1.0f) && len <= 1.0f)
+        {
+            q->x[3] = b0[0];
+            q->y[3] = b0[1];
+            q->x[2] = b1[0];
+            q->y[2] = b1[1];
+            {
+                int k;
+                for (k = 2; k < 4; ++k)
+                {
+                    float rx = rintf(q->x[k]), ry = rintf(q->y[k]);
+                    if (fabsf(q->x[k] - rx) < 0.03f)
+                        q->x[k] = rx;
+                    if (fabsf(q->y[k] - ry) < 0.03f)
+                        q->y[k] = ry;
+                }
+            }
+            return 0;
+        }
+    }
+    {
+        /* a quad shorter than three hundredths of a tile, the loft's hair
+         * each side of a tile crossing on a bend, is no outline: its
+         * pieces collapse under the check's quantum, and the road covers
+         * that hair of ground either way */
+        float lx = b0[0] - a0[0], ly = b0[1] - a0[1];
+        if (lx * lx + ly * ly < 0.03f * 0.03f)
+            return 0;
+    }
+    if (s_n_cuts + 1u > s_cap_cuts)
+    {
+        uint32_t nc = s_cap_cuts ? s_cap_cuts * 2u : 1024u;
+        CutPoly *nl = (CutPoly *)realloc(s_cuts, nc * sizeof *nl);
+        if (!nl)
+            return -1;
+        s_cuts     = nl;
+        s_cap_cuts = nc;
+    }
+    p       = &s_cuts[s_n_cuts++];
+    p->x[0] = a0[0];
+    p->y[0] = a0[1];
+    p->x[1] = a1[0];
+    p->y[1] = a1[1];
+    p->x[2] = b1[0];
+    p->y[2] = b1[1];
+    p->x[3] = b0[0];
+    p->y[3] = b0[1];
+    {
+        /*  A corner within a hair of a tile line snaps onto it: the loft
+         *  stations a road a hair each side of every tile edge, and an
+         *  outline ending that hair short of the line left slivers of
+         *  ground thinner than the watertight check's quantum, which it
+         *  read as holes. */
+        int k;
+        for (k = 0; k < 4; ++k)
+        {
+            float rx = rintf(p->x[k]), ry = rintf(p->y[k]);
+            if (fabsf(p->x[k] - rx) < 0.03f)
+                p->x[k] = rx;
+            if (fabsf(p->y[k] - ry) < 0.03f)
+                p->y[k] = ry;
+        }
+    }
+    return 0;
+}
+
+static void cut_bbox(const CutPoly *p, int32_t *tx0, int32_t *ty0, int32_t *tx1, int32_t *ty1)
+{
+    float x0 = p->x[0], x1 = p->x[0], y0 = p->y[0], y1 = p->y[0];
+    int   k;
+    for (k = 1; k < 4; ++k)
+    {
+        if (p->x[k] < x0)
+            x0 = p->x[k];
+        if (p->x[k] > x1)
+            x1 = p->x[k];
+        if (p->y[k] < y0)
+            y0 = p->y[k];
+        if (p->y[k] > y1)
+            y1 = p->y[k];
+    }
+    *tx0 = (int32_t)floorf(x0 - 0.06f);
+    *ty0 = (int32_t)floorf(y0 - 0.06f);
+    *tx1 = (int32_t)floorf(x1 + 0.06f);
+    *ty1 = (int32_t)floorf(y1 + 0.06f);
+    if (*tx0 < 0)
+        *tx0 = 0;
+    if (*ty0 < 0)
+        *ty0 = 0;
+    if (*tx1 >= R_MAP)
+        *tx1 = R_MAP - 1;
+    if (*ty1 >= R_MAP)
+        *ty1 = R_MAP - 1;
+}
+
+static int cuts_index(void)
+{
+    static uint32_t count[R_MAP * R_MAP + 1];
+    uint32_t        i, total = 0;
+    int32_t         tx0, ty0, tx1, ty1, tx, ty;
+    if (!s_cut_start)
+        s_cut_start = (uint32_t *)malloc(((size_t)R_MAP * R_MAP + 1u) * sizeof *s_cut_start);
+    if (!s_cut_start)
+        return -1;
+    memset(count, 0, sizeof count);
+    for (i = 0; i < s_n_cuts; ++i)
+    {
+        cut_bbox(&s_cuts[i], &tx0, &ty0, &tx1, &ty1);
+        for (ty = ty0; ty <= ty1; ++ty)
+            for (tx = tx0; tx <= tx1; ++tx)
+            {
+                ++count[ty * R_MAP + tx];
+                ++total;
+            }
+    }
+    s_cut_start[0] = 0;
+    for (i = 0; i < (uint32_t)R_MAP * R_MAP; ++i)
+        s_cut_start[i + 1] = s_cut_start[i] + count[i];
+    {
+        uint32_t *nl = (uint32_t *)realloc(s_cut_list, (total ? total : 1u) * sizeof *nl);
+        if (!nl)
+            return -1;
+        s_cut_list = nl;
+    }
+    memset(count, 0, sizeof count);
+    for (i = 0; i < s_n_cuts; ++i)
+    {
+        cut_bbox(&s_cuts[i], &tx0, &ty0, &tx1, &ty1);
+        for (ty = ty0; ty <= ty1; ++ty)
+            for (tx = tx0; tx <= tx1; ++tx)
+            {
+                uint32_t t                          = (uint32_t)(ty * R_MAP + tx);
+                s_cut_list[s_cut_start[t] + count[t]++] = i;
+            }
+    }
+    return 0;
+}
+
+/*  Whether a point in plan lies on the outline of some cut, within a
+ *  hair over half the watertight check's quantum. */
+static int point_on_cut(float x, float y)
+{
+    int32_t tx, ty;
+    if (!s_n_cuts || !s_cut_start)
+        return 0;
+    for (ty = (int32_t)floorf(y - 0.05f); ty <= (int32_t)floorf(y + 0.05f); ++ty)
+        for (tx = (int32_t)floorf(x - 0.05f); tx <= (int32_t)floorf(x + 0.05f); ++tx)
+        {
+            uint32_t j;
+            if (tx < 0 || ty < 0 || tx >= R_MAP || ty >= R_MAP)
+                continue;
+            for (j = s_cut_start[ty * R_MAP + tx]; j < s_cut_start[ty * R_MAP + tx + 1]; ++j)
+            {
+                const CutPoly *p = &s_cuts[s_cut_list[j]];
+                int            k;
+                for (k = 0; k < 4; ++k)
+                {
+                    float ex = p->x[k], ey = p->y[k], dx = p->x[(k + 1) & 3] - ex, dy = p->y[(k + 1) & 3] - ey;
+                    float l2 = dx * dx + dy * dy, t = l2 > 1e-12f ? ((x - ex) * dx + (y - ey) * dy) / l2 : 0.0f;
+                    float px, py;
+                    if (t < 0.0f)
+                        t = 0.0f;
+                    if (t > 1.0f)
+                        t = 1.0f;
+                    px = ex + dx * t - x;
+                    py = ey + dy * t - y;
+                    if (px * px + py * py <= 0.05f * 0.05f)
+                        return 1;
+                }
+            }
+        }
+    return 0;
+}
+
+/*  Whether a point in plan lies inside some cut's outline, or within a
+ *  hair of it: ground there is dug and the road covers it. */
+static int point_in_cut_m(float x, float y, float margin)
+{
+    int32_t tx = (int32_t)floorf(x), ty = (int32_t)floorf(y);
+    uint32_t j;
+    if (!s_n_cuts || !s_cut_start || tx < 0 || ty < 0 || tx >= R_MAP || ty >= R_MAP)
+        return 0;
+    for (j = s_cut_start[ty * R_MAP + tx]; j < s_cut_start[ty * R_MAP + tx + 1]; ++j)
+    {
+        const CutPoly *p = &s_cuts[s_cut_list[j]];
+        float          cx = 0.25f * (p->x[0] + p->x[1] + p->x[2] + p->x[3]);
+        float          cy = 0.25f * (p->y[0] + p->y[1] + p->y[2] + p->y[3]);
+        int            k, in = 1;
+        for (k = 0; k < 4 && in; ++k)
+        {
+            float ex = p->x[k], ey = p->y[k], dx = p->x[(k + 1) & 3] - ex, dy = p->y[(k + 1) & 3] - ey;
+            float l   = sqrtf(dx * dx + dy * dy);
+            float sgn = (dx * (cy - ey) - dy * (cx - ex)) >= 0.0f ? 1.0f : -1.0f;
+            if (l > 1e-6f && (dx * (y - ey) - dy * (x - ex)) * sgn / l < -margin)
+                in = 0;
+        }
+        if (in)
+            return 1;
+    }
+    return 0;
+}
+
+static int point_in_cut(float x, float y)
+{
+    return point_in_cut_m(x, y, 0.1f);
+}
+
+#define DIG_MAXV 40
+typedef struct
+{
+    RMeshVert v[DIG_MAXV];
+    int       n;
+} DigPoly;
+
+static int vert_less(const RMeshVert *a, const RMeshVert *b)
+{
+    if (a->pos[0] != b->pos[0])
+        return a->pos[0] < b->pos[0];
+    if (a->pos[1] != b->pos[1])
+        return a->pos[1] < b->pos[1];
+    return a->pos[2] < b->pos[2];
+}
+
+static void vert_lerp(const RMeshVert *a, const RMeshVert *b, float t, RMeshVert *o)
+{
+    int k;
+    for (k = 0; k < 4; ++k)
+    {
+        o->pos[k] = a->pos[k] + (b->pos[k] - a->pos[k]) * t;
+        o->nrm[k] = a->nrm[k] + (b->nrm[k] - a->nrm[k]) * t;
+        o->col[k] = a->col[k] + (b->col[k] - a->col[k]) * t;
+    }
+}
+
+/*  Split a polygon by the line through (ex, ey) along (dx, dy): `in`
+ *  takes the side where sgn * cross(d, p - e) >= 0, `out` the other.  A
+ *  crossing point is computed from the edge's ends in a fixed order, so
+ *  the two tiles that share the edge get the same point. */
+static void poly_split(const DigPoly *p, float ex, float ey, float dx, float dy, float sgn, DigPoly *in, DigPoly *out)
+{
+    int i;
+    in->n = out->n = 0;
+    for (i = 0; i < p->n; ++i)
+    {
+        const RMeshVert *a  = &p->v[i], *b = &p->v[(i + 1) % p->n];
+        float            fa = (dx * (a->pos[1] - ey) - dy * (a->pos[0] - ex)) * sgn;
+        float            fb = (dx * (b->pos[1] - ey) - dy * (b->pos[0] - ex)) * sgn;
+        /* a vertex on the line belongs to both sides: a triangle that
+         * only touched a cut's edge had lost both its halves */
+        if (fa >= 0.0f && in->n < DIG_MAXV)
+            in->v[in->n++] = *a;
+        if (fa <= 0.0f && out->n < DIG_MAXV)
+            out->v[out->n++] = *a;
+        if ((fa > 0.0f && fb < 0.0f) || (fa < 0.0f && fb > 0.0f))
+        {
+            RMeshVert x;
+            if (vert_less(b, a))
+                vert_lerp(b, a, fb / (fb - fa), &x);
+            else
+                vert_lerp(a, b, fa / (fa - fb), &x);
+            if (in->n < DIG_MAXV)
+                in->v[in->n++] = x;
+            if (out->n < DIG_MAXV)
+                out->v[out->n++] = x;
+        }
+    }
+}
+
+static int dig_emit(const DigPoly *p, RMeshVert **out, uint32_t *n_out, uint32_t *cap_out)
+{
+    int k;
+    for (k = 1; k + 1 < p->n; ++k)
+    {
+        const RMeshVert *a = &p->v[0], *b = &p->v[k], *c = &p->v[k + 1];
+        {
+            /* a degenerate piece, three points on a line, has edges the
+             * watertight check would count and no face to show */
+            float ux = b->pos[0] - a->pos[0], uy = b->pos[1] - a->pos[1], uz = b->pos[2] - a->pos[2];
+            float vx = c->pos[0] - a->pos[0], vy = c->pos[1] - a->pos[1], vz = c->pos[2] - a->pos[2];
+            float nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+            if (nx * nx + ny * ny + nz * nz < 1e-10f)
+                continue;
+        }
+        if (grow(out, n_out, cap_out, 3) != 0)
+            return -1;
+        (*out)[(*n_out)++] = *a;
+        (*out)[(*n_out)++] = *b;
+        (*out)[(*n_out)++] = *c;
+    }
+    return 0;
+}
+
+/*  A triangle of the surface less the cuts that touch it: the part
+ *  inside each cut's outline goes, the rest stays, piece by piece. */
+static int dig_tri(const RMeshVert *tri, const uint32_t *idx, uint32_t nidx, RMeshVert **out, uint32_t *n_out, uint32_t *cap_out)
+{
+    static DigPoly list[512], next[512], in, outp;
+    int            nl = 1, nn, i, k;
+    uint32_t       c;
+    list[0].n = 3;
+    for (k = 0; k < 3; ++k)
+        list[0].v[k] = tri[k];
+    for (c = 0; c < nidx && nl; ++c)
+    {
+        const CutPoly *p  = &s_cuts[idx[c]];
+        float          cx = 0.25f * (p->x[0] + p->x[1] + p->x[2] + p->x[3]);
+        float          cy = 0.25f * (p->y[0] + p->y[1] + p->y[2] + p->y[3]);
+        nn = 0;
+        for (i = 0; i < nl; ++i)
+        {
+            DigPoly cur = list[i];
+            for (k = 0; k < 4 && cur.n >= 3; ++k)
+            {
+                float ex = p->x[k], ey = p->y[k], dx = p->x[(k + 1) & 3] - ex, dy = p->y[(k + 1) & 3] - ey;
+                float sgn = (dx * (cy - ey) - dy * (cx - ex)) >= 0.0f ? 1.0f : -1.0f;
+                poly_split(&cur, ex, ey, dx, dy, sgn, &in, &outp);
+                if (outp.n >= 3 && nn < 512)
+                    next[nn++] = outp;
+                cur = in;
+            }
+            /* what is left lies inside the outline: dug away */
+        }
+        memcpy(list, next, (size_t)nn * sizeof list[0]);
+        nl = nn;
+    }
+    for (i = 0; i < nl; ++i)
+        if (dig_emit(&list[i], out, n_out, cap_out) != 0)
+            return -1;
+    return 0;
+}
+
+/*  Welding after the dig: clipping by the outlines' edge lines splits
+ *  a face where the line crosses it and leaves the face across the
+ *  shared edge whole, a T-junction the watertight check reads as two
+ *  open edges.  Every face in a tile a cut touches, or beside one, is
+ *  split at any vertex of another such face that lies strictly inside
+ *  one of its edges, until none does, so the mesh conforms again. */
+static int dig_weld(RMeshVert **land, uint32_t *n_land, uint32_t *cap_land, const uint8_t *touched)
+{
+    uint32_t  n_tri = *n_land / 3u, i, nvert = 0, *vstart, *vlist, *cand, nc = 0, ci;
+    uint32_t *count = (uint32_t *)calloc((size_t)R_MAP * R_MAP + 1u, sizeof *count);
+    float    *vx = NULL, *vy = NULL, *vz = NULL;
+    int       pass;
+    vstart = (uint32_t *)calloc((size_t)R_MAP * R_MAP + 1u, sizeof *vstart);
+    cand   = (uint32_t *)malloc((n_tri + 1u) * sizeof *cand);
+    if (!count || !vstart || !cand)
+    {
+        free(count);
+        free(vstart);
+        free(cand);
+        return -1;
+    }
+    /* the candidates: faces of the surface in a touched tile */
+    for (i = 0; i < n_tri; ++i)
+    {
+        const RMeshVert *v = *land + i * 3u;
+        float            x0 = v[0].pos[0], x1 = x0, y0 = v[0].pos[1], y1 = y0;
+        int32_t          tx, ty, hit = 0, k;
+        if (v[0].col[2] > 6.5f)
+            continue;
+        for (k = 1; k < 3; ++k)
+        {
+            if (v[k].pos[0] < x0)
+                x0 = v[k].pos[0];
+            if (v[k].pos[0] > x1)
+                x1 = v[k].pos[0];
+            if (v[k].pos[1] < y0)
+                y0 = v[k].pos[1];
+            if (v[k].pos[1] > y1)
+                y1 = v[k].pos[1];
+        }
+        for (ty = (int32_t)floorf(y0); ty <= (int32_t)floorf(y1 - 1e-6f) && !hit; ++ty)
+            for (tx = (int32_t)floorf(x0); tx <= (int32_t)floorf(x1 - 1e-6f) && !hit; ++tx)
+                if (tx >= 0 && ty >= 0 && tx < R_MAP && ty < R_MAP && touched[ty * R_MAP + tx])
+                    hit = 1;
+        if (hit)
+            cand[nc++] = i;
+    }
+    /*  Their vertices snapped: two outlines' lines cross an edge at
+     *  "the same" point a fraction of a millimetre apart, and such
+     *  near-twins made slivers no split could close.  Every vertex
+     *  within half a millimetre of an earlier one takes its position;
+     *  the survivors are the unique list, bucketed by tile. */
+    {
+        uint32_t  cap_v = nc * 3u + 1u, hcap = 1u, hi;
+        uint32_t *htab;
+        vx = (float *)malloc(cap_v * sizeof *vx);
+        vy = (float *)malloc(cap_v * sizeof *vy);
+        vz = (float *)malloc(cap_v * sizeof *vz);
+        while (hcap < cap_v * 4u)
+            hcap *= 2u;
+        htab = (uint32_t *)malloc(hcap * sizeof *htab);
+        if (!vx || !vy || !vz || !htab)
+        {
+            free(count);
+            free(vstart);
+            free(cand);
+            free(vx);
+            free(vy);
+            free(vz);
+            free(htab);
+            return -1;
+        }
+        memset(htab, 0xff, hcap * sizeof *htab);
+        for (ci = 0; ci < nc; ++ci)
+        {
+            RMeshVert *v = *land + cand[ci] * 3u;
+            int        k;
+            for (k = 0; k < 3; ++k)
+            {
+                /* the 27 cells of a 1 mm grid around the vertex */
+                int32_t  cx = (int32_t)floorf(v[k].pos[0] * 1000.0f), cy = (int32_t)floorf(v[k].pos[1] * 1000.0f), cz = (int32_t)floorf(v[k].pos[2] * 1000.0f);
+                int32_t  ox, oy, oz;
+                uint32_t found = 0xffffffffu;
+                for (oz = -1; oz <= 1 && found == 0xffffffffu; ++oz)
+                    for (oy = -1; oy <= 1 && found == 0xffffffffu; ++oy)
+                        for (ox = -1; ox <= 1 && found == 0xffffffffu; ++ox)
+                        {
+                            uint32_t h = ((uint32_t)(cx + ox) * 73856093u) ^ ((uint32_t)(cy + oy) * 19349663u) ^ ((uint32_t)(cz + oz) * 83492791u);
+                            h &= hcap - 1u;
+                            for (;;)
+                            {
+                                uint32_t vi = htab[h];
+                                if (vi == 0xffffffffu)
+                                    break;
+                                if ((int32_t)floorf(vx[vi] * 1000.0f) == cx + ox && (int32_t)floorf(vy[vi] * 1000.0f) == cy + oy && (int32_t)floorf(vz[vi] * 1000.0f) == cz + oz)
+                                {
+                                    float dx = vx[vi] - v[k].pos[0], dy = vy[vi] - v[k].pos[1], dz = vz[vi] - v[k].pos[2];
+                                    if (dx * dx + dy * dy + dz * dz <= 0.0005f * 0.0005f)
+                                    {
+                                        found = vi;
+                                        break;
+                                    }
+                                }
+                                h = (h + 1u) & (hcap - 1u);
+                            }
+                        }
+                if (found != 0xffffffffu)
+                {
+                    v[k].pos[0] = vx[found];
+                    v[k].pos[1] = vy[found];
+                    v[k].pos[2] = vz[found];
+                }
+                else
+                {
+                    uint32_t h = ((uint32_t)cx * 73856093u) ^ ((uint32_t)cy * 19349663u) ^ ((uint32_t)cz * 83492791u);
+                    h &= hcap - 1u;
+                    while (htab[h] != 0xffffffffu)
+                        h = (h + 1u) & (hcap - 1u);
+                    htab[h]   = nvert;
+                    vx[nvert] = v[k].pos[0];
+                    vy[nvert] = v[k].pos[1];
+                    vz[nvert] = v[k].pos[2];
+                    ++nvert;
+                }
+            }
+        }
+        free(htab);
+        (void)hi;
+    }
+    for (pass = 0; pass < 2; ++pass)
+    {
+        if (pass == 1)
+        {
+            uint32_t t, acc = 0;
+            for (t = 0; t < (uint32_t)R_MAP * R_MAP; ++t)
+            {
+                uint32_t c2 = count[t];
+                vstart[t]   = acc;
+                acc        += c2;
+            }
+            vstart[R_MAP * R_MAP] = acc;
+            vlist                 = (uint32_t *)malloc((acc ? acc : 1u) * sizeof *vlist);
+            if (!vlist)
+            {
+                free(count);
+                free(vstart);
+                free(cand);
+                free(vx);
+                free(vy);
+                free(vz);
+                return -1;
+            }
+            memset(count, 0, ((size_t)R_MAP * R_MAP + 1u) * sizeof *count);
+        }
+        for (i = 0; i < nvert; ++i)
+        {
+            int32_t tx = (int32_t)floorf(vx[i]), ty = (int32_t)floorf(vy[i]);
+            if (tx < 0)
+                tx = 0;
+            if (ty < 0)
+                ty = 0;
+            if (tx >= R_MAP)
+                tx = R_MAP - 1;
+            if (ty >= R_MAP)
+                ty = R_MAP - 1;
+            if (pass == 0)
+                ++count[ty * R_MAP + tx];
+            else
+                vlist[vstart[ty * R_MAP + tx] + count[ty * R_MAP + tx]++] = i;
+        }
+    }
+    /* split every candidate at any vertex strictly inside one of its edges; new faces join the queue */
+    {
+        uint32_t splits = 0, budget = n_tri * 4u + 1000u, nc0 = nc;
+        if (getenv("SC2K_DIG_DEBUG"))
+            fprintf(stderr, "weld: %u candidates, %u vertices\n", nc, nvert);
+    for (ci = 0; ci < nc && splits < budget; ++ci)
+    {
+        uint32_t ti = cand[ci];
+        int      k, again = 1, rounds = 0;
+        while (again && rounds++ < 64)
+        {
+            RMeshVert *v = *land + ti * 3u;
+            again        = 0;
+            for (k = 0; k < 3 && !again; ++k)
+            {
+                const RMeshVert *a = &v[k], *b = &v[(k + 1) % 3];
+                float            ex = b->pos[0] - a->pos[0], ey = b->pos[1] - a->pos[1], ez = b->pos[2] - a->pos[2];
+                float            l2 = ex * ex + ey * ey + ez * ez, best_t = 2.0f;
+                uint32_t         best = 0;
+                int32_t          tx, ty, tx0, tx1, ty0, ty1;
+                if (l2 < 1e-6f)
+                    continue; /* under a millimetre: no room for a vertex */
+                tx0 = (int32_t)floorf(fminf(a->pos[0], b->pos[0]) - 1e-4f);
+                tx1 = (int32_t)floorf(fmaxf(a->pos[0], b->pos[0]) + 1e-4f);
+                ty0 = (int32_t)floorf(fminf(a->pos[1], b->pos[1]) - 1e-4f);
+                ty1 = (int32_t)floorf(fmaxf(a->pos[1], b->pos[1]) + 1e-4f);
+                for (ty = ty0; ty <= ty1; ++ty)
+                    for (tx = tx0; tx <= tx1; ++tx)
+                    {
+                        uint32_t j;
+                        if (tx < 0 || ty < 0 || tx >= R_MAP || ty >= R_MAP)
+                            continue;
+                        for (j = vstart[ty * R_MAP + tx]; j < vstart[ty * R_MAP + tx + 1]; ++j)
+                        {
+                            uint32_t vi = vlist[j];
+                            float    px = vx[vi] - a->pos[0], py = vy[vi] - a->pos[1], pz = vz[vi] - a->pos[2];
+                            float    t  = (px * ex + py * ey + pz * ez) / l2, d2;
+                            if (t * l2 < 1e-3f * sqrtf(l2) || (1.0f - t) * l2 < 1e-3f * sqrtf(l2) || t >= best_t)
+                                continue; /* a millimetre clear of both ends */
+                            d2 = (px - t * ex) * (px - t * ex) + (py - t * ey) * (py - t * ey) + (pz - t * ez) * (pz - t * ez);
+                            if (d2 > 1e-8f)
+                                continue;
+                            best_t = t;
+                            best   = vi;
+                        }
+                    }
+                if (best_t <= 1.0f)
+                {
+                    /* split a-b at the vertex: (a, m, c) stays here, (m, b, c) is appended */
+                    RMeshVert mid, c2 = v[(k + 2) % 3], bv = *b;
+                    uint32_t  nt;
+                    vert_lerp(a, b, best_t, &mid);
+                    mid.pos[0] = vx[best];
+                    mid.pos[1] = vy[best];
+                    mid.pos[2] = vz[best];
+                    if (grow(land, n_land, cap_land, 3) != 0)
+                    {
+                        free(count);
+                        free(vstart);
+                        free(vlist);
+                        free(cand);
+                        free(vx);
+                        free(vy);
+                        free(vz);
+                        return -1;
+                    }
+                    v                  = *land + ti * 3u; /* grow may have moved the buffer */
+                    v[(k + 1) % 3]     = mid;
+                    nt                 = *n_land / 3u;
+                    (*land)[nt * 3u]     = mid;
+                    (*land)[nt * 3u + 1] = bv;
+                    (*land)[nt * 3u + 2] = c2;
+                    *n_land += 3u;
+                    /* the new face is a candidate too */
+                    {
+                        uint32_t *nc2 = (uint32_t *)realloc(cand, (nc + 2u) * sizeof *cand);
+                        if (!nc2)
+                        {
+                            free(count);
+                            free(vstart);
+                            free(vlist);
+                            free(cand);
+                            free(vx);
+                            free(vy);
+                            free(vz);
+                            return -1;
+                        }
+                        cand       = nc2;
+                        cand[nc++] = nt;
+                    }
+                    if (getenv("SC2K_DIG_DEBUG") && (splits < 6 || (splits % 30000) == 0 || (splits > 300 && splits < 306)))
+                        fprintf(stderr, "split mat %g edge (%.4f,%.4f,%.4f)-(%.4f,%.4f,%.4f) at (%.4f,%.4f,%.4f) t %.4f face %u\n", (double)v[0].col[2], (double)v[k].pos[0], (double)v[k].pos[1], (double)v[k].pos[2], (double)bv.pos[0], (double)bv.pos[1], (double)bv.pos[2], (double)vx[best], (double)vy[best], (double)vz[best], (double)best_t, ti);
+                    ++splits;
+                    again = 1;
+                }
+            }
+        }
+    }
+        if (getenv("SC2K_DIG_DEBUG"))
+            fprintf(stderr, "weld: %u splits (%u new faces)\n", splits, nc - nc0);
+    }
+    free(count);
+    free(vstart);
+    free(vlist);
+    free(cand);
+    free(vx);
+    free(vy);
+    free(vz);
+    return 0;
+}
+
+static int dig_cuts(RMesh *m)
+{
+    static uint32_t stamp[1u << 16];
+    static uint32_t gen;
+    RMeshVert      *out = NULL;
+    uint32_t        n_out = 0, cap_out = 0, i, n_tri = m->n_land / 3u;
+    if (!s_n_cuts || getenv("SC2K_NO_DIG")) /* SC2K_NO_DIG=1: the cuts painted over, not dug, for comparison */
+        return 0;
+    if (cuts_index() != 0)
+        return -1;
+    {
+        /* SC2K_CUT_DUMP=col,row prints the cut outlines whose box touches that tile */
+        const char *dump = getenv("SC2K_CUT_DUMP");
+        int         dc, dr;
+        if (dump && sscanf(dump, "%d,%d", &dc, &dr) == 2 && dc >= 0 && dr >= 0 && dc < R_MAP && dr < R_MAP)
+        {
+            uint32_t j;
+            for (j = s_cut_start[dr * R_MAP + dc]; j < s_cut_start[dr * R_MAP + dc + 1]; ++j)
+            {
+                const CutPoly *p = &s_cuts[s_cut_list[j]];
+                printf("cut %u: (%.3f,%.3f) (%.3f,%.3f) (%.3f,%.3f) (%.3f,%.3f)\n", s_cut_list[j], (double)p->x[0], (double)p->y[0], (double)p->x[1], (double)p->y[1], (double)p->x[2], (double)p->y[2], (double)p->x[3], (double)p->y[3]);
+            }
+        }
+    }
+    for (i = 0; i < n_tri; ++i)
+    {
+        const RMeshVert *v = &m->land[i * 3u];
+        uint32_t         idx[256], nidx = 0;
+        if (v[0].col[2] < 6.5f)
+        {
+            float   x0 = v[0].pos[0], x1 = x0, y0 = v[0].pos[1], y1 = y0;
+            int32_t tx, ty, k;
+            for (k = 1; k < 3; ++k)
+            {
+                if (v[k].pos[0] < x0)
+                    x0 = v[k].pos[0];
+                if (v[k].pos[0] > x1)
+                    x1 = v[k].pos[0];
+                if (v[k].pos[1] < y0)
+                    y0 = v[k].pos[1];
+                if (v[k].pos[1] > y1)
+                    y1 = v[k].pos[1];
+            }
+            ++gen;
+            for (ty = (int32_t)floorf(y0); ty <= (int32_t)floorf(y1 - 1e-6f); ++ty)
+                for (tx = (int32_t)floorf(x0); tx <= (int32_t)floorf(x1 - 1e-6f); ++tx)
+                {
+                    uint32_t j;
+                    if (tx < 0 || ty < 0 || tx >= R_MAP || ty >= R_MAP)
+                        continue;
+                    for (j = s_cut_start[ty * R_MAP + tx]; j < s_cut_start[ty * R_MAP + tx + 1] && nidx < 256; ++j)
+                    {
+                        uint32_t       ci = s_cut_list[j];
+                        const CutPoly *p  = &s_cuts[ci];
+                        float          px0 = p->x[0], px1 = px0, py0 = p->y[0], py1 = py0;
+                        int            q;
+                        if (ci < (1u << 16) && stamp[ci] == gen)
+                            continue;
+                        if (ci < (1u << 16))
+                            stamp[ci] = gen;
+                        for (q = 1; q < 4; ++q)
+                        {
+                            if (p->x[q] < px0)
+                                px0 = p->x[q];
+                            if (p->x[q] > px1)
+                                px1 = p->x[q];
+                            if (p->y[q] < py0)
+                                py0 = p->y[q];
+                            if (p->y[q] > py1)
+                                py1 = p->y[q];
+                        }
+                        if (px1 < x0 || px0 > x1 || py1 < y0 || py0 > y1)
+                            continue;
+                        idx[nidx++] = ci;
+                    }
+                }
+        }
+        if (!nidx)
+        {
+            if (grow(&out, &n_out, &cap_out, 3) != 0)
+                return -1;
+            out[n_out++] = v[0];
+            out[n_out++] = v[1];
+            out[n_out++] = v[2];
+            continue;
+        }
+        if (dig_tri(v, idx, nidx, &out, &n_out, &cap_out) != 0)
+            return -1;
+    }
+    free(m->land);
+    m->land     = out;
+    m->n_land   = n_out;
+    m->cap_land = cap_out;
+    {
+        static uint8_t touched[R_MAP * R_MAP];
+        uint32_t       t;
+        memset(touched, 0, sizeof touched);
+        for (t = 0; t < (uint32_t)R_MAP * R_MAP; ++t)
+            if (s_cut_start[t + 1] > s_cut_start[t])
+            {
+                int32_t tx = (int32_t)(t % R_MAP), ty = (int32_t)(t / R_MAP), ax, ay;
+                for (ay = ty - 1; ay <= ty + 1; ++ay)
+                    for (ax = tx - 1; ax <= tx + 1; ++ax)
+                        if (ax >= 0 && ay >= 0 && ax < R_MAP && ay < R_MAP)
+                            touched[ay * R_MAP + ax] = 1;
+            }
+        return dig_weld(&m->land, &m->n_land, &m->cap_land, touched);
+    }
+}
+static int   put_prism_clip_m(RMesh *m, const RCity *c, uint8_t mask_bit, float order, float cx, float cy, float dx, float dy, float len, float wid, float zb, float zf, float z0, float z1, float paint, float mat);
+
 static int loft(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, Family f, const Piece *pc, int np, float total, float zeb0, float zeb1, int pin0, int pin1)
 {
     static Sample smp[8192];
@@ -2214,6 +2969,8 @@ static int loft(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, Family f, 
             int   cut   = pv->z < gc[0] - 0.015f || pv->z < gc[1] - 0.015f || cu->z < gc[2] - 0.015f || cu->z < gc[3] - 0.015f ||
                         pv->z < s_zorig[i - 1] - 0.005f || cu->z < s_zorig[i] - 0.005f;
             float cls   = s_road_class;
+            if (cut && cut_record(a0, a1, b0, b1) != 0)
+                return -1;
             if (cut)
                 s_road_class += 4.0f;
             if (strip_quad_z(m, c, mask_bit, order, a0, a1, b0, b1, pv->z, cu->z, -1.0f, 1.0f, al_a, al_b, ma) != 0)
@@ -2306,6 +3063,22 @@ static int straighten(const V2 *p, int n, V2 *out)
         {
             int   j = i, k, grid = 1;
             float sign_prev = 0.0f;
+            /*  A run that would end after one period because its first
+             *  inner leg is unlike the third yields to the run from the
+             *  next corner when that one is longer: Toronto's rail at
+             *  column 108, row 25, a two-tile leg into a 1:1 staircase,
+             *  had been taken as a 2:1 stair of one step joined to the
+             *  1:1 stair by a half-tile jog, an abrupt turn where the
+             *  staircase should have begun a tile later. */
+            if (i + 4 < m)
+            {
+                V2 l1 = {w[i + 1].x - w[i].x, w[i + 1].y - w[i].y};
+                V2 l3 = {w[i + 3].x - w[i + 2].x, w[i + 3].y - w[i + 2].y};
+                V2 l2 = {w[i + 2].x - w[i + 1].x, w[i + 2].y - w[i + 1].y};
+                V2 l4 = {w[i + 4].x - w[i + 3].x, w[i + 4].y - w[i + 3].y};
+                if (fabsf(v2len(l1) - v2len(l3)) > 0.1f && fabsf(v2len(l2) - v2len(l4)) <= 0.1f && v2len(l1) > 1.05f)
+                    continue;
+            }
             for (k = i; k < m - 1; ++k)
             {
                 V2    a    = {w[k].x - w[k - 1].x, w[k].y - w[k - 1].y};
@@ -2451,6 +3224,51 @@ static int straighten(const V2 *p, int n, V2 *out)
         m = o;
     }
     return m;
+}
+
+/*  A rail's corners cut (the user, on Toronto's rail at column 108,
+ *  row 25: "why can't it have a softer angle to reach its destination?"):
+ *  a leg of two tiles or less between two longer legs whose lines meet
+ *  on one of those legs, at a turn of sixty degrees or less, goes, the
+ *  two corners it made replaced by that one point, which the fillet
+ *  rounds.  A line down a column turning west a tile and a half, then
+ *  north-west along a staircase, becomes a line down the column that
+ *  bends once, forty-five degrees, onto the staircase's diagonal a tile
+ *  and a half further on; the rail tile at the old corner is bypassed,
+ *  which the check for undrawn pieces allows a rail beside its line. */
+static int cut_corners(V2 *q, int n)
+{
+    int i, changed = 1;
+    while (changed && n >= 4)
+    {
+        changed = 0;
+        for (i = 1; i + 2 < n; ++i)
+        {
+            V2    a = q[i - 1], b = q[i], c = q[i + 1], d = q[i + 2], x;
+            V2    ab = {b.x - a.x, b.y - a.y}, bc = {c.x - b.x, c.y - b.y}, cd = {d.x - c.x, d.y - c.y};
+            float lab = v2len(ab), lbc = v2len(bc), lcd = v2len(cd), t, u, cosang;
+            if (lbc > 2.05f || lab < 1e-4f || lcd < 1e-4f || lbc < 1e-4f)
+                continue;
+            cosang = (ab.x * cd.x + ab.y * cd.y) / (lab * lcd);
+            if (cosang < 0.5f)
+                continue; /* a turn over sixty degrees keeps its corners */
+            if (!line_meet(a, ab, c, cd, &x))
+                continue;
+            t = ((x.x - a.x) * ab.x + (x.y - a.y) * ab.y) / (lab * lab); /* along a-b */
+            u = ((x.x - c.x) * cd.x + (x.y - c.y) * cd.y) / (lcd * lcd); /* along c-d */
+            if ((t > 0.2f && t < 1.0f - 1e-3f && lab - t * lab <= 2.05f) || (u > 1e-3f && u < 0.8f && u * lcd <= 2.05f))
+            {
+                int k;
+                q[i] = x;
+                for (k = i + 1; k + 1 < n; ++k)
+                    q[k] = q[k + 1];
+                --n;
+                changed = 1;
+                break;
+            }
+        }
+    }
+    return n;
 }
 
 /*  A lone piece no neighbour joins: a band across its own tile along the
@@ -2623,6 +3441,8 @@ static int walk_segment(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t 
     else
         s_seg_class = -1.0f;
     nk = straighten(pts, n, q);
+    if (f == F_RAIL)
+        nk = cut_corners(q, nk);
     {
         /*  SC2K_ROAD_DUMP=1 prints every segment of six tiles or more;
          *  SC2K_ROAD_DUMP=col,row every segment through that tile. */
@@ -3225,6 +4045,7 @@ int r_mesh_build(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel *l
     m->n_water  = 0;
     m->to_water = 0;
     m->n_walls  = 0;
+    s_n_cuts    = 0;
     build_field(c);
     tile_colour(a, l, 256, land_col, land_fb);
     land_col[2] = MAT_GROUND;
@@ -3406,7 +4227,11 @@ int r_mesh_build(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel *l
             }
         }
     if (roads && !underground)
-        return build_networks(m, c, a, l, mask_bit, !rotated);
+    {
+        if (build_networks(m, c, a, l, mask_bit, !rotated) != 0)
+            return -1;
+        return dig_cuts(m);
+    }
     return 0;
 }
 
@@ -3728,6 +4553,17 @@ int r_mesh_check_roads(const RMesh *m, int verbose)
             uint8_t b = s_check_xbld ? s_check_xbld[i] : 0;
             if (!((b >= 0x0Eu && b <= 0x3Au) || (b >= 0x43u && b <= 0x48u)))
                 continue;
+            if (count[i] == 0 && b >= 0x2Cu && b <= 0x3Au)
+            {
+                /* a rail piece bypassed by its line's cut corner: geometry on a neighbour will do */
+                int32_t col = (int32_t)(i % R_MAP), row = (int32_t)(i / R_MAP), dc, dr, near = 0;
+                for (dr = -1; dr <= 1 && !near; ++dr)
+                    for (dc = -1; dc <= 1 && !near; ++dc)
+                        if (col + dc >= 0 && row + dr >= 0 && col + dc < R_MAP && row + dr < R_MAP && count[(row + dr) * R_MAP + col + dc])
+                            near = 1;
+                if (near)
+                    continue;
+            }
             if (count[i] == 0)
             {
                 ++missing;
@@ -3774,6 +4610,35 @@ int r_mesh_check_roads(const RMesh *m, int verbose)
 
 int r_mesh_check(const RMesh *m, int verbose)
 {
+    if (getenv("SC2K_SPIKE_CHECK"))
+    {
+        /* ground top faces spanning over a level, or wider than a tile: a deformed or mis-welded face */
+        uint32_t i, n = m->n_land / 3u, bad = 0;
+        for (i = 0; i < n; ++i)
+        {
+            const RMeshVert *v  = &m->land[i * 3u];
+            float            z0 = v[0].pos[2], z1 = z0, x0 = v[0].pos[0], x1 = x0, y0 = v[0].pos[1], y1 = y0;
+            int              k;
+            if (v[0].col[2] > 0.5f)
+                continue;
+            for (k = 1; k < 3; ++k)
+            {
+                z0 = fminf(z0, v[k].pos[2]);
+                z1 = fmaxf(z1, v[k].pos[2]);
+                x0 = fminf(x0, v[k].pos[0]);
+                x1 = fmaxf(x1, v[k].pos[0]);
+                y0 = fminf(y0, v[k].pos[1]);
+                y1 = fmaxf(y1, v[k].pos[1]);
+            }
+            if (z1 - z0 > 1.05f || x1 - x0 > 1.01f || y1 - y0 > 1.01f)
+            {
+                ++bad;
+                if (bad <= 5)
+                    printf("spike: (%.3f,%.3f,%.3f) (%.3f,%.3f,%.3f) (%.3f,%.3f,%.3f)\n", (double)v[0].pos[0], (double)v[0].pos[1], (double)v[0].pos[2], (double)v[1].pos[0], (double)v[1].pos[1], (double)v[1].pos[2], (double)v[2].pos[0], (double)v[2].pos[1], (double)v[2].pos[2]);
+            }
+        }
+        printf("spikes: %u\n", bad);
+    }
     uint32_t n_tri = (m->n_land + m->n_water) / 3u, cap = 1u, i, free_edges = 0, free_spans = 0;
     Edge    *tab;
     Span    *spans;
@@ -3810,6 +4675,8 @@ int r_mesh_check(const RMesh *m, int verbose)
                 Span *s;
                 if (a[2] == b[2])
                     continue; /* a point, not an edge */
+                if (fabsf(v[k].pos[0] - v[(k + 1) % 3].pos[0]) > 1e-4f || fabsf(v[k].pos[1] - v[(k + 1) % 3].pos[1]) > 1e-4f)
+                    continue; /* a sloping edge shorter than the plan's quantum, collapsed to a vertical: a dug piece's rim, not a span */
                 s      = &spans[n_spans++];
                 s->x   = a[0];
                 s->y   = a[1];
@@ -3845,26 +4712,247 @@ int r_mesh_check(const RMesh *m, int verbose)
             }
         }
     }
-    for (i = 0; i < cap; ++i)
+    /*  The odd edges, less the floor and the rims of cuts.  Then a
+     *  T-junction is no hole: an odd edge covered end to end by other
+     *  odd edges on its own line (a neighbour split where a cut's edge
+     *  line crossed it, this side whole) is dropped, as are those. */
     {
-        const Edge *e = &tab[i];
-        if (e->count != 1)
-            continue;
-        if (e->a[2] == 0 && e->b[2] == 0)
-            continue; /* the floor */
-        free_edges++;
-        by_mat[(int)(e->mat + 0.5f) & 7]++;
-        if (verbose && shown++ < 40)
-            printf("free edge  (%g,%g,%g)-(%g,%g,%g)  tile c%d r%d  %s\n",
-                   e->a[0] / 16.0,
-                   e->a[1] / 16.0,
-                   e->a[2] / 48.0,
-                   e->b[0] / 16.0,
-                   e->b[1] / 16.0,
-                   e->b[2] / 48.0,
-                   (int)((e->a[0] < e->b[0] ? e->a[0] : e->b[0]) / 16),
-                   (int)((e->a[1] < e->b[1] ? e->a[1] : e->b[1]) / 16),
-                   mat_name(e->mat));
+        uint32_t *cand = (uint32_t *)malloc((n_tri * 3u + 1u) * sizeof *cand), nc = 0, ci;
+        if (!cand)
+        {
+            free(tab);
+            free(spans);
+            return -1;
+        }
+        for (i = 0; i < cap; ++i)
+        {
+            const Edge *e = &tab[i];
+            if (e->count != 1)
+                continue;
+            if (e->a[2] == 0 && e->b[2] == 0)
+                continue; /* the floor */
+            if (point_on_cut((float)e->a[0] / 16.0f, (float)e->a[1] / 16.0f) && point_on_cut((float)e->b[0] / 16.0f, (float)e->b[1] / 16.0f))
+                continue; /* the rim of a cut: the ground dug out under a sunken road, walled by the loft */
+            cand[nc++] = i;
+        }
+        /*  Every edge, any count, bucketed by the tiles its box covers:
+         *  a candidate's partners can be edges of even count too, as
+         *  where a dug tile's pieces meet a water tile whose surface and
+         *  bed share an edge. */
+        uint32_t *pstart = (uint32_t *)calloc((size_t)R_MAP * R_MAP + 1u, sizeof *pstart), *plist = NULL, np = 0;
+        if (!pstart)
+        {
+            free(cand);
+            free(tab);
+            free(spans);
+            return -1;
+        }
+        {
+            int pass;
+            for (pass = 0; pass < 2; ++pass)
+            {
+                if (pass == 1)
+                {
+                    uint32_t t, acc = 0;
+                    for (t = 0; t < (uint32_t)R_MAP * R_MAP; ++t)
+                    {
+                        uint32_t c2  = pstart[t];
+                        pstart[t]    = acc;
+                        acc         += c2;
+                    }
+                    pstart[R_MAP * R_MAP] = acc;
+                    plist                 = (uint32_t *)malloc((acc ? acc : 1u) * sizeof *plist);
+                    if (!plist)
+                    {
+                        free(pstart);
+                        free(cand);
+                        free(tab);
+                        free(spans);
+                        return -1;
+                    }
+                    np = acc;
+                }
+                for (i = 0; i < cap; ++i)
+                {
+                    const Edge *e = &tab[i];
+                    int32_t     tx0, tx1, ty0, ty1, tx, ty;
+                    if (e->count == 0)
+                        continue;
+                    tx0 = (e->a[0] < e->b[0] ? e->a[0] : e->b[0]) / 16;
+                    tx1 = (e->a[0] > e->b[0] ? e->a[0] : e->b[0]) / 16;
+                    ty0 = (e->a[1] < e->b[1] ? e->a[1] : e->b[1]) / 16;
+                    ty1 = (e->a[1] > e->b[1] ? e->a[1] : e->b[1]) / 16;
+                    if (tx0 < 0)
+                        tx0 = 0;
+                    if (ty0 < 0)
+                        ty0 = 0;
+                    if (tx1 >= R_MAP)
+                        tx1 = R_MAP - 1;
+                    if (ty1 >= R_MAP)
+                        ty1 = R_MAP - 1;
+                    if (tx0 >= R_MAP)
+                        tx0 = R_MAP - 1; /* the map's far edge line lies on tile 128 */
+                    if (ty0 >= R_MAP)
+                        ty0 = R_MAP - 1;
+                    for (ty = ty0; ty <= ty1; ++ty)
+                        for (tx = tx0; tx <= tx1; ++tx)
+                        {
+                            uint32_t t = (uint32_t)(ty * R_MAP + tx);
+                            if (pass == 0)
+                                ++pstart[t];
+                            else
+                                plist[pstart[t]++] = i;
+                        }
+                }
+            }
+            /* pstart advanced by the fill: shift back */
+            {
+                uint32_t t, prev = 0;
+                for (t = 0; t < (uint32_t)R_MAP * R_MAP; ++t)
+                {
+                    uint32_t cur = pstart[t];
+                    pstart[t]    = prev;
+                    prev         = cur;
+                }
+                pstart[R_MAP * R_MAP] = np;
+            }
+        }
+        for (ci = 0; ci < nc; ++ci)
+        {
+            const Edge *e   = &tab[cand[ci]];
+            float       ax = (float)e->a[0], ay = (float)e->a[1], az = (float)e->a[2];
+            float       dx = (float)e->b[0] - ax, dy = (float)e->b[1] - ay, dz = (float)e->b[2] - az;
+            float       l2 = dx * dx + dy * dy, lo = 1.0f, hi = 0.0f;
+            float       iv[64][2];
+            int         niv = 0, covered = 0, k;
+            int32_t     tx0, tx1, ty0, ty1, tx, ty;
+            if (l2 < 1e-6f)
+                continue; /* a vertical: the spans below */
+            tx0 = (e->a[0] < e->b[0] ? e->a[0] : e->b[0]) / 16;
+            tx1 = (e->a[0] > e->b[0] ? e->a[0] : e->b[0]) / 16;
+            ty0 = (e->a[1] < e->b[1] ? e->a[1] : e->b[1]) / 16;
+            ty1 = (e->a[1] > e->b[1] ? e->a[1] : e->b[1]) / 16;
+            if (tx0 < 0)
+                tx0 = 0;
+            if (ty0 < 0)
+                ty0 = 0;
+            if (tx1 >= R_MAP)
+                tx1 = R_MAP - 1;
+            if (ty1 >= R_MAP)
+                ty1 = R_MAP - 1;
+            if (tx0 >= R_MAP)
+                tx0 = R_MAP - 1;
+            if (ty0 >= R_MAP)
+                ty0 = R_MAP - 1;
+            for (ty = ty0; ty <= ty1; ++ty)
+                for (tx = tx0; tx <= tx1 && niv < 64; ++tx)
+                {
+                    uint32_t t = (uint32_t)(ty * R_MAP + tx), pj;
+                    for (pj = pstart[t]; pj < pstart[t + 1] && niv < 64; ++pj)
+                    {
+                        const Edge *f = &tab[plist[pj]];
+                        float       t0, t1, px, py, pz, d0, d1, tmp;
+                        int         dup;
+                        if (plist[pj] == cand[ci])
+                            continue;
+                        px = (float)f->a[0] - ax;
+                        py = (float)f->a[1] - ay;
+                        pz = (float)f->a[2] - az;
+                        t0 = (px * dx + py * dy) / l2;
+                        d0 = (px - t0 * dx) * (px - t0 * dx) + (py - t0 * dy) * (py - t0 * dy);
+                        if (fabsf(pz - t0 * dz) > 24.0f + 4.0f * fabsf(t0))
+                            continue;
+                        px = (float)f->b[0] - ax;
+                        py = (float)f->b[1] - ay;
+                        pz = (float)f->b[2] - az;
+                        t1 = (px * dx + py * dy) / l2;
+                        d1 = (px - t1 * dx) * (px - t1 * dx) + (py - t1 * dy) * (py - t1 * dy);
+                        if (fabsf(pz - t1 * dz) > 24.0f + 4.0f * fabsf(t1))
+                            continue;
+                        if (d0 > 1.1f || d1 > 1.1f)
+                            continue;
+                        if (t0 > t1)
+                        {
+                            tmp = t0;
+                            t0  = t1;
+                            t1  = tmp;
+                        }
+                        if (t1 < -1e-3f || t0 > 1.0f + 1e-3f)
+                            continue;
+                        /* an edge in several buckets is seen once */
+                        for (dup = 0, k = 0; k < niv; ++k)
+                            if (fabsf(iv[k][0] - t0) < 1e-6f && fabsf(iv[k][1] - t1) < 1e-6f)
+                                dup = 1;
+                        if (dup)
+                            continue;
+                        iv[niv][0] = t0;
+                        iv[niv][1] = t1;
+                        ++niv;
+                    }
+                }
+            /*  The union of the intervals covers [0, 1]?  A gap is no
+             *  hole either where it lies on the rim of a cut, since an
+             *  edge can run from the dug ground out along a cut's edge
+             *  line into ground that a neighbour split differently. */
+            lo      = 0.0f;
+            covered = 1;
+            for (;;)
+            {
+                float best = lo, gap_end = 1.0f;
+                for (k = 0; k < niv; ++k)
+                    if (iv[k][0] <= lo + 1e-3f && iv[k][1] > best)
+                        best = iv[k][1];
+                if (best > lo + 1e-4f)
+                {
+                    lo = best;
+                    if (lo >= 1.0f - 1e-3f)
+                        break;
+                    continue;
+                }
+                /* a gap from lo to the next interval's start, or the end */
+                for (k = 0; k < niv; ++k)
+                    if (iv[k][0] > lo + 1e-3f && iv[k][0] < gap_end)
+                        gap_end = iv[k][0];
+                {
+                    int q;
+                    for (q = 0; q < 5; ++q)
+                    {
+                        float t = lo + (gap_end - lo) * (0.1f + 0.2f * (float)q);
+                        if (!point_on_cut((ax + dx * t) / 16.0f, (ay + dy * t) / 16.0f) && !point_in_cut((ax + dx * t) / 16.0f, (ay + dy * t) / 16.0f))
+                        {
+                            covered = 0;
+                            break;
+                        }
+                    }
+                }
+                if (!covered || gap_end >= 1.0f - 1e-3f)
+                    break;
+                lo = gap_end;
+            }
+            hi = lo;
+            (void)hi;
+            if (covered)
+                continue;
+            free_edges++;
+            by_mat[(int)(e->mat + 0.5f) & 7]++;
+            if (verbose && shown++ < 40)
+                printf("free edge  (%g,%g,%g)-(%g,%g,%g)  tile c%d r%d  %s  rim %d %d  partners %d\n",
+                       e->a[0] / 16.0,
+                       e->a[1] / 16.0,
+                       e->a[2] / 48.0,
+                       e->b[0] / 16.0,
+                       e->b[1] / 16.0,
+                       e->b[2] / 48.0,
+                       (int)((e->a[0] < e->b[0] ? e->a[0] : e->b[0]) / 16),
+                       (int)((e->a[1] < e->b[1] ? e->a[1] : e->b[1]) / 16),
+                       mat_name(e->mat),
+                       point_on_cut((float)e->a[0] / 16.0f, (float)e->a[1] / 16.0f),
+                       point_on_cut((float)e->b[0] / 16.0f, (float)e->b[1] / 16.0f),
+                       niv);
+        }
+        free(cand);
+        free(pstart);
+        free(plist);
     }
     /*  The verticals: per corner, the coverage of every elementary span. */
     if (n_spans)
@@ -3878,6 +4966,11 @@ int r_mesh_check(const RMesh *m, int verbose)
             uint32_t nz = 0, zi;
             while (s1 < n_spans && spans[s1].x == spans[s0].x && spans[s1].y == spans[s0].y)
                 ++s1;
+            if (point_on_cut((float)spans[s0].x / 16.0f, (float)spans[s0].y / 16.0f))
+            {
+                s0 = s1; /* a corner on the rim of a cut */
+                continue;
+            }
             for (j = s0; j < s1 && nz < 510; ++j)
             {
                 zs[nz++] = spans[j].z0;
