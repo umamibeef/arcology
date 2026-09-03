@@ -32,6 +32,7 @@
 
 #include <SDL3/SDL.h>
 
+#include "arco.h"
 #include "r_adapt.h"
 #include "r_atlas.h"
 #include "r_city.h"
@@ -42,6 +43,9 @@
 #include "r_sound.h"
 #include "r_ui.h"
 #include "sc2k.h"
+
+/*  Nanoseconds from SDL_GetTicksNS as milliseconds, for the log. */
+#define NS_MS(ns) ((double)(ns) / 1e6)
 
 /*  The original's clock.  TickCount is 60 Hz; the speed's delay per phase
  *  is the word table at A5+0xC9A indexed by MISC[1019]: 0, 0, 36, 12, 0.
@@ -157,6 +161,46 @@ static void run_phase(App *a)
 }
 
 /*  the window title and the default save name follow the city */
+/*  What a load brought in, for the log: the file and its shape, then
+ *  the city the file describes.  Both load paths call this, so a city
+ *  picked from the menu reports exactly what one named on the command
+ *  line does.  ms is the time the load took. */
+static void log_city_loaded(const City *c, const char *path, double ms)
+{
+    const char *base  = strrchr(path, '/');
+    const char *fmt   = arco_is_arco(path) ? ".arco" : ".sc2";
+    long        bytes = -1;
+    char        name[40];
+    char        chunks[24 * 6 + 1];
+    int         i, n = 0;
+    FILE       *f = fopen(path, "rb");
+    base          = base ? base + 1 : path;
+    if (f)
+    {
+        if (fseek(f, 0, SEEK_END) == 0)
+            bytes = ftell(f);
+        fclose(f);
+    }
+    /*  CNAM is a Pascal string: the length, then the characters. */
+    name[0] = 0;
+    if (c->cnam && c->cnam_len > 1)
+    {
+        size_t k = c->cnam[0];
+        if (k > c->cnam_len - 1)
+            k = c->cnam_len - 1;
+        if (k > sizeof name - 1)
+            k = sizeof name - 1;
+        memcpy(name, c->cnam + 1, k);
+        name[k] = 0;
+    }
+    R_NOTE("city", "%s: %s, %ld bytes, %d chunks, %.0f ms", base, fmt, bytes, c->n_chunks, ms);
+    R_NOTE("city", "\"%s\": founded %d, year %d day %d, $%d, population %d, rotation %d, speed %d", name[0] ? name : "(unnamed)", (int)c->year_founded, (int)c->year_founded + (int)c->years, (int)c->date, (int)c->funds, (int)c->population, (int)(c->misc[2] & 3), (int)c->misc[MISC_SPEED]);
+    chunks[0] = 0;
+    for (i = 0; i < c->n_chunks && i < 24; i++)
+        n += snprintf(chunks + n, sizeof chunks - (size_t)n, "%s%s", i ? " " : "", c->order[i]);
+    R_DBG("city", "chunks: %s", chunks);
+}
+
 static void set_city_name(App *a, const char *path)
 {
     const char *base = strrchr(path, '/');
@@ -924,7 +968,9 @@ static void ui_apply(App *a, SDL_Window *win, int pw, int ph)
     {
         /*  r_adapt_city runs from a->city every frame, so swapping the
          *  city is all a load has to do. */
-        City *fresh = (City *)calloc(1, sizeof *fresh);
+        City    *fresh = (City *)calloc(1, sizeof *fresh);
+        uint64_t t0    = SDL_GetTicksNS();
+        R_NOTE("city", "loading %s", s->load_path);
         if (fresh && city_load(s->load_path, fresh))
         {
             city_free(a->city);
@@ -941,7 +987,7 @@ static void ui_apply(App *a, SDL_Window *win, int pw, int ph)
              *  compares the two and puts the old speed back */
             s->speed = a->speed;
             a->q_col = a->q_row = -1; /* the query box is about a gone tile */
-            R_NOTE("city", "loaded %s", a->city_base);
+            log_city_loaded(a->city, s->load_path, NS_MS(SDL_GetTicksNS() - t0));
             r_ui_log(s, "Loaded %s", a->city_base);
         }
         else
@@ -1253,8 +1299,18 @@ int r_game_main(int argc, char **argv)
     int         have_centre = 0, centre_col = 0, centre_row = 0;
     int         have_pick = 0;
     float       pick_x = 0.0f, pick_y = 0.0f;
-    int32_t     pixel_scale = 0;
-    char        err[256];
+    /*  Phase clocks for the init log.  SDL3's ticks need no SDL_Init. */
+    const uint64_t t_start = SDL_GetTicksNS();
+    uint64_t       t_phase = t_start, t_atlas = 0, t_city = 0, t_gpu = 0, t_sweep = 0;
+#define PHASE_MS(var)                    \
+    do                                   \
+    {                                    \
+        uint64_t now = SDL_GetTicksNS(); \
+        (var)        = now - t_phase;    \
+        t_phase      = now;              \
+    } while (0)
+    int32_t pixel_scale = 0;
+    char    err[256];
 
     char assets_dir[1024] = {0}, city_path[1024] = {0};
     int  first_opt = 1;
@@ -1392,6 +1448,25 @@ int r_game_main(int argc, char **argv)
     a.us.show_palette = 1;
     a.us.show_log     = 0; /* under Windows > Messages */
     a.us.tool         = -1;
+    if (check)
+        R_NOTE("init", "arcology, check against %s", check_out ? check_out : "the original");
+    else if (run_frames)
+    {
+        char speed[32];
+        if (run_speed)
+            snprintf(speed, sizeof speed, "speed %d", run_speed);
+        else
+            snprintf(speed, sizeof speed, "the city's speed");
+        R_NOTE("init", "arcology, headless: %d frames at %s%s%s", run_frames, speed, shot_out ? ", shot " : "", shot_out ? shot_out : "");
+    }
+    else if (shot_out)
+        R_NOTE("init", "arcology, one frame to %s", shot_out);
+    else
+        R_NOTE("init", "arcology, %dx%d window", ww, wh);
+    R_DBG("init", "zoom %d, scale %s, %s", (int)a.opts.zoom, pixel_scale < 1 ? "auto" : pixel_scale == 1 ? "1"
+                                                                                                         : "2",
+          a.gv.terrain3d ? "geometry" : "sprites");
+
     /*  where the cities are, for resolving a name and for the menu */
     find_cities(a.us.city_dir, sizeof a.us.city_dir);
     scan_cities(&a.us);
@@ -1422,18 +1497,36 @@ int r_game_main(int argc, char **argv)
         R_ERR("atlas", "%s", a.atlas.err);
         return 1;
     }
+    PHASE_MS(t_atlas);
+    {
+        int32_t tiles = 0;
+        char    zooms[32];
+        int     zn = 0;
+        zooms[0]   = 0;
+        for (i = 0; i < a.atlas.n_levels; i++)
+        {
+            tiles += a.atlas.level[i].n_tiles;
+            zn += snprintf(zooms + zn, sizeof zooms - (size_t)zn, "%s%d", i ? "/" : "", (int)a.atlas.level[i].zoom);
+        }
+        R_NOTE("atlas", "%d levels (%s px), %d tiles, %d animated runs, %.0f ms", (int)a.atlas.n_levels, zooms, (int)tiles, (int)a.atlas.n_anim, NS_MS(t_atlas));
+        for (i = 0; i < a.atlas.n_levels; i++)
+            R_DBG("atlas", "%d px: %d tiles in %dx%d, tile %dx%d, level step %d", (int)a.atlas.level[i].zoom, (int)a.atlas.level[i].n_tiles, (int)a.atlas.level[i].w, (int)a.atlas.level[i].h, (int)a.atlas.level[i].tile_w, (int)a.atlas.level[i].tile_h, (int)a.atlas.level[i].alt_step);
+    }
     a.city = (City *)calloc(1, sizeof *a.city);
     a.view = (RCity *)calloc(1, sizeof *a.view);
     if (!a.city || !a.view)
         return 1;
     if (city_path[0])
     {
+        R_NOTE("city", "loading %s", city_path);
         if (!city_load(city_path, a.city))
         {
             R_ERR("city", "%s is not a city", city_path);
             return 1;
         }
+        PHASE_MS(t_city);
         set_city_name(&a, city_path);
+        log_city_loaded(a.city, city_path, NS_MS(t_city));
     }
     else
     {
@@ -1448,24 +1541,32 @@ int r_game_main(int argc, char **argv)
      *  a run starts from the clock like the original does. */
     rng_seed((int32_t)time(NULL), (uint16_t)(time(NULL) & 0xFFFF));
 
+    t_phase = SDL_GetTicksNS();
     if (!SDL_Init(SDL_INIT_VIDEO))
     {
-        fprintf(stderr, "SDL: %s\n", SDL_GetError());
+        R_ERR("sdl", "%s", SDL_GetError());
         return 1;
     }
+    R_DBG("sdl", "video %s, driver %s", SDL_GetRevision(), SDL_GetCurrentVideoDriver() ? SDL_GetCurrentVideoDriver() : "none");
     win = SDL_CreateWindow("SimCity 2000", ww, wh, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | ((check || run_frames || shot_out) ? SDL_WINDOW_HIDDEN : 0));
     if (!win)
     {
-        fprintf(stderr, "window: %s\n", SDL_GetError());
+        R_ERR("sdl", "window: %s", SDL_GetError());
         return 1;
+    }
+    {
+        int pw, ph;
+        SDL_GetWindowSizeInPixels(win, &pw, &ph);
+        R_DBG("sdl", "window %dx%d, %dx%d px%s", ww, wh, pw, ph, (check || run_frames || shot_out) ? ", hidden" : "");
     }
     a.gpu = r_gpu_create(win, &a.atlas, err, sizeof err);
     if (!a.gpu)
     {
-        fprintf(stderr, "%s\n", err);
+        R_ERR("gpu", "%s", err);
         return 1;
     }
-    R_DBG("gpu", "%s", r_gpu_driver(a.gpu));
+    PHASE_MS(t_gpu);
+    R_NOTE("gpu", "%s, %.0f ms", r_gpu_driver(a.gpu), NS_MS(t_gpu));
     if (!check && !run_frames)
     {
         a.ui = r_ui_create(win, r_gpu_device(a.gpu), shot_out ? r_gpu_offscreen_format(a.gpu) : r_gpu_swapchain_format(a.gpu), 1.0f, assets_dir);
@@ -1505,11 +1606,14 @@ int r_game_main(int argc, char **argv)
     if (check && !run_frames)
         a.speed = 1;
 
+    t_phase = SDL_GetTicksNS();
     if (resweep(&a) != 0)
     {
-        fprintf(stderr, "no %d px art set\n", (int)a.opts.zoom);
+        R_ERR("sweep", "no %d px art set", (int)a.opts.zoom);
         return 1;
     }
+    PHASE_MS(t_sweep);
+    R_DBG("sweep", "canvas %dx%d at %d px, %.0f ms", (int)a.sw.w, (int)a.sw.h, (int)a.opts.zoom, NS_MS(t_sweep));
     {
         int pw, ph;
         SDL_GetWindowSizeInPixels(win, &pw, &ph);
@@ -1562,6 +1666,9 @@ int r_game_main(int argc, char **argv)
         pivot_on_view(&a, win);
         a.angle = ang;
     }
+
+    R_NOTE("init", "ready in %.0f ms (atlas %.0f, city %.0f, gpu %.0f, sweep %.0f)", NS_MS(SDL_GetTicksNS() - t_start), NS_MS(t_atlas), NS_MS(t_city), NS_MS(t_gpu), NS_MS(t_sweep));
+#undef PHASE_MS
 
     if (run_frames > 0)
     {
@@ -1684,6 +1791,7 @@ int r_game_main(int argc, char **argv)
 
     if (run_frames > 0)
         a.quit = 1;
+
     while (!a.quit)
     {
         SDL_Event e;

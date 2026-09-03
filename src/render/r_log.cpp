@@ -179,14 +179,17 @@ class stamp_flag : public spdlog::custom_flag_formatter
     }
 };
 
-/*  The level in capitals.  spdlog's %l is lower case and %L a single
- *  letter; neither is [INFO]. */
+/*  The level in capitals, padded to five so the brackets line up down
+ *  a page -- [INFO ] over [DEBUG] (the user: "I want the levels to be
+ *  the same width").  spdlog's %l is lower case and %L a single letter;
+ *  neither is that.  CRITICAL is cut to CRIT for the width; nothing
+ *  here emits it. */
 class level_flag : public spdlog::custom_flag_formatter
 {
   public:
     void format(const spdlog::details::log_msg &msg, const std::tm &, spdlog::memory_buf_t &dest) override
     {
-        static const char *const NAME[] = {"TRACE", "DEBUG", "INFO", "WARN", "ERROR", "CRITICAL", "OFF"};
+        static const char *const NAME[] = {"TRACE", "DEBUG", "INFO ", "WARN ", "ERROR", "CRIT ", "OFF  "};
         int                      l      = static_cast<int>(msg.level);
         if (l < 0 || l > 6)
             l = 6;
