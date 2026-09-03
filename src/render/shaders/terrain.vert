@@ -56,9 +56,12 @@ void main()
         depth = 1.0 - (rr.x + rr.y + 300.0) / 800.0;
     /*  A road strip lies on its tile's ground: a fifth of a depth slot
      *  nearer, so it wins over the ground it lies on and stays under the
-     *  sprites of its tile. */
+     *  sprites of its tile.  A viaduct's bent takes less than the road
+     *  it carries, so the deck draws over the columns beneath it while
+     *  they still stand in front of the ground (the user: "the support
+     *  columns are in front of the road"). */
     if (a_col.z > 6.5)
-        depth -= ((cam.rot.x > 0.5) ? 0.3 / 800.0 : 0.2 / cam.alt.y) * (a_col.z > 16.5 ? 1.0 : a_col.z > 15.5 ? 1.3 : a_col.z > 14.5 ? 2.0 : a_col.z > 13.5 ? 1.5 : a_col.z > 12.5 ? 0.5 : 1.0);
+        depth -= ((cam.rot.x > 0.5) ? 0.3 / 800.0 : 0.2 / cam.alt.y) * (a_col.z > 17.5 ? 0.3 : a_col.z > 16.5 ? 1.0 : a_col.z > 15.5 ? 1.3 : a_col.z > 14.5 ? 2.0 : a_col.z > 13.5 ? 1.5 : a_col.z > 12.5 ? 0.5 : 1.0);
     /*  A vehicle's depth within its tile's slot follows its place along
      *  the tile's diagonal toward the viewer, a tenth of a slot across
      *  the tile, so two cars overlapping in one tile, on the inside of a

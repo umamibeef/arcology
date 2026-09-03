@@ -111,6 +111,8 @@ static const uint8_t *s_check_xbld; /* the last built city's XBLD, for the piece
 #define MAT_RAIL_X    14.0f /* a rail across a road: the rails alone, flush in the crossing surface */
 #define MAT_VEHICLE   15.0f /* a train car or a road car: col.r the paint, col.g the shade  */
 #define MAT_XPANEL    16.0f /* a level crossing's surface: rubber panels across both tracks     */
+#define MAT_PIER      18.0f /* a viaduct's bent: behind the deck it carries, in */
+                            /* front of the ground it stands on                 */
 #define MAT_XAPPROACH 17.0f /* the road approaching a crossing: solid lines and the RXR stencil */
                             /* depth, and no part of the surface              */
 
@@ -696,15 +698,33 @@ static void grid_point(int32_t col, int32_t row, int k, float z, float out[3])
 static int s_hiway;
 
 /*  How far the deck rides above the ground, in altitude levels.  Spec
- *  7.2 asks for 5 m of clearance under the soffit, which with a box
- *  girder is about 7.5 m to the road surface; a level is seven to eight
- *  metres, so this is a shade over one. */
-#define HIWAY_LIFT 1.05f
+ *  7.2 puts the road surface 7.5 to 8 m up, and 7.4.4 makes the step
+ *  between one deck level and the next 7.4 m: L1 is 7.5 m over ground,
+ *  L2 = L1 + 7.4, L3 = L2 + 7.4.  A level IS that step, so the lower
+ *  deck stands at exactly one and an upper deck will stand at two. */
+#define HIWAY_LIFT 1.0f
 /*  The box girder's depth under the deck, the parapet's height above it
  *  and the bent's span along -- two tiles, the spec's 30 m. */
 #define HIWAY_GIRDER  0.22f
 #define HIWAY_PARAPET 0.13f
-#define HIWAY_BENT    2.0f
+#define HIWAY_BENT    1.0f
+/*  The cap is 1.5 m deep along the deck (7.2) and the columns 1.8 m
+ *  across, against the spec's 15 m tile.
+ *
+ *  Two departures from 7.2, both taken from the original's own art,
+ *  which is the reference for how a raised highway reads.  It stands a
+ *  column under each edge of the deck every TILE, not a hammerhead on
+ *  the centreline every two: measured off the sprites, the columns are
+ *  16 px apart in x, which is one tile step along a deck, about 4 px
+ *  wide, and they drop about 5 px below the deck's near edge.  A
+ *  hammerhead on the centreline is hidden by the deck it carries at
+ *  this camera -- the near edge projects eight pixels further down the
+ *  screen than the centreline does -- which is why the first build read
+ *  as a deck lying on the ground (the user: "why is it so low???",
+ *  "the original sprites had columns"). */
+#define HIWAY_CAP     0.10f
+#define HIWAY_CAP_D   0.10f
+#define HIWAY_COL     0.16f
 
 /* ---- roads, rails and power lines -------------------------------------- */
 
@@ -2589,6 +2609,7 @@ static int dig_cuts(RMesh *m)
         return dig_weld(&m->land, &m->n_land, &m->cap_land, touched);
     }
 }
+static int road_under_deck(const RCity *c, float x, float y, float px, float py);
 static int put_prism_clip_m(RMesh *m, const RCity *c, uint8_t mask_bit, float order, float cx, float cy, float dx, float dy, float len, float wid, float zb, float zf, float z0, float z1, float paint, float mat);
 
 static int loft(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, Family f, const Piece *pc, int np, float total, float zeb0, float zeb1, int pin0, int pin1)
@@ -2799,10 +2820,17 @@ static int loft(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, Family f, 
     if (s_hiway)
         for (i = 0; i < ns; ++i)
             smp[i].z += HIWAY_LIFT;
-    /*  The bents.  One every two tiles (spec 7.2, span = 30 m), each a
-     *  pair of columns under the deck's edges with a cap beam across
-     *  them.  A highway runs on one axis, so the boxes stand square to
-     *  it and need no turning. */
+    /*  The piers.  One per segment boundary, every two tiles, which is
+     *  the spec's 30 m span (7.2).  The type comes from what is under
+     *  the deck there: over nothing, a lot or a verge, a single
+     *  hammerhead on the centreline carrying a cap the full width of
+     *  the deck; over a surface road, a two-column bent with the
+     *  columns outside the carriageway, never in a lane.
+     *
+     *  The cap spans both tiles of the band, so it is laid as two
+     *  halves, each carrying the painter's order of the tile it is in:
+     *  one order for a piece that straddles the seam would put half the
+     *  cap in front of the deck over the other tile. */
     if (s_hiway)
     {
         float next = 1.0f;
@@ -2812,8 +2840,8 @@ static int loft(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, Family f, 
             float         px = -sm->dir.y, py = sm->dir.x;
             int           ew = fabsf(px) < 0.5f; /* the deck runs east-west */
             int32_t       tc, tr;
-            float         g, order, top, cap;
-            int           j;
+            float         g, top, cap, cw, cd;
+            int           j, bent;
             if (sm->s < next)
                 continue;
             next += HIWAY_BENT;
@@ -2821,24 +2849,43 @@ static int loft(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, Family f, 
             tr = (int32_t)floorf(sm->pos.y);
             if (tc < 0 || tr < 0 || tc >= R_MAP || tr >= R_MAP)
                 continue;
-            order = tile_order(c, tc, tr, mask_bit);
-            g     = surface_at_world(c, mask_bit, sm->pos.x, sm->pos.y);
-            top   = sm->z - HIWAY_GIRDER - g; /* the columns' top, over the ground */
-            cap   = top - 0.10f;
+            g   = surface_at_world(c, mask_bit, sm->pos.x, sm->pos.y);
+            top = sm->z - HIWAY_GIRDER - g; /* the cap's top, over the ground */
+            cap = top - HIWAY_CAP;
             if (top < 0.12f)
                 continue; /* the deck has met the ground: no room to stand */
-            /* the cap beam, across the deck */
-            if (put_box(m, c, mask_bit, order, sm->pos.x, sm->pos.y, ew ? 0.34f : 1.5f, ew ? 1.5f : 0.34f, cap, top, MAT_SKIRT, 0.0f) != 0)
-                return -1;
-            /* and its two columns, under the deck's edges */
+            /*  A road under the deck asks for a bent, its columns clear
+             *  of the carriageway; anything else takes the hammerhead. */
+            bent = road_under_deck(c, sm->pos.x, sm->pos.y, px, py);
+            /*  The cap, the full width of the deck and 1.5 m along it,
+             *  in two halves so each takes its own tile's order. */
+            cw = ew ? HIWAY_CAP_D : 1.0f;
+            cd = ew ? 1.0f : HIWAY_CAP_D;
             for (j = 0; j < 2; ++j)
             {
-                float o  = j ? 0.55f : -0.55f;
-                float cx = sm->pos.x + px * o, cy = sm->pos.y + py * o;
-                float cg = surface_at_world(c, mask_bit, cx, cy);
-                if (sm->z - HIWAY_GIRDER - 0.10f - cg < 0.05f)
+                float   o  = j ? 0.5f : -0.5f;
+                float   hx = sm->pos.x + px * o, hy = sm->pos.y + py * o;
+                int32_t hc = (int32_t)floorf(hx), hr = (int32_t)floorf(hy);
+                if (hc < 0 || hr < 0 || hc >= R_MAP || hr >= R_MAP)
                     continue;
-                if (put_box(m, c, mask_bit, order, cx, cy, 0.30f, 0.30f, 0.0f, sm->z - HIWAY_GIRDER - 0.10f - cg, MAT_SKIRT, 0.0f) != 0)
+                if (put_box(m, c, mask_bit, tile_order(c, hc, hr, mask_bit), hx, hy, cw, cd, cap, top, MAT_PIER, 0.0f) != 0)
+                    return -1;
+            }
+            /*  Then the column, or the bent's pair of them.  A column
+             *  runs from the ground it stands on up to the cap. */
+            for (j = 0; j < 2; ++j)
+            {
+                /*  Outside the carriageway when a road runs under the
+                 *  deck (7.2: never in a lane), otherwise just inside
+                 *  the deck's edges, where the art stands them. */
+                float   o  = (bent ? 0.78f : 0.62f) * (j ? 1.0f : -1.0f);
+                float   cx = sm->pos.x + px * o, cy = sm->pos.y + py * o;
+                float   cg = surface_at_world(c, mask_bit, cx, cy);
+                float   ch = sm->z - HIWAY_GIRDER - HIWAY_CAP - cg;
+                int32_t bc = (int32_t)floorf(cx), br = (int32_t)floorf(cy);
+                if (bc < 0 || br < 0 || bc >= R_MAP || br >= R_MAP || ch < 0.05f)
+                    continue;
+                if (put_box(m, c, mask_bit, tile_order(c, bc, br, mask_bit), cx, cy, HIWAY_COL, HIWAY_COL, 0.0f, ch, MAT_PIER, 0.0f) != 0)
                     return -1;
             }
         }
@@ -3994,6 +4041,27 @@ static int put_prism_clip(RMesh *m, const RCity *c, uint8_t mask_bit, float orde
  *  across.  The six crossings are DECK tiles too: 0x4D is a deck in an
  *  east-west band with a railway underneath, and the rail below it is
  *  drawn by the rail family, not this one. */
+/*  Is there a surface road under the deck here?  7.2 puts a two-column
+ *  bent over one, its columns outside the curbs, and a hammerhead over
+ *  anything else.  The two tiles the deck's own band covers are asked
+ *  across it, since that is where a column would land. */
+static int road_under_deck(const RCity *c, float x, float y, float px, float py)
+{
+    int k;
+    for (k = -1; k <= 1; k += 2)
+    {
+        int32_t tc = (int32_t)floorf(x + px * 0.5f * (float)k);
+        int32_t tr = (int32_t)floorf(y + py * 0.5f * (float)k);
+        uint8_t b;
+        if (tc < 0 || tr < 0 || tc >= R_MAP || tr >= R_MAP)
+            continue;
+        b = c->xbld[tr * R_MAP + tc];
+        if ((b >= 0x1Du && b <= 0x2Bu) || (b >= 0x43u && b <= 0x48u))
+            return 1;
+    }
+    return 0;
+}
+
 static int hiway_deck(uint8_t b, int *east_west)
 {
     if (b == 0x49u || b == 0x4Bu || b == 0x4Du || b == 0x4Fu)

@@ -315,6 +315,13 @@ void main()
         o_col = vec4(clamp(c * lit, 0.0, 1.0), v_col.a);
         return;
     }
+    if (v_col.b > 17.5 && v_col.b < 18.5)
+    {
+        /*  A viaduct's bent, the same coursed blocks as the works at a
+         *  raised road's edge. */
+        o_col = vec4(clamp(wall_colour(1.0, n), 0.0, 1.0), v_col.a);
+        return;
+    }
     if (v_col.b > 11.5 && v_col.b < 12.5)
     {
         /*  A raised road's embankment: the coursed blocks of a wall. */
