@@ -59,14 +59,16 @@ enum
                         *  crossings, and 0x44 at 112,91 and 0x45 at
                         *  111,93 floated within the hour.
                         *
-                        *  And it STOPS at 0x48.  The highways,
-                        *  0x49..0x60, are not drawn by the mesh at all
-                        *  -- render one with --mesh-only and there is
-                        *  grass where the highway should be.  They are
-                        *  sprites and must stay sprites.  Widening this
-                        *  to cover them, which looks like the tidy
-                        *  thing to do, deletes every highway in the
-                        *  game. */
+                        *  It now stops at 0x50, not 0x48: the eight
+                        *  highway DECK ids are meshed as of the Part 7
+                        *  work, so their sprites go the same way the
+                        *  road's do.  The RAMP ids, 0x51..0x60, are
+                        *  still sprites -- nothing meshes them yet --
+                        *  and must stay outside this range until
+                        *  something does.  The rule is the same as it
+                        *  always was: the range is exactly what the
+                        *  mesh draws, no more and no less, and
+                        *  --mesh-only is how you check. */
 };
 
 struct RGpu
@@ -752,11 +754,11 @@ int r_gpu_set_ops(RGpu *g, const ROpList *ops, const RSweep *sw)
             /*  The underground lattice is emitted as a plain sprite, not
              *  as terrain; it is the empty tile's art all the same. */
             int32_t sh         = op->shape - l->id_base;
-            g->kind[g->n_inst] = (sh >= 305 && sh <= 318)                                     ? K_UG_LATTICE
-                                 : (sh >= 0x0E && sh <= 0x48)                                  ? K_ROAD_ART
-                                 : (op->stencil >= 0)                                         ? K_CAR
-                                 : (sh >= 374 && sh <= 378)                                   ? K_TRAIN
-                                                                                              : K_SPRITE;
+            g->kind[g->n_inst] = (sh >= 305 && sh <= 318)     ? K_UG_LATTICE
+                                 : (sh >= 0x0E && sh <= 0x50) ? K_ROAD_ART
+                                 : (op->stencil >= 0)         ? K_CAR
+                                 : (sh >= 374 && sh <= 378)   ? K_TRAIN
+                                                              : K_SPRITE;
         }
         {
             /*  Debug: SC2K_GPU_DUMP=row,col prints a tile's instances. */

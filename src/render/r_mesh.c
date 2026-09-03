@@ -689,6 +689,11 @@ static void grid_point(int32_t col, int32_t row, int k, float z, float out[3])
     out[2] = z;
 }
 
+/*  Set while a highway deck is being lofted: the deck is a two-tile
+ *  band, not a one-tile strip, and nothing else about the loft changes
+ *  for it yet. */
+static int s_hiway;
+
 /* ---- roads, rails and power lines -------------------------------------- */
 
 /*  The networks as geometry (the user, 2 September 2026: "a road renderer,
@@ -1972,7 +1977,7 @@ static int cuts_index(void)
         for (ty = ty0; ty <= ty1; ++ty)
             for (tx = tx0; tx <= tx1; ++tx)
             {
-                uint32_t t                          = (uint32_t)(ty * R_MAP + tx);
+                uint32_t t                              = (uint32_t)(ty * R_MAP + tx);
                 s_cut_list[s_cut_start[t] + count[t]++] = i;
             }
     }
@@ -2019,13 +2024,13 @@ static int point_on_cut(float x, float y)
  *  hair of it: ground there is dug and the road covers it. */
 static int point_in_cut_m(float x, float y, float margin)
 {
-    int32_t tx = (int32_t)floorf(x), ty = (int32_t)floorf(y);
+    int32_t  tx = (int32_t)floorf(x), ty = (int32_t)floorf(y);
     uint32_t j;
     if (!s_n_cuts || !s_cut_start || tx < 0 || ty < 0 || tx >= R_MAP || ty >= R_MAP)
         return 0;
     for (j = s_cut_start[ty * R_MAP + tx]; j < s_cut_start[ty * R_MAP + tx + 1]; ++j)
     {
-        const CutPoly *p = &s_cuts[s_cut_list[j]];
+        const CutPoly *p  = &s_cuts[s_cut_list[j]];
         float          cx = 0.25f * (p->x[0] + p->x[1] + p->x[2] + p->x[3]);
         float          cy = 0.25f * (p->y[0] + p->y[1] + p->y[2] + p->y[3]);
         int            k, in = 1;
@@ -2085,7 +2090,7 @@ static void poly_split(const DigPoly *p, float ex, float ey, float dx, float dy,
     in->n = out->n = 0;
     for (i = 0; i < p->n; ++i)
     {
-        const RMeshVert *a  = &p->v[i], *b = &p->v[(i + 1) % p->n];
+        const RMeshVert *a = &p->v[i], *b = &p->v[(i + 1) % p->n];
         float            fa = (dx * (a->pos[1] - ey) - dy * (a->pos[0] - ex)) * sgn;
         float            fb = (dx * (b->pos[1] - ey) - dy * (b->pos[0] - ex)) * sgn;
         /* a vertex on the line belongs to both sides: a triangle that
@@ -2148,7 +2153,7 @@ static int dig_tri(const RMeshVert *tri, const uint32_t *idx, uint32_t nidx, RMe
         const CutPoly *p  = &s_cuts[idx[c]];
         float          cx = 0.25f * (p->x[0] + p->x[1] + p->x[2] + p->x[3]);
         float          cy = 0.25f * (p->y[0] + p->y[1] + p->y[2] + p->y[3]);
-        nn = 0;
+        nn                = 0;
         for (i = 0; i < nl; ++i)
         {
             DigPoly cur = list[i];
@@ -2196,7 +2201,7 @@ static int dig_weld(RMeshVert **land, uint32_t *n_land, uint32_t *cap_land, cons
     /* the candidates: faces of the surface in a touched tile */
     for (i = 0; i < n_tri; ++i)
     {
-        const RMeshVert *v = *land + i * 3u;
+        const RMeshVert *v  = *land + i * 3u;
         float            x0 = v[0].pos[0], x1 = x0, y0 = v[0].pos[1], y1 = y0;
         int32_t          tx, ty, hit = 0, k;
         if (v[0].col[2] > 6.5f)
@@ -2310,7 +2315,7 @@ static int dig_weld(RMeshVert **land, uint32_t *n_land, uint32_t *cap_land, cons
             {
                 uint32_t c2 = count[t];
                 vstart[t]   = acc;
-                acc        += c2;
+                acc += c2;
             }
             vstart[R_MAP * R_MAP] = acc;
             vlist                 = (uint32_t *)malloc((acc ? acc : 1u) * sizeof *vlist);
@@ -2347,79 +2352,58 @@ static int dig_weld(RMeshVert **land, uint32_t *n_land, uint32_t *cap_land, cons
     {
         uint32_t splits = 0, budget = n_tri * 4u + 1000u, nc0 = nc;
         if (getenv("SC2K_DIG_DEBUG"))
-            fprintf(stderr, "weld: %u candidates, %u vertices\n", nc, nvert);
-    for (ci = 0; ci < nc && splits < budget; ++ci)
-    {
-        uint32_t ti = cand[ci];
-        int      k, again = 1, rounds = 0;
-        while (again && rounds++ < 64)
+            fprintf(stderr, "weld: %u candidates, %u vertices, %u cuts\n", nc, nvert, s_n_cuts);
+        for (ci = 0; ci < nc && splits < budget; ++ci)
         {
-            RMeshVert *v = *land + ti * 3u;
-            again        = 0;
-            for (k = 0; k < 3 && !again; ++k)
+            uint32_t ti = cand[ci];
+            int      k, again = 1, rounds = 0;
+            while (again && rounds++ < 64)
             {
-                const RMeshVert *a = &v[k], *b = &v[(k + 1) % 3];
-                float            ex = b->pos[0] - a->pos[0], ey = b->pos[1] - a->pos[1], ez = b->pos[2] - a->pos[2];
-                float            l2 = ex * ex + ey * ey + ez * ez, best_t = 2.0f;
-                uint32_t         best = 0;
-                int32_t          tx, ty, tx0, tx1, ty0, ty1;
-                if (l2 < 1e-6f)
-                    continue; /* under a millimetre: no room for a vertex */
-                tx0 = (int32_t)floorf(fminf(a->pos[0], b->pos[0]) - 1e-4f);
-                tx1 = (int32_t)floorf(fmaxf(a->pos[0], b->pos[0]) + 1e-4f);
-                ty0 = (int32_t)floorf(fminf(a->pos[1], b->pos[1]) - 1e-4f);
-                ty1 = (int32_t)floorf(fmaxf(a->pos[1], b->pos[1]) + 1e-4f);
-                for (ty = ty0; ty <= ty1; ++ty)
-                    for (tx = tx0; tx <= tx1; ++tx)
-                    {
-                        uint32_t j;
-                        if (tx < 0 || ty < 0 || tx >= R_MAP || ty >= R_MAP)
-                            continue;
-                        for (j = vstart[ty * R_MAP + tx]; j < vstart[ty * R_MAP + tx + 1]; ++j)
-                        {
-                            uint32_t vi = vlist[j];
-                            float    px = vx[vi] - a->pos[0], py = vy[vi] - a->pos[1], pz = vz[vi] - a->pos[2];
-                            float    t  = (px * ex + py * ey + pz * ez) / l2, d2;
-                            if (t * l2 < 1e-3f * sqrtf(l2) || (1.0f - t) * l2 < 1e-3f * sqrtf(l2) || t >= best_t)
-                                continue; /* a millimetre clear of both ends */
-                            d2 = (px - t * ex) * (px - t * ex) + (py - t * ey) * (py - t * ey) + (pz - t * ez) * (pz - t * ez);
-                            if (d2 > 1e-8f)
-                                continue;
-                            best_t = t;
-                            best   = vi;
-                        }
-                    }
-                if (best_t <= 1.0f)
+                RMeshVert *v = *land + ti * 3u;
+                again        = 0;
+                for (k = 0; k < 3 && !again; ++k)
                 {
-                    /* split a-b at the vertex: (a, m, c) stays here, (m, b, c) is appended */
-                    RMeshVert mid, c2 = v[(k + 2) % 3], bv = *b;
-                    uint32_t  nt;
-                    vert_lerp(a, b, best_t, &mid);
-                    mid.pos[0] = vx[best];
-                    mid.pos[1] = vy[best];
-                    mid.pos[2] = vz[best];
-                    if (grow(land, n_land, cap_land, 3) != 0)
+                    const RMeshVert *a = &v[k], *b = &v[(k + 1) % 3];
+                    float            ex = b->pos[0] - a->pos[0], ey = b->pos[1] - a->pos[1], ez = b->pos[2] - a->pos[2];
+                    float            l2 = ex * ex + ey * ey + ez * ez, best_t = 2.0f;
+                    uint32_t         best = 0;
+                    int32_t          tx, ty, tx0, tx1, ty0, ty1;
+                    if (l2 < 1e-6f)
+                        continue; /* under a millimetre: no room for a vertex */
+                    tx0 = (int32_t)floorf(fminf(a->pos[0], b->pos[0]) - 1e-4f);
+                    tx1 = (int32_t)floorf(fmaxf(a->pos[0], b->pos[0]) + 1e-4f);
+                    ty0 = (int32_t)floorf(fminf(a->pos[1], b->pos[1]) - 1e-4f);
+                    ty1 = (int32_t)floorf(fmaxf(a->pos[1], b->pos[1]) + 1e-4f);
+                    for (ty = ty0; ty <= ty1; ++ty)
+                        for (tx = tx0; tx <= tx1; ++tx)
+                        {
+                            uint32_t j;
+                            if (tx < 0 || ty < 0 || tx >= R_MAP || ty >= R_MAP)
+                                continue;
+                            for (j = vstart[ty * R_MAP + tx]; j < vstart[ty * R_MAP + tx + 1]; ++j)
+                            {
+                                uint32_t vi = vlist[j];
+                                float    px = vx[vi] - a->pos[0], py = vy[vi] - a->pos[1], pz = vz[vi] - a->pos[2];
+                                float    t = (px * ex + py * ey + pz * ez) / l2, d2;
+                                if (t * l2 < 1e-3f * sqrtf(l2) || (1.0f - t) * l2 < 1e-3f * sqrtf(l2) || t >= best_t)
+                                    continue; /* a millimetre clear of both ends */
+                                d2 = (px - t * ex) * (px - t * ex) + (py - t * ey) * (py - t * ey) + (pz - t * ez) * (pz - t * ez);
+                                if (d2 > 1e-8f)
+                                    continue;
+                                best_t = t;
+                                best   = vi;
+                            }
+                        }
+                    if (best_t <= 1.0f)
                     {
-                        free(count);
-                        free(vstart);
-                        free(vlist);
-                        free(cand);
-                        free(vx);
-                        free(vy);
-                        free(vz);
-                        return -1;
-                    }
-                    v                  = *land + ti * 3u; /* grow may have moved the buffer */
-                    v[(k + 1) % 3]     = mid;
-                    nt                 = *n_land / 3u;
-                    (*land)[nt * 3u]     = mid;
-                    (*land)[nt * 3u + 1] = bv;
-                    (*land)[nt * 3u + 2] = c2;
-                    *n_land += 3u;
-                    /* the new face is a candidate too */
-                    {
-                        uint32_t *nc2 = (uint32_t *)realloc(cand, (nc + 2u) * sizeof *cand);
-                        if (!nc2)
+                        /* split a-b at the vertex: (a, m, c) stays here, (m, b, c) is appended */
+                        RMeshVert mid, c2 = v[(k + 2) % 3], bv = *b;
+                        uint32_t  nt;
+                        vert_lerp(a, b, best_t, &mid);
+                        mid.pos[0] = vx[best];
+                        mid.pos[1] = vy[best];
+                        mid.pos[2] = vz[best];
+                        if (grow(land, n_land, cap_land, 3) != 0)
                         {
                             free(count);
                             free(vstart);
@@ -2430,19 +2414,40 @@ static int dig_weld(RMeshVert **land, uint32_t *n_land, uint32_t *cap_land, cons
                             free(vz);
                             return -1;
                         }
-                        cand       = nc2;
-                        cand[nc++] = nt;
+                        v                    = *land + ti * 3u; /* grow may have moved the buffer */
+                        v[(k + 1) % 3]       = mid;
+                        nt                   = *n_land / 3u;
+                        (*land)[nt * 3u]     = mid;
+                        (*land)[nt * 3u + 1] = bv;
+                        (*land)[nt * 3u + 2] = c2;
+                        *n_land += 3u;
+                        /* the new face is a candidate too */
+                        {
+                            uint32_t *nc2 = (uint32_t *)realloc(cand, (nc + 2u) * sizeof *cand);
+                            if (!nc2)
+                            {
+                                free(count);
+                                free(vstart);
+                                free(vlist);
+                                free(cand);
+                                free(vx);
+                                free(vy);
+                                free(vz);
+                                return -1;
+                            }
+                            cand       = nc2;
+                            cand[nc++] = nt;
+                        }
+                        if (getenv("SC2K_DIG_DEBUG") && (splits < 6 || (splits % 30000) == 0 || (splits > 300 && splits < 306)))
+                            fprintf(stderr, "split mat %g edge (%.4f,%.4f,%.4f)-(%.4f,%.4f,%.4f) at (%.4f,%.4f,%.4f) t %.4f face %u\n", (double)v[0].col[2], (double)v[k].pos[0], (double)v[k].pos[1], (double)v[k].pos[2], (double)bv.pos[0], (double)bv.pos[1], (double)bv.pos[2], (double)vx[best], (double)vy[best], (double)vz[best], (double)best_t, ti);
+                        ++splits;
+                        again = 1;
                     }
-                    if (getenv("SC2K_DIG_DEBUG") && (splits < 6 || (splits % 30000) == 0 || (splits > 300 && splits < 306)))
-                        fprintf(stderr, "split mat %g edge (%.4f,%.4f,%.4f)-(%.4f,%.4f,%.4f) at (%.4f,%.4f,%.4f) t %.4f face %u\n", (double)v[0].col[2], (double)v[k].pos[0], (double)v[k].pos[1], (double)v[k].pos[2], (double)bv.pos[0], (double)bv.pos[1], (double)bv.pos[2], (double)vx[best], (double)vy[best], (double)vz[best], (double)best_t, ti);
-                    ++splits;
-                    again = 1;
                 }
             }
         }
-    }
         if (getenv("SC2K_DIG_DEBUG"))
-            fprintf(stderr, "weld: %u splits (%u new faces)\n", splits, nc - nc0);
+            fprintf(stderr, "weld: %u splits (%u new faces)%s\n", splits, nc - nc0, splits >= budget ? "  BUDGET EXHAUSTED" : "");
     }
     free(count);
     free(vstart);
@@ -2458,7 +2463,7 @@ static int dig_cuts(RMesh *m)
 {
     static uint32_t stamp[1u << 16];
     static uint32_t gen;
-    RMeshVert      *out = NULL;
+    RMeshVert      *out   = NULL;
     uint32_t        n_out = 0, cap_out = 0, i, n_tri = m->n_land / 3u;
     if (!s_n_cuts || getenv("SC2K_NO_DIG")) /* SC2K_NO_DIG=1: the cuts painted over, not dug, for comparison */
         return 0;
@@ -2506,8 +2511,8 @@ static int dig_cuts(RMesh *m)
                         continue;
                     for (j = s_cut_start[ty * R_MAP + tx]; j < s_cut_start[ty * R_MAP + tx + 1] && nidx < 256; ++j)
                     {
-                        uint32_t       ci = s_cut_list[j];
-                        const CutPoly *p  = &s_cuts[ci];
+                        uint32_t       ci  = s_cut_list[j];
+                        const CutPoly *p   = &s_cuts[ci];
                         float          px0 = p->x[0], px1 = px0, py0 = p->y[0], py1 = py0;
                         int            q;
                         if (ci < (1u << 16) && stamp[ci] == gen)
@@ -2563,13 +2568,14 @@ static int dig_cuts(RMesh *m)
         return dig_weld(&m->land, &m->n_land, &m->cap_land, touched);
     }
 }
-static int   put_prism_clip_m(RMesh *m, const RCity *c, uint8_t mask_bit, float order, float cx, float cy, float dx, float dy, float len, float wid, float zb, float zf, float z0, float z1, float paint, float mat);
+static int put_prism_clip_m(RMesh *m, const RCity *c, uint8_t mask_bit, float order, float cx, float cy, float dx, float dy, float len, float wid, float zb, float zf, float z0, float z1, float paint, float mat);
 
 static int loft(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, Family f, const Piece *pc, int np, float total, float zeb0, float zeb1, int pin0, int pin1)
 {
     static Sample smp[8192];
     static float  zraw[8192];
-    float         hw  = f == F_ROAD ? ROAD_W * 0.5f : RAIL_W * 0.5f;
+    float         hw  = s_hiway ? 1.0f : f == F_ROAD ? ROAD_W * 0.5f
+                                                     : RAIL_W * 0.5f;
     float         mat = f == F_ROAD ? MAT_ROAD : MAT_RAIL;
     int           k, ns = 0, i;
     float         s = 0.0f;
@@ -2964,10 +2970,9 @@ static int loft(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, Family f, 
             /*  A quad in a cut, the road below the ground at a corner, is
              *  flagged in its class (4 and up) so the clipping check knows
              *  the ground over it is meant, held back by the walls below. */
-            float gc[4] = {surface_at_world(c, mask_bit, a0[0], a0[1]), surface_at_world(c, mask_bit, a1[0], a1[1]),
-                           surface_at_world(c, mask_bit, b0[0], b0[1]), surface_at_world(c, mask_bit, b1[0], b1[1])};
+            float gc[4] = {surface_at_world(c, mask_bit, a0[0], a0[1]), surface_at_world(c, mask_bit, a1[0], a1[1]), surface_at_world(c, mask_bit, b0[0], b0[1]), surface_at_world(c, mask_bit, b1[0], b1[1])};
             int   cut   = pv->z < gc[0] - 0.015f || pv->z < gc[1] - 0.015f || cu->z < gc[2] - 0.015f || cu->z < gc[3] - 0.015f ||
-                        pv->z < s_zorig[i - 1] - 0.005f || cu->z < s_zorig[i] - 0.005f;
+                          pv->z < s_zorig[i - 1] - 0.005f || cu->z < s_zorig[i] - 0.005f;
             float cls   = s_road_class;
             if (cut && cut_record(a0, a1, b0, b1) != 0)
                 return -1;
@@ -2983,12 +2988,12 @@ static int loft(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, Family f, 
         {
             static const float blocks[3] = {0.0f, 0.0f, MAT_SKIRT};
 
-            const float       *ea = side ? a1 : a0, *eb = side ? b1 : b0;
-            float              ga    = surface_at_world(c, mask_bit, ea[0], ea[1]);
-            float              gb    = surface_at_world(c, mask_bit, eb[0], eb[1]);
-            float              t0[3] = {ea[0], ea[1], pv->z}, t1[3] = {eb[0], eb[1], cu->z};
-            float              q0[3] = {ea[0], ea[1], ga}, q1[3] = {eb[0], eb[1], gb};
-            float              nrm[3];
+            const float *ea = side ? a1 : a0, *eb = side ? b1 : b0;
+            float        ga    = surface_at_world(c, mask_bit, ea[0], ea[1]);
+            float        gb    = surface_at_world(c, mask_bit, eb[0], eb[1]);
+            float        t0[3] = {ea[0], ea[1], pv->z}, t1[3] = {eb[0], eb[1], cu->z};
+            float        q0[3] = {ea[0], ea[1], ga}, q1[3] = {eb[0], eb[1], gb};
+            float        nrm[3];
             nrm[0] = side ? -cu->dir.y : cu->dir.y;
             nrm[1] = side ? cu->dir.x : -cu->dir.x;
             nrm[2] = 0.0f;
@@ -3880,6 +3885,161 @@ static int put_prism_clip(RMesh *m, const RCity *c, uint8_t mask_bit, float orde
 
 /*  Every network: the power lines per tile; the roads and rails as
  *  junctions and segments. */
+/* ---- raised highways (the road spec, part 7) --------------------------- */
+
+/*  A highway is not one tile wide.  Its deck is a TWO-TILE BAND -- the
+ *  spec's 2x2 segment -- so its centreline runs along the seam between
+ *  two rows or two columns, never through a tile centre, and the whole
+ *  segment pipeline above (which walks tile to tile) cannot express it.
+ *  This walks the band instead and hands the ordinary loft a spine that
+ *  is offset half a tile across.
+ *
+ *  Which ids are which was read off the shipped cities, not the sprite
+ *  sheet -- see the Part 7 section of docs/future.rst.  Every one of
+ *  these is ALWAYS part of a 2x2 square of highway (6905 of 6905 for
+ *  0x49), and the id alone says which way the band runs, because an
+ *  interior tile of a two-wide band has two neighbours along it and one
+ *  across.  The six crossings are DECK tiles too: 0x4D is a deck in an
+ *  east-west band with a railway underneath, and the rail below it is
+ *  drawn by the rail family, not this one. */
+static int hiway_deck(uint8_t b, int *east_west)
+{
+    if (b == 0x49u || b == 0x4Bu || b == 0x4Du || b == 0x4Fu)
+    {
+        *east_west = 1;
+        return 1;
+    }
+    if (b == 0x4Au || b == 0x4Cu || b == 0x4Eu || b == 0x50u)
+    {
+        *east_west = 0;
+        return 1;
+    }
+    return 0;
+}
+
+/*  The band cell a deck tile belongs to, as its PRIMARY tile: the lower
+ *  of the two across the band.  Answers 0 if the tile has no partner --
+ *  a lone deck tile is malformed data and is left to the sprites. */
+static int hiway_cell(const RCity *c, int32_t col, int32_t row, int32_t *pc, int32_t *pr, int *ew)
+{
+    uint8_t b = c->xbld[row * R_MAP + col];
+    int32_t oc, orr;
+    int     e2;
+    if (!hiway_deck(b, ew))
+        return 0;
+    /*  across the band: north-south for an east-west deck */
+    oc  = *ew ? col : col - 1;
+    orr = *ew ? row - 1 : row;
+    if (oc >= 0 && orr >= 0 && hiway_deck(c->xbld[orr * R_MAP + oc], &e2) && e2 == *ew)
+    {
+        *pc = oc;
+        *pr = orr;
+        return 1;
+    }
+    oc  = *ew ? col : col + 1;
+    orr = *ew ? row + 1 : row;
+    if (oc < R_MAP && orr < R_MAP && hiway_deck(c->xbld[orr * R_MAP + oc], &e2) && e2 == *ew)
+    {
+        *pc = col;
+        *pr = row;
+        return 1;
+    }
+    return 0;
+}
+
+/*  Walk one band from an end and loft its deck.  The spine runs along
+ *  the seam: half a tile across from the primary tile's centre. */
+static int walk_hiway(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, int32_t col, int32_t row, int ew, uint8_t *seen)
+{
+    static V2    pts[MAX_PTS];
+    static Piece pieces[MAX_PIECES];
+    int32_t      cc = col, cr = row;
+    int          n = 0, np, guard = 0;
+    float        total = 0.0f;
+    /*  Along the band, not across it: an east-west deck runs in +col.
+     *  The spine is offset half a tile ACROSS, which is the other
+     *  axis -- getting these two the same way round finds every band
+     *  and then walks off it in one step. */
+    const float ax = ew ? 1.0f : 0.0f, ay = ew ? 0.0f : 1.0f;
+    const float sx = ew ? 0.5f : 1.0f, sy = ew ? 1.0f : 0.5f; /* spine  */
+    while (guard++ < R_MAP)
+    {
+        int32_t pcol, prow;
+        int     e2;
+        if (cc < 0 || cr < 0 || cc >= R_MAP || cr >= R_MAP)
+            break;
+        if (!hiway_cell(c, cc, cr, &pcol, &prow, &e2) || e2 != ew)
+            break;
+        if (pcol != cc || prow != cr)
+            break; /* not the primary: the band has stepped sideways */
+        if (seen[cr * R_MAP + cc])
+            break;
+        seen[cr * R_MAP + cc] = 1;
+        if (n + 1 >= MAX_PTS)
+            break;
+        pts[n++] = (V2){(float)cc + sx, (float)cr + sy};
+        cc += (int32_t)ax;
+        cr += (int32_t)ay;
+    }
+    if (n < 2)
+        return 0;
+    /*  Run the spine to the outer edge of the end cells, so the deck
+     *  covers its whole first and last segment rather than stopping at
+     *  their centres. */
+    pts[0].x -= ax * 0.5f;
+    pts[0].y -= ay * 0.5f;
+    pts[n - 1].x += ax * 0.5f;
+    pts[n - 1].y += ay * 0.5f;
+    if (fillet(pts, n, 1.0f, pieces, &np) != 0 || np == 0)
+        return 0;
+    for (guard = 0; guard < np; ++guard)
+        total += pieces[guard].len;
+    /*  F_ROAD for now: the deck is lofted as a very wide road strip so
+     *  it is visible and the band walk can be judged.  The parapets,
+     *  the median barrier, the freeway markings of 7.1 and the piers of
+     *  7.2 want a material of their own and come next. */
+    {
+        int rc;
+        s_hiway = 1;
+        rc      = loft(m, c, mask_bit, comp, F_ROAD, pieces, np, total, 0.0f, 0.0f, 1, 1);
+        s_hiway = 0;
+        return rc;
+    }
+}
+
+/*  Every band in the city, each walked once from an end. */
+static int build_highways(RMesh *m, const RCity *c, uint8_t mask_bit, int comp)
+{
+    static uint8_t seen[R_MAP * R_MAP];
+    int32_t        col, row;
+    memset(seen, 0, sizeof seen);
+    for (row = 0; row < R_MAP; ++row)
+        for (col = 0; col < R_MAP; ++col)
+        {
+            int32_t pcol, prow;
+            int     ew;
+            int32_t bc, br;
+            if (!hiway_cell(c, col, row, &pcol, &prow, &ew))
+                continue;
+            if (pcol != col || prow != row || seen[row * R_MAP + col])
+                continue;
+            /*  only from an end: the cell before this one along the band
+             *  is not a band cell */
+            bc = ew ? col - 1 : col;
+            br = ew ? row : row - 1;
+            if (bc >= 0 && br >= 0)
+            {
+                int32_t qc, qr;
+                int     e2;
+                if (hiway_cell(c, bc, br, &qc, &qr, &e2) && e2 == ew && qc == bc && qr == br)
+                    continue;
+            }
+            if (walk_hiway(m, c, mask_bit, comp, col, row, ew, seen) != 0)
+                return -1;
+        }
+    return 0;
+}
+
 static int build_networks(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel *l, uint8_t mask_bit, int comp)
 {
     static uint8_t visited[R_MAP * R_MAP * 4];
@@ -4229,6 +4389,8 @@ int r_mesh_build(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel *l
     if (roads && !underground)
     {
         if (build_networks(m, c, a, l, mask_bit, !rotated) != 0)
+            return -1;
+        if (build_highways(m, c, mask_bit, !rotated) != 0)
             return -1;
         return dig_cuts(m);
     }
@@ -4756,9 +4918,9 @@ int r_mesh_check(const RMesh *m, int verbose)
                     uint32_t t, acc = 0;
                     for (t = 0; t < (uint32_t)R_MAP * R_MAP; ++t)
                     {
-                        uint32_t c2  = pstart[t];
-                        pstart[t]    = acc;
-                        acc         += c2;
+                        uint32_t c2 = pstart[t];
+                        pstart[t]   = acc;
+                        acc += c2;
                     }
                     pstart[R_MAP * R_MAP] = acc;
                     plist                 = (uint32_t *)malloc((acc ? acc : 1u) * sizeof *plist);
@@ -4819,7 +4981,7 @@ int r_mesh_check(const RMesh *m, int verbose)
         }
         for (ci = 0; ci < nc; ++ci)
         {
-            const Edge *e   = &tab[cand[ci]];
+            const Edge *e  = &tab[cand[ci]];
             float       ax = (float)e->a[0], ay = (float)e->a[1], az = (float)e->a[2];
             float       dx = (float)e->b[0] - ax, dy = (float)e->b[1] - ay, dz = (float)e->b[2] - az;
             float       l2 = dx * dx + dy * dy, lo = 1.0f, hi = 0.0f;
