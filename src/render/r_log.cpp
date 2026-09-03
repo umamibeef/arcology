@@ -326,6 +326,75 @@ int r_log_colour(void)
     return g_colour ? 1 : 0;
 }
 
+/*  The banner's gradient runs across its width, character by
+ *  character, through the first three colours the sources are painted
+ *  in -- blue, magenta, orange -- so the art and the log lines under it
+ *  are one palette.  A terminal that announces truecolor in COLORTERM
+ *  gets the blend exact; any other gets the nearest of the 256-colour
+ *  cube's 216, which is banded but never wrong, and macOS's own
+ *  Terminal is one of those.  Blanks are left bare: colouring a space
+ *  is bytes for nothing. */
+static void banner_colour(float t, bool truecolor, char *out, size_t n)
+{
+    static const int STOP[3][3] = {
+        {0,   135, 255}, /* blue    */
+        {255, 0,   255}, /* magenta */
+        {255, 135, 0  }, /* orange  */
+    };
+    const float u = t * 2.0f;
+    const int   k = u < 1.0f ? 0 : 1;
+    const float f = u - static_cast<float>(k);
+    int         rgb[3];
+    for (int c = 0; c < 3; ++c)
+        rgb[c] = static_cast<int>(static_cast<float>(STOP[k][c]) + (static_cast<float>(STOP[k + 1][c]) - static_cast<float>(STOP[k][c])) * f + 0.5f);
+    if (truecolor)
+    {
+        std::snprintf(out, n, "\033[38;2;%d;%d;%dm", rgb[0], rgb[1], rgb[2]);
+        return;
+    }
+    /*  the cube's levels are 0, 95, 135, 175, 215, 255 */
+    int q[3];
+    for (int c = 0; c < 3; ++c)
+        q[c] = rgb[c] < 48 ? 0 : rgb[c] < 115 ? 1
+                             : rgb[c] < 155   ? 2
+                             : rgb[c] < 195   ? 3
+                             : rgb[c] < 235   ? 4
+                                              : 5;
+    std::snprintf(out, n, "\033[38;5;%dm", 16 + 36 * q[0] + 6 * q[1] + q[2]);
+}
+
+extern "C" void r_log_banner(const char *const *lines, int n)
+{
+    std::call_once(g_once, setup);
+    size_t width = 0;
+    for (int i = 0; i < n; ++i)
+        if (std::strlen(lines[i]) > width)
+            width = std::strlen(lines[i]);
+    const char *ct        = std::getenv("COLORTERM");
+    const bool  truecolor = ct && (std::strstr(ct, "truecolor") || std::strstr(ct, "24bit"));
+    std::string buf;
+    for (int i = 0; i < n; ++i)
+    {
+        const char *l = lines[i];
+        for (size_t x = 0; l[x]; ++x)
+        {
+            if (l[x] == ' ' || !g_colour)
+            {
+                buf += l[x];
+                continue;
+            }
+            char esc[32];
+            banner_colour(width > 1 ? static_cast<float>(x) / static_cast<float>(width - 1) : 0.0f, truecolor, esc, sizeof esc);
+            buf += esc;
+            buf += l[x];
+        }
+        if (g_colour)
+            buf += "\033[m";
+        buf += '\n';
+    }
+    std::fputs(buf.c_str(), stderr);
+}
+
 void r_log(RLogLevel lvl, const char *source, const char *fmt, ...)
 {
     char    buf[1024];

@@ -60,6 +60,11 @@ void r_log(RLogLevel lvl, const char *source, const char *fmt, ...);
 #define R_NOTE(src, ...) r_log(R_LOG_NOTE, (src), __VA_ARGS__)
 #define R_DBG(src, ...)  r_log(R_LOG_DEBUG, (src), __VA_ARGS__)
 
+/*  The banner: `n` lines of ASCII art to the log's stream, each
+ *  character coloured by a gradient across the banner's width, under
+ *  the same colour rules as the log, so NO_COLOR gets the plain text. */
+void r_log_banner(const char *const *lines, int n);
+
 #ifdef __cplusplus
 }
 #endif

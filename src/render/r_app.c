@@ -1448,6 +1448,16 @@ int r_game_main(int argc, char **argv)
     a.us.show_palette = 1;
     a.us.show_log     = 0; /* under Windows > Messages */
     a.us.tool         = -1;
+    {
+        static const char *const BANNER[] = {
+            "   ___                __",
+            "  / _ | ___________  / /__  ___ ___ __",
+            " / __ |/ __/ __/ _ \\/ / _ \\/ _ `/ // /",
+            "/_/ |_/_/  \\__/\\___/_/\\___/\\_, /\\_, /",
+            "                          /___//___/",
+        };
+        r_log_banner(BANNER, 5);
+    }
     if (check)
         R_NOTE("init", "arcology, check against %s", check_out ? check_out : "the original");
     else if (run_frames)
