@@ -34,7 +34,7 @@ int r_game_main(int argc, char **argv);
  *  checker hanging. */
 static const char *const ARC_DEV_MODES[] = {
     "--verify",    "--bits",      "--water",     "--roundtrip",
-    "--convert",   "--micro",
+    "--convert",   "--micro",      "--allocmicro",
     "--findmisc",  "--riot",      "--demolish1", "--averages",
     "--advisor",   "--clock",     "--graph",     "--things",
     "--demolish",  "--terrain",   "--raise",     "--settile",
