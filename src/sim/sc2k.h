@@ -709,6 +709,8 @@ extern const Building BUILDING[256];
 
 extern const int16_t BLD_CHOICE_BASE[20];   /* A5-0x146E 5 kinds x 4 tiers */
 extern const int16_t BLD_CHOICE_COUNT[20];  /* A5-0x1446                   */
+extern const uint8_t MICRO_CLASS[58];       /* A5-0x5D42 */
+extern const uint8_t MICRO_LABEL[928];      /* A5-0x60E2 */
 extern const int16_t MICRO_REBUILD_IDX[11]; /* A5-0x5198 */
 extern const int32_t BUILD_COST[24];        /* A5+0x6A6   */
 extern const int16_t ROT_CORNER_4[16];      /* A5-0x7DCC                   */

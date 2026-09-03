@@ -173,6 +173,19 @@ emit_bytes('WEATHER_NEXT', 0xA72, 4 * 12 * 8,
            ' and a separate set of twelve for each of the four seasons.'
            '  Indexed [season][state][roll].')
 
+emit_bytes('MICRO_CLASS', -0x5D42, 58,
+           'A5-0x5D42.  Which XMIC slot a building gets, by id from '
+           '0xC6.  Zero means it keeps no record at all; 0x11 and above '
+           'is a FIXED slot, that value less sixteen -- the systems that '
+           'share one record between every copy of themselves; anything '
+           'else takes the first free slot from ten up ($EEC8).')
+
+emit_bytes('MICRO_LABEL', -0x60E2, 58 * 16,
+           'A5-0x60E2.  The default name a new XMIC record is given, '
+           'sixteen bytes per building id from 0xC6, Pascal-counted.  '
+           '$EFDA copies it in unless a fixed-slot record already has a '
+           'name of its own.')
+
 emit_words('MICRO_REBUILD_IDX', -0x5198, 11,
            'A5-0x5198.  $10392 in the microsim: a worn-out power plant\'s '
            'building id, less 0xC6, indexes this to reach BUILD_COST.  '

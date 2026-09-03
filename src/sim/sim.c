@@ -2604,13 +2604,210 @@ int32_t        sim_growth_stub(int i) { return growth_stub[i & 7]; }
  *  It draws no randoms, so leaving it out cannot shift the RNG stream
  *  and cannot move XBLD, XZON, XBIT or XTRF -- the four layers the
  *  growth oracle compares.  What it costs is the XTXT label byte. */
+/*  XMIC lives with the year-end pass at the end of this file; the
+ *  allocator here needs the same four helpers. */
+static uint8_t *micro_rec(const City *c, int i);
+static int      micro_w(const uint8_t *r, int k);
+static void     micro_set_w(uint8_t *r, int k, int v);
+static int      micro_cap(const City *c, int want, int per);
+
+/*  $FD28.  What a brand-new record starts life holding.  A fixed-slot
+ *  building ADDS to a record shared with every other copy of itself; a
+ *  slot of its own is cleared first and then filled.
+ *
+ *  The seven plant figures are the game's megawatt ratings -- gas 50,
+ *  oil 220, nuclear 500, solar 50, microwave 1600, fusion 2500, coal
+ *  200, with hydro worth 20 apiece and wind 4 -- which is a useful check
+ *  that the id chain has been read the right way round. */
+static void micro_init(City *c, int slot, int bld)
+{
+    uint8_t *r    = micro_rec(c, slot);
+    int      year = (int)(c->years + c->year_founded);
+    if (!r)
+        return;
+    if (MICRO_CLASS[bld - 0xC6] >= 0x11) /* $FD48, a shared record */
+    {
+        switch (bld)
+        {
+            case 0xC6:
+            case 0xC7: /* hydro: 20 MW each */
+                micro_set_w(r, 0, micro_w(r, 0) + 1);
+                micro_set_w(r, 1, micro_w(r, 1) + 20);
+                break;
+            case 0xC8: /* wind: 4 MW each */
+                micro_set_w(r, 0, micro_w(r, 0) + 1);
+                micro_set_w(r, 1, micro_w(r, 1) + 4);
+                break;
+            case 0xD5: /* a park adds nine to its acreage */
+                micro_set_w(r, 1, micro_w(r, 1) + 9);
+                break;
+            case 0xE9: /* subway, bus, rail: one more of them */
+            case 0xEC:
+            case 0xED:
+                micro_set_w(r, 0, micro_w(r, 0) + 1);
+                break;
+            default:
+                break;
+        }
+        return;
+    }
+
+    /*  $FE0C -- a slot of its own: cleared, then filled by type. */
+    r[1] = 0;
+    micro_set_w(r, 0, 0);
+    micro_set_w(r, 1, 0);
+    micro_set_w(r, 2, 0);
+    switch (bld)
+    {
+        case 0xC9:
+            micro_set_w(r, 0, 50);
+            break; /* gas       */
+        case 0xCA:
+            micro_set_w(r, 0, 220);
+            break; /* oil       */
+        case 0xCB:
+            micro_set_w(r, 0, 500);
+            break; /* nuclear   */
+        case 0xCC:
+            micro_set_w(r, 0, 50);
+            break; /* solar     */
+        case 0xCD:
+            micro_set_w(r, 0, 1600);
+            break; /* microwave */
+        case 0xCE:
+            micro_set_w(r, 0, 2500);
+            break; /* fusion    */
+        case 0xCF:
+            micro_set_w(r, 0, 200);
+            break; /* coal      */
+
+        case 0xD0: /* city hall, $FF58 */
+            micro_set_w(r, 0, micro_cap(c, 0xC8, 0x384));
+            micro_set_w(r, 1, year);
+            break;
+        case 0xD2: /* police, $FF8E */
+            micro_set_w(r, 0, micro_cap(c, (int)(c->dept[DEPT_POLICE].funding * 2), 0x5A));
+            break;
+        case 0xD3: /* fire, $FFB8 */
+            micro_set_w(r, 0, micro_cap(c, (int)ASR(c->dept[DEPT_FIRE].funding, 1), 0x46));
+            break;
+        case 0xD4: /* museum, $FFF2 */
+            r[1] = 100;
+            break;
+        case 0xD1: /* hospital, school, college: $10060 */
+        case 0xD6:
+        case 0xD9:
+            r[1] = 6;
+            break;
+        case 0xDB: /* a statue remembers the year, $10090 */
+            micro_set_w(r, 0, year);
+            break;
+        case 0xF3: /* the mayor's house, $10006 */
+            micro_set_w(r, 0, year);
+            break;
+        case 0xFB: /* the arcologies, $100AA/$100E4/$1011E */
+            micro_set_w(r, 0, 0x37);
+            r[1] = 5;
+            break;
+        case 0xFC:
+            micro_set_w(r, 0, 0x1E);
+            r[1] = 5;
+            break;
+        case 0xFD:
+            micro_set_w(r, 0, 0x2D);
+            r[1] = 5;
+            break;
+        default:
+            break;
+    }
+}
+
+/* ================================================================== *
+ *  $EEAE  allocMicro -- give a newly placed special building its XMIC
+ *  record, and answer the marker the caller writes into XTXT.
+ *
+ *  Which slot it gets is a table, not a search: `MICRO_CLASS` maps the
+ *  building id to zero (no record at all -- runways and cranes are
+ *  here, which is why the growth scan never allocates one), to a FIXED
+ *  slot shared with every other copy of that building, or to "take the
+ *  first free slot from ten up".
+ *
+ *  When they are all taken the table is not simply full: an arcology
+ *  gives up, and anything else EVICTS the first record below 0xFB and
+ *  scrubs its marker off the map, so the arcologies outlive everything
+ *  else in the table.
+ *
+ *  The marker is the slot plus 0x33, which is what micro_find_tile
+ *  searches XTXT for.
+ * ================================================================== */
 static int sim_alloc_micro(City *c, int y, int x, int bld)
 {
-    (void)c;
+    int slot, cls;
     (void)y;
     (void)x;
-    (void)bld;
-    return 0;
+    if (bld < 0xC6 || bld > 0xFF) /* $EEBC */
+        return 0;
+    cls = MICRO_CLASS[bld - 0xC6];
+    if (cls == 0) /* $EED8, this building keeps no record */
+        return 0;
+
+    if (cls >= 0x11)
+        slot = cls - 16; /* $EEE8, `moveq #$f0` is -16 */
+    else
+    {
+        for (slot = 10; slot < N_MICRO; slot++) /* $EEF2 */
+        {
+            const uint8_t *r = micro_rec(c, slot);
+            if (!r || r[0] == 0)
+                break;
+        }
+    }
+
+    if (slot >= N_MICRO) /* $EF0C, the table is full */
+    {
+        if (bld >= 0xFB)
+            return 0; /* $EF16, an arcology does not evict */
+        for (slot = 10; slot < N_MICRO; slot++)
+        {
+            const uint8_t *r = micro_rec(c, slot);
+            if (!r || r[0] < 0xFB)
+                break; /* $EF30 */
+        }
+        if (slot >= N_MICRO)
+            return 0; /* $EF88 */
+        /*  $EF4C -- and the evicted record's marker comes off the map,
+         *  or a tile would point at a record that is now somebody
+         *  else's. */
+        {
+            int yy, xx;
+            for (yy = 0; yy < MAP_H; yy++)
+                for (xx = 0; xx < MAP_W; xx++)
+                    if (c->xtxt[yy][xx] == (uint8_t)(slot + 0x33))
+                        c->xtxt[yy][xx] = 0;
+        }
+    }
+
+    {
+        uint8_t *r = micro_rec(c, slot);
+        if (!r)
+            return 0;
+        r[0] = (uint8_t)bld; /* $EFA0 */
+        micro_init(c, slot, bld);
+    }
+
+    /*  $EFB6 -- the default name, unless this is a shared record that
+     *  has been named already. */
+    if (c->xlab && (size_t)((slot + 0x33) * 25 + 16) <= c->xlab_len)
+    {
+        uint8_t *lab = c->xlab + (slot + 0x33) * 25;
+        if (!(cls >= 0x11 && lab[0] != 0))
+        {
+            int k;
+            for (k = 0; k < 16; k++)
+                lab[k] = MICRO_LABEL[(bld - 0xC6) * 16 + k];
+        }
+    }
+    return slot + 0x33; /* $F00C */
 }
 
 /* ================================================================== *
