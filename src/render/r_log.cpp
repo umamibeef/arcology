@@ -20,6 +20,7 @@
 #include <spdlog/sinks/stdout_sinks.h>
 #include <spdlog/spdlog.h>
 
+#include <chrono>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
@@ -83,49 +84,37 @@ class source_flag : public spdlog::custom_flag_formatter
   public:
     void format(const spdlog::details::log_msg &msg, const std::tm &, spdlog::memory_buf_t &dest) override
     {
-        /*  Blues, purples and magentas, and nothing else.  spdlog
-         *  paints debug cyan, info green, warn yellow and error red, so
-         *  the whole warm half of the wheel plus green and cyan is left
-         *  alone -- a source in one of those reads as a severity at a
-         *  glance, which is the confusion this change exists to remove.
+        /*  Nine colours, as far apart as the wheel allows once the
+         *  level's own are kept clear -- spdlog paints debug cyan, info
+         *  green, warn yellow and error red, and nothing here is near
+         *  any of those.  Nine rather than two dozen: the point of a
+         *  source colour is to tell the sources apart at a glance (the
+         *  user: "so that we can identify the messages more easily"),
+         *  and two dozen blues do not do that, while nine spread from
+         *  blue through violet and magenta to pink, with one orange, do.
+         *  Consecutive entries alternate hue families, so the first few
+         *  sources to appear -- the ones every run has -- contrast most.
+         *  The source sits in its own bracket now, so an orange source
+         *  is not mistaken for a warning the way it could be when the
+         *  two stood side by side unlabelled.
          *
          *  These are 256-colour codes.  A terminal old enough not to
          *  know them ignores the escape rather than printing rubbish,
-         *  and NO_COLOR skips them entirely, so the cost of asking is
-         *  nil and twenty-four hues beat the eight the basic set can
-         *  spare.  With a dozen sources a collision is still possible;
-         *  it costs a moment's confusion, not correctness. */
+         *  and NO_COLOR skips them entirely. */
         static const char *const PALETTE[] = {
-            "\033[38;5;39m",
-            "\033[38;5;45m",
-            "\033[38;5;63m",
-            "\033[38;5;69m",
-            "\033[38;5;75m",
-            "\033[38;5;81m",
-            "\033[38;5;99m",
-            "\033[38;5;105m",
-            "\033[38;5;111m",
-            "\033[38;5;135m",
-            "\033[38;5;141m",
-            "\033[38;5;147m",
-            "\033[38;5;165m",
-            "\033[38;5;170m",
-            "\033[38;5;177m",
-            "\033[38;5;183m",
-            "\033[38;5;189m",
-            "\033[38;5;201m",
-            "\033[38;5;207m",
-            "\033[38;5;213m",
-            "\033[38;5;219m",
-            "\033[38;5;33m",
-            "\033[38;5;57m",
-            "\033[38;5;93m",
+            "\033[38;5;33m",  /* blue          */
+            "\033[38;5;201m", /* magenta       */
+            "\033[38;5;208m", /* orange        */
+            "\033[38;5;135m", /* purple        */
+            "\033[38;5;117m", /* light sky     */
+            "\033[38;5;213m", /* pink          */
+            "\033[38;5;63m",  /* royal blue    */
+            "\033[38;5;171m", /* orchid        */
+            "\033[38;5;147m", /* light slate   */
         };
         const size_t N = sizeof PALETTE / sizeof *PALETTE;
 
         std::string name(msg.logger_name.data(), msg.logger_name.size());
-        if (name.size() < 9)
-            name.append(9 - name.size(), ' ');
 
         if (!g_colour)
         {
@@ -161,16 +150,70 @@ class source_flag : public spdlog::custom_flag_formatter
     }
 };
 
-/*  An ISO 8601 timestamp, the level, then the source.  The timestamp is
- *  first because that is where every log reader looks for one, and it
- *  carries the offset so lines from two machines can be interleaved
- *  without guessing a zone. */
-const char *const PATTERN = "%Y-%m-%dT%H:%M:%S.%e%z %^%-5l%$ %* %v";
+/*  The stamp: the date, then the hour and minute, then the seconds to
+ *  the hundredth after the point --
+ *
+ *      [20260801:1349.3455]
+ *
+ *  -- the form the user set out.  Local time, no zone, and no
+ *  separators inside a field, so it sorts as text and is one token to a
+ *  parser.  spdlog has flags for the parts but none for hundredths (%e
+ *  is thousandths), and the dot in the middle of a field is not
+ *  something its pattern language can put there, so the whole thing is
+ *  one flag. */
+class stamp_flag : public spdlog::custom_flag_formatter
+{
+  public:
+    void format(const spdlog::details::log_msg &msg, const std::tm &tm, spdlog::memory_buf_t &dest) override
+    {
+        using namespace std::chrono;
+        const auto ms = duration_cast<milliseconds>(msg.time.time_since_epoch()) % 1000;
+        char       buf[24];
+        const int  n = std::snprintf(buf, sizeof buf, "%04d%02d%02d:%02d%02d.%02d%02d", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, static_cast<int>(ms.count() / 10));
+        dest.append(buf, buf + n);
+    }
+
+    std::unique_ptr<spdlog::custom_flag_formatter> clone() const override
+    {
+        return spdlog::details::make_unique<stamp_flag>();
+    }
+};
+
+/*  The level in capitals.  spdlog's %l is lower case and %L a single
+ *  letter; neither is [INFO]. */
+class level_flag : public spdlog::custom_flag_formatter
+{
+  public:
+    void format(const spdlog::details::log_msg &msg, const std::tm &, spdlog::memory_buf_t &dest) override
+    {
+        static const char *const NAME[] = {"TRACE", "DEBUG", "INFO", "WARN", "ERROR", "CRITICAL", "OFF"};
+        int                      l      = static_cast<int>(msg.level);
+        if (l < 0 || l > 6)
+            l = 6;
+        dest.append(NAME[l], NAME[l] + std::strlen(NAME[l]));
+    }
+
+    std::unique_ptr<spdlog::custom_flag_formatter> clone() const override
+    {
+        return spdlog::details::make_unique<level_flag>();
+    }
+};
+
+/*  [stamp][LEVEL][source] message.  Each field in its own brackets, the
+ *  stamp first because that is where every log reader looks for one.
+ *  The colour, where there is any, stays inside the brackets: the level
+ *  in spdlog's own severity colour, the source in its palette entry. */
+const char *const PATTERN = "[%~][%^%_%$][%*] %v";
 
 std::unique_ptr<spdlog::pattern_formatter> make_formatter()
 {
     auto f = spdlog::details::make_unique<spdlog::pattern_formatter>();
-    f->add_flag<source_flag>('*').set_pattern(PATTERN);
+    f->add_flag<stamp_flag>('~').add_flag<level_flag>('_').add_flag<source_flag>('*').set_pattern(PATTERN);
+    /*  set_pattern works out whether the pattern needs the local time
+     *  from spdlog's own flags only; a custom flag does not count, and
+     *  without this the stamp is handed an all-zero tm and prints the
+     *  year 1900. */
+    f->need_localtime(true);
     return f;
 }
 
@@ -266,6 +309,10 @@ void r_log_set_colour(int on)
     std::lock_guard<std::mutex> lock(g_mutex);
     g_sink   = sink;
     g_colour = sink->should_color();
+    /*  A new sink comes with spdlog's default pattern; without this the
+     *  stamp, the brackets and the source colour all vanish the moment
+     *  colour is toggled. */
+    sink->set_formatter(make_formatter());
     for (auto &kv : g_loggers)
         kv.second->sinks() = {g_sink};
 }
