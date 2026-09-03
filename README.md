@@ -121,7 +121,7 @@ python3 tools/scheme.py rsrc/scheme-classic7.rsrc assets/themes/classic7
 ```
 
 `classic7`, Apple's System 7 look, is worn by default. **Options > Theme** lists every pack under `assets/themes/` and
-None; a choice is remembered in `settings.txt` in the per-user settings folder (Application Support on macOS, AppData on
+None; a choice is remembered in `settings.json` in the per-user settings folder (Application Support on macOS, AppData on
 Windows, `~/.local/share` on Linux) and comes back next run. `--theme NAME`, `--theme DIR` or `--theme none` overrides it
 for one run.
 

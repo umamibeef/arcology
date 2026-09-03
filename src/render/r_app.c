@@ -34,6 +34,8 @@
 
 #include "arc_version.h"
 #include "arco.h"
+#define JSMN_STATIC
+#include "jsmn.h"
 #include "r_adapt.h"
 #include "r_atlas.h"
 #include "r_city.h"
@@ -184,81 +186,149 @@ static void run_phase(App *a)
 /*  the window title and the default save name follow the city */
 /* ---- preferences ------------------------------------------------------- */
 
-/*  A few key=value lines in the per-user place SDL knows for the
- *  platform -- Application Support on macOS, AppData on Windows,
- *  ~/.local/share on Linux -- called settings.txt.  Read whole and
+/*  settings.json, in the per-user place SDL knows for the platform --
+ *  Application Support on macOS, AppData on Windows, ~/.local/share on
+ *  Linux: one flat object of strings and numbers, JSON because that is
+ *  what everything else this program writes is.  Read whole and
  *  written whole; the theme is the first key, and a few more will not
- *  need anything cleverer.  A missing file is simply no preference. */
-#define PREFS_LINES 64
-#define PREFS_LEN   256
+ *  need anything cleverer.  A missing file is simply no preference.
+ *  Nested values are not ours and are left alone; a quote or a
+ *  backslash in a value is escaped on the way out and not unescaped on
+ *  the way in, which for theme names and numbers never arises. */
+#define PREFS_MAX 32
+
+typedef struct
+{
+    char key[64];
+    char val[192];
+    int  is_str; /* written quoted; a number or true/false goes bare */
+} Pref;
 
 static int prefs_path(char *out, size_t n)
 {
     char *p = SDL_GetPrefPath("", "arcology");
     if (!p)
         return 0;
-    snprintf(out, n, "%ssettings.txt", p);
+    snprintf(out, n, "%ssettings.json", p);
     SDL_free(p);
+    return 1;
+}
+
+static int prefs_read(Pref *p, int *n)
+{
+    char        path[1024];
+    FILE       *f;
+    long        len;
+    char       *js;
+    jsmn_parser jp;
+    jsmntok_t   t[2 * PREFS_MAX + 2];
+    int         nt, i;
+    *n = 0;
+    if (!prefs_path(path, sizeof path) || !(f = fopen(path, "rb")))
+        return 0;
+    if (fseek(f, 0, SEEK_END) != 0 || (len = ftell(f)) < 0 || len > 65536)
+    {
+        fclose(f);
+        return 0;
+    }
+    rewind(f);
+    js = (char *)malloc((size_t)len + 1);
+    if (!js || fread(js, 1, (size_t)len, f) != (size_t)len)
+    {
+        fclose(f);
+        free(js);
+        return 0;
+    }
+    fclose(f);
+    js[len] = 0;
+    jsmn_init(&jp);
+    nt = jsmn_parse(&jp, js, (size_t)len, t, sizeof t / sizeof *t);
+    if (nt < 1 || t[0].type != JSMN_OBJECT)
+    {
+        free(js);
+        return 0;
+    }
+    for (i = 1; i + 1 < nt && *n < PREFS_MAX; i += 2)
+    {
+        const jsmntok_t *k = &t[i], *v = &t[i + 1];
+        Pref            *q = &p[*n];
+        if (k->type != JSMN_STRING || (v->type != JSMN_STRING && v->type != JSMN_PRIMITIVE))
+            break; /* nested: not a settings file this build wrote */
+        snprintf(q->key, sizeof q->key, "%.*s", k->end - k->start, js + k->start);
+        snprintf(q->val, sizeof q->val, "%.*s", v->end - v->start, js + v->start);
+        q->is_str = v->type == JSMN_STRING;
+        (*n)++;
+    }
+    free(js);
     return 1;
 }
 
 static int prefs_get(const char *key, char *out, size_t n)
 {
-    char   path[1024], line[PREFS_LEN];
-    FILE  *f;
-    size_t kl = strlen(key);
-    out[0]    = 0;
-    if (!prefs_path(path, sizeof path) || !(f = fopen(path, "r")))
+    Pref p[PREFS_MAX];
+    int  np, i;
+    out[0] = 0;
+    if (!prefs_read(p, &np))
         return 0;
-    while (fgets(line, sizeof line, f))
-    {
-        char *nl = strpbrk(line, "\r\n");
-        if (nl)
-            *nl = 0;
-        if (strncmp(line, key, kl) == 0 && line[kl] == '=')
+    for (i = 0; i < np; i++)
+        if (strcmp(p[i].key, key) == 0)
         {
-            snprintf(out, n, "%s", line + kl + 1);
-            fclose(f);
+            snprintf(out, n, "%s", p[i].val);
             return 1;
         }
-    }
-    fclose(f);
     return 0;
+}
+
+static void json_str(FILE *f, const char *s)
+{
+    fputc('"', f);
+    for (; *s; s++)
+    {
+        if (*s == '"' || *s == '\\')
+            fputc('\\', f);
+        fputc(*s, f);
+    }
+    fputc('"', f);
 }
 
 static int prefs_set(const char *key, const char *value)
 {
-    static char lines[PREFS_LINES][PREFS_LEN];
-    char        path[1024];
-    FILE       *f;
-    int         n = 0, i, found = 0;
-    size_t      kl = strlen(key);
+    Pref  p[PREFS_MAX];
+    char  path[1024];
+    FILE *f;
+    int   np = 0, i, found = 0;
     if (!prefs_path(path, sizeof path))
         return 0;
-    if ((f = fopen(path, "r")))
-    {
-        while (n < PREFS_LINES && fgets(lines[n], PREFS_LEN, f))
+    prefs_read(p, &np); /* nothing there yet is fine */
+    for (i = 0; i < np; i++)
+        if (strcmp(p[i].key, key) == 0)
         {
-            char *nl = strpbrk(lines[n], "\r\n");
-            if (nl)
-                *nl = 0;
-            if (strncmp(lines[n], key, kl) == 0 && lines[n][kl] == '=')
-            {
-                snprintf(lines[n], PREFS_LEN, "%s=%s", key, value);
-                found = 1;
-            }
-            n++;
+            snprintf(p[i].val, sizeof p[i].val, "%s", value);
+            p[i].is_str = 1;
+            found       = 1;
         }
-        fclose(f);
+    if (!found && np < PREFS_MAX)
+    {
+        snprintf(p[np].key, sizeof p[np].key, "%s", key);
+        snprintf(p[np].val, sizeof p[np].val, "%s", value);
+        p[np].is_str = 1;
+        np++;
     }
-    if (n == 0)
-        snprintf(lines[n++], PREFS_LEN, "# arcology settings -- written by the game, and yours to edit");
-    if (!found && n < PREFS_LINES)
-        snprintf(lines[n++], PREFS_LEN, "%s=%s", key, value);
     if (!(f = fopen(path, "w")))
         return 0;
-    for (i = 0; i < n; i++)
-        fprintf(f, "%s\n", lines[i]);
+    fputs("{\n", f);
+    for (i = 0; i < np; i++)
+    {
+        fputs("  ", f);
+        json_str(f, p[i].key);
+        fputs(": ", f);
+        if (p[i].is_str)
+            json_str(f, p[i].val);
+        else
+            fputs(p[i].val, f);
+        fputs(i + 1 < np ? ",\n" : "\n", f);
+    }
+    fputs("}\n", f);
     fclose(f);
     return 1;
 }
