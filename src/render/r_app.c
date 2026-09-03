@@ -1728,7 +1728,7 @@ int r_game_main(int argc, char **argv)
         r_log_raw("SimCity 2000 is copyright (c) 1993-1995 Maxis, now part of Electronic Arts Inc.\n"
                   "Not affiliated with, endorsed by, or connected to Electronic Arts or Maxis.\n"
                   "Arcology is copyright (c) 2026 the Arcology authors, MIT licence.\n"
-                  "https://github.com/umamibeef/arcology\n\n");
+                  "https://github.com/umamibeef/arcology\n");
     }
     if (check)
         R_NOTE("init", "arcology, check against %s", check_out ? check_out : "the original");
