@@ -106,7 +106,8 @@ static const uint8_t *s_check_xbld; /* the last built city's XBLD, for the piece
 #define MAT_ZEBRA     10.0f /* a crosswalk across a junction's arm           */
 #define MAT_RAIL      11.0f /* a railway: two rails on ties, col.r across    */
 #define MAT_WALK      13.0f /* the sidewalk: a road tile paved to its edges  */
-#define MAT_SKIRT     12.0f /* a raised road's embankment: blocks, a decal's  */
+#define MAT_SKIRT     12.0f /* a raised road's works: its embankment, and a  */
+                            /* viaduct's fascia, parapet and bents; blocks   */
 #define MAT_RAIL_X    14.0f /* a rail across a road: the rails alone, flush in the crossing surface */
 #define MAT_VEHICLE   15.0f /* a train car or a road car: col.r the paint, col.g the shade  */
 #define MAT_XPANEL    16.0f /* a level crossing's surface: rubber panels across both tracks     */
@@ -693,6 +694,17 @@ static void grid_point(int32_t col, int32_t row, int k, float z, float out[3])
  *  band, not a one-tile strip, and nothing else about the loft changes
  *  for it yet. */
 static int s_hiway;
+
+/*  How far the deck rides above the ground, in altitude levels.  Spec
+ *  7.2 asks for 5 m of clearance under the soffit, which with a box
+ *  girder is about 7.5 m to the road surface; a level is seven to eight
+ *  metres, so this is a shade over one. */
+#define HIWAY_LIFT 1.05f
+/*  The box girder's depth under the deck, the parapet's height above it
+ *  and the bent's span along -- two tiles, the spec's 30 m. */
+#define HIWAY_GIRDER  0.22f
+#define HIWAY_PARAPET 0.13f
+#define HIWAY_BENT    2.0f
 
 /* ---- roads, rails and power lines -------------------------------------- */
 
@@ -1780,6 +1792,15 @@ static int net_record(RRoadNet *net, const Sample *smp, int ns, float total, int
                                                 : 0.225f;
     sg->lane_in  = cls == 0 ? 0.142f : cls == 1 ? 0.082f
                                                 : 0.115f;
+    if (s_hiway)
+    {
+        /*  A deck's lanes, from the 7.1 section: the half deck is a tile
+         *  and holds three of them, their centres 2.75, 6.45 and 10.15 m
+         *  out of 14.9.  Two lanes carry the traffic here, so it runs in
+         *  the one against the median and the one against the shoulder. */
+        sg->lane_in  = 0.185f;
+        sg->lane_out = 0.681f;
+    }
     if (rail)
         sg->lane_out = sg->lane_in = 0.133f; /* a rail: the track to the right of travel */
     for (i = 0; i < ns; ++i)
@@ -2770,6 +2791,58 @@ static int loft(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, Family f, 
         for (i = 0; i < ns; ++i)
             smp[i].z = zs[i];
     }
+    /*  The deck stands clear (spec 7.2): 5 m under the soffit plus the
+     *  girder is about 7.5 m to the road surface, and the vertical unit
+     *  here is the altitude level, seven to eight metres.  So a little
+     *  over one level, applied after the profile is settled so the deck
+     *  follows the ground's shape while riding above it. */
+    if (s_hiway)
+        for (i = 0; i < ns; ++i)
+            smp[i].z += HIWAY_LIFT;
+    /*  The bents.  One every two tiles (spec 7.2, span = 30 m), each a
+     *  pair of columns under the deck's edges with a cap beam across
+     *  them.  A highway runs on one axis, so the boxes stand square to
+     *  it and need no turning. */
+    if (s_hiway)
+    {
+        float next = 1.0f;
+        for (i = 1; i < ns; ++i)
+        {
+            const Sample *sm = &smp[i];
+            float         px = -sm->dir.y, py = sm->dir.x;
+            int           ew = fabsf(px) < 0.5f; /* the deck runs east-west */
+            int32_t       tc, tr;
+            float         g, order, top, cap;
+            int           j;
+            if (sm->s < next)
+                continue;
+            next += HIWAY_BENT;
+            tc = (int32_t)floorf(sm->pos.x);
+            tr = (int32_t)floorf(sm->pos.y);
+            if (tc < 0 || tr < 0 || tc >= R_MAP || tr >= R_MAP)
+                continue;
+            order = tile_order(c, tc, tr, mask_bit);
+            g     = surface_at_world(c, mask_bit, sm->pos.x, sm->pos.y);
+            top   = sm->z - HIWAY_GIRDER - g; /* the columns' top, over the ground */
+            cap   = top - 0.10f;
+            if (top < 0.12f)
+                continue; /* the deck has met the ground: no room to stand */
+            /* the cap beam, across the deck */
+            if (put_box(m, c, mask_bit, order, sm->pos.x, sm->pos.y, ew ? 0.34f : 1.5f, ew ? 1.5f : 0.34f, cap, top, MAT_SKIRT, 0.0f) != 0)
+                return -1;
+            /* and its two columns, under the deck's edges */
+            for (j = 0; j < 2; ++j)
+            {
+                float o  = j ? 0.55f : -0.55f;
+                float cx = sm->pos.x + px * o, cy = sm->pos.y + py * o;
+                float cg = surface_at_world(c, mask_bit, cx, cy);
+                if (sm->z - HIWAY_GIRDER - 0.10f - cg < 0.05f)
+                    continue;
+                if (put_box(m, c, mask_bit, order, cx, cy, 0.30f, 0.30f, 0.0f, sm->z - HIWAY_GIRDER - 0.10f - cg, MAT_SKIRT, 0.0f) != 0)
+                    return -1;
+            }
+        }
+    }
     if (f == F_ROAD && ns >= 2 && net_record(&m->net, smp, ns, total, (int)(s_seg_class + 0.5f), 0) != 0)
         return -1;
     if (f == F_RAIL && ns >= 2 && net_record(&m->railnet, smp, ns, total, 0, 1) != 0)
@@ -2950,7 +3023,7 @@ static int loft(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, Family f, 
         if (tr >= R_MAP)
             tr = R_MAP - 1;
         order        = tile_order(c, tc, tr, mask_bit);
-        s_road_class = f != F_ROAD ? 0.0f : s_seg_class >= 0.0f ? s_seg_class
+        s_road_class = s_hiway ? 3.0f : f != F_ROAD ? 0.0f : s_seg_class >= 0.0f ? s_seg_class
                                                                 : road_class(c, tc, tr);
         if (f == F_ROAD && pv->xd > 0.45f && 0.5f * (pv->xd + cu->xd) < 1.55f)
         {
@@ -2997,6 +3070,25 @@ static int loft(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, Family f, 
             nrm[0] = side ? -cu->dir.y : cu->dir.y;
             nrm[1] = side ? cu->dir.x : -cu->dir.x;
             nrm[2] = 0.0f;
+            if (s_hiway)
+            {
+                /*  A deck stands clear of the ground the whole way, so
+                 *  the embankment below would be one long wall of earth
+                 *  under it.  What belongs there instead is the edge of
+                 *  the structure: the girder's fascia down from the deck
+                 *  and the parapet up from it, the bents carrying the
+                 *  weight down (spec 7.2). */
+                static const float conc[3] = {0.0f, 0.0f, MAT_SKIRT};
+                float g0[3] = {ea[0], ea[1], pv->z - HIWAY_GIRDER};
+                float g1[3] = {eb[0], eb[1], cu->z - HIWAY_GIRDER};
+                float p0[3] = {ea[0], ea[1], pv->z + HIWAY_PARAPET};
+                float p1[3] = {eb[0], eb[1], cu->z + HIWAY_PARAPET};
+                if (put_wall(m, t0, t1, g0, g1, nrm, order, conc) != 0)
+                    return -1;
+                if (put_wall(m, p0, p1, t0, t1, nrm, order, conc) != 0)
+                    return -1;
+                continue;
+            }
             if (pv->z > ga + 0.035f || cu->z > gb + 0.035f)
             {
                 if (q0[2] > t0[2])

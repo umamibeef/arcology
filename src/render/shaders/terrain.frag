@@ -424,6 +424,30 @@ void main()
             else if (t < 0.72 && fract(v_col.r * 3.0 + 0.5) < 0.5)
                 c = vec3(0.92);
         }
+        else if (cls > 2.5)
+        {
+            /*  A freeway deck, the spec's 7.1 bake: two tiles wide with
+             *  three lanes each way.  Across the half deck, in its own
+             *  14.9 m: half the median barrier 0.3, inner shoulder 0.6,
+             *  three 3.7 m lanes, a 2.4 m outer shoulder and the 0.5 m
+             *  parapet.  Normalised, that is every number below.
+             *
+             *  Yellow on the LEFT against the median and white on the
+             *  right is the freeway cue -- it is the pair that says at a
+             *  glance which way the traffic runs. */
+            if (x < 0.020)
+                c = vec3(0.72);                      /* median barrier   */
+            else if (abs(x - 0.060) < 0.5 * line)
+                c = yellow;                          /* left edge line   */
+            else if (abs(x - 0.309) < 0.5 * line && dashed)
+                c = dash;                            /* lane 1 / lane 2  */
+            else if (abs(x - 0.557) < 0.5 * line && dashed)
+                c = dash;                            /* lane 2 / lane 3  */
+            else if (abs(x - 0.805) < 0.5 * line)
+                c = dash;                            /* right edge line  */
+            else if (x > 0.966)
+                c = vec3(0.70);                      /* parapet          */
+        }
         else if (cls > 1.5)
         {
             if (x < 0.14)
