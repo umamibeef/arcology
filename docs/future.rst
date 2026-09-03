@@ -393,3 +393,93 @@ The road system spec, part by part
      - The original places a car sprite on a tile whose traffic passes a threshold; cars do not move.
      - Cars as small meshes in the right-hand lane, moving along the strip and holding at red, in a per-frame buffer; the same threshold keeps the original's density.
      - Cars move on the lofted network in the lanes their class draws, hold at red and behind the car ahead, turn at junctions and dead ends, seeded by the original's density; trains run the rail network as coupled chains behind their engine, straightest arm at turnouts; crossing gates follow them; every vehicle pitches with the grade.
+
+Part 7, the raised highways: what the save file gives us
+--------------------------------------------------------
+
+.. container:: lede
+
+   Part 7 of the :doc:`road spec <appendix-road-spec>` is engine-agnostic:
+   it describes decks, ramps and interchanges without saying which byte
+   is which. This is that bridge, and it is read off the shipped cities
+   rather than off the sprite sheet — a sprite says what a tile looks
+   like, its neighbours say what it *is*. ``tools/highway_map.py``
+   regenerates the whole table.
+
+**The spec's 2×2 premise holds.** Across the 101 cities there are 3547
+squares of four adjacent highway tiles, and a straight run is a solid
+block of one id. The family divides exactly where Part 7 needs it to:
+eight ids that are *always* part of a 2×2 block, and twelve that almost
+never are.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 12 10 12 30 36
+
+   * - XBLD
+     - Tiles
+     - In a 2×2
+     - Neighbours
+     - What it is
+   * - ``0x49``
+     - 6905
+     - 6905 / 6905
+     - E+W along, one of N/S across
+     - **Deck, east–west.** The two-tile band of Part 7.1.
+   * - ``0x4A``
+     - 7182
+     - 7179 / 7182
+     - N+S along, one of E/W across
+     - **Deck, north–south.**
+   * - ``0x4B`` ``0x4C``
+     - 1729
+     - all
+     - road, 784 and 880
+     - Deck over a **road** — the grade separation of 7.2.
+   * - ``0x4D`` ``0x4E``
+     - 131
+     - all
+     - rail, 61 of 62 and 64 of 69
+     - Deck over a **rail** line, in pairs across the band's width.
+   * - ``0x4F`` ``0x50``
+     - 1022
+     - all
+     - power, 133 and 99
+     - Deck over a **power line**.
+   * - ``0x51``–``0x5C``
+     - 3592
+     - 10–243 of 300–911
+     - single-width N–S or E–W runs
+     - **Ramp runs.** One tile wide, so these are the 1×1 ramp data of
+       7.3 — including ``0x5A``/``0x5B`` over rail and ``0x5C`` under a
+       power line.
+   * - ``0x5D``–``0x60``
+     - 1642
+     - 17–19 of ~400
+     - one-sided; road 470–561
+     - **Ramp touchdowns**, one id per direction, meeting the surface
+       road at the T of 7.3 step 5.
+
+Two consequences for the implementation.
+
+**The deck really is a band, and the id says which way it runs.** An
+interior tile of a two-wide band has two neighbours along it and one
+across, which is why every deck id reports a three-neighbour mask.
+``0x49`` reports ``{E,W,N}`` and ``{E,W,S}``; ``0x4A`` reports
+``{N,S,E}`` and ``{N,S,W}``. Nothing has to be inferred from the art.
+
+**The crossings are the deck, not the thing underneath.** ``0x4D`` is a
+deck tile in an east–west band with a north–south railway beneath it,
+which is why the renderer's ``piece_family`` must answer *rail,
+north–south* for it: the rail is what the mesh has to draw through the
+tile, and the highway above is drawn by the highway family. The same
+holds for ``0x4B``/``0x4C`` over road and ``0x4F``/``0x50`` over power.
+
+**What is not in the data at all.** The save file has no elevation for a
+highway tile, no ramp form, no interchange type, and no air claims.
+Part 7's whole apparatus — ``D`` and ``U``, the helix, the quadrant
+tests, the stack — is therefore *derived on every edit* from the tile
+layout alone, exactly as 7.3's closing note says it should be. There is
+nothing to load and nothing to migrate; an imported city gets its ramp
+forms computed the first time it is drawn.
+
