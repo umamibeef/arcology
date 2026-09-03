@@ -29,6 +29,7 @@ union SDL_Event;
 #define RUI_LOG_LINES     24
 #define RUI_LOG_LEN       96
 #define RUI_N_GRAPH       16
+#define RUI_MAX_THEMES    16
 #define RUI_GRAPH_SAMPLES 52
 #define RUI_N_DEPT        16
 
@@ -113,6 +114,13 @@ typedef struct
     int32_t want_rotate;    /* +1 clockwise, -1 anticlockwise    */
     int32_t want_sound;     /* a sound id to play, 0 none         */
     char    save_path[512];
+    /*  The themes: every pack found under assets/themes, the one worn
+     *  now by name ("none" for the hand-drawn look), and the request to
+     *  change, which r_app applies and saves. */
+    char theme_list[RUI_MAX_THEMES][64];
+    int  n_themes;
+    char theme_name[64];
+    int  want_theme;
 } RUiState;
 
 /*  The thirty-four buttons of the tool palette, in the order the
@@ -170,6 +178,10 @@ void r_ui_destroy(RUi *u);
  *  scheme's resource fork).  Returns 0, or -1 if the pack is not there;
  *  without one the look is System 7's, drawn by hand. */
 int r_ui_set_theme(RUi *u, const char *dir);
+
+/*  Take the scheme off again: the hand-drawn look, and the style
+ *  colours the scheme had changed put back. */
+void r_ui_clear_theme(RUi *u);
 
 /*  Hand the UI an event.  Returns 1 when the UI owns the pointer or
  *  the keyboard for it, so the app should not act on it too. */

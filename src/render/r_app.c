@@ -115,6 +115,7 @@ typedef struct
     float    zoom_world;       /* continuous zoom: 1 = the 32 px set at 1:1 */
     float    angle;            /* free rotation, degrees, 0 = the snap view */
     float    win_density;      /* window pixels per point                   */
+    char     themes_dir[1024]; /* <assets>/themes, for the menu's picks */
 } App;
 
 static int64_t ticks_now(const App *a)
@@ -181,6 +182,162 @@ static void run_phase(App *a)
 }
 
 /*  the window title and the default save name follow the city */
+/* ---- preferences ------------------------------------------------------- */
+
+/*  A few key=value lines in the per-user place SDL knows for the
+ *  platform -- Application Support on macOS, AppData on Windows,
+ *  ~/.local/share on Linux -- called settings.txt.  Read whole and
+ *  written whole; the theme is the first key, and a few more will not
+ *  need anything cleverer.  A missing file is simply no preference. */
+#define PREFS_LINES 64
+#define PREFS_LEN   256
+
+static int prefs_path(char *out, size_t n)
+{
+    char *p = SDL_GetPrefPath("", "arcology");
+    if (!p)
+        return 0;
+    snprintf(out, n, "%ssettings.txt", p);
+    SDL_free(p);
+    return 1;
+}
+
+static int prefs_get(const char *key, char *out, size_t n)
+{
+    char   path[1024], line[PREFS_LEN];
+    FILE  *f;
+    size_t kl = strlen(key);
+    out[0]    = 0;
+    if (!prefs_path(path, sizeof path) || !(f = fopen(path, "r")))
+        return 0;
+    while (fgets(line, sizeof line, f))
+    {
+        char *nl = strpbrk(line, "\r\n");
+        if (nl)
+            *nl = 0;
+        if (strncmp(line, key, kl) == 0 && line[kl] == '=')
+        {
+            snprintf(out, n, "%s", line + kl + 1);
+            fclose(f);
+            return 1;
+        }
+    }
+    fclose(f);
+    return 0;
+}
+
+static int prefs_set(const char *key, const char *value)
+{
+    static char lines[PREFS_LINES][PREFS_LEN];
+    char        path[1024];
+    FILE       *f;
+    int         n = 0, i, found = 0;
+    size_t      kl = strlen(key);
+    if (!prefs_path(path, sizeof path))
+        return 0;
+    if ((f = fopen(path, "r")))
+    {
+        while (n < PREFS_LINES && fgets(lines[n], PREFS_LEN, f))
+        {
+            char *nl = strpbrk(lines[n], "\r\n");
+            if (nl)
+                *nl = 0;
+            if (strncmp(lines[n], key, kl) == 0 && lines[n][kl] == '=')
+            {
+                snprintf(lines[n], PREFS_LEN, "%s=%s", key, value);
+                found = 1;
+            }
+            n++;
+        }
+        fclose(f);
+    }
+    if (n == 0)
+        snprintf(lines[n++], PREFS_LEN, "# arcology settings -- written by the game, and yours to edit");
+    if (!found && n < PREFS_LINES)
+        snprintf(lines[n++], PREFS_LEN, "%s=%s", key, value);
+    if (!(f = fopen(path, "w")))
+        return 0;
+    for (i = 0; i < n; i++)
+        fprintf(f, "%s\n", lines[i]);
+    fclose(f);
+    return 1;
+}
+
+/* ---- themes ------------------------------------------------------------ */
+
+#define DEFAULT_THEME "classic7" /* Apple's System 7 look, the game's own era */
+
+static int name_cmp(const void *a, const void *b)
+{
+    return strcmp((const char *)a, (const char *)b);
+}
+
+/*  Every pack under <assets>/themes -- a directory with a theme.txt --
+ *  by name, sorted, for the menu. */
+static void scan_themes(App *a, const char *assets_dir)
+{
+    DIR           *d;
+    struct dirent *e;
+    RUiState      *s = &a->us;
+    snprintf(a->themes_dir, sizeof a->themes_dir, "%s/themes", assets_dir);
+    s->n_themes = 0;
+    if (!(d = opendir(a->themes_dir)))
+        return;
+    while ((e = readdir(d)) && s->n_themes < RUI_MAX_THEMES)
+    {
+        char        p[1200];
+        struct stat st;
+        if (e->d_name[0] == '.')
+            continue;
+        snprintf(p, sizeof p, "%s/%s/theme.txt", a->themes_dir, e->d_name);
+        if (stat(p, &st) != 0)
+            continue;
+        snprintf(s->theme_list[s->n_themes++], sizeof s->theme_list[0], "%s", e->d_name);
+    }
+    closedir(d);
+    qsort(s->theme_list, (size_t)s->n_themes, sizeof s->theme_list[0], name_cmp);
+}
+
+/*  Put a scheme on: by name from assets/themes, by path, or "none" for
+ *  the hand-drawn look.  `why` is for the log -- default, saved
+ *  preference, --theme, chosen.  A default pack that is not there is
+ *  not a warning: assets/ is built from the game's own files and a
+ *  fresh checkout has no schemes yet. */
+static int apply_theme_choice(App *a, const char *name, const char *why)
+{
+    char        path[1200];
+    const char *base;
+    size_t      len;
+    if (!a->ui)
+        return 0;
+    if (strcmp(name, "none") == 0)
+    {
+        r_ui_clear_theme(a->ui);
+        snprintf(a->us.theme_name, sizeof a->us.theme_name, "none");
+        R_NOTE("theme", "none (%s)", why);
+        return 1;
+    }
+    if (strchr(name, '/'))
+        snprintf(path, sizeof path, "%s", name);
+    else
+        snprintf(path, sizeof path, "%s/%s", a->themes_dir, name);
+    for (len = strlen(path); len > 1 && path[len - 1] == '/'; len--)
+        path[len - 1] = 0;
+    if (r_ui_set_theme(a->ui, path) != 0)
+    {
+        if (strcmp(why, "default") == 0)
+            R_DBG("theme", "no %s pack in %s; the hand-drawn look", name, a->themes_dir);
+        else
+            R_WARN("theme", "%s: not found (%s)", path, why);
+        return 0;
+    }
+    base = strrchr(path, '/');
+    base = base ? base + 1 : path;
+    snprintf(a->us.theme_name, sizeof a->us.theme_name, "%s", base);
+    R_NOTE("theme", "%s (%s)", base, why);
+    return 1;
+}
+
 /*  What a load brought in, for the log: the file and its shape, then
  *  the city the file describes.  Both load paths call this, so a city
  *  picked from the menu reports exactly what one named on the command
@@ -1018,6 +1175,20 @@ static void ui_apply(App *a, SDL_Window *win, int pw, int ph)
         }
         s->want_load = 0;
     }
+    if (s->want_theme)
+    {
+        char pick[64];
+        snprintf(pick, sizeof pick, "%s", s->theme_name);
+        if (apply_theme_choice(a, pick, "chosen"))
+        {
+            if (prefs_set("theme", s->theme_name))
+                R_DBG("prefs", "theme=%s saved", s->theme_name);
+            else
+                R_WARN("prefs", "could not save the theme preference");
+            r_ui_log(s, "Theme: %s", s->theme_name);
+        }
+        s->want_theme = 0;
+    }
     if (s->want_save)
     {
         if (city_save(s->save_path, a->city))
@@ -1380,6 +1551,8 @@ int r_game_main(int argc, char **argv)
                    "  --shot FILE   render one frame to a PNG and exit\n"
                    "  --run N       advance N frames headless\n"
                    "  --version     the version, one line\n"
+                   "  --theme NAME  a Kaleidoscope scheme: a pack under assets/themes, a path, or none;\n"
+                   "                the default is classic7, and Options > Theme remembers a choice\n"
                    "\n"
                    "  arcology --modes   lists the developer modes\n",
                    argv[0]);
@@ -1610,13 +1783,22 @@ int r_game_main(int argc, char **argv)
     {
         a.ui = r_ui_create(win, r_gpu_device(a.gpu), shot_out ? r_gpu_offscreen_format(a.gpu) : r_gpu_swapchain_format(a.gpu), 1.0f, assets_dir);
         R_DBG("ui", "%s", a.ui ? "imgui" : "none");
-        if (a.ui && theme_dir)
+        if (a.ui)
         {
-            int ok = r_ui_set_theme(a.ui, theme_dir) == 0;
-            if (ok)
-                R_DBG("theme", "%s", theme_dir);
+            /*  --theme for this run beats the saved preference, which
+             *  beats the default; a saved pack that has gone falls back
+             *  to the default rather than to nothing. */
+            char saved[64], ppath[1024];
+            scan_themes(&a, assets_dir);
+            R_DBG("theme", "%d packs in %s", a.us.n_themes, a.themes_dir);
+            if (prefs_path(ppath, sizeof ppath))
+                R_DBG("prefs", "%s", ppath);
+            if (theme_dir)
+                apply_theme_choice(&a, theme_dir, "--theme");
+            else if (prefs_get("theme", saved, sizeof saved) && saved[0] && apply_theme_choice(&a, saved, "saved preference"))
+                ;
             else
-                R_WARN("theme", "%s: not found", theme_dir);
+                apply_theme_choice(&a, DEFAULT_THEME, "default");
         }
     }
     if (city_path[0])

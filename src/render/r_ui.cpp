@@ -392,6 +392,21 @@ extern "C" int r_ui_set_theme(RUi *u, const char *dir)
     return 0;
 }
 
+static void apply_theme(float dpi); /* below: the hand-drawn look */
+
+extern "C" void r_ui_clear_theme(RUi *u)
+{
+    if (!u)
+        return;
+    Theme &t = u->theme;
+    if (t.tex)
+        SDL_ReleaseGPUTexture(u->dev, t.tex); /* deferred by SDL until the GPU is done with it */
+    t.tex    = nullptr;
+    t.loaded = false;
+    t.n_els = t.n_parts = 0;
+    apply_theme(u->dpi); /* the style colours the scheme set, back to the hand-drawn look's */
+}
+
 /*  Draw a picture, or a part of it, at a screen position, one texel per
  *  point, sampled nearest so the pixels stay pixels. */
 static void draw_pict(const RUi *u, ImDrawList *dl, int id, ImVec2 at, int sx = 0, int sy = 0, int sw = -1, int sh = -1)
@@ -816,6 +831,31 @@ static void menu_bar(RUi *u, RUiState *s)
         ImGui::MenuItem("Auto-Goto", nullptr, true, false);
         ImGui::MenuItem("Sound Effects", nullptr, true, false);
         ImGui::MenuItem("Music", nullptr, true, false);
+        ImGui::Separator();
+        /*  The Kaleidoscope schemes: None, then every pack found under
+         *  assets/themes.  A pick is a request; r_app puts the scheme
+         *  on and writes the preference. */
+        if (ImGui::BeginMenu("Theme"))
+        {
+            const bool none = s->theme_name[0] == 0 || strcmp(s->theme_name, "none") == 0;
+            if (ImGui::MenuItem("None", nullptr, none) && !none)
+            {
+                snprintf(s->theme_name, sizeof s->theme_name, "none");
+                s->want_theme = 1;
+            }
+            if (s->n_themes)
+                ImGui::Separator();
+            for (int k = 0; k < s->n_themes; ++k)
+            {
+                const bool cur = strcmp(s->theme_list[k], s->theme_name) == 0;
+                if (ImGui::MenuItem(s->theme_list[k], nullptr, cur) && !cur)
+                {
+                    snprintf(s->theme_name, sizeof s->theme_name, "%s", s->theme_list[k]);
+                    s->want_theme = 1;
+                }
+            }
+            ImGui::EndMenu();
+        }
         ImGui::EndMenu();
     }
     /* MENU 1004 */
