@@ -2020,6 +2020,49 @@ static int loft(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, Family f, 
      *  green; an absolute one, red, a tile before a junction; a whistle
      *  post two tiles before a level crossing; none on or beside a
      *  crossing. */
+    /*  Street lighting (spec 1.6, 6.4): on an avenue or a boulevard a
+     *  cobra-head luminaire on a davit arm every two tiles, thirty
+     *  metres, staggered side to side: a round pole on the sidewalk
+     *  1.35 levels tall, ten metres, an arm three metres out over the
+     *  road from its top, and the head at the arm's end; none within a
+     *  tile of a junction, an end or a level crossing.  A local road
+     *  goes unlit, as the spec's post-tops are a downtown's. */
+    if (f == F_ROAD && s_seg_class >= 0.5f && total > 2.5f)
+    {
+        float at;
+        int   side = 0;
+        for (at = 1.25f; at < total - 1.0f; at += 2.0f, side ^= 1)
+        {
+            int   j = 1;
+            float sgn, px, py, ax, ay, hx, hy, order;
+            while (j < ns - 1 && smp[j].s < at)
+                ++j;
+            if (near_crossing(c, smp[j].pos))
+                continue;
+            sgn = side ? -1.0f : 1.0f;
+            hx  = smp[j].dir.x;
+            hy  = smp[j].dir.y;
+            ax  = -hy * sgn; /* across, toward the pole's side */
+            ay  = hx * sgn;
+            px  = smp[j].pos.x + ax * hw * 0.90f;
+            py  = smp[j].pos.y + ay * hw * 0.90f;
+            {
+                int32_t tc = (int32_t)floorf(px), tr = (int32_t)floorf(py);
+                if (tc < 0 || tr < 0 || tc >= R_MAP || tr >= R_MAP)
+                    continue;
+                order = tile_order(c, tc, tr, mask_bit) + 0.3f;
+            }
+            /* the pole, on the sidewalk's height */
+            if (put_prism_clip_m(m, c, mask_bit, order, px, py, hx, hy, 0.02f, 0.02f, smp[j].z, smp[j].z, 0.0f, 1.35f, 0.0f, MAT_PROP) != 0)
+                return -1;
+            /* the arm, from the pole's top in over the road, rising a little */
+            if (put_prism_clip_m(m, c, mask_bit, order, px - ax * 0.10f, py - ay * 0.10f, -ax, -ay, 0.20f, 0.014f, smp[j].z, smp[j].z + 0.03f, 1.33f, 1.35f, 0.0f, MAT_PROP) != 0)
+                return -1;
+            /* the cobra head, 0.8 m long, hung at the arm's end */
+            if (put_prism_clip_m(m, c, mask_bit, order, px - ax * 0.19f, py - ay * 0.19f, -ax, -ay, 0.055f, 0.025f, smp[j].z + 0.03f, smp[j].z + 0.03f, 1.30f, 1.345f, 0.0f, MAT_PROP) != 0)
+                return -1;
+        }
+    }
     if (f == F_RAIL && ns > 2)
     {
         float sig;
@@ -2956,11 +2999,11 @@ static int build_power_tile(RMesh *m, const RCity *c, int32_t col, int32_t row, 
  *  viewer lay under that tile's ground until the centre crossed, when
  *  the whole car stood up at once.  `order` is the centre tile's slot
  *  with the fraction the pieces keep above each tile's ground. */
-static int put_prism_clip(RMesh *m, const RCity *c, uint8_t mask_bit, float order, float cx, float cy, float dx, float dy, float len, float wid, float zb, float zf, float z0, float z1, float paint)
+static int put_prism_clip_m(RMesh *m, const RCity *c, uint8_t mask_bit, float order, float cx, float cy, float dx, float dy, float len, float wid, float zb, float zf, float z0, float z1, float paint, float mat)
 {
     static const float up[3] = {0.0f, 0.0f, 1.0f};
     float              ax = dx * len * 0.5f, ay = dy * len * 0.5f, bx = -dy * wid * 0.5f, by = dx * wid * 0.5f;
-    float              p[4][3], top[4][3], col[3] = {paint, 0.0f, MAT_VEHICLE}, nrm[3], t3[3][3];
+    float              p[4][3], top[4][3], col[3] = {paint, 0.0f, mat}, nrm[3], t3[3][3];
     float              ref[3] = {paint, paint, paint}, ref2[3] = {0.0f, 0.0f, 0.0f};
     int                k;
     p[0][0] = cx - ax - bx;
@@ -3008,6 +3051,11 @@ static int put_prism_clip(RMesh *m, const RCity *c, uint8_t mask_bit, float orde
     memcpy(t3[1], top[2], sizeof t3[1]);
     memcpy(t3[2], top[3], sizeof t3[2]);
     return put_tri_road_n(m, c, mask_bit, order, (const float (*)[3])t3, up, col, ref, ref2);
+}
+
+static int put_prism_clip(RMesh *m, const RCity *c, uint8_t mask_bit, float order, float cx, float cy, float dx, float dy, float len, float wid, float zb, float zf, float z0, float z1, float paint)
+{
+    return put_prism_clip_m(m, c, mask_bit, order, cx, cy, dx, dy, len, wid, zb, zf, z0, z1, paint, MAT_VEHICLE);
 }
 
 /*  Every network: the power lines per tile; the roads and rails as
@@ -3988,8 +4036,11 @@ static void car_place(const RRoadNet *net, const RCar *car, float *x, float *y, 
  *  half a cycle later; amber and red both hold a car at the line. */
 static int signal_red(int32_t col, int32_t row, float hx, float hy, float time)
 {
+    /*  Twenty seconds round (spec 3.4's timing, scaled to the sim): each
+     *  group runs green six seconds, amber two, then an all-red
+     *  clearance of two before the other group's green. */
     float phase = (float)((col * 7 + row * 13) % 8) / 8.0f;
-    float t     = time / 12.0f + phase;
+    float t     = time / 20.0f + phase;
     int   ew    = fabsf(hx) > fabsf(hy);
     t           = t - floorf(t);
     if (ew)
@@ -3997,7 +4048,7 @@ static int signal_red(int32_t col, int32_t row, float hx, float hy, float time)
         t += 0.5f;
         t -= floorf(t);
     }
-    return t >= 0.40f;
+    return t >= 0.30f;
 }
 
 /*  The crossing's approach a (0 or 1): the mast at the driver's right

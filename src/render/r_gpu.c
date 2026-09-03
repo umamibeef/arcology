@@ -39,21 +39,34 @@ enum
     K_WATER_EDGE = 8,  /* water art on a cut edge: the mesh draws the surface  */
     K_CAR        = 10, /* a car, $19004's stencilled traffic sprite; off with the road mesh */
     K_TRAIN      = 11, /* a train car, thing types 10 and 11, shapes 374..378; off with the road mesh */
-    K_ROAD_ART   = 9   /* a power, road or rail piece, XBLD 0x0E..0x48 --
-                        *  the whole run, crossings at 0x43..0x48 and all
+    K_ROAD_ART   = 9   /* a power, road, rail or crossing piece: XBLD
+                        *  0x0E..0x48, one contiguous run.
                         *
-                        *  The range must cover EVERY id the mesh draws
-                        *  as a strip, because that is what this kind is
-                        *  for: with the mesh on, K_ROAD_ART sprites are
-                        *  suppressed ($962) and the geometry stands in
-                        *  for them.  An id outside the range keeps its
-                        *  sprite, which is then drawn over the mesh at
-                        *  the sprite's own height -- a piece of track
-                        *  hanging in the air above a surface that is
-                        *  already there.  It used to stop at 0x3A and
-                        *  skip 0x3B..0x42, which is why rail did it
-                        *  (the user, Toronto column 110 row 101).
-                        * 0x44..0x47: the network mesh replaces it                */
+                        *  This kind is not a label, it is the
+                        *  SUPPRESSION LIST.  With the mesh on, a
+                        *  K_ROAD_ART sprite is dropped because the
+                        *  geometry stands in for it.  An id outside the
+                        *  range keeps its sprite, which is then drawn
+                        *  over the mesh at the sprite's own height -- a
+                        *  piece of track hanging in the air above a
+                        *  surface that is already there.
+                        *
+                        *  So the range must cover EXACTLY what the mesh
+                        *  draws as a strip.  It used to stop at 0x3A
+                        *  and skip 0x3B..0x42, and rail floated (the
+                        *  user, Toronto column 110 row 101).  Widening
+                        *  it, I wrote 0x0E..0x42 and dropped the
+                        *  crossings, and 0x44 at 112,91 and 0x45 at
+                        *  111,93 floated within the hour.
+                        *
+                        *  And it STOPS at 0x48.  The highways,
+                        *  0x49..0x60, are not drawn by the mesh at all
+                        *  -- render one with --mesh-only and there is
+                        *  grass where the highway should be.  They are
+                        *  sprites and must stay sprites.  Widening this
+                        *  to cover them, which looks like the tidy
+                        *  thing to do, deletes every highway in the
+                        *  game. */
 };
 
 struct RGpu

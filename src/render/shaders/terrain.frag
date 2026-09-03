@@ -466,7 +466,7 @@ void main()
          *  0..2 red, amber, green on a north-south arm, 3..5 on an
          *  east-west arm.  Twelve seconds round: one group runs green,
          *  then amber, then red while the other waits, then they swap. */
-        float t    = fract(fr.params.y / 12.0 + v_col.r);
+        float t    = fract(fr.params.y / 20.0 + v_col.r); /* twenty seconds round: green, amber, all-red, then the swap */
         int   code = int(v_col.g + 0.01); /* a sign's face carries its v in the fraction */
         int   grp  = code / 3, lamp = code - grp * 3;
         if (code == 0 && v_col.r == 0.0)
@@ -509,7 +509,7 @@ void main()
             return;
         }
         float tt   = grp == 1 ? fract(t + 0.5) : t;
-        int   lit  = tt < 0.40 ? 2 : (tt < 0.48 ? 1 : 0);
+        int   lit  = tt < 0.30 ? 2 : (tt < 0.40 ? 1 : 0); /* six seconds green, two amber, two all-red */
         vec3  col  = lamp == 0 ? vec3(0.95, 0.12, 0.10)
                    : lamp == 1 ? vec3(0.98, 0.76, 0.12) : vec3(0.15, 0.90, 0.30);
         o_col = vec4(lamp == lit ? col : col * 0.18, v_col.a);
