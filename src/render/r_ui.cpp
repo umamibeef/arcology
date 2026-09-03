@@ -33,6 +33,7 @@ unsigned lodepng_decode32_file(unsigned char **out, unsigned *w, unsigned *h, co
 #include "imgui.h"
 #include "imgui_impl_sdl3.h"
 #include "imgui_impl_sdlgpu3.h"
+#include "imgui_internal.h" /* the Selectable flags MenuItem itself is built on */
 #ifdef IMGUI_ENABLE_FREETYPE
     #include "imgui_freetype.h"
 #endif
@@ -773,6 +774,80 @@ static void demand(RUi *u, RUiState *s)
 
 /* ---- the menu bar ------------------------------------------------------ */
 
+/* ---- menus: the shortcut at the right, the check at the left ------------- */
+
+/*  The Mac's menus put a check mark at the left of an item and its key
+ *  at the far right, with the ⌘ that every one of them needs; ImGui's
+ *  MenuItem puts the key in a column just past the widest label and the
+ *  mark to the right of that (the user: "they need to be right
+ *  aligned").  So an item is a Selectable that spans the row -- the
+ *  highlight covers it, the layout width is the label's and the key's
+ *  -- with the three pieces drawn on it by hand.  Every shortcut here
+ *  takes the platform's command key: ⌘ on the Mac, Ctrl elsewhere, and
+ *  the labels say which (the user: "gated behind command/ctrl, and show
+ *  the respective symbol"). */
+#ifdef __APPLE__
+    #define SC_MOD   "\xE2\x8C\x98" /* ⌘ U+2318 */
+    #define SC_SHIFT "\xE2\x87\xA7" /* ⇧ U+21E7 */
+#else
+    #define SC_MOD   "Ctrl+"
+    #define SC_SHIFT "Shift+"
+#endif
+#define CHECK_MARK "\xE2\x9C\x93" /* ✓ U+2713, in Chicago */
+
+/*  "⌘L", or "⇧⌘T" with shift -- the Mac writes the shift first; Windows
+ *  writes Ctrl+Shift+T.  A ring of buffers so several can be live in
+ *  one menu. */
+static const char *sc(char key, bool shift = false)
+{
+    static char buf[16][24];
+    static int  n;
+    char       *b = buf[n++ & 15];
+#ifdef __APPLE__
+    snprintf(b, sizeof buf[0], "%s%s%c", shift ? SC_SHIFT : "", SC_MOD, key);
+#else
+    snprintf(b, sizeof buf[0], "%s%s%c", SC_MOD, shift ? SC_SHIFT : "", key);
+#endif
+    return b;
+}
+
+static bool menu_item(const char *label, const char *shortcut = nullptr, bool selected = false, bool enabled = true)
+{
+    const ImGuiStyle &st      = ImGui::GetStyle();
+    const float       check_w = ImGui::CalcTextSize(CHECK_MARK).x + st.ItemInnerSpacing.x;
+    const float       lw      = ImGui::CalcTextSize(label).x;
+    const float       sw      = shortcut ? ImGui::CalcTextSize(shortcut).x : 0.0f;
+    /*  the layout width: the check column, the label, and room for the
+     *  key; SpanAvailWidth then stretches the highlight to the row */
+    const float need = check_w + lw + (shortcut ? 4.0f * st.ItemSpacing.x + sw : 0.0f);
+    ImGui::PushID(label);
+    if (!enabled)
+        ImGui::BeginDisabled();
+    const bool pressed = ImGui::Selectable("##item", false, ImGuiSelectableFlags_SelectOnRelease | ImGuiSelectableFlags_SetNavIdOnHover | ImGuiSelectableFlags_SpanAvailWidth, ImVec2(need, 0.0f));
+    if (!enabled)
+        ImGui::EndDisabled();
+    ImGui::PopID();
+    ImDrawList  *dl = ImGui::GetWindowDrawList();
+    const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+    const ImU32  col = ImGui::GetColorU32(enabled ? ImGuiCol_Text : ImGuiCol_TextDisabled);
+    const float  ty  = a.y + (b.y - a.y - ImGui::GetTextLineHeight()) * 0.5f;
+    if (selected)
+        dl->AddText(ImVec2(a.x, ty), col, CHECK_MARK);
+    dl->AddText(ImVec2(a.x + check_w, ty), col, label);
+    if (shortcut)
+        dl->AddText(ImVec2(b.x - sw, ty), col, shortcut);
+    return pressed;
+}
+
+/*  The toggle form, as ImGui's: flips *p_selected on a pick. */
+static bool menu_item(const char *label, const char *shortcut, bool *p_selected, bool enabled = true)
+{
+    const bool pressed = menu_item(label, shortcut, p_selected && *p_selected, enabled);
+    if (pressed && p_selected)
+        *p_selected = !*p_selected;
+    return pressed;
+}
+
 static void menu_bar(RUi *u, RUiState *s)
 {
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8.0f, 3.0f));
@@ -798,39 +873,39 @@ static void menu_bar(RUi *u, RUiState *s)
     /* MENU 1001 */
     if (ImGui::BeginMenu("File"))
     {
-        ImGui::MenuItem("Load Tile Set", nullptr, false, false);
+        menu_item("Load Tile Set", nullptr, false, false);
         ImGui::Separator();
-        if (ImGui::MenuItem("Load City", "L"))
+        if (menu_item("Load City", sc('L')))
             s->open_load = 1;
-        ImGui::MenuItem("New City", "N", false, false);
-        ImGui::MenuItem("Edit New Map", "E", false, false);
-        ImGui::MenuItem("Load Scenario", "Z", false, false);
+        menu_item("New City", sc('N'), false, false);
+        menu_item("Edit New Map", sc('E'), false, false);
+        menu_item("Load Scenario", sc('Z'), false, false);
         ImGui::Separator();
-        if (ImGui::MenuItem("Save City", "S"))
+        if (menu_item("Save City", sc('S')))
             s->want_save = 1;
-        if (ImGui::MenuItem("Save City As..."))
+        if (menu_item("Save City As...", nullptr))
             u->save_popup = true;
         ImGui::Separator();
-        if (ImGui::MenuItem("Quit", "Q"))
+        if (menu_item("Quit", sc('Q')))
             s->want_quit = 1;
         ImGui::EndMenu();
     }
     /* MENU 1002 */
     if (ImGui::BeginMenu("Speed"))
     {
-        const char *keys[6] = {"", "P", "1", "2", "3", "4"};
+        const char *keys[6] = {"", "1", "2", "3", "4", "5"}; /* bare digits, as the keys are */
         for (int k = 1; k <= 5; ++k)
-            if (ImGui::MenuItem(SPEED_NAME[k], keys[k], s->speed == k))
+            if (menu_item(SPEED_NAME[k], keys[k], s->speed == k))
                 s->speed = k;
         ImGui::EndMenu();
     }
     /* MENU 1003 */
     if (ImGui::BeginMenu("Options"))
     {
-        ImGui::MenuItem("Auto-Budget", nullptr, false, false);
-        ImGui::MenuItem("Auto-Goto", nullptr, true, false);
-        ImGui::MenuItem("Sound Effects", nullptr, true, false);
-        ImGui::MenuItem("Music", nullptr, true, false);
+        menu_item("Auto-Budget", nullptr, false, false);
+        menu_item("Auto-Goto", nullptr, true, false);
+        menu_item("Sound Effects", nullptr, true, false);
+        menu_item("Music", nullptr, true, false);
         ImGui::Separator();
         /*  The Kaleidoscope schemes: None, then every pack found under
          *  assets/themes.  A pick is a request; r_app puts the scheme
@@ -838,7 +913,7 @@ static void menu_bar(RUi *u, RUiState *s)
         if (ImGui::BeginMenu("Theme"))
         {
             const bool none = s->theme_name[0] == 0 || strcmp(s->theme_name, "none") == 0;
-            if (ImGui::MenuItem("None", nullptr, none) && !none)
+            if (menu_item("None", nullptr, none) && !none)
             {
                 snprintf(s->theme_name, sizeof s->theme_name, "none");
                 s->want_theme = 1;
@@ -848,7 +923,7 @@ static void menu_bar(RUi *u, RUiState *s)
             for (int k = 0; k < s->n_themes; ++k)
             {
                 const bool cur = strcmp(s->theme_list[k], s->theme_name) == 0;
-                if (ImGui::MenuItem(s->theme_list[k], nullptr, cur) && !cur)
+                if (menu_item(s->theme_list[k], nullptr, cur) && !cur)
                 {
                     snprintf(s->theme_name, sizeof s->theme_name, "%s", s->theme_list[k]);
                     s->want_theme = 1;
@@ -876,42 +951,42 @@ static void menu_bar(RUi *u, RUiState *s)
             {"Rioters",    RUI_DISASTER_RIOT      }
         };
         for (int k = 0; k < 8; ++k)
-            if (ImGui::MenuItem(items[k].name))
+            if (menu_item(items[k].name))
                 s->want_disaster = items[k].id;
         ImGui::Separator();
-        ImGui::MenuItem("No Disasters", nullptr, false, false);
+        menu_item("No Disasters", nullptr, false, false);
         ImGui::EndMenu();
     }
     /* MENU 1005 */
     if (ImGui::BeginMenu("Windows"))
     {
-        if (ImGui::MenuItem("Map", "M"))
+        if (menu_item("Map", sc('M')))
             r_ui_log(s, "Map window: not yet ported");
-        if (ImGui::MenuItem("Budget", "B"))
+        if (menu_item("Budget", sc('B')))
             s->show_budget = 1;
-        ImGui::MenuItem("Ordinances", "O", false, false);
-        if (ImGui::MenuItem("Population", "C"))
+        menu_item("Ordinances", sc('O'), false, false);
+        if (menu_item("Population", sc('C')))
             s->show_city = 1;
-        ImGui::MenuItem("Industry", "I", false, false);
-        if (ImGui::MenuItem("Graphs", "G"))
+        menu_item("Industry", sc('I'), false, false);
+        if (menu_item("Graphs", sc('G')))
             s->show_graphs = 1;
-        ImGui::MenuItem("Neighbors", "H", false, false);
+        menu_item("Neighbors", sc('H'), false, false);
         ImGui::Separator();
-        if (ImGui::MenuItem("Tools", nullptr, s->show_palette != 0))
+        if (menu_item("Tools", nullptr, s->show_palette != 0))
             s->show_palette = !s->show_palette;
-        if (ImGui::MenuItem("Query", nullptr, s->show_query != 0))
+        if (menu_item("Query", nullptr, s->show_query != 0))
             s->show_query = !s->show_query;
-        if (ImGui::MenuItem("Messages", nullptr, s->show_log != 0))
+        if (menu_item("Messages", nullptr, s->show_log != 0))
             s->show_log = !s->show_log;
-        if (ImGui::MenuItem("Renderer", nullptr, s->show_renderer != 0))
+        if (menu_item("Renderer", nullptr, s->show_renderer != 0))
             s->show_renderer = !s->show_renderer;
         ImGui::EndMenu();
     }
     /* MENU 1006 */
     if (ImGui::BeginMenu("Newspaper"))
     {
-        ImGui::MenuItem("Subscription", nullptr, false, false);
-        ImGui::MenuItem("Extra!!!", nullptr, false, false);
+        menu_item("Subscription", nullptr, false, false);
+        menu_item("Extra!!!", nullptr, false, false);
         ImGui::EndMenu();
     }
     /* the view switches, ours, at the right */
@@ -919,11 +994,11 @@ static void menu_bar(RUi *u, RUiState *s)
     {
         if (ImGui::BeginMenu("Zoom"))
         {
-            if (ImGui::MenuItem("8 px", nullptr, s->zoom == 8))
+            if (menu_item("8 px", nullptr, s->zoom == 8))
                 s->zoom = 8;
-            if (ImGui::MenuItem("16 px", nullptr, s->zoom == 16))
+            if (menu_item("16 px", nullptr, s->zoom == 16))
                 s->zoom = 16;
-            if (ImGui::MenuItem("32 px", nullptr, s->zoom == 32))
+            if (menu_item("32 px", nullptr, s->zoom == 32))
                 s->zoom = 32;
             ImGui::EndMenu();
         }
@@ -933,7 +1008,7 @@ static void menu_bar(RUi *u, RUiState *s)
             {
                 char lab[8];
                 snprintf(lab, sizeof lab, "%dx", k);
-                if (ImGui::MenuItem(lab, nullptr, s->scale == k))
+                if (menu_item(lab, nullptr, s->scale == k))
                     s->scale = k;
             }
             ImGui::EndMenu();
@@ -941,27 +1016,27 @@ static void menu_bar(RUi *u, RUiState *s)
         ImGui::Separator();
         bool b;
         b = s->terrain3d != 0;
-        if (ImGui::MenuItem("3D terrain", "T", &b))
+        if (menu_item("3D terrain", sc('T', true), &b))
             s->terrain3d = b;
         b = s->water3d != 0;
-        if (ImGui::MenuItem("Water shader", "Y", &b))
+        if (menu_item("Water shader", sc('Y', true), &b))
             s->water3d = b;
         b = s->roads3d != 0;
-        if (ImGui::MenuItem("Road mesh", "R", &b))
+        if (menu_item("Road mesh", sc('R', true), &b))
             s->roads3d = b;
         b = s->grid != 0;
-        if (ImGui::MenuItem("Grid", "G", &b))
+        if (menu_item("Grid", sc('G', true), &b))
             s->grid = b;
         ImGui::Separator();
         if (ImGui::BeginMenu("Data view"))
         {
             for (int k = 0; k < 12; ++k)
-                if (ImGui::MenuItem(VIEW_NAME[k], nullptr, s->view == k))
+                if (menu_item(VIEW_NAME[k], nullptr, s->view == k))
                     s->view = k;
             ImGui::EndMenu();
         }
         ImGui::Separator();
-        if (ImGui::MenuItem("Screenshot", "P"))
+        if (menu_item("Screenshot", sc('P', true)))
             s->want_screenshot = 1;
         ImGui::EndMenu();
     }
@@ -1245,6 +1320,28 @@ extern "C" RUi *r_ui_create(SDL_Window *win, SDL_GPUDevice *dev, int swap_fmt, f
             fc.FontLoaderFlags = ImGuiFreeTypeLoaderFlags_Monochrome | ImGuiFreeTypeLoaderFlags_NoHinting;
 #endif
             loaded = io.Fonts->AddFontFromFileTTF(fpath, 16.0f, &fc) != nullptr;
+            /*  Chicago-Kare has no ⌘ and no ⇧: Susan Kare's bitmap never
+             *  needed them, the Menu Manager drew them itself.  ChicagoFLF
+             *  has both, so it is merged in behind Kare for the glyphs
+             *  Kare lacks, and only those.  The ✓ Kare has. */
+            if (loaded)
+            {
+                char fpath2[1024];
+                snprintf(fpath2, sizeof fpath2, "%s/fonts/ChicagoFLF.ttf", assets_dir);
+                FILE *p2 = fopen(fpath2, "rb");
+                if (p2)
+                {
+                    ImFontConfig mc;
+                    fclose(p2);
+                    mc.MergeMode   = true;
+                    mc.PixelSnapH  = true;
+                    mc.OversampleH = mc.OversampleV = 1;
+#ifdef IMGUI_ENABLE_FREETYPE
+                    mc.FontLoaderFlags = ImGuiFreeTypeLoaderFlags_Monochrome | ImGuiFreeTypeLoaderFlags_MonoHinting;
+#endif
+                    io.Fonts->AddFontFromFileTTF(fpath2, 16.0f, &mc);
+                }
+            }
         }
         if (!loaded)
         {

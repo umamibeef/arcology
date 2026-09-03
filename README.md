@@ -76,6 +76,12 @@ arcology --clock <city> 25 <out>   one month, dumped for comparison
 
 `arcology --help` lists the rest.
 
+Every letter shortcut takes the platform's command key -- ⌘ on the Mac, Ctrl elsewhere -- and the menus show which.
+The original's own shortcuts keep its letters (⌘L load, ⌘S save, ⌘Q quit, ⌘B budget, ⌘C population, ⌘G graphs); the
+port's view switches add shift (⇧⌘T geometry, ⇧⌘G grid, ⇧⌘P screenshot, ⇧⌘M plain sweep, ⇧⌘U underground, ⌘V and
+⇧⌘V through the data views). The bare keys are game controls, not menu shortcuts: 1 to 5 for the speeds, space to
+pause, + and - to zoom, [ and ] for the pixel scale, the arrows to scroll.
+
 ## Importing the game's resources
 
 Arcology ships no art, no sound and no interface graphics. All of it is read out of a real, Macintosh SimCity 2000

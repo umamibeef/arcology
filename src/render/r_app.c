@@ -50,6 +50,16 @@
 #endif
 #include "sc2k.h"
 
+/*  The key every letter shortcut needs: the Mac's command key, and
+ *  Ctrl everywhere else.  The bare keys that remain -- the digits for
+ *  the speeds, space, the zoom and scale keys, the arrows -- are game
+ *  controls, not menu shortcuts. */
+#ifdef __APPLE__
+    #define KMOD_CMD SDL_KMOD_GUI
+#else
+    #define KMOD_CMD SDL_KMOD_CTRL
+#endif
+
 /*  The platform, for the banner: what SDL calls it, the kernel and
  *  the machine where uname can say, and the SDL this is running on. */
 static void platform_line(char *out, size_t n)
@@ -2141,6 +2151,7 @@ int r_game_main(int argc, char **argv)
             {
                 SDL_Keycode k     = e.key.key;
                 int         shift = (e.key.mod & SDL_KMOD_SHIFT) != 0;
+                int         mod   = (e.key.mod & KMOD_CMD) != 0;
                 SDL_GetWindowSizeInPixels(win, &pw, &ph);
                 if (k == SDLK_ESCAPE)
                     a.quit = 1;
@@ -2157,33 +2168,48 @@ int r_game_main(int argc, char **argv)
                     a.gv.scale--;
                 else if (k == SDLK_RIGHTBRACKET && a.gv.scale < 4)
                     a.gv.scale++;
-                else if (k == SDLK_T)
+                /*  the original's own shortcuts, its letters: File and Windows */
+                else if (mod && !shift && k == SDLK_L)
+                    a.us.open_load = 1;
+                else if (mod && !shift && k == SDLK_S)
+                    a.us.want_save = 1;
+                else if (mod && !shift && k == SDLK_Q)
+                    a.quit = 1;
+                else if (mod && !shift && k == SDLK_B)
+                    a.us.show_budget = 1;
+                else if (mod && !shift && k == SDLK_C)
+                    a.us.show_city = 1;
+                else if (mod && !shift && k == SDLK_G)
+                    a.us.show_graphs = 1;
+                else if (mod && !shift && k == SDLK_M)
+                    r_ui_log(&a.us, "Map window: not yet ported");
+                else if (mod && shift && k == SDLK_T)
                     a.gv.terrain3d = !a.gv.terrain3d;
-                else if (k == SDLK_Y)
+                else if (mod && shift && k == SDLK_Y)
                     a.gv.water3d = !a.gv.water3d;
-                else if (k == SDLK_R)
+                else if (mod && shift && k == SDLK_R)
                 {
                     a.gv.roads3d = !a.gv.roads3d;
                     a.mesh_dirty = 1;
                 }
-                else if (k == SDLK_G)
+                else if (mod && shift && k == SDLK_G)
                     a.gv.grid = !a.gv.grid;
-                else if (k == SDLK_M)
+                else if (mod && shift && k == SDLK_M)
                     a.gv.plain_sweep = !a.gv.plain_sweep;
-                else if (k == SDLK_U)
+                else if (mod && shift && k == SDLK_U)
                 {
                     a.opts.underground = !a.opts.underground;
                     a.dirty            = 1;
                     a.mesh_dirty       = 1;
                 }
-                else if (k == SDLK_V)
+                else if (mod && k == SDLK_V)
                 {
                     a.opts.view = shift ? (a.opts.view + 11) % 12
                                         : (a.opts.view + 1) % 12;
                     a.dirty     = 1;
                 }
-                else if (k == SDLK_P)
-                    check_frame(&a, win, "sc2kgpu-check.png");
+                else if (mod && shift && k == SDLK_P)
+                    a.us.want_screenshot = 1;
                 else if (k == SDLK_COMMA)
                     rotate_by(&a, -15.0f, win);
                 else if (k == SDLK_PERIOD)
