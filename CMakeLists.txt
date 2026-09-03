@@ -72,6 +72,9 @@ if(Python3_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/cities")
         add_test(NAME microsim
                  COMMAND ${Python3_EXECUTABLE}
                          ${CMAKE_CURRENT_SOURCE_DIR}/tools/micro_check.py)
+        add_test(NAME allocmicro
+                 COMMAND ${Python3_EXECUTABLE}
+                         ${CMAKE_CURRENT_SOURCE_DIR}/tools/micro_alloc_check.py)
     endif()
     add_test(NAME arco_roundtrip
              COMMAND ${Python3_EXECUTABLE}

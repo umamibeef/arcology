@@ -611,6 +611,12 @@ void       sim_economy(City *c);          /* economyPass $34D04, phase 21 */
 /*  $101AC.  The year-end microsimulation: every special building on the
  *  map gets its turn.  budgetPass calls it from the January settlement,
  *  right after the departments are reconciled. */
+/*  $EEAE.  Give a newly placed special building its XMIC record and
+ *  answer the marker XTXT carries for it (the slot plus 0x33), or 0 if
+ *  the building keeps no record.  Exposed so tools/micro_alloc_check.py
+ *  can drive it against the original. */
+int sim_alloc_micro(City *c, int y, int x, int bld);
+
 void    sim_microsim(City *c);
 void    sim_budget(City *c);               /* budgetPass $263C8, phase 0  */
 int     sim_opinion_poll(City *c);         /* $3152A February poll  */

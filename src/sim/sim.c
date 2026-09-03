@@ -2690,6 +2690,7 @@ static void micro_init(City *c, int slot, int bld)
             break;
         case 0xD3: /* fire, $FFB8 */
             micro_set_w(r, 0, micro_cap(c, (int)ASR(c->dept[DEPT_FIRE].funding, 1), 0x46));
+            micro_set_w(r, 1, 4); /* $FFE6, one crew to start */
             break;
         case 0xD4: /* museum, $FFF2 */
             r[1] = 100;
@@ -2704,18 +2705,35 @@ static void micro_init(City *c, int slot, int bld)
             break;
         case 0xF3: /* the mayor's house, $10006 */
             micro_set_w(r, 0, year);
+            micro_set_w(r, 1, (int)((uint16_t)Random() % 30) + 10); /* $1001E */
+            micro_set_w(r, 2, (int)((uint16_t)Random() % 60));      /* $10040 */
             break;
-        case 0xFB: /* the arcologies, $100AA/$100E4/$1011E */
+        /*  The four arcologies, $100AA/$100E4/$1011E/$1015A: a starting
+         *  population, a life of five, and the YEAR they went up, which
+         *  is what the Launch Arco's ending counts from.  The llama dome
+         *  keeps its year the same way ($1018E). */
+        case 0xFB:
             micro_set_w(r, 0, 0x37);
             r[1] = 5;
+            micro_set_w(r, 2, year);
             break;
         case 0xFC:
             micro_set_w(r, 0, 0x1E);
             r[1] = 5;
+            micro_set_w(r, 2, year);
             break;
         case 0xFD:
             micro_set_w(r, 0, 0x2D);
             r[1] = 5;
+            micro_set_w(r, 2, year);
+            break;
+        case 0xFE:
+            micro_set_w(r, 0, 0x41);
+            r[1] = 5;
+            micro_set_w(r, 2, year);
+            break;
+        case 0xFF:
+            micro_set_w(r, 2, year);
             break;
         default:
             break;
@@ -2740,7 +2758,7 @@ static void micro_init(City *c, int slot, int bld)
  *  The marker is the slot plus 0x33, which is what micro_find_tile
  *  searches XTXT for.
  * ================================================================== */
-static int sim_alloc_micro(City *c, int y, int x, int bld)
+int sim_alloc_micro(City *c, int y, int x, int bld)
 {
     int slot, cls;
     (void)y;
