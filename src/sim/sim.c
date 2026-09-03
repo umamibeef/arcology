@@ -7744,13 +7744,16 @@ void sim_microsim(City *c)
                             }
                         }
                         /*  $103C4 and $103F8, the same two lines twice.
-                         *  NOTE: the original removes the plant's power
-                         *  lines first ($392E) when MISC[1021] is set.  That
-                         *  routine is not ported, so a city with the
-                         *  preference on keeps lines it should lose.  No
-                         *  city in the corpus has a fifty-year-old plant,
-                         *  so nothing here is checked against the oracle
-                         *  either -- it is transcription only. */
+                         *  The call they guard with MISC[1021] is $392E, which
+                         *  SCROLLS THE VIEW to the tile so you watch the plant
+                         *  go -- interface, not simulation, and nothing to port.
+                         *  (symbols.json carried it as `powerLineRemove` for a
+                         *  while, which is why an earlier note here said a
+                         *  routine was missing.  None is.)
+                         *
+                         *  No city in the corpus has a fifty-year-old plant, so
+                         *  this arm is transcription only: read off the listing
+                         *  and never checked against the oracle. */
                         sim_demolish_and_place(c, y, x, 0xFF);
                         r[0] = 0; /* $103EE, the record dies with it */
                     }

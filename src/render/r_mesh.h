@@ -99,6 +99,8 @@ typedef struct
     float    speed, paint;
     int      in_box, next_seg, next_dir;
     float    bx0, by0, bz0, bx1, by1, bz1, bt, blen;
+    float    bcx, bcy; /* the corner the arms' lines meet at: a turn's path bends through it */
+    int      bcurve;
     float    hx, hy; /* the heading last drawn */
     float    hold;   /* seconds stood at a stop sign */
     uint32_t rng;

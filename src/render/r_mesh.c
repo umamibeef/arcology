@@ -790,6 +790,50 @@ static int piece_family(uint8_t b, Family *f)
         *f = F_ROAD;
         return 1;
     }
+    /*  Four more rail straights, and they are NOT in the 0x2C..0x3A run:
+     *  0x3B and 0x3D go north-south, 0x3C and 0x3E east-west.  Read off
+     *  the corpus the same way the crossings were -- of 37 tiles of
+     *  0x3B, 29 join north and south and five join one of them; 0x3C is
+     *  40 of 54 east-west; and so on.  (Two ids to an axis because the
+     *  art has two elevations of trestle.)
+     *
+     *  Missing them did not merely leave a gap.  A tile no family claims
+     *  is not treated as bare ground -- it falls through to the BUILDING
+     *  path and is given a levelled pad, so a rail tile in the middle of
+     *  a line became a raised slab with the track drawn on top of it and
+     *  the ground either side untouched: a piece of track hanging in the
+     *  air (the user, on Toronto column 110 row 101).  344 tiles across
+     *  the corpus, which is why it turned up everywhere. */
+    /*  Rail under a HIGHWAY, the same shape as 0x47/0x48 under a power
+     *  line: 0x4D carries the rail north-south, 0x4E east-west.  They
+     *  come in pairs, one per tile of the highway's two-tile width, so
+     *  each sees rail on one side and its partner on the other -- of 62
+     *  tiles of 0x4D, 61 touch rail and every one of them touches
+     *  another 0x4D.
+     *
+     *  Left out, the rail simply stopped where a highway crossed it and
+     *  a bare embankment pad sat in the gap: 131 tiles of it across the
+     *  corpus. */
+    if (b == 0x4Du)
+    {
+        *f = F_RAIL;
+        return 1; /* north-south */
+    }
+    if (b == 0x4Eu)
+    {
+        *f = F_RAIL;
+        return 0; /* east-west */
+    }
+    if (b == 0x3Bu || b == 0x3Du)
+    {
+        *f = F_RAIL;
+        return 1; /* north-south, as 0x48 is */
+    }
+    if (b == 0x3Cu || b == 0x3Eu)
+    {
+        *f = F_RAIL;
+        return 0; /* east-west, as 0x47 is */
+    }
     if (b == 0x47u)
     {
         *f = F_RAIL;
@@ -1210,7 +1254,10 @@ static int strip_quad(RMesh *m, const RCity *c, uint8_t mask_bit, float order, c
 
 /*  A fan of triangles about a point, from angle t0 at radius r0 to t1
  *  at r1, one material; the rim carries across 1, the apex `across_c`. */
-static int strip_fan(RMesh *m, const RCity *c, uint8_t mask_bit, float order, float cx, float cy, float t0, float t1, float r0, float r1, float across_c, float mat, int n)
+/*  `lift` is added to the ground under each vertex, so a cap on a slope
+ *  lies on the slope (set flat at its centre's height, the uphill half
+ *  of a dead end's cap on a slope piece lay under the ground). */
+static int strip_fan_z(RMesh *m, const RCity *c, uint8_t mask_bit, float order, float cx, float cy, float t0, float t1, float r0, float r1, float across_c, float mat, int n, float lift)
 {
     float road_col[3] = {0.0f, 0.0f, mat};
     int   i;
@@ -1226,9 +1273,9 @@ static int strip_fan(RMesh *m, const RCity *c, uint8_t mask_bit, float order, fl
         tri[1][1] = cy + ra * sinf(ta);
         tri[2][0] = cx + rb * cosf(tb);
         tri[2][1] = cy + rb * sinf(tb);
-        tri[0][2] = surface_at_world(c, mask_bit, tri[0][0], tri[0][1]);
-        tri[1][2] = surface_at_world(c, mask_bit, tri[1][0], tri[1][1]);
-        tri[2][2] = surface_at_world(c, mask_bit, tri[2][0], tri[2][1]);
+        tri[0][2] = surface_at_world(c, mask_bit, tri[0][0], tri[0][1]) + lift;
+        tri[1][2] = surface_at_world(c, mask_bit, tri[1][0], tri[1][1]) + lift;
+        tri[2][2] = surface_at_world(c, mask_bit, tri[2][0], tri[2][1]) + lift;
         if (put_tri_road(m, c, mask_bit, order, (const float (*)[3])tri, road_col, ref, ref2) != 0)
             return -1;
     }
@@ -1761,6 +1808,8 @@ static int near_crossing(const RCity *c, V2 pos)
     return 0;
 }
 
+static float s_zorig[8192];
+
 static int loft(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, Family f, const Piece *pc, int np, float total, float zeb0, float zeb1, int pin0, int pin1)
 {
     static Sample smp[8192];
@@ -1895,6 +1944,70 @@ static int loft(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, Family f, 
         float lim = smp[i + 1].z - ROAD_GRADE * (smp[i + 1].s - smp[i].s);
         if (smp[i].z < lim)
             smp[i].z = lim;
+    }
+    /*  Vertical curves (the user: "soften the transition so that the
+     *  roads don't abruptly change angles... raising/lowering the road
+     *  segments with engineered walls"; the specification's 3.10:
+     *  fillet the profile polyline as the plan's, R_v 20 to 60 m).  The
+     *  profile is averaged over half a tile each side, which rounds
+     *  every grade break into a curve a tile long: at a sag the road
+     *  rises off the ground onto its embankment, at a crest it sinks
+     *  into the ground behind retaining walls, about a metre at the
+     *  break for the art's one-level-per-tile grade.  The ends keep
+     *  their height, a junction box, a carrier or a cap on the ground,
+     *  the rounding fading in over the half tile from each. */
+    for (i = 0; i < ns; ++i)
+        s_zorig[i] = smp[i].z; /* the profile before the fillet: a station below it is in a cut */
+    if (ns > 2 && total > 1.0f)
+    {
+        static float zs[8192];
+        const float  T  = 0.5f;
+        int          lo = 0;
+        for (i = 0; i < ns; ++i)
+        {
+            float a = smp[i].s - T, b = smp[i].s + T, acc = 0.0f, dend, fade;
+            int   j;
+            if (a < 0.0f)
+                a = 0.0f;
+            if (b > total)
+                b = total;
+            while (lo + 1 < ns && smp[lo + 1].s <= a)
+                ++lo;
+            for (j = lo; j + 1 < ns && smp[j].s < b; ++j)
+            {
+                float s0 = smp[j].s, s1 = smp[j + 1].s, z0 = smp[j].z, z1 = smp[j + 1].z, c0, c1, zc0, zc1;
+                if (s1 <= s0)
+                    continue;
+                c0 = s0 > a ? s0 : a;
+                c1 = s1 < b ? s1 : b;
+                if (c1 <= c0)
+                    continue;
+                zc0 = z0 + (z1 - z0) * (c0 - s0) / (s1 - s0);
+                zc1 = z0 + (z1 - z0) * (c1 - s0) / (s1 - s0);
+                acc += 0.5f * (zc0 + zc1) * (c1 - c0);
+            }
+            zs[i] = b > a ? acc / (b - a) : smp[i].z;
+            dend  = smp[i].s < total - smp[i].s ? smp[i].s : total - smp[i].s;
+            fade  = dend / T;
+            if (fade > 1.0f)
+                fade = 1.0f;
+            {
+                /*  Only a real correction survives: the average also drifts
+                 *  a few centimetres off the ground along a curved road
+                 *  across a slope, where the section's maximum wanders,
+                 *  and that drift had grown a thin wall down a whole hill. */
+                float d = (zs[i] - smp[i].z) * fade;
+                if (d > 0.03f)
+                    d -= 0.03f;
+                else if (d < -0.03f)
+                    d += 0.03f;
+                else
+                    d = 0.0f;
+                zs[i] = smp[i].z + d;
+            }
+        }
+        for (i = 0; i < ns; ++i)
+            smp[i].z = zs[i];
     }
     if (f == F_ROAD && ns >= 2 && net_record(&m->net, smp, ns, total, (int)(s_seg_class + 0.5f), 0) != 0)
         return -1;
@@ -2049,29 +2162,53 @@ static int loft(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, Family f, 
             al_a = total - pv->s;
             al_b = total - cu->s;
         }
-        if (strip_quad_z(m, c, mask_bit, order, a0, a1, b0, b1, pv->z, cu->z, -1.0f, 1.0f, al_a, al_b, ma) != 0)
-            return -1;
-        /* the skirts: where the road stands above the ground at an edge, blocks down to it */
+        {
+            /*  A quad in a cut, the road below the ground at a corner, is
+             *  flagged in its class (4 and up) so the clipping check knows
+             *  the ground over it is meant, held back by the walls below. */
+            float gc[4] = {surface_at_world(c, mask_bit, a0[0], a0[1]), surface_at_world(c, mask_bit, a1[0], a1[1]),
+                           surface_at_world(c, mask_bit, b0[0], b0[1]), surface_at_world(c, mask_bit, b1[0], b1[1])};
+            int   cut   = pv->z < gc[0] - 0.015f || pv->z < gc[1] - 0.015f || cu->z < gc[2] - 0.015f || cu->z < gc[3] - 0.015f ||
+                        pv->z < s_zorig[i - 1] - 0.005f || cu->z < s_zorig[i] - 0.005f;
+            float cls   = s_road_class;
+            if (cut)
+                s_road_class += 4.0f;
+            if (strip_quad_z(m, c, mask_bit, order, a0, a1, b0, b1, pv->z, cu->z, -1.0f, 1.0f, al_a, al_b, ma) != 0)
+                return -1;
+            s_road_class = cls;
+        }
+        /* the skirts: where the road stands above the ground at an edge, blocks down to it;
+         * where it lies below, a retaining wall from the ground down to its edge, facing in */
         for (side = 0; side < 2; ++side)
         {
             static const float blocks[3] = {0.0f, 0.0f, MAT_SKIRT};
+
             const float       *ea = side ? a1 : a0, *eb = side ? b1 : b0;
             float              ga    = surface_at_world(c, mask_bit, ea[0], ea[1]);
             float              gb    = surface_at_world(c, mask_bit, eb[0], eb[1]);
             float              t0[3] = {ea[0], ea[1], pv->z}, t1[3] = {eb[0], eb[1], cu->z};
             float              q0[3] = {ea[0], ea[1], ga}, q1[3] = {eb[0], eb[1], gb};
             float              nrm[3];
-            if (pv->z <= ga + 0.035f && cu->z <= gb + 0.035f)
-                continue;
-            if (q0[2] > t0[2])
-                q0[2] = t0[2];
-            if (q1[2] > t1[2])
-                q1[2] = t1[2];
             nrm[0] = side ? -cu->dir.y : cu->dir.y;
             nrm[1] = side ? cu->dir.x : -cu->dir.x;
             nrm[2] = 0.0f;
-            if (put_wall(m, t0, t1, q0, q1, nrm, order, blocks) != 0)
-                return -1;
+            if (pv->z > ga + 0.035f || cu->z > gb + 0.035f)
+            {
+                if (q0[2] > t0[2])
+                    q0[2] = t0[2];
+                if (q1[2] > t1[2])
+                    q1[2] = t1[2];
+                if (put_wall(m, t0, t1, q0, q1, nrm, order, blocks) != 0)
+                    return -1;
+            }
+            if (pv->z < ga - 0.015f || cu->z < gb - 0.015f)
+            {
+                float u0[3] = {ea[0], ea[1], ga > pv->z ? ga : pv->z}, u1[3] = {eb[0], eb[1], gb > cu->z ? gb : cu->z};
+                float in[3] = {-nrm[0], -nrm[1], 0.0f};
+                /* the embankment's material, which the watertight check leaves out with the strip */
+                if (put_wall(m, u0, u1, t0, t1, in, order, blocks) != 0)
+                    return -1;
+            }
         }
     }
     return 0;
@@ -2312,24 +2449,6 @@ static int node_kind(const RCity *c, const RAtlasLevel *l, Family f, int32_t col
     return n == 1 ? 1 : 0;
 }
 
-/*  Room for a cul-de-sac bulb: the end tile's neighbours that are not
- *  road are open land, nothing built on them (spec 3.10, step 11). */
-static int cul_de_sac_room(const RCity *c, int32_t col, int32_t row)
-{
-    int e;
-    for (e = 0; e < 4; ++e)
-    {
-        int32_t nc = col + (int32_t)ROAD_DU[e], nr = row + (int32_t)ROAD_DV[e];
-        uint8_t b;
-        if (nc < 0 || nr < 0 || nc >= R_MAP || nr >= R_MAP)
-            continue;
-        b = c->xbld[nr * R_MAP + nc];
-        if (b > 0x0Du && !(b >= 0x1Du && b <= 0x2Bu) && !(b >= 0x43u && b <= 0x46u))
-            return 0;
-    }
-    return 1;
-}
-
 /*  Where a segment ends on an end tile, and how.  The tile's art links
  *  that no neighbour returns point at the dead side; what stands there
  *  decides: against a building, a bridge, a tunnel end or a highway
@@ -2514,11 +2633,11 @@ static int walk_segment(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t 
             float h, ang;
             if (at_end ? (kind1 != 1 || square1) : (kind0 != 1 || square0))
                 continue;
-            /*  Spec 3.10, step 11: the turning head is a local road's, and
-             *  only where the tile's other neighbours are open land; an
-             *  avenue or boulevard ends square, a barricade to come. */
-            if (s_seg_class > 0.5f || !cul_de_sac_room(c, at_end ? (int32_t)floorf(pts[n - 1].x) : col, at_end ? (int32_t)floorf(pts[n - 1].y) : row))
-                continue;
+            /*  Every dead end gets its round cap (the user: "all dead end
+             *  roads should have endcaps"); spec 3.10's step 11 keeps the
+             *  turning head for a local road with open land around it, and
+             *  ends an avenue square, but a square end in the middle of a
+             *  tile is a raw edge, so the cap is unconditional. */
             piece_at(&pieces[end], at_end ? pieces[end].len : 0.0f, &pos, &dir);
             if (!at_end)
             {
@@ -2537,7 +2656,7 @@ static int walk_segment(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t 
                     tc = R_MAP - 1;
                 if (tr >= R_MAP)
                     tr = R_MAP - 1;
-                if (strip_fan(m, c, mask_bit, tile_order(c, tc, tr, mask_bit), pos.x, pos.y, ang - 1.5707963f, ang + 1.5707963f, h, h, 0.0f, MAT_ROAD, 8) != 0)
+                if (strip_fan_z(m, c, mask_bit, tile_order(c, tc, tr, mask_bit), pos.x, pos.y, ang - 1.5707963f, ang + 1.5707963f, h, h, 0.0f, MAT_ROAD, 8, 0.03f) != 0)
                     return -1;
             }
         }
@@ -2637,29 +2756,105 @@ static int build_junction(RMesh *m, const RCity *c, uint8_t mask_bit, Family f, 
     float lw    = h * 0.20f; /* the sidewalk along a free side, across 0.8..1       */
     float a0[2] = {cx - h, cy - h}, a1[2] = {cx + h, cy - h}, b0[2] = {cx - h, cy + h}, b1[2] = {cx + h, cy + h};
     int   e;
+    /*  The box stands the hair above the ground the strips do, 0.03 of a
+     *  level: on the ground itself, under arms a hair higher, the oblique
+     *  view showed a line of grass along every side of a rail box. */
+    float zj     = surface_at_world(c, mask_bit, cx, cy) + 0.03f;
     s_road_class = 0.0f; /* the box is plain asphalt; a median ends at the junction */
     if (f == F_ROAD)
         s_junc_ctrl[row * R_MAP + col] = (uint8_t)junction_control(c, col, row, links);
     if (f == F_RAIL)
     {
-        /*  A rail junction is no box: each arm's rails run through to
-         *  the centre, so a T reads as a turnout and a crossing as two
-         *  tracks crossing (a plain box was a brown square with the
-         *  rails stopping at its sides). */
+        /*  A rail junction within its box (the user: "train T crossing
+         *  are incorrect"; three half strips to the centre had crossed
+         *  the branch's rails and ties through the through track's).
+         *  The through line runs across the box whole.  A T is a
+         *  junction of two double-track lines: the branch's inbound
+         *  track, the right-hand one, curves right into the near through
+         *  track, and its outbound track runs on across the near track,
+         *  a diamond, and curves left into the far one, each curve a
+         *  quarter circle of the largest radius the box allows, 0.177 of
+         *  a tile; the spec's turnout (5.4) takes two to four tiles the
+         *  art does not give.  A crossing is two whole strips, a diamond. */
+        int n = link_count(links), eb = -1, ea = -1;
         for (e = 0; e < 4; ++e)
+            if ((links & (1 << e)) && !(links & (1 << ((e + 2) & 3))))
+                eb = e; /* the branch: the arm without an opposite */
+            else if (links & (1 << e))
+                ea = e; /* a through arm */
+        if (n >= 3 && ea >= 0)
         {
-            float su = cx + ROAD_DU[e] * h, sv = cy + ROAD_DV[e] * h;
-            float px = -ROAD_DV[e], py = ROAD_DU[e];
-            float o0[2] = {su - px * h, sv - py * h}, o1[2] = {su + px * h, sv + py * h};
-            float q0[2] = {cx - px * h, cy - py * h}, q1[2] = {cx + px * h, cy + py * h};
-            if (!(links & (1 << e)))
-                continue;
-            if (strip_quad(m, c, mask_bit, order + 0.01f * (float)e, o0, o1, q0, q1, -1.0f, 1.0f, 0.0f, h, mat) != 0)
+            /* the through strip: across along the through arm's normal, along the through axis */
+            float tx = ROAD_DU[ea], ty = ROAD_DV[ea], nx = -ty, ny = tx;
+            float q0[2] = {cx - nx * h - tx * h, cy - ny * h - ty * h}, q1[2] = {cx + nx * h - tx * h, cy + ny * h - ty * h};
+            float p0[2] = {cx - nx * h + tx * h, cy - ny * h + ty * h}, p1[2] = {cx + nx * h + tx * h, cy + ny * h + ty * h};
+            if (strip_quad_z(m, c, mask_bit, order, q0, q1, p0, p1, zj, zj, -1.0f, 1.0f, -h, h, mat) != 0)
                 return -1;
+        }
+        if (n == 4)
+        {
+            /* the other line of the diamond, over the first */
+            float tx = ROAD_DV[ea], ty = -ROAD_DU[ea], nx = -ty, ny = tx;
+            float q0[2] = {cx - nx * h - tx * h, cy - ny * h - ty * h}, q1[2] = {cx + nx * h - tx * h, cy + ny * h - ty * h};
+            float p0[2] = {cx - nx * h + tx * h, cy - ny * h + ty * h}, p1[2] = {cx + nx * h + tx * h, cy + ny * h + ty * h};
+            if (strip_quad_z(m, c, mask_bit, order + 0.03f, q0, q1, p0, p1, zj, zj, -1.0f, 1.0f, -h, h, mat) != 0)
+                return -1;
+        }
+        else if (n == 3 && eb >= 0)
+        {
+            const float tk = 0.133f, r = h - 0.133f, tw = 0.087f; /* the track offset, the curve, half a tie */
+            float       ax = -ROAD_DU[eb], ay = -ROAD_DV[eb];     /* inbound, from the branch's edge to the centre */
+            float       rx = -ay, ry = ax;                        /* to the right of inbound */
+            float       cX, cY, along, L0[2], L1[2], R0[2], R1[2];
+            int         k;
+            /*  The inbound track (right of inbound) curves right into the
+             *  near through track: a quarter circle about the box's corner
+             *  on that side, from the box's edge to its side. */
+            cX = cx + rx * h - ax * h;
+            cY = cy + ry * h - ay * h;
+            for (k = 0; k < 6; ++k)
+            {
+                float t0 = 1.5707963f * (float)k / 6.0f, t1 = 1.5707963f * (float)(k + 1) / 6.0f;
+                float ex0 = -rx * cosf(t0) + ax * sinf(t0), ey0 = -ry * cosf(t0) + ay * sinf(t0);
+                float ex1 = -rx * cosf(t1) + ax * sinf(t1), ey1 = -ry * cosf(t1) + ay * sinf(t1);
+                L0[0] = cX + ex0 * (r - tw), L0[1] = cY + ey0 * (r - tw);
+                R0[0] = cX + ex0 * (r + tw), R0[1] = cY + ey0 * (r + tw);
+                L1[0] = cX + ex1 * (r - tw), L1[1] = cY + ey1 * (r - tw);
+                R1[0] = cX + ex1 * (r + tw), R1[1] = cY + ey1 * (r + tw);
+                if (strip_quad_z(m, c, mask_bit, order + 0.03f, L0, R0, L1, R1, zj, zj, 0.15f, 0.71f, r * t0, r * t1, mat) != 0)
+                    return -1;
+            }
+            /*  The outbound track (left of inbound) runs straight across
+             *  the near track, then curves left into the far one. */
+            {
+                float p0x = cx - rx * tk - ax * h, p0y = cy - ry * tk - ay * h;
+                float p1x = cx - rx * tk + ax * (tk - r), p1y = cy - ry * tk + ay * (tk - r);
+                along = sqrtf((p1x - p0x) * (p1x - p0x) + (p1y - p0y) * (p1y - p0y));
+                L0[0] = p0x - rx * tw, L0[1] = p0y - ry * tw;
+                R0[0] = p0x + rx * tw, R0[1] = p0y + ry * tw;
+                L1[0] = p1x - rx * tw, L1[1] = p1y - ry * tw;
+                R1[0] = p1x + rx * tw, R1[1] = p1y + ry * tw;
+                if (strip_quad_z(m, c, mask_bit, order + 0.03f, L0, R0, L1, R1, zj, zj, 0.15f, 0.71f, 0.0f, along, mat) != 0)
+                    return -1;
+                cX = p1x - rx * r;
+                cY = p1y - ry * r;
+            }
+            for (k = 0; k < 6; ++k)
+            {
+                float t0 = 1.5707963f * (float)k / 6.0f, t1 = 1.5707963f * (float)(k + 1) / 6.0f;
+                float ex0 = rx * cosf(t0) + ax * sinf(t0), ey0 = ry * cosf(t0) + ay * sinf(t0);
+                float ex1 = rx * cosf(t1) + ax * sinf(t1), ey1 = ry * cosf(t1) + ay * sinf(t1);
+                L0[0] = cX + ex0 * (r - tw), L0[1] = cY + ey0 * (r - tw);
+                R0[0] = cX + ex0 * (r + tw), R0[1] = cY + ey0 * (r + tw);
+                L1[0] = cX + ex1 * (r - tw), L1[1] = cY + ey1 * (r - tw);
+                R1[0] = cX + ex1 * (r + tw), R1[1] = cY + ey1 * (r + tw);
+                if (strip_quad_z(m, c, mask_bit, order + 0.03f, L0, R0, L1, R1, zj, zj, 0.15f, 0.71f, along + r * t0, along + r * t1, mat) != 0)
+                    return -1;
+            }
         }
         return 0;
     }
-    if (strip_quad(m, c, mask_bit, order, a0, a1, b0, b1, 0.5f, 0.5f, -1.0f, -1.0f, mat) != 0)
+    if (strip_quad_z(m, c, mask_bit, order, a0, a1, b0, b1, zj, zj, 0.5f, 0.5f, -1.0f, -1.0f, mat) != 0)
         return -1;
     for (e = 0; e < 4; ++e)
     {
@@ -2671,7 +2866,7 @@ static int build_junction(RMesh *m, const RCity *c, uint8_t mask_bit, Family f, 
             float o0[2] = {su - px * h - ROAD_DU[e] * lw, sv - py * h - ROAD_DV[e] * lw};
             float o1[2] = {su + px * h - ROAD_DU[e] * lw, sv + py * h - ROAD_DV[e] * lw};
             float q0[2] = {su - px * h, sv - py * h}, q1[2] = {su + px * h, sv + py * h};
-            if (strip_quad(m, c, mask_bit, order + 0.02f, o0, o1, q0, q1, 0.80f, 1.0f, -1.0f, -1.0f, mat) != 0)
+            if (strip_quad_z(m, c, mask_bit, order + 0.02f, o0, o1, q0, q1, zj, zj, 0.80f, 1.0f, -1.0f, -1.0f, mat) != 0)
                 return -1;
         }
         else if (f == F_ROAD)
@@ -2716,9 +2911,7 @@ static int build_junction(RMesh *m, const RCity *c, uint8_t mask_bit, Family f, 
                     tri[1][1] = iv + sw * sinf(ta);
                     tri[2][0] = iu + sw * cosf(tb);
                     tri[2][1] = iv + sw * sinf(tb);
-                    tri[0][2] = surface_at_world(c, mask_bit, tri[0][0], tri[0][1]);
-                    tri[1][2] = surface_at_world(c, mask_bit, tri[1][0], tri[1][1]);
-                    tri[2][2] = surface_at_world(c, mask_bit, tri[2][0], tri[2][1]);
+                    tri[0][2] = tri[1][2] = tri[2][2] = zj;
                     /* over the box, which a sidewalk face otherwise lies under */
                     if (put_tri_r2(m, (const float (*)[3])tri, NULL, order + 0.15f, rc, ref, ref2, 0) != 0)
                         return -1;
@@ -3393,6 +3586,8 @@ int r_mesh_check_roads(const RMesh *m, int verbose)
         int              a, b;
         if (!(mat > 6.5f && mat < 7.5f) && !(mat > 9.5f && mat < 11.5f) && !(mat > 12.5f && mat < 14.5f) && !(mat > 15.5f))
             continue; /* the bands, the sidewalk corners, the crossing surface and approach; not props, not vehicles */
+        if (v[0].nrm[3] >= 3.5f)
+            continue; /* a quad in a cut: the ground over it is meant, held back by retaining walls */
         /* strictly inside the face: a sample on an edge would read the
          * tile across it, which may stand higher behind a wall */
         for (a = 1; a < N; ++a)
@@ -3922,6 +4117,48 @@ static void train_place(const RRoadNet *net, const RTrain *tr, float *x, float *
 }
 
 /*  Onward from a rail node: the arm that continues straightest. */
+/*  The path across a junction box from the entry point, heading (hx,
+ *  hy), to the exit point, heading (gx, gy): straight through when the
+ *  headings agree, else a quadratic curve tangent to both arms through
+ *  the corner where their lines meet, the junction's own curve, so a
+ *  turning vehicle bends through the box as the T's rails and the
+ *  road's curb returns do rather than cutting the corner on a chord.
+ *  Returns 1 and the corner for a turn. */
+static int box_curve(float ex, float ey, float hx, float hy, float xx, float xy, float gx, float gy, float *cx, float *cy)
+{
+    V2 c;
+    if (hx * gx + hy * gy > 0.7f)
+        return 0;
+    if (!line_meet((V2){ex, ey}, (V2){hx, hy}, (V2){xx, xy}, (V2){gx, gy}, &c))
+        return 0;
+    *cx = c.x;
+    *cy = c.y;
+    return 1;
+}
+
+static void box_point(float ex, float ey, float cx, float cy, float xx, float xy, float t, float *x, float *y, float *dx, float *dy)
+{
+    float u = 1.0f - t;
+    *x      = u * u * ex + 2.0f * u * t * cx + t * t * xx;
+    *y      = u * u * ey + 2.0f * u * t * cy + t * t * xy;
+    *dx     = 2.0f * u * (cx - ex) + 2.0f * t * (xx - cx);
+    *dy     = 2.0f * u * (cy - ey) + 2.0f * t * (xy - cy);
+}
+
+static float box_length(float ex, float ey, float cx, float cy, float xx, float xy)
+{
+    float len = 0.0f, px = ex, py = ey, x, y, dx, dy;
+    int   k;
+    for (k = 1; k <= 8; ++k)
+    {
+        box_point(ex, ey, cx, cy, xx, xy, (float)k / 8.0f, &x, &y, &dx, &dy);
+        len += sqrtf((x - px) * (x - px) + (y - py) * (y - py));
+        px = x;
+        py = y;
+    }
+    return len;
+}
+
 static int train_turn(const RRoadNet *net, int32_t nc, int32_t nr, int from_seg, float hx, float hy, int *out_seg, int *out_dir)
 {
     float    best = -2.0f;
@@ -4124,6 +4361,67 @@ static int trains_init(RTraffic *t, const RMesh *m, const RCity *c)
     return 0;
 }
 
+/*  Whether a signal's block is occupied (spec 5.6): any car of any
+ *  train but `skip` stands within the ten tiles ahead of the signal on
+ *  its segment in the direction it governs, or just behind it.  Lit red
+ *  for the lamp, and a train keeps out of it. */
+static int rail_block_occupied(const RTraffic *t, const RRailSig *sg2, int skip)
+{
+    uint32_t k;
+    for (k = 0; k < t->n_trains; ++k)
+    {
+        const RTrain *tr = &t->trains[k];
+        int           q;
+        if ((int)k == skip)
+            continue;
+        for (q = 0; q < tr->n_cars; ++q)
+        {
+            const RTrailPt *pt   = NULL;
+            float           want = tr->d - (float)q * TRAIN_PITCH;
+            uint32_t        j;
+            for (j = 0; j < tr->trail_n; ++j)
+            {
+                pt = trail_at(tr, j);
+                if (pt->d <= want)
+                    break;
+            }
+            if (!pt || j >= tr->trail_n)
+                continue;
+            if (pt->seg == sg2->seg)
+            {
+                float ahead = (float)sg2->dir * (pt->s - sg2->s);
+                if (ahead > -0.6f && ahead < 10.0f)
+                    return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+/*  The distance along its segment to the nearest signal ahead of a
+ *  train that governs its direction and stands at red for it, or -1. */
+static float red_signal_ahead(const RTraffic *t, const RMesh *m, int train, float reach)
+{
+    const RTrain *tr   = &t->trains[train];
+    float         best = -1.0f;
+    uint32_t      i;
+    for (i = 0; i < m->n_rsigs; ++i)
+    {
+        const RRailSig *sg2 = &m->rsigs[i];
+        float           a;
+        if (sg2->seg != tr->seg || sg2->dir != tr->dir)
+            continue;
+        a = (float)tr->dir * (sg2->s - tr->s);
+        if (a < -0.02f || a > reach || (best >= 0.0f && a >= best))
+            continue;
+        if (rail_block_occupied(t, sg2, train))
+            best = a;
+    }
+    return best;
+}
+
+static int s_sig_held;
+
 static void trains_step(RTraffic *t, const RMesh *m, float dt)
 {
     const RRoadNet *net = &m->railnet;
@@ -4133,67 +4431,134 @@ static void trains_step(RTraffic *t, const RMesh *m, float dt)
         RTrain        *tr = &t->trains[i];
         const RNetSeg *sg;
         float          step = tr->speed * dt, x, y, z, hx, hy, to_end;
-        int            end;
+        int            end, hops = 0;
+        float          d0;
         if (tr->seg < 0 || (uint32_t)tr->seg >= net->n_segs)
             continue;
-        sg     = &net->segs[tr->seg];
-        end    = tr->dir > 0 ? 1 : 0;
-        to_end = tr->dir > 0 ? sg->total - tr->s : tr->s;
-        if (step >= to_end)
+        /*  A frame's travel is spent piece by piece, not all on the
+         *  segment the train started on.  Reaching a junction used to
+         *  `continue` -- which lands on the NEXT TRAIN -- so the box was
+         *  crossed whole in one frame and whatever was left of the step
+         *  was thrown away.  At a T that reads as the train jumping the
+         *  junction (the user).  Now the loop keeps going with what is
+         *  left, and the box costs its own arc length like any other
+         *  stretch of track.  The hop count is a guard: a train cannot
+         *  cross more than a few junctions in one frame unless the
+         *  network is degenerate, and spinning here would hang the
+         *  renderer. */
+        while (step > 0.0f && hops++ < 8)
         {
-            int nseg, ndir;
-            train_place(net, tr, &x, &y, &z, &hx, &hy);
-            if (sg->kind[end] == 2 && train_turn(net, sg->node[end][0], sg->node[end][1], tr->seg, hx, hy, &nseg, &ndir))
+            sg     = &net->segs[tr->seg];
+            end    = tr->dir > 0 ? 1 : 0;
+            to_end = tr->dir > 0 ? sg->total - tr->s : tr->s;
+            /*  A red signal ahead (spec 5.6): the train stops a hair short of
+             *  it and waits for the block to clear, so a train never runs
+             *  into the one ahead on its track. */
             {
-                /* across the junction tile onto the next arm: the path point at the box's far side */
-                RTrain probe = *tr;
-                float  x1, y1, z1, h1x, h1y;
-                probe.seg = nseg;
-                probe.dir = ndir;
-                probe.s   = ndir > 0 ? 0.0f : net->segs[nseg].total;
-                train_place(net, &probe, &x1, &y1, &z1, &h1x, &h1y);
-                tr->d += sqrtf((x1 - x) * (x1 - x) + (y1 - y) * (y1 - y)) + to_end;
-                tr->seg = nseg;
-                tr->dir = ndir;
-                tr->s   = probe.s;
-                trail_push(tr, x1, y1, z1, h1x, h1y, tr->d, tr->seg, tr->s, tr->dir);
-                continue;
-            }
-            /* a dead end or a carrier: the train reverses, its tail the new head */
-            {
-                float px[32], py[32], pz[32], phx[32], phy[32];
-                int   q, nc = tr->n_cars;
-                for (q = 0; q < nc; ++q)
-                    train_car_at(tr, (float)q * TRAIN_PITCH, &px[q], &py[q], &pz[q], &phx[q], &phy[q]);
-                tr->trail_n = tr->trail_head = 0;
-                tr->d                        = 0.0f;
-                for (q = 0; q < nc; ++q)
+                float a = red_signal_ahead(t, m, (int)i, 2.0f);
+                if (a >= 0.0f)
                 {
-                    int r = nc - 1 - q; /* the old tail first, the old head last */
-                    trail_push(tr, px[r], py[r], pz[r], -phx[r], -phy[r], (float)q * TRAIN_PITCH, tr->seg, tr->s, -tr->dir);
-                }
-                tr->d = (float)(nc - 1) * TRAIN_PITCH;
-                /* the new head: the old tail's place on the track, found afresh */
-                {
-                    int32_t seg2;
-                    float   s2, dx2, dy2;
-                    if (railnet_nearest(net, px[nc - 1], py[nc - 1], &seg2, &s2, &dx2, &dy2))
+                    float room = a - 0.06f;
+                    if (room < 0.0f)
+                        room = 0.0f;
+                    if (step > room)
                     {
-                        tr->seg = seg2;
-                        tr->s   = s2;
-                        tr->dir = (-phx[nc - 1] * dx2 - phy[nc - 1] * dy2) >= 0.0f ? 1 : -1;
+                        step = room;
+                        ++s_sig_held;
+                    }
+                }
+            }
+            if (step >= to_end && step > 0.0f)
+            {
+                int nseg, ndir;
+                d0 = tr->d; /* what the crossing costs, measured after */
+                train_place(net, tr, &x, &y, &z, &hx, &hy);
+                if (sg->kind[end] == 2 && train_turn(net, sg->node[end][0], sg->node[end][1], tr->seg, hx, hy, &nseg, &ndir))
+                {
+                    /* across the junction tile onto the next arm: the path point at the box's far side */
+                    RTrain probe = *tr;
+                    float  x1, y1, z1, h1x, h1y, ex, ey, ez, ehx, ehy, ccx, ccy;
+                    /* the entry point: this arm's end */
+                    probe.s = tr->dir > 0 ? sg->total : 0.0f;
+                    train_place(net, &probe, &ex, &ey, &ez, &ehx, &ehy);
+                    probe.seg = nseg;
+                    probe.dir = ndir;
+                    probe.s   = ndir > 0 ? 0.0f : net->segs[nseg].total;
+                    train_place(net, &probe, &x1, &y1, &z1, &h1x, &h1y);
+                    tr->d += to_end;
+                    trail_push(tr, ex, ey, ez, ehx, ehy, tr->d, tr->seg, tr->dir > 0 ? sg->total : 0.0f, tr->dir);
+                    tr->seg = nseg;
+                    tr->dir = ndir;
+                    tr->s   = probe.s;
+                    if (box_curve(ex, ey, ehx, ehy, x1, y1, h1x, h1y, &ccx, &ccy))
+                    {
+                        /* a turn: the curve through the corner, eight points */
+                        float px = ex, py = ey;
+                        int   k;
+                        for (k = 1; k <= 8; ++k)
+                        {
+                            float qx, qy, qdx, qdy, ql, tt = (float)k / 8.0f;
+                            box_point(ex, ey, ccx, ccy, x1, y1, tt, &qx, &qy, &qdx, &qdy);
+                            ql = sqrtf(qdx * qdx + qdy * qdy);
+                            if (ql > 1e-6f)
+                            {
+                                qdx /= ql;
+                                qdy /= ql;
+                            }
+                            tr->d += sqrtf((qx - px) * (qx - px) + (qy - py) * (qy - py));
+                            trail_push(tr, qx, qy, ez + (z1 - ez) * tt, qdx, qdy, tr->d, tr->seg, tr->s, tr->dir);
+                            px = qx;
+                            py = qy;
+                        }
                     }
                     else
-                        tr->dir = -tr->dir;
+                    {
+                        tr->d += sqrtf((x1 - ex) * (x1 - ex) + (y1 - ey) * (y1 - ey));
+                        trail_push(tr, x1, y1, z1, h1x, h1y, tr->d, tr->seg, tr->s, tr->dir);
+                    }
+                    /*  tr->d has grown by the run to the end plus the box:
+                     *  that is exactly what this frame has spent. */
+                    step -= tr->d - d0;
+                    continue;
                 }
-                continue;
+                /* a dead end or a carrier: the train reverses, its tail the new head */
+                {
+                    float px[32], py[32], pz[32], phx[32], phy[32];
+                    int   q, nc = tr->n_cars;
+                    for (q = 0; q < nc; ++q)
+                        train_car_at(tr, (float)q * TRAIN_PITCH, &px[q], &py[q], &pz[q], &phx[q], &phy[q]);
+                    tr->trail_n = tr->trail_head = 0;
+                    tr->d                        = 0.0f;
+                    for (q = 0; q < nc; ++q)
+                    {
+                        int r = nc - 1 - q; /* the old tail first, the old head last */
+                        trail_push(tr, px[r], py[r], pz[r], -phx[r], -phy[r], (float)q * TRAIN_PITCH, tr->seg, tr->s, -tr->dir);
+                    }
+                    tr->d = (float)(nc - 1) * TRAIN_PITCH;
+                    /* the new head: the old tail's place on the track, found afresh */
+                    {
+                        int32_t seg2;
+                        float   s2, dx2, dy2;
+                        if (railnet_nearest(net, px[nc - 1], py[nc - 1], &seg2, &s2, &dx2, &dy2))
+                        {
+                            tr->seg = seg2;
+                            tr->s   = s2;
+                            tr->dir = (-phx[nc - 1] * dx2 - phy[nc - 1] * dy2) >= 0.0f ? 1 : -1;
+                        }
+                        else
+                            tr->dir = -tr->dir;
+                    }
+                    step = 0.0f; /* reversing ends the frame */
+                    continue;
+                }
             }
+            tr->s += (float)tr->dir * step;
+            tr->d += step;
+            train_place(net, tr, &x, &y, &z, &hx, &hy);
+            if (tr->trail_n == 0 || tr->d - trail_at(tr, 0)->d >= 0.03f)
+                trail_push(tr, x, y, z, hx, hy, tr->d, tr->seg, tr->s, tr->dir);
+            step = 0.0f;
         }
-        tr->s += (float)tr->dir * step;
-        tr->d += step;
-        train_place(net, tr, &x, &y, &z, &hx, &hy);
-        if (tr->trail_n == 0 || tr->d - trail_at(tr, 0)->d >= 0.03f)
-            trail_push(tr, x, y, z, hx, hy, tr->d, tr->seg, tr->s, tr->dir);
     }
 }
 
@@ -4245,28 +4610,44 @@ static int put_gate_state(RMesh *m, const RCity *c, uint8_t mask_bit, float orde
     float g  = surface_at_world(c, mask_bit, x, y);
     float bx = -fx, by = -fy;
     float wu = -by, wv = bx;
-    float ph  = (float)(((int)(x * 3.0f) + (int)(y * 5.0f)) & 7) / 8.0f;
-    int   lit = angle < 87.5f;
     float px = x + wu * 0.045f, py = y + wv * 0.045f;
     float ca = cosf(angle * 3.14159265f / 180.0f), sa = sinf(angle * 3.14159265f / 180.0f);
     float tx = px + wu * arm_len * ca, ty = py + wv * arm_len * ca, tz = g + 0.13f + arm_len * sa * 0.53f;
-    float t0[3] = {px, py, g + 0.13f + 0.006f}, t1[3] = {tx, ty, tz + 0.006f};
-    float b0[3] = {px, py, g + 0.13f - 0.006f}, b1[3] = {tx, ty, tz - 0.006f};
-    float nrm[3] = {bx, by, 0.0f};
-    float col[3] = {11.0f, 0.0f, MAT_LAMP};
+    /*  The arm: a bar 0.02 of a tile wide and 0.04 of a level deep, its
+     *  face to the approach and its top, red and white stripes (lamp
+     *  code 11, in the channel the lamp material reads), every face
+     *  through the tile clipper since the bar reaches across the lane
+     *  into the next tile.  It had been a hair of 0.006 with its code in
+     *  the wrong channel, a white thread no zoom could show. */
+    float col[3] = {0.0f, 11.0f, MAT_LAMP}, ref[3] = {0.0f, 0.0f, 0.0f}, ref2[3] = {11.0f, 11.0f, 11.0f};
+    float ph  = (float)(((int)(x * 3.0f) + (int)(y * 5.0f)) & 7) / 8.0f;
+    int   lit = angle < 87.5f;
     (void)time;
     if (put_lamp_face(m, order, x + bx * 0.012f + wu * 0.045f, y + by * 0.012f + wv * 0.045f, g, 0.293f, bx, by, 0.011f, ph, lit ? 8.0f : 12.0f) != 0 ||
         put_lamp_face(m, order, x + bx * 0.012f - wu * 0.045f, y + by * 0.012f - wv * 0.045f, g, 0.293f, bx, by, 0.011f, ph, lit ? 9.0f : 12.0f) != 0)
         return -1;
-    /* the arm: a ribbon seen from the approach and one seen from above */
-    if (put_wall_r2(m, t0, t1, b0, b1, nrm, order + 0.05f, col, 0.0f, 0.0f, 0.0f, 0.0f) != 0)
-        return -1;
     {
-        float l0[3] = {px - bx * 0.006f, py - by * 0.006f, g + 0.13f}, l1[3] = {tx - bx * 0.006f, ty - by * 0.006f, tz};
-        float r0[3] = {px + bx * 0.006f, py + by * 0.006f, g + 0.13f}, r1[3] = {tx + bx * 0.006f, ty + by * 0.006f, tz};
-        float up[3] = {0.0f, 0.0f, 1.0f};
-        if (put_wall_r2(m, l0, l1, r0, r1, up, order + 0.05f, col, 0.0f, 0.0f, 0.0f, 0.0f) != 0)
-            return -1;
+        const float hw = 0.010f, hd = 0.02f; /* half the width across the approach, half the depth */
+        float       a0[3] = {px - bx * hw, py - by * hw, g + 0.13f + hd}, a1[3] = {tx - bx * hw, ty - by * hw, tz + hd};
+        float       b0[3] = {px - bx * hw, py - by * hw, g + 0.13f - hd}, b1[3] = {tx - bx * hw, ty - by * hw, tz - hd};
+        float       c0[3] = {px + bx * hw, py + by * hw, g + 0.13f + hd}, c1[3] = {tx + bx * hw, ty + by * hw, tz + hd};
+        float       nrm[3] = {bx, by, 0.0f}, up[3] = {0.0f, 0.0f, 1.0f}, t3[3][3];
+#define ARM_TRI(A, B, C, N)                                                                                  \
+    do                                                                                                       \
+    {                                                                                                        \
+        memcpy(t3[0], (A), sizeof t3[0]);                                                                    \
+        memcpy(t3[1], (B), sizeof t3[1]);                                                                    \
+        memcpy(t3[2], (C), sizeof t3[2]);                                                                    \
+        if (put_tri_road_n(m, c, mask_bit, order + 0.05f, (const float (*)[3])t3, (N), col, ref, ref2) != 0) \
+            return -1;                                                                                       \
+    } while (0)
+        /* the face toward the approach (the far side is the post's, unseen) */
+        ARM_TRI(a0, a1, b1, nrm);
+        ARM_TRI(a0, b1, b0, nrm);
+        /* the top */
+        ARM_TRI(a0, c0, c1, up);
+        ARM_TRI(a0, c1, a1, up);
+#undef ARM_TRI
     }
     return 0;
 }
@@ -4413,9 +4794,10 @@ void r_traffic_step(RTraffic *t, const RMesh *m, float dt, float time)
                     fprintf(stderr, "xing down: c%d r%d angle %.0f\n", (int)m->xings[q].col, (int)m->xings[q].row, (double)t->gate[q]);
                 ++down;
             }
-        fprintf(stderr, "xing: t %.2f gates down %u cars held %d\n", (double)time, down, s_xing_held);
+        fprintf(stderr, "xing: t %.2f gates down %u cars held %d trains held at signals %d\n", (double)time, down, s_xing_held, s_sig_held);
     }
     s_xing_held = 0;
+    s_sig_held  = 0;
     if (!t->n || !net->n_segs)
         return;
     qsort(t->cars, t->n, sizeof *t->cars, car_order_cmp);
@@ -4527,7 +4909,9 @@ void r_traffic_step(RTraffic *t, const RMesh *m, float dt, float time)
                     car->bx1      = x1;
                     car->by1      = y1;
                     car->bz1      = z1;
-                    car->blen     = sqrtf((x1 - car->bx0) * (x1 - car->bx0) + (y1 - car->by0) * (y1 - car->by0));
+                    car->bcurve   = box_curve(car->bx0, car->by0, hx, hy, x1, y1, h1x, h1y, &car->bcx, &car->bcy);
+                    car->blen     = car->bcurve ? box_length(car->bx0, car->by0, car->bcx, car->bcy, x1, y1)
+                                                : sqrtf((x1 - car->bx0) * (x1 - car->bx0) + (y1 - car->by0) * (y1 - car->by0));
                     car->bt       = 0.0f;
                     car->in_box   = 1;
                     car->next_seg = nseg;
@@ -4563,11 +4947,20 @@ int r_traffic_build(RTraffic *t, const RMesh *m, const RCity *c)
         if (car->in_box)
         {
             float f = car->blen > 0.0f ? car->bt / car->blen : 1.0f;
-            x       = car->bx0 + (car->bx1 - car->bx0) * f;
-            y       = car->by0 + (car->by1 - car->by0) * f;
-            z       = car->bz0 + (car->bz1 - car->bz0) * f;
-            hx      = car->bx1 - car->bx0;
-            hy      = car->by1 - car->by0;
+            if (f > 1.0f)
+                f = 1.0f;
+            if (car->bcurve)
+                box_point(car->bx0, car->by0, car->bcx, car->bcy, car->bx1, car->by1, f, &x, &y, &hx, &hy);
+            else
+            {
+                x  = car->bx0 + (car->bx1 - car->bx0) * f;
+                y  = car->by0 + (car->by1 - car->by0) * f;
+                hx = car->bx1 - car->bx0;
+                hy = car->by1 - car->by0;
+            }
+            z = car->bz0 + (car->bz1 - car->bz0) * f;
+            if (car->bcurve && getenv("SC2K_BOX_DEBUG"))
+                fprintf(stderr, "box car %u f %.2f at (%.3f,%.3f) h (%.2f,%.2f) entry (%.3f,%.3f) corner (%.3f,%.3f) exit (%.3f,%.3f)\n", i, (double)f, (double)x, (double)y, (double)hx, (double)hy, (double)car->bx0, (double)car->by0, (double)car->bcx, (double)car->bcy, (double)car->bx1, (double)car->by1);
             {
                 float l = sqrtf(hx * hx + hy * hy);
                 if (l > 1e-5f)
@@ -4657,36 +5050,10 @@ int r_traffic_build(RTraffic *t, const RMesh *m, const RCity *c)
         const RRailSig *sg2 = &m->rsigs[i];
         float           g   = surface_at_world(c, mask_bit, sg2->x, sg2->y);
         int32_t         tc = (int32_t)floorf(sg2->x), tr2 = (int32_t)floorf(sg2->y);
-        int             red = 0;
-        uint32_t        k;
+        int             red;
         if (tc < 0 || tr2 < 0 || tc >= R_MAP || tr2 >= R_MAP)
             continue;
-        for (k = 0; k < t->n_trains && !red; ++k)
-        {
-            const RTrain *tr = &t->trains[k];
-            int           q;
-            for (q = 0; q < tr->n_cars && !red; ++q)
-            {
-                const RTrailPt *pt;
-                float           back = (float)q * TRAIN_PITCH, want = tr->d - back;
-                uint32_t        j;
-                /* the car's segment and distance: the ring point just behind it */
-                for (j = 0; j < tr->trail_n; ++j)
-                {
-                    pt = trail_at(tr, j);
-                    if (pt->d <= want)
-                        break;
-                }
-                if (j >= tr->trail_n)
-                    continue;
-                if (pt->seg == sg2->seg)
-                {
-                    float ahead = (float)sg2->dir * (pt->s - sg2->s);
-                    if (ahead > -0.6f && ahead < 10.0f)
-                        red = 1;
-                }
-            }
-        }
+        red = rail_block_occupied(t, sg2, -1);
         if (put_lamp_face(&t->scratch, tile_order(c, tc, tr2, mask_bit) + 0.3f, sg2->x + sg2->fx * 0.015f, sg2->y + sg2->fy * 0.015f, g, 0.56f, sg2->fx, sg2->fy, 0.014f, 0.0f, red ? 7.0f : 6.0f) != 0)
             return -1;
     }

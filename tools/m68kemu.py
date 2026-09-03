@@ -290,6 +290,13 @@ class Emu:
         #  the rest of the shake: it points QuickDraw at the city
         #  bitmap and blits it back and forth 24 times.
         '_SetPort':      (4, 0, 0),
+        #  GetPort takes a VAR parameter and the callers all pair it
+        #  with a SetPort to put back what they found.  SetPort is
+        #  already a no-op, so handing back a null port is consistent:
+        #  nothing reads it, and leaving the caller's variable
+        #  uninitialised would be worse than a value that is plainly
+        #  not a port.  $F72 reaches this on 1898 around tick 80.
+        '_GetPort':      (4, 0, 0),
         '_CopyBits':     (22, 0, 0),
         #  $16B74 calls idlePump between diagonals, which asks for the
         #  front window before animating the palette.  Answering NULL

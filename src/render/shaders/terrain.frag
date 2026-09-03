@@ -384,7 +384,7 @@ void main()
         float px      = fwidth(v_col.r);
         float line    = clamp(px, 0.02, 0.08); /* capped: fwidth swells in sliver triangles */
         float cb      = clamp(px, 0.04, 0.12);
-        float cls     = v_curv;
+        float cls     = mod(v_curv, 4.0); /* 4 and up flags a cut for the clipping check */
         /*  Lit so that a flat strip is exactly the sprite's colour: the
          *  sun's product on level ground divides out, and only a slope
          *  shades away from it. */
