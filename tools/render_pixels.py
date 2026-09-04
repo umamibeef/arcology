@@ -77,7 +77,7 @@ def render(city, crop, underground=False, view=0, bg=0, zoneflag=None,
            whole=False, zoom=2):
     cx, cy, cw, ch = crop
     #  arcology --soft puts its canvas at ox = 128 * tile_w / 2, oy = 200 * tile_h
-    #  / 16 (r_soft.c $645/$650); match it so both sides land on the same
+    #  / 16 (soft.c $645/$650); match it so both sides land on the same
     #  coordinates at every zoom, not just 32.
     tw, th = 8 << zoom, 4 << zoom
     ox, oy = 128 * tw // 2, 200 * th // 16

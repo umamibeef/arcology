@@ -397,7 +397,7 @@ def build_atlas(shapes, base, tile_w, tile_h, alt_step, width, palette):
         #  is subtracting the sprite's full height.  A uniform offset is
         #  invisible, so keep the canvas framing by carrying h - tile_h;
         #  what matters is that it is the sprite's OWN height, and that the
-        #  underground overlays use the ground sprite's instead (r_soft.c).
+        #  underground overlays use the ground sprite's instead (soft.c).
         meta[name] = {
             "id": sid,
             "tile": sid - base,

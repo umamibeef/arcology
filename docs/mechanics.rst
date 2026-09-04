@@ -323,7 +323,7 @@ Only after the shape is known does ``fixTerrain`` decide whether the tile is lan
 
 A tile *at or above* the water level is dry and keeps its slope code unshifted. Below it, four things happen at once: XBIT bit 2 goes on, the water level is written into ALTM bits 5–9, whatever stood there is cleared, and the code is shifted — by ``$20`` when the tile sits exactly one step under the waterline, which is the shoreline, and by ``$10`` when it is deeper.
 
-So XTER is really three bands of fourteen, and reading a tile’s XTER tells you its shape and its relation to the water in one byte. In the shipped corpus that is exactly what turns up: ``$00``–``$0D`` dry, ``$10``–``$1D`` submerged, ``$20``–``$2C`` shore.
+So XTER is really three bands of fourteen, and reading a tile’s XTER tells you its shape and its relation to the water in one byte. In the shipped the shipped cities that is exactly what turns up: ``$00``–``$0D`` dry, ``$10``–``$1D`` submerged, ``$20``–``$2C`` shore.
 
 .. admonition:: Two bands are unaccounted for
    :class: warning

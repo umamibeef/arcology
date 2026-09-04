@@ -249,7 +249,7 @@ It is **not** a rotation, which is the obvious guess and the wrong one. :ref:`$9
 
 The 49-entry permutation is three eight-cycles, a four-cycle and a fixed point, then an eight-cycle, a four-cycle and an eight-cycle running the *other* way — several independent ramps flowing in opposite directions, not one block turning. The 15-entry one (``A5-0x644E``) is seven swaps and a fixed point: a blink, not a flow. Turning all 49 as a single run, which is what a rotation does, mixes ramps that have nothing to do with each other.
 
-The reconstruction generates both permutations into ``r_tables.c`` and applies them in ``r_atlas_animate()``; ``--phase N`` advances N steps, and ``tools/gen_anim.py`` writes a GIF at the game’s own 12-tick cadence. **The result is still not oracle-verified**: a palette-only effect leaves every index identical, so the pixel comparison has nothing to compare. The permutation and the timing are read from the listing; that the result *looks* right is a judgement, not a measurement.
+The reconstruction generates both permutations into ``tables.c`` and applies them in ``atlas_animate()``; ``--phase N`` advances N steps, and ``tools/gen_anim.py`` writes a GIF at the game’s own 12-tick cadence. **The result is still not oracle-verified**: a palette-only effect leaves every index identical, so the pixel comparison has nothing to compare. The permutation and the timing are read from the listing; that the result *looks* right is a judgement, not a measurement.
 
 Verification
 ------------

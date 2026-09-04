@@ -26,9 +26,9 @@
 #include <string.h>
 
 int sc2k_dev_main(int argc, char **argv);
-int r_atlas_main(int argc, char **argv);
-int r_soft_main(int argc, char **argv);
-int r_game_main(int argc, char **argv);
+int atlas_main(int argc, char **argv);
+int soft_main(int argc, char **argv);
+int game_main(int argc, char **argv);
 
 /*  Every mode sc2k/main.c answers to.  Keep this in step with the
  *  `strcmp(argv[1], "--...")` ladder there -- a mode missing from this
@@ -66,9 +66,9 @@ int main(int argc, char **argv)
     if (argc >= 2)
     {
         if (!strcmp(argv[1], "--atlas"))
-            return r_atlas_main(argc - 1, argv + 1);
+            return atlas_main(argc - 1, argv + 1);
         if (!strcmp(argv[1], "--soft"))
-            return r_soft_main(argc - 1, argv + 1);
+            return soft_main(argc - 1, argv + 1);
         if (!strcmp(argv[1], "--modes"))
         {
             arc_usage();
@@ -83,5 +83,5 @@ int main(int argc, char **argv)
             if (!strcmp(argv[1], ARC_DEV_MODES[i]))
                 return sc2k_dev_main(argc, argv);
     }
-    return r_game_main(argc, argv);
+    return game_main(argc, argv);
 }

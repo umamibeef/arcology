@@ -6,7 +6,7 @@ corner is one altitude step up.  That gives four corner heights per code;
 what it does not give is how the game's artists cut the non-planar tiles
 into faces, and that decides the silhouette.  This script builds each code
 as faces -- the top, split along one diagonal or the other, and the two
-walls under the near edges -- projects it exactly as r_soft.c does, and
+walls under the near edges -- projects it exactly as soft.c does, and
 compares the union of the projected faces against the sprite's opaque
 mask.  The diagonal that reproduces the sprite is the one the mesh uses.
 

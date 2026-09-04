@@ -3,7 +3,7 @@
  *  them needs a window, so the binary is still worth building. */
 #include <stdio.h>
 
-int r_game_main(int argc, char **argv)
+int game_main(int argc, char **argv)
 {
     (void)argc;
     (void)argv;

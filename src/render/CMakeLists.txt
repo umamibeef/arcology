@@ -19,7 +19,7 @@ project(arcology
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
-#  C++ is used only to host Dear ImGui (r_ui.cpp); everything else is C99.
+#  C++ is used only to host Dear ImGui (ui.cpp); everything else is C99.
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -48,7 +48,7 @@ endif()
 # ---- vendored third party ------------------------------------------------
 #  lodepng reads the indexed PNGs, including their palette and tRNS, which
 #  stb_image cannot do -- it expands palettes and hands back RGBA.  jsmn is
-#  header-only and is compiled into r_atlas.c.  Both are ISO C and both are
+#  header-only and is compiled into atlas.c.  Both are ISO C and both are
 #  built with warnings off: they are not ours to fix.
 #  The simulation comes first: it defines sc2k_vendor (lodepng), which
 #  arco.c needs for deflate and the renderer needs for PNG.  One
@@ -63,10 +63,10 @@ endif()
 #  generated tables.  The executable's own sources are listed further
 #  down, with the SDL3 it needs.
 add_library(sc2krender STATIC
-    r_atlas.c     # the sprite atlas and its manifest
-    r_city.c      # a City as the renderer wants to see it
-    r_soft.c      # the sweep and the software rasteriser
-    r_tables.c    # GENERATED from the A5 image - do not edit
+    atlas.c     # the sprite atlas and its manifest
+    city.c      # a City as the renderer wants to see it
+    soft.c      # the sweep and the software rasteriser
+    tables.c    # GENERATED from the A5 image - do not edit
 )
 target_include_directories(sc2krender PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(sc2krender PUBLIC sc2k_vendor sc2kcore
@@ -100,7 +100,7 @@ if(SDL3_FOUND)
     #  Logging: spdlog does the parts that are tedious to get right --
     #  colour sinks that know about terminals and the Windows console,
     #  a stderr/stdout split, levels from the environment, and locking.
-    #  r_log.h keeps a small C face over it so the C sources are plain.
+    #  log.h keeps a small C face over it so the C sources are plain.
     include(FetchContent)
     FetchContent_Declare(spdlog
         GIT_REPOSITORY https://github.com/gabime/spdlog.git
@@ -113,10 +113,10 @@ if(SDL3_FOUND)
 
     add_executable(arcology
         a_main.c                          # the dispatcher
-        r_app.c r_gpu.c r_log.cpp r_adapt.c r_shaders.c r_sound.c
-        r_mesh.c r_mesh_tile.c r_mesh_emit.c r_mesh_net.c r_mesh_seg.c
-        r_mesh_hiway.c r_mesh_check.c r_traffic.c
-        r_atlasdump.c r_softmain.c)       # --atlas and --soft
+        app.c gpu.c log.cpp adapt.c shaders.c sound.c
+        mesh.c mesh_tile.c mesh_emit.c mesh_net.c road.c
+        mesh_hiway.c mesh_check.c traffic.c
+        atlasdump.c softmain.c)       # --atlas and --soft
     #  sc2kdev links sc2kcore PUBLIC, so naming both here would put the
     #  archive on the link line twice.
     target_link_libraries(arcology PRIVATE sc2krender sc2kdev
@@ -156,25 +156,25 @@ if(SDL3_FOUND)
         else()
             target_compile_options(sc2k_imgui PRIVATE -w)
         endif()
-        target_sources(arcology PRIVATE r_ui.cpp)
+        target_sources(arcology PRIVATE ui.cpp)
         target_link_libraries(arcology PRIVATE sc2k_imgui)
         target_compile_definitions(arcology PRIVATE SC2K_IMGUI=1)
     else()
-        target_sources(arcology PRIVATE r_ui_none.c)
+        target_sources(arcology PRIVATE ui_none.c)
     endif()
     install(TARGETS arcology RUNTIME DESTINATION bin)
 else()
     #  No SDL3, so no game -- but the developer modes must still be
     #  reachable, because that is what the checkers in tools/ drive and
     #  what ctest runs.  a_stub.c stands in for the game and says why.
-    add_executable(arcology a_main.c a_stub.c r_atlasdump.c r_softmain.c)
+    add_executable(arcology a_main.c a_stub.c atlasdump.c softmain.c)
     target_link_libraries(arcology PRIVATE sc2krender sc2kdev sc2k_warnings)
     install(TARGETS arcology RUNTIME DESTINATION bin)
     message(STATUS "SDL3 not found: arcology is built without the game "
                    "(install SDL3, or configure with -DSC2K_FETCH_SDL3=ON)")
 endif()
 
-#  r_shaders.c is generated from shaders/*.vert|frag and checked in, so a
+#  shaders.c is generated from shaders/*.vert|frag and checked in, so a
 #  plain build needs no shader tools.  Regenerate with:
 #     cmake --build build --target render-shaders
 if(Python3_FOUND)
@@ -217,9 +217,9 @@ if(Python3_FOUND AND EXISTS "${SC2K_ASSETS}/atlas.json")
                      "${CMAKE_CURRENT_SOURCE_DIR}/tests/invariants.py")
 endif()
 #  The terrain mesh must be watertight: no edge of any triangle may be
-#  free.  r_mesh_check counts them; the build fails the test on the first.
+#  free.  mesh_check counts them; the build fails the test on the first.
 #  With --roads3d the same run also checks that no terrain face rises
-#  above a road (r_mesh_check_roads).  SC2K_CITIES is the game folder,
+#  above a road (mesh_check_roads).  SC2K_CITIES is the game folder,
 #  whose cities are under Cities/, or the Cities folder itself.
 if(TARGET arcology AND SC2K_CITIES AND EXISTS "${SC2K_ASSETS}/atlas.json")
     foreach(city "Bayview" "Cape Wells" "Egypt Falls" "Felsenschloss")

@@ -339,7 +339,7 @@ enum
 /*  All five above came out of tools/miscmap2.py, which runs the MISC
  *  builder at $2A186 under a small 68k interpreter and records which A5
  *  global feeds each slot.  MISC_POPULATION was found independently by
- *  searching the corpus first; the emulator agreeing with that search is
+ *  searching the shipped cities first; the emulator agreeing with that search is
  *  the reason to trust both. */
 
 typedef struct

@@ -96,7 +96,7 @@ def main():
     shown = 0
     for path in args:
         if not os.path.isfile(path):
-            continue          # the corpus has directories in it too
+            continue          # the shipped cities has directories in it too
         try:
             want = oracle(path, month, years)
         except Exception as e:

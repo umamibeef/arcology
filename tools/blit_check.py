@@ -4,7 +4,7 @@
 Not "does it look right" and not "does the blit list agree" -- those were
 both checked and both missed real defects.  This draws every sprite, in
 both mirror states, through the ORIGINAL blitter into a framebuffer, and
-compares it against what r_soft.c's blit() would put in the same place
+compares it against what soft.c's blit() would put in the same place
 given the same atlas.  Anything that differs is a difference in the
 blitter itself: the anchor, the mirror pivot, the transparency rule.
 

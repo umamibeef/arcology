@@ -1477,7 +1477,7 @@ int sc2k_dev_main(int argc, char **argv)
 
     printf("  file format\n");
     pct("codec round-trip, lossless", lossless, files, "");
-    pct("byte-exact vs the shipped file", exact, files, "two encoders in the corpus");
+    pct("byte-exact vs the shipped file", exact, files, "two encoders in the shipped cities");
 
     printf("\n  totals recomputed from the map\n");
     pct("sum(XPLT) == MISC[13]  pollution", t.agg_ok[0], t.cities, "");

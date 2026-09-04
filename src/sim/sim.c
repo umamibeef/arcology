@@ -7966,7 +7966,7 @@ void sim_microsim(City *c)
                          *  while, which is why an earlier note here said a
                          *  routine was missing.  None is.)
                          *
-                         *  No city in the corpus has a fifty-year-old plant, so
+                         *  No shipped city has a fifty-year-old plant, so
                          *  this arm is transcription only: read off the listing
                          *  and never checked against the oracle. */
                         sim_demolish_and_place(c, y, x, 0xFF);

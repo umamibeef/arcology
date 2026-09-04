@@ -3,7 +3,7 @@
 
 Part 7 of the road spec is engine-agnostic: it describes decks, ramps and
 interchanges without saying which XBLD byte is which.  This answers that,
-and it answers it from the corpus rather than from the sprite sheet,
+and it answers it from the shipped cities rather than from the sprite sheet,
 because a sprite tells you what a tile LOOKS like and the neighbours tell
 you what it IS.
 

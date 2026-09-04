@@ -317,9 +317,14 @@ void main()
     }
     if (v_col.b > 17.5 && v_col.b < 18.5)
     {
-        /*  A viaduct's bent, the same coursed blocks as the works at a
-         *  raised road's edge. */
-        o_col = vec4(clamp(wall_colour(1.0, n), 0.0, 1.0), v_col.a);
+        /*  A viaduct's structure: plain cast concrete, no pattern at all
+         *  (the user, three times: "I also asked you not to use the
+         *  texture", "the engineered wall texture").  col.g set means
+         *  the girder's face, which lies in the deck's own shadow. */
+        vec3 c = vec3(0.62, 0.61, 0.59);
+        if (v_col.g > 0.5)
+            c *= 0.52;
+        o_col = vec4(clamp(c * (fr.sun.w + fr.params.x * d), 0.0, 1.0), v_col.a);
         return;
     }
     if (v_col.b > 11.5 && v_col.b < 12.5)
@@ -367,12 +372,84 @@ void main()
                                                    max(fr.sun.w + fr.params.x * max(normalize(fr.sun.xyz).z, 0.0), 1e-3) - 1.0)), 0.0, 1.0), v_col.a);
         return;
     }
-    if (v_col.b > 6.5 && v_col.b < 7.5 || v_col.b > 9.5 && v_col.b < 10.5 || v_col.b > 16.5)
+    if (v_col.b > 19.5)
+    {
+        /*  A zone, as the original's map view paints them: residential
+         *  green, commercial blue, industrial yellow, the darker shade
+         *  for the dense zone, and the rest as the game's own map has
+         *  them.  col.r carries the zone; 10 and 11 are not zones but
+         *  the structures the player placed -- a power plant burning
+         *  orange, a park in parkland green, everything else civic
+         *  white -- and they are painted
+         *  more solidly than a zone, because on a map they are the
+         *  landmarks a person looks for. */
+        int  zn = int(v_col.r + 0.5);
+        vec3 c  = zn == 1    ? vec3(0.36, 0.78, 0.36)
+                  : zn == 2  ? vec3(0.16, 0.55, 0.20)
+                  : zn == 3  ? vec3(0.40, 0.62, 0.95)
+                  : zn == 4  ? vec3(0.16, 0.32, 0.78)
+                  : zn == 5  ? vec3(0.92, 0.85, 0.35)
+                  : zn == 6  ? vec3(0.78, 0.62, 0.12)
+                  : zn == 7  ? vec3(0.66, 0.30, 0.30)
+                  : zn == 8  ? vec3(0.62, 0.62, 0.68)
+                  : zn == 9  ? vec3(0.30, 0.62, 0.66)
+                  : zn == 11 ? vec3(0.95, 0.45, 0.18)
+                  : zn == 12 ? vec3(0.22, 0.42, 0.20)
+                             : vec3(0.94, 0.93, 0.90);
+        /*  The grid runs over the tint as it runs over the ground (the
+         *  user: "grids aren't visible in map view over the zones and
+         *  buildings"): the tint is a lid on the tile, so it has to
+         *  carry the tile's edges or the map loses its grid exactly
+         *  where it is most read. */
+        if (fr.params.z > 0.0)
+        {
+            vec2  f    = fract(v_wpos.xy);
+            vec2  edge = min(f, 1.0 - f);
+            vec2  gu   = vec2(dFdx(v_wpos.x), dFdy(v_wpos.x));
+            vec2  gv   = vec2(dFdx(v_wpos.y), dFdy(v_wpos.y));
+            vec2  px   = edge / max(vec2(length(gu), length(gv)), vec2(1e-4));
+            if (min(px.x, px.y) < fr.params.z)
+                c *= 0.72;
+        }
+        o_col   = vec4(c, (zn >= 10 ? 0.78 : 0.45) * clamp(v_col.g, 0.0, 1.0));
+        return;
+    }
+    if (v_col.b > 18.5)
+    {
+        /*  A freeway deck (spec 7.1), two carriageways either side of a
+         *  median barrier, three lanes each: across the band, -1 to 1,
+         *  the barrier to 0.06, a yellow edge line against it, white
+         *  dashes between the lanes and a white edge line at the
+         *  shoulder.  It had worn a surface road's class and drawn a
+         *  double yellow line down the middle of the carriageway. */
+        float x    = abs(v_col.r);
+        float px   = fwidth(v_col.r);
+        float line = clamp(px, 0.012f, 0.05f);
+        float lit  = (fr.sun.w + fr.params.x * d) /
+                    max(fr.sun.w + fr.params.x * max(normalize(fr.sun.xyz).z, 0.0), 1e-3);
+        lit        = 1.0 + 0.35 * (lit - 1.0);
+        /*  Flat asphalt, no grain (the user, twice: "I also asked you not
+         *  to use the texture"): the markings are markings, the surface
+         *  is one colour. */
+        vec3 c     = vec3(143.0, 143.0, 143.0) / 255.0;
+        bool dash  = fract(v_col.g * 4.0) < 0.5;
+        if (x < 0.11)
+            c = vec3(0.70, 0.69, 0.67); /* the median barrier, as the art has it: no yellow on the deck */
+        else if (abs(x - 0.40) < 0.5 * line && dash)
+            c = vec3(0.92);
+        else if (abs(x - 0.70) < 0.5 * line && dash)
+            c = vec3(0.92);
+        else if (x > 0.94 - line && x < 0.94)
+            c = vec3(0.92);
+        o_col = vec4(clamp(c * lit, 0.0, 1.0), v_col.a);
+        return;
+    }
+    if (v_col.b > 6.5 && v_col.b < 7.5 || v_col.b > 9.5 && v_col.b < 10.5 || (v_col.b > 16.5 && v_col.b < 17.5))
     {
         /*  Approaching a level crossing (17): v_col.g is the distance
          *  to the crossing; the centre and lane lines are solid, and a
          *  large X is stencilled in each lane a tile out (spec 3.15). */
-        bool  xapp = v_col.b > 16.5;
+        bool  xapp = v_col.b > 16.5 && v_col.b < 17.5;
         /*  A road strip (v_col.b 7) or a crosswalk band (10).  Across the
          *  strip, -1 to 1 in v_col.r: the asphalt (the sprites' palette
          *  0x91) to 0.78, a curb, then a sidewalk of concrete with a

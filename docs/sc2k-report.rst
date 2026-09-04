@@ -305,14 +305,14 @@ Population sits past index 26 in ``MISC``, where the builder's counted loops def
        return units * 10;              /* $33FE6 */
    }
 
-**MISC[1035], at offset 0x102C, is the city population.** It tracks the computed figure across the whole corpus with a median error of 0.01%. The residual is the same snapshot drift traffic has, and the evidence for that is its shape: 52 cities compute high, 40 compute low. A missing term in the model would skew one way. Drift does not.
+**MISC[1035], at offset 0x102C, is the city population.** It tracks the computed figure across the whole the shipped cities with a median error of 0.01%. The residual is the same snapshot drift traffic has, and the evidence for that is its shape: 52 cities compute high, 40 compute low. A missing term in the model would skew one way. Drift does not.
 
 Eleven cities miss by more than 2%, all of them downloaded ``.SC2`` files rather than the shipped scenarios, and one of them, LINCOLN.SC2, is out by a factor of almost exactly two. Those look like maps edited outside the game, where the stored statistics never got recomputed. They are listed as failures rather than excused.
 
-The corpus contains two different compressors
+The the shipped cities contains two different compressors
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Porting the encoder from :ref:`$293EC <rt-293EC>` raised an awkward question: how do you tell a faithful port from a plausible one? Byte-exact output is the answer, and it splits the corpus cleanly. **1,218 of 1,957 compressed chunks come back byte-for-byte identical**, and 39 files match in every chunk. A coincidence at that scale is not available.
+Porting the encoder from :ref:`$293EC <rt-293EC>` raised an awkward question: how do you tell a faithful port from a plausible one? Byte-exact output is the answer, and it splits the shipped cities cleanly. **1,218 of 1,957 compressed chunks come back byte-for-byte identical**, and 39 files match in every chunk. A coincidence at that scale is not available.
 
 The rest were written by something else. The shipped 1993–95 scenarios match 0%, and their encoder makes different choices: where the Mac build breaks a literal run the moment two bytes repeat, the other keeps going. For the source bytes ``07 ff ff 63 c3`` the shipped file emits one five-byte literal. This build emits literal-1, run-2, literal-2. Neither is wrong, and the sizes differ in both directions, so it is a different encoder rather than a better one.
 
@@ -1456,7 +1456,7 @@ What I would do next
 - **Resolve** ``$30FE``. The volcano takes a draw from the shared generator on a branch that only chooses a redraw, and that branch is gated on this routine. The linear disassembly puts the address in the middle of an instruction, so it has not been read. Until it is, the volcano's dice cannot be checked at all.
 - Draw the underground view from ``XUND``, the signs from ``XTXT`` through :ref:`$FABA <rt-FABA>`, and the water animation. The false-colour data views are already in.
 - Find the resource behind the shape descriptor table at ``$1226``. Each shape's vertical offset lives there, and the reconstruction derives it geometrically instead. The blit oracle can see every other property of a draw but not this one.
-- Read the dedicated movement routines for thing types 8, 10 and 11. They are 634 of the corpus's 1,227 moving objects, and they render plausibly through a shared skeleton whose detail is guessed at.
+- Read the dedicated movement routines for thing types 8, 10 and 11. They are 634 of the shipped cities's 1,227 moving objects, and they render plausibly through a shared skeleton whose detail is guessed at.
 
 What cannot be done, and why that is a result too
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

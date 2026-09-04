@@ -99,7 +99,7 @@ def main():
                     sheet[Y][(cw + GAP) * 2 * S + x * S + dx] = (
                         MARK if not same else mi)
     if a.frames > 1:
-        #  One phase per frame, read back from arcology --soft so r_atlas_animate
+        #  One phase per frame, read back from arcology --soft so atlas_animate
         #  stays the only implementation of the permutation.  The magenta
         #  sits at 254, outside every animated run, so it never moves.
         pals = []

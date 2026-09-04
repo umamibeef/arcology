@@ -8,7 +8,7 @@ _AnimatePalette. The pixels stay put, which is why a whole map animates for
 nothing.
 
 Each frame is rendered by arcology --soft with `--phase k`, so the permutation has
-exactly one implementation (r_atlas_animate) rather than a second one here
+exactly one implementation (atlas_animate) rather than a second one here
 that could drift from it. `--indexed` writes the GAME's palette indices --
 not lodepng's re-numbering, which silently turned this whole thing into a
 no-op until it was noticed.

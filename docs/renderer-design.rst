@@ -70,7 +70,7 @@ What retires the old format is that the renderer draws from ``assets/`` alone �
 
 The invariant check runs against the city data itself, not against another renderer. Two renderers agreeing is not evidence — a check can only find them disagreeing, and both can carry the same fault.
 
-The terrain mapping, the altitude rule and the zoom geometry are read out of the game’s own tile drawing routine at :ref:`$167CC <rt-167CC>`, and the XTER table is generated into ``r_tables.c`` straight from the A5 image rather than inferred from the corpus.
+The terrain mapping, the altitude rule and the zoom geometry are read out of the game’s own tile drawing routine at :ref:`$167CC <rt-167CC>`, and the XTER table is generated into ``tables.c`` straight from the A5 image rather than inferred from the shipped cities.
 
 Separately, the rotation question is settled: rotation *rewrites every layer* rather than remapping at draw time. Turning all 103 cities four times under ``tools/rotate.py`` returns all fifteen map layers to their original bytes. See :ref:`Crossfade the four rotations; do not promise smooth rotation <d10>`.
 
@@ -455,17 +455,17 @@ Module layout
 
    sim/
      render/
-       r_atlas.c    atlas + sidecar load, mod overrides, palette resolve
-       r_miff.c     MIFF/TSET/SPRT reader — SCURK import at runtime
-       r_camera.c   iso projection, continuous zoom, pan, rotation state
-       r_scene.c    const City * -> instance buffer; dirty-region rebuild
-       r_gpu.c      SDL_GPU backend, one pipeline, one bind
-       r_soft.c     reference rasteriser; must match render.py exactly
-       r_overlay.c  data-layer textures and ramps
+       atlas.c    atlas + sidecar load, mod overrides, palette resolve
+       miff.c     MIFF/TSET/SPRT reader — SCURK import at runtime
+       camera.c   iso projection, continuous zoom, pan, rotation state
+       scene.c    const City * -> instance buffer; dirty-region rebuild
+       gpu.c      SDL_GPU backend, one pipeline, one bind
+       soft.c     reference rasteriser; must match render.py exactly
+       overlay.c  data-layer textures and ramps
    tools/
        sc2kpack.py  extract / pack / import-scurk — builds on miff.py
 
-Extraction stays in Python. ``miff.py`` already decodes the format correctly, including the odd-run padding rule that took real effort to find, and it runs once at build time. The C runtime only needs to read PNG — plus ``r_miff.c`` for the live SCURK import, which is the one place the format has to exist in both languages.
+Extraction stays in Python. ``miff.py`` already decodes the format correctly, including the odd-run padding rule that took real effort to find, and it runs once at build time. The C runtime only needs to read PNG — plus ``miff.c`` for the live SCURK import, which is the one place the format has to exist in both languages.
 
 8. Cross-platform, enforced
 ---------------------------
@@ -567,7 +567,7 @@ Software rasteriser
 
    Step 2 · done
 
-``r_soft.c`` draws a city from a read-only view, with no GPU in the picture. It matches ``render.py`` pixel for pixel on cities covering all four rotations. The view type is ``RCity``, defined in the renderer and deliberately *not* the simulation's ``City`` — an adapter will fill one from the other, and until then ``r_city.c`` reads a ``.SC2`` directly so the renderer builds and tests standalone.
+``soft.c`` draws a city from a read-only view, with no GPU in the picture. It matches ``render.py`` pixel for pixel on cities covering all four rotations. The view type is ``RCity``, defined in the renderer and deliberately *not* the simulation's ``City`` — an adapter will fill one from the other, and until then ``city.c`` reads a ``.SC2`` directly so the renderer builds and tests standalone.
 
 Window and GPU path
 ~~~~~~~~~~~~~~~~~~~
@@ -603,7 +603,7 @@ Mods and SCURK
 
    Step 6 · not started
 
-``r_miff.c``, the mod override directory, live reload. Load all 33 readable packs as the test — a renderer that opens 1995 artwork untouched is the thing worth showing people.
+``miff.c``, the mod override directory, live reload. Load all 33 readable packs as the test — a renderer that opens 1995 artwork untouched is the thing worth showing people.
 
 11. The third dimension
 -----------------------
