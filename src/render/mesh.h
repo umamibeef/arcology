@@ -22,7 +22,7 @@
 
 #include "atlas.h"
 #include "city.h"
-#include "gpu.h"
+#include "meshvert.h"
 
 /*  The road network the strips were lofted along, kept for the traffic:
  *  every road segment's stations, x, y, the band's height, the direction

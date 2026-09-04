@@ -3,6 +3,8 @@
  *  Split out of mesh.c; see mesh_int.h.
  */
 #include "mesh_int.h"
+#include "opt.h"
+#include "project.h"
 
 /* ---- the traffic ------------------------------------------------------ */
 
@@ -341,6 +343,43 @@ static int train_prefill(RTrain *tr, const RRoadNet *net)
     return 0;
 }
 
+/*  Whether a signal's block is occupied (spec 5.6): any car of any
+ *  train but `skip` stands within the ten tiles ahead of the signal on
+ *  its segment in the direction it governs, or just behind it.  Lit red
+ *  for the lamp; the trains do not obey it. */
+static int rail_block_occupied(const RTraffic *t, const RRailSig *sg2, int skip)
+{
+    uint32_t k;
+    for (k = 0; k < t->n_trains; ++k)
+    {
+        const RTrain *tr = &t->trains[k];
+        int           q;
+        if ((int)k == skip)
+            continue;
+        for (q = 0; q < tr->n_cars; ++q)
+        {
+            const RTrailPt *pt   = NULL;
+            float           want = tr->d - (float)q * TRAIN_PITCH;
+            uint32_t        j;
+            for (j = 0; j < tr->trail_n; ++j)
+            {
+                pt = trail_at(tr, j);
+                if (pt->d <= want)
+                    break;
+            }
+            if (!pt || j >= tr->trail_n)
+                continue;
+            if (pt->seg == sg2->seg)
+            {
+                float ahead = (float)sg2->dir * (pt->s - sg2->s);
+                if (ahead > -0.6f && ahead < 10.0f)
+                    return 1;
+            }
+        }
+    }
+    return 0;
+}
+
 /*  The trains from the save: a run of consecutive records of types 10
  *  and 11 on adjacent tiles is one train, the type-10 engine its head
  *  (the user: "we need rendered train cars", "the old renderer
@@ -460,67 +499,6 @@ static int trains_init(RTraffic *t, const RMesh *m, const RCity *c)
     return 0;
 }
 
-/*  Whether a signal's block is occupied (spec 5.6): any car of any
- *  train but `skip` stands within the ten tiles ahead of the signal on
- *  its segment in the direction it governs, or just behind it.  Lit red
- *  for the lamp, and a train keeps out of it. */
-static int rail_block_occupied(const RTraffic *t, const RRailSig *sg2, int skip)
-{
-    uint32_t k;
-    for (k = 0; k < t->n_trains; ++k)
-    {
-        const RTrain *tr = &t->trains[k];
-        int           q;
-        if ((int)k == skip)
-            continue;
-        for (q = 0; q < tr->n_cars; ++q)
-        {
-            const RTrailPt *pt   = NULL;
-            float           want = tr->d - (float)q * TRAIN_PITCH;
-            uint32_t        j;
-            for (j = 0; j < tr->trail_n; ++j)
-            {
-                pt = trail_at(tr, j);
-                if (pt->d <= want)
-                    break;
-            }
-            if (!pt || j >= tr->trail_n)
-                continue;
-            if (pt->seg == sg2->seg)
-            {
-                float ahead = (float)sg2->dir * (pt->s - sg2->s);
-                if (ahead > -0.6f && ahead < 10.0f)
-                    return 1;
-            }
-        }
-    }
-    return 0;
-}
-
-/*  The distance along its segment to the nearest signal ahead of a
- *  train that governs its direction and stands at red for it, or -1. */
-static float red_signal_ahead(const RTraffic *t, const RMesh *m, int train, float reach)
-{
-    const RTrain *tr   = &t->trains[train];
-    float         best = -1.0f;
-    uint32_t      i;
-    for (i = 0; i < m->n_rsigs; ++i)
-    {
-        const RRailSig *sg2 = &m->rsigs[i];
-        float           a;
-        if (sg2->seg != tr->seg || sg2->dir != tr->dir)
-            continue;
-        a = (float)tr->dir * (sg2->s - tr->s);
-        if (a < -0.02f || a > reach || (best >= 0.0f && a >= best))
-            continue;
-        if (rail_block_occupied(t, sg2, train))
-            best = a;
-    }
-    return best;
-}
-
-static int s_sig_held;
-
 static void trains_step(RTraffic *t, const RMesh *m, float dt)
 {
     const RRoadNet *net = &m->railnet;
@@ -550,23 +528,6 @@ static void trains_step(RTraffic *t, const RMesh *m, float dt)
             sg     = &net->segs[tr->seg];
             end    = tr->dir > 0 ? 1 : 0;
             to_end = tr->dir > 0 ? sg->total - tr->s : tr->s;
-            /*  A red signal ahead (spec 5.6): the train stops a hair short of
-             *  it and waits for the block to clear, so a train never runs
-             *  into the one ahead on its track. */
-            {
-                float a = red_signal_ahead(t, m, (int)i, 2.0f);
-                if (a >= 0.0f)
-                {
-                    float room = a - 0.06f;
-                    if (room < 0.0f)
-                        room = 0.0f;
-                    if (step > room)
-                    {
-                        step = room;
-                        ++s_sig_held;
-                    }
-                }
-            }
             if (step >= to_end && step > 0.0f)
             {
                 int nseg, ndir;
@@ -710,7 +671,7 @@ static int put_gate_state(RMesh *m, const RCity *c, uint8_t mask_bit, float orde
     float bx = -fx, by = -fy;
     float wu = -by, wv = bx;
     float px = x + wu * 0.045f, py = y + wv * 0.045f;
-    float ca = cosf(angle * 3.14159265f / 180.0f), sa = sinf(angle * 3.14159265f / 180.0f);
+    float ca = cosf(angle * ARC_DEG2RAD), sa = sinf(angle * ARC_DEG2RAD);
     float tx = px + wu * arm_len * ca, ty = py + wv * arm_len * ca, tz = g + 0.13f + arm_len * sa * 0.53f;
     /*  The arm: a bar 0.02 of a tile wide and 0.04 of a level deep, its
      *  face to the approach and its top, red and white stripes (lamp
@@ -873,9 +834,9 @@ void traffic_step(RTraffic *t, const RMesh *m, float dt, float time)
         dt = 0.1f;
     trains_step(t, m, dt);
     gates_step(t, m, dt);
-    if (getenv("SC2K_XING_DEBUG"))
+    if (opt_set("xing-debug"))
     {
-        /* SC2K_XING_DEBUG=1: per step, the crossings with their gates off rest and the cars held at a line */
+        /* --xing-debug 1: per step, the crossings with their gates off rest and the cars held at a line */
         uint32_t q, down = 0;
         for (q = 0; q < m->n_xings && t->gate; ++q)
             if (t->gate[q] < 87.5f)
@@ -884,10 +845,9 @@ void traffic_step(RTraffic *t, const RMesh *m, float dt, float time)
                     fprintf(stderr, "xing down: c%d r%d angle %.0f\n", (int)m->xings[q].col, (int)m->xings[q].row, (double)t->gate[q]);
                 ++down;
             }
-        fprintf(stderr, "xing: t %.2f gates down %u cars held %d trains held at signals %d\n", (double)time, down, s_xing_held, s_sig_held);
+        fprintf(stderr, "xing: t %.2f gates down %u cars held %d\n", (double)time, down, s_xing_held);
     }
     s_xing_held = 0;
-    s_sig_held  = 0;
     if (!t->n || !net->n_segs)
         return;
     qsort(t->cars, t->n, sizeof *t->cars, car_order_cmp);
@@ -972,7 +932,7 @@ void traffic_step(RTraffic *t, const RMesh *m, float dt, float time)
                 if (ahead <= 0.02f)
                 {
                     v = 0.0f;
-                    ++s_xing_held; /* SC2K_XING_DEBUG counts these per step */
+                    ++s_xing_held; /* --xing-debug counts these per step */
                 }
                 else if (v * dt > ahead - 0.02f)
                     v = (ahead - 0.02f) / dt;
@@ -1049,7 +1009,7 @@ int traffic_build(RTraffic *t, const RMesh *m, const RCity *c)
                 hy = car->by1 - car->by0;
             }
             z = car->bz0 + (car->bz1 - car->bz0) * f;
-            if (car->bcurve && getenv("SC2K_BOX_DEBUG"))
+            if (car->bcurve && opt_set("box-debug"))
                 fprintf(stderr, "box car %u f %.2f at (%.3f,%.3f) h (%.2f,%.2f) entry (%.3f,%.3f) corner (%.3f,%.3f) exit (%.3f,%.3f)\n", i, (double)f, (double)x, (double)y, (double)hx, (double)hy, (double)car->bx0, (double)car->by0, (double)car->bcx, (double)car->bcy, (double)car->bx1, (double)car->by1);
             {
                 float l = sqrtf(hx * hx + hy * hy);

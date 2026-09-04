@@ -342,7 +342,7 @@ enum
  *  searching the shipped cities first; the emulator agreeing with that search is
  *  the reason to trust both. */
 
-typedef struct
+typedef struct City
 {
     /* --- full-resolution tile layers ----------------------------- */
     uint16_t altm[MAP_H][MAP_W]; /* A5+0x1FC2  altitude, low 5 bits   */

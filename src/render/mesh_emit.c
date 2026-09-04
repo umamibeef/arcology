@@ -282,3 +282,75 @@ float s_hiway_ramp0, s_hiway_ramp1; /* the tile lengths the deck ramps down over
  *  screen than the centreline does -- which is why the first build read
  *  as a deck lying on the ground (the user: "why is it so low???",
  *  "the original sprites had columns"). */
+
+/*  A box with a clipped skirt, and the vehicle default.
+ *
+ *  These came out of road.c, where they had accreted at the bottom under
+ *  the road algorithm: they are emit primitives -- a prism, its four
+ *  sides and its top -- and this is the file that owns those.  The road
+ *  code and the traffic both draw with them. */
+/*  A prism clipped to the tile grid, each piece in the depth slot of
+ *  the tile under it (the user: "train cars get masked off once in a
+ *  while, like they flicker").  A car had carried the order of the tile
+ *  under its centre, and the part of it over the next tile toward the
+ *  viewer lay under that tile's ground until the centre crossed, when
+ *  the whole car stood up at once.  `order` is the centre tile's slot
+ *  with the fraction the pieces keep above each tile's ground. */
+int put_prism_clip_m(RMesh *m, const RCity *c, uint8_t mask_bit, float order, float cx, float cy, float dx, float dy, float len, float wid, float zb, float zf, float z0, float z1, float paint, float mat)
+{
+    static const float up[3] = {0.0f, 0.0f, 1.0f};
+    float              ax = dx * len * 0.5f, ay = dy * len * 0.5f, bx = -dy * wid * 0.5f, by = dx * wid * 0.5f;
+    float              p[4][3], top[4][3], col[3] = {paint, 0.0f, mat}, nrm[3], t3[3][3];
+    float              ref[3] = {paint, paint, paint}, ref2[3] = {0.0f, 0.0f, 0.0f};
+    int                k;
+    p[0][0] = cx - ax - bx;
+    p[0][1] = cy - ay - by;
+    p[1][0] = cx + ax - bx;
+    p[1][1] = cy + ay - by;
+    p[2][0] = cx + ax + bx;
+    p[2][1] = cy + ay + by;
+    p[3][0] = cx - ax + bx;
+    p[3][1] = cy - ay + by;
+    for (k = 0; k < 4; ++k)
+    {
+        float zg  = (k == 1 || k == 2) ? zf : zb;
+        p[k][2]   = zg + z0;
+        top[k][0] = p[k][0];
+        top[k][1] = p[k][1];
+        top[k][2] = zg + z1;
+    }
+    for (k = 0; k < 4; ++k)
+    {
+        const float *a = p[k], *b = p[(k + 1) & 3], *ta = top[k], *tb = top[(k + 1) & 3];
+        float        ex = b[0] - a[0], ey = b[1] - a[1], el = sqrtf(ex * ex + ey * ey);
+        if (el < 1e-6f)
+            continue;
+        nrm[0] = ey / el;
+        nrm[1] = -ex / el;
+        nrm[2] = 0.0f;
+        memcpy(t3[0], ta, sizeof t3[0]);
+        memcpy(t3[1], tb, sizeof t3[1]);
+        memcpy(t3[2], b, sizeof t3[2]);
+        if (put_tri_road_n(m, c, mask_bit, order, (const float (*)[3])t3, nrm, col, ref, ref2) != 0)
+            return -1;
+        memcpy(t3[0], ta, sizeof t3[0]);
+        memcpy(t3[1], b, sizeof t3[1]);
+        memcpy(t3[2], a, sizeof t3[2]);
+        if (put_tri_road_n(m, c, mask_bit, order, (const float (*)[3])t3, nrm, col, ref, ref2) != 0)
+            return -1;
+    }
+    memcpy(t3[0], top[0], sizeof t3[0]);
+    memcpy(t3[1], top[1], sizeof t3[1]);
+    memcpy(t3[2], top[2], sizeof t3[2]);
+    if (put_tri_road_n(m, c, mask_bit, order, (const float (*)[3])t3, up, col, ref, ref2) != 0)
+        return -1;
+    memcpy(t3[0], top[0], sizeof t3[0]);
+    memcpy(t3[1], top[2], sizeof t3[1]);
+    memcpy(t3[2], top[3], sizeof t3[2]);
+    return put_tri_road_n(m, c, mask_bit, order, (const float (*)[3])t3, up, col, ref, ref2);
+}
+
+int put_prism_clip(RMesh *m, const RCity *c, uint8_t mask_bit, float order, float cx, float cy, float dx, float dy, float len, float wid, float zb, float zf, float z0, float z1, float paint)
+{
+    return put_prism_clip_m(m, c, mask_bit, order, cx, cy, dx, dy, len, wid, zb, zf, z0, z1, paint, MAT_VEHICLE);
+}

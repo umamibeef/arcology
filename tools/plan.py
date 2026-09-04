@@ -86,12 +86,11 @@ def run(city):
         path = os.path.join(GAME, city)
     if not os.path.isfile(path):
         sys.exit("no city at %s" % path)
-    env = dict(os.environ, SC2K_PLAN_DUMP="1", SC2K_PATH_DUMP="1", SC2K_JUNC_DUMP="1")
     out = subprocess.run(
-        [os.path.join(ROOT, "build", "arcology"), "assets", path, "--mesh-check", "--roads3d"],
+        [os.path.join(ROOT, "build", "arcology"), "assets", path, "--mesh-check", "--roads3d",
+         "--plan-dump", "--path-dump", "--junc-dump"],
         capture_output=True,
         text=True,
-        env=env,
     )
     return out.stdout
 

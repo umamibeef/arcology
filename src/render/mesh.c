@@ -3,6 +3,7 @@
  *  Split out of mesh.c; see mesh_int.h.
  */
 #include "mesh_int.h"
+#include "opt.h"
 
 static int build_networks(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel *l, uint8_t mask_bit, int comp)
 {
@@ -110,17 +111,17 @@ static int build_networks(RMesh *m, const RCity *c, const RAtlas *a, const RAtla
                  *  faces each footway.  The gates are down and the
                  *  flashers lit while a train stands within three tiles
                  *  along the line. */
-                const RCross *xr = &s_cross[FAMX(F_ROAD)][idx];
-                const RCross *xl = &s_cross[FAMX(F_RAIL)][idx];
-                int   links2 = piece_links(l, second, c->xter[idx]);
-                int   ns     = (links2 & (L_N | L_S)) == (L_N | L_S); /* the rail runs north-south */
-                float cx = (float)col + 0.5f, cy = (float)row + 0.5f;
+                const RCross *xr     = &s_cross[FAMX(F_ROAD)][idx];
+                const RCross *xl     = &s_cross[FAMX(F_RAIL)][idx];
+                int           links2 = piece_links(l, second, c->xter[idx]);
+                int           ns     = (links2 & (L_N | L_S)) == (L_N | L_S); /* the rail runs north-south */
+                float         cx = (float)col + 0.5f, cy = (float)row + 0.5f;
                 /* the road's way through, and the rail's */
                 float ox = xr->have ? xr->dx : (ns ? 1.0f : 0.0f);
                 float oy = xr->have ? xr->dy : (ns ? 0.0f : 1.0f);
                 float lx = xl->have ? xl->dx : (ns ? 0.0f : 1.0f);
                 float ly = xl->have ? xl->dy : (ns ? 1.0f : 0.0f);
-                float rx = -oy, ry = ox;   /* the driver's right */
+                float rx = -oy, ry = ox; /* the driver's right */
                 float sinang, reach, hb = ROAD_W * 0.5f;
                 float rh, h = ROAD_W * 0.5f + 0.08f;
                 int   ap, side;
@@ -129,8 +130,7 @@ static int build_networks(RMesh *m, const RCity *c, const RAtlas *a, const RAtla
                 if (xr->have && xl->have)
                 {
                     V2 met;
-                    if (line_meet((V2){xr->x, xr->y}, (V2){ox, oy},
-                                  (V2){xl->x, xl->y}, (V2){lx, ly}, &met))
+                    if (line_meet((V2){xr->x, xr->y}, (V2){ox, oy}, (V2){xl->x, xl->y}, (V2){lx, ly}, &met))
                     {
                         float dx = met.x - cx, dy = met.y - cy;
                         if (dx * dx + dy * dy < 0.36f) /* still on this tile */
@@ -173,14 +173,19 @@ static int build_networks(RMesh *m, const RCity *c, const RAtlas *a, const RAtla
                  *  Four corners, each where a road edge meets a rail
                  *  edge. */
                 {
-                    float rw = RAIL_W * 0.5f + 0.06f;
-                    V2    op = {xr->have ? xr->x : cx, xr->have ? xr->y : cy};
-                    V2    rp = {xl->have ? xl->x : cx, xl->have ? xl->y : cy};
-                    V2    od = {ox, oy}, rd = {lx, ly};
-                    V2    rn = {-ly, lx};
-                    V2    q[4];
-                    int   ok = 1, k;
-                    static const float es[4][2] = {{-1.0f, -1.0f}, {1.0f, -1.0f}, {-1.0f, 1.0f}, {1.0f, 1.0f}};
+                    float              rw = RAIL_W * 0.5f + 0.06f;
+                    V2                 op = {xr->have ? xr->x : cx, xr->have ? xr->y : cy};
+                    V2                 rp = {xl->have ? xl->x : cx, xl->have ? xl->y : cy};
+                    V2                 od = {ox, oy}, rd = {lx, ly};
+                    V2                 rn = {-ly, lx};
+                    V2                 q[4];
+                    int                ok       = 1, k;
+                    static const float es[4][2] = {
+                        {-1.0f, -1.0f},
+                        {1.0f,  -1.0f},
+                        {-1.0f, 1.0f },
+                        {1.0f,  1.0f }
+                    };
                     for (k = 0; k < 4 && ok; ++k)
                     {
                         V2 ea = {op.x + rx * hb * es[k][0], op.y + ry * hb * es[k][0]};
@@ -315,12 +320,12 @@ int mesh_build(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel *l, 
     const uint8_t      mask_bit = city_corner_mask(c->rotation);
     int                dump_r = -1, dump_c = -1;
 
-    if (getenv("SC2K_MESH_DUMP"))
-        sscanf(getenv("SC2K_MESH_DUMP"), "%d,%d", &dump_r, &dump_c);
+    if (opt_get("mesh-dump"))
+        sscanf(opt_get("mesh-dump"), "%d,%d", &dump_r, &dump_c);
     /*  Two passes when there are roads: the first lays the networks out
      *  and records the surface their corridors want, the second builds
      *  the world with those corridors notched into it. */
-    if (roads && !underground && s_pass == 0 && !getenv("SC2K_NO_CAP"))
+    if (roads && !underground && s_pass == 0 && !opt_set("no-cap"))
     {
         int32_t g;
         int     rc;
@@ -373,10 +378,9 @@ int mesh_build(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel *l, 
             for (row2 = 0; row2 < R_MAP; ++row2)
                 for (col2 = 0; col2 < R_MAP; ++col2)
                 {
-                    int32_t gi[4] = {row2 * GRID + col2, row2 * GRID + col2 + 1, (row2 + 1) * GRID + col2,
-                                     (row2 + 1) * GRID + col2 + 1};
+                    int32_t gi[4] = {row2 * GRID + col2, row2 * GRID + col2 + 1, (row2 + 1) * GRID + col2, (row2 + 1) * GRID + col2 + 1};
                     float   sum = 0.0f, low = 1e9f;
-                    int     k2, have = 0;
+                    int     k2, have        = 0;
                     uint8_t b2 = c->xbld[row2 * R_MAP + col2];
                     if (b2 < 0x0Eu || b2 >= 0x49u)
                         continue; /* not a network piece */
@@ -414,7 +418,6 @@ int mesh_build(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel *l, 
          *  batter ring beyond them is terrain, and terrain is left as it
          *  is.  The wall rule closes the sides of the cut, and the
          *  watertight check covers the corridor like any other ground. */
-        int32_t g;
         {
 
             /*  The corridor's surface, smoothed over the whole field
@@ -427,9 +430,6 @@ int mesh_build(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel *l, 
              *  meeting at different heights then spreads over several
              *  tiles instead of tilting one tile through the band, which
              *  is what the clipping check kept finding. */
-            static float zf[GRID * GRID];
-            for (g = 0; g < GRID * GRID; ++g)
-                zf[g] = (s_corr[g] && s_zcap[g] < 1e8f) ? s_zcap[g] : s_h[g];
             /*  No global solve: the corridor's height comes from its
              *  own ramp between node altitudes, which every segment
              *  computes for itself and writes into its corners.  Nothing
@@ -438,17 +438,20 @@ int mesh_build(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel *l, 
              *  solves because that doesn't scale"). */
             /*  Nothing is written to the terrain.  The corridor carries
              *  its own surface, tile by tile, and the ground stays
-             *  exactly where it was; the wall rule closes the step. */
-            (void)zf;
+             *  exactly where it was; the wall rule closes the step.
+             *
+             *  What stood here was a smoothing of the corridor caps into
+             *  a second height field, computed in full and then thrown
+             *  away when the ramp replaced it. */
         }
     }
-    /*  SC2K_PLAN_DUMP=1 writes the world as numbers for tools/plan.py,
+    /*  --plan-dump 1 writes the world as numbers for tools/plan.py,
      *  which draws a city from above: the field's heights, what each
      *  tile carries, and (with the paths) the corridors and their
      *  centrelines.  A plan view is how this is inspected (the user:
      *  "can you provide a debug view that allows me to inspect a
      *  city?"). */
-    if (s_pass != 1 && getenv("SC2K_PLAN_DUMP"))
+    if (s_pass != 1 && opt_set("plan-dump"))
     {
         int32_t gx, gy;
         printf("FIELD %d\n", GRID);
@@ -696,26 +699,26 @@ int mesh_build(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel *l, 
             float   ref[3];
             Kind    kind;
             if (c->xbld[idx] >= 0xC6u)
-                zone = c->xbld[idx] <= 0xCFu  ? 11  /* the ten power plants */
+                zone = c->xbld[idx] <= 0xCFu   ? 11 /* the ten power plants */
                        : c->xbld[idx] == 0xD5u ? 12 /* a park              */
                                                : 10;
             if (!zone)
                 continue;
-            kind  = tile_top(c, col, row, mask_bit, z);
+            kind = tile_top(c, col, row, mask_bit, z);
             (void)kind;
-            zc[0] = (float)zone;
-            zc[1] = 0.0f;
-            zc[2] = MAT_ZONE;
+            zc[0]  = (float)zone;
+            zc[1]  = 0.0f;
+            zc[2]  = MAT_ZONE;
             ref[0] = ref[1] = ref[2] = (float)zone;
-            tri[0][0] = (float)col;
-            tri[0][1] = (float)row;
-            tri[0][2] = z[NW] + 0.02f;
-            tri[1][0] = (float)col + 1.0f;
-            tri[1][1] = (float)row;
-            tri[1][2] = z[NE] + 0.02f;
-            tri[2][0] = (float)col + 1.0f;
-            tri[2][1] = (float)row + 1.0f;
-            tri[2][2] = z[SE] + 0.02f;
+            tri[0][0]                = (float)col;
+            tri[0][1]                = (float)row;
+            tri[0][2]                = z[NW] + 0.02f;
+            tri[1][0]                = (float)col + 1.0f;
+            tri[1][1]                = (float)row;
+            tri[1][2]                = z[NE] + 0.02f;
+            tri[2][0]                = (float)col + 1.0f;
+            tri[2][1]                = (float)row + 1.0f;
+            tri[2][2]                = z[SE] + 0.02f;
             if (put_tri_r2(m, (const float (*)[3])tri, NULL, tile_order(c, col, row, mask_bit) + 0.4f, zc, ref, ref, 1) != 0)
                 return -1;
             tri[1][0] = (float)col + 1.0f;

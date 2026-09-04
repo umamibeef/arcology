@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate src/render/tables.c from the binary's own global image.
+"""Generate src/render/generated/tables.c from the binary's own global image.
 
 Nothing here is hand-typed.  The terrain table is the word table the tile
 drawing routine at $167CC indexes with XTER:
@@ -41,7 +41,7 @@ DIR_FRAME4   = -0x6338   # byte[4]: heading -> frame, for thing types 0/4/9
 DIR_FLIP4    = -0x6334   # byte[4]: heading -> mirror, for the same
 ANIM_PERM_A  = -0x64B0   # word[49]: the palette permutation for run 155..203
 ANIM_PERM_B  = -0x644E   # word[15]: the palette permutation for run 224..238
-OUT = Path(__file__).resolve().parent.parent / "src" / "render" / "tables.c"
+OUT = Path(__file__).resolve().parent.parent / "src" / "render" / "generated" / "tables.c"
 
 
 def main():

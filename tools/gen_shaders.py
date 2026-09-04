@@ -20,7 +20,7 @@ import pathlib, re, subprocess, sys, tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SRC = ROOT / "src/render/shaders"
-OUT_C = ROOT / "src/render/shaders.c"
+OUT_C = ROOT / "src/render/generated/shaders.c"
 
 SHADERS = [
     "sprite.vert", "sprite.frag", "shadow.frag",

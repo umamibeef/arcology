@@ -3,6 +3,7 @@
  *  Split out of mesh.c; see mesh_int.h.
  */
 #include "mesh_int.h"
+#include "opt.h"
 
 /* ---- raised highways (the road spec, part 7) --------------------------- */
 
@@ -607,7 +608,7 @@ static int walk_hiway(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, int3
         nk      = straighten(pts, n, q);
         nk      = cut_corners(q, nk);
         s_hiway = 0;
-        if (getenv("SC2K_HIWAY_DUMP"))
+        if (opt_set("hiway-dump"))
         {
             int q2;
             printf("hiway band from c%d r%d: %d points ->", (int)col, (int)row, n);

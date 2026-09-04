@@ -1,4 +1,4 @@
-"""Generate src/sim/tables.c from the binary's own initialized-global image.
+"""Generate src/sim/generated/tables.c from the binary's own initialized-global image.
 
 Nothing here is hand-typed: every value is read out of the A5 image that
 thinkdata.py rebuilds from the compressed DATA 0 resource, so each table
@@ -272,7 +272,7 @@ gen_coverage.emit(w)
 gen_ordinance.emit(w)
 gen_walk.emit(w)
 
-path = os.path.join(os.path.dirname(__file__), "..", "src", "sim", "tables.c")
+path = os.path.join(os.path.dirname(__file__), "..", "src", "sim", "generated", "tables.c")
 open(path, "w").write("\n".join(x for x in out if x is not None) + "\n")
 
 # the generated file is held to the same style as the hand-written ones,

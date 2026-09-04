@@ -48,13 +48,17 @@
 #include "arc_version.h"
 #include "arco.h"
 #define JSMN_STATIC
-#include "jsmn.h"
 #include "adapt.h"
+#include "app_int.h"
 #include "atlas.h"
 #include "city.h"
 #include "gpu.h"
+#include "jsmn.h"
 #include "log.h"
 #include "mesh.h"
+#include "music.h"
+#include "opt.h"
+#include "project.h"
 #include "soft.h"
 #include "sound.h"
 #include "ui.h"
@@ -95,6 +99,10 @@ static void platform_line(char *out, size_t n)
 #endif
 }
 
+/*  --song S OUT: one song rendered to a WAV, headless.  Set by the
+ *  option parser, acted on once the assets are found. */
+static const char *song_arg, *song_out;
+
 /*  Nanoseconds from SDL_GetTicksNS as milliseconds, for the log. */
 #define NS_MS(ns) ((double)(ns) / 1e6)
 
@@ -109,52 +117,6 @@ static const int32_t SPEED_DELAY[6] = {0, 0, 36, 12, 0, 0};
 #define SWALLOW_BUDGET_NS 4000000 /* speed 5: phases per frame, by time */
 
 static const char *MONTHS[12] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
-
-typedef struct
-{
-    RAtlas    atlas;
-    City     *city;
-    RCity    *view;
-    ROpList   ops;
-    RSweep    sw;
-    RSoftOpts opts;
-    RGpu     *gpu;
-    RGpuView  gv;
-    RMesh     mesh;
-    RTraffic  traffic;
-    float     traffic_time;
-
-    int32_t  speed, last_speed;
-    uint64_t t0_ns;
-    int64_t  deadline, things_deadline, anim_a_deadline, anim_b_deadline;
-    int32_t  anim_a, anim_b;
-    int      dirty;      /* the city changed: sweep again          */
-    int      mesh_dirty; /* the terrain changed: rebuild the mesh  */
-    int      quit;
-    uint8_t  sky[3];
-
-    RUi     *ui;
-    RUiState us;
-    RSound  *snd;
-    float    fps, frame_ms;
-    uint64_t last_ns;
-    int      drag;              /* the left button drags the map     */
-    float    drag_ax, drag_ay;  /* sub-pixel remainder of the drag    */
-    float    drag_len;          /* how far the button travelled       */
-    int32_t  q_col, q_row;      /* the tile under the pointer, or -1 */
-    char     city_base[128];    /* the city file's name, for a city without one */
-    float    zoom_world;        /* continuous zoom: 1 = the 32 px set at 1:1 */
-    float    angle;             /* free rotation, degrees, 0 = the snap view */
-    int      plan;              /* the map view: the camera raised to look
-                                 * straight down at the world                */
-    float cam_t;                /* the camera's move, 0..1; 1 when it is over */
-    float pitch_from, pitch_to; /* the pitches it moves between, degrees */
-    float yaw_from, yaw_to;     /* and the yaws                          */
-    float anch_c, anch_r;       /* the grid point it keeps under the centre  */
-    float anch_alt;
-    float win_density;      /* window pixels per point                   */
-    char  themes_dir[1024]; /* <assets>/themes, for the menu's picks */
-} App;
 
 static int64_t ticks_now(const App *a)
 {
@@ -231,224 +193,8 @@ static void run_phase(App *a)
  *  Nested values are not ours and are left alone; a quote or a
  *  backslash in a value is escaped on the way out and not unescaped on
  *  the way in, which for theme names and numbers never arises. */
-#define PREFS_MAX 32
-
-typedef struct
-{
-    char key[64];
-    char val[192];
-    int  is_str; /* written quoted; a number or true/false goes bare */
-} Pref;
-
-/*  ==================================================================
- *  Preferences and themes
- *
- *  A small JSON file beside the assets, and the Kaleidoscope schemes it
- *  remembers a choice from.
- *  ================================================================== */
-static int prefs_path(char *out, size_t n)
-{
-    char *p = SDL_GetPrefPath("", "arcology");
-    if (!p)
-        return 0;
-    snprintf(out, n, "%ssettings.json", p);
-    SDL_free(p);
-    return 1;
-}
-
-static int prefs_read(Pref *p, int *n)
-{
-    char        path[1024];
-    FILE       *f;
-    long        len;
-    char       *js;
-    jsmn_parser jp;
-    jsmntok_t   t[2 * PREFS_MAX + 2];
-    int         nt, i;
-    *n = 0;
-    if (!prefs_path(path, sizeof path) || !(f = fopen(path, "rb")))
-        return 0;
-    if (fseek(f, 0, SEEK_END) != 0 || (len = ftell(f)) < 0 || len > 65536)
-    {
-        fclose(f);
-        return 0;
-    }
-    rewind(f);
-    js = (char *)malloc((size_t)len + 1);
-    if (!js || fread(js, 1, (size_t)len, f) != (size_t)len)
-    {
-        fclose(f);
-        free(js);
-        return 0;
-    }
-    fclose(f);
-    js[len] = 0;
-    jsmn_init(&jp);
-    nt = jsmn_parse(&jp, js, (size_t)len, t, sizeof t / sizeof *t);
-    if (nt < 1 || t[0].type != JSMN_OBJECT)
-    {
-        free(js);
-        return 0;
-    }
-    for (i = 1; i + 1 < nt && *n < PREFS_MAX; i += 2)
-    {
-        const jsmntok_t *k = &t[i], *v = &t[i + 1];
-        Pref            *q = &p[*n];
-        if (k->type != JSMN_STRING || (v->type != JSMN_STRING && v->type != JSMN_PRIMITIVE))
-            break; /* nested: not a settings file this build wrote */
-        snprintf(q->key, sizeof q->key, "%.*s", k->end - k->start, js + k->start);
-        snprintf(q->val, sizeof q->val, "%.*s", v->end - v->start, js + v->start);
-        q->is_str = v->type == JSMN_STRING;
-        (*n)++;
-    }
-    free(js);
-    return 1;
-}
-
-static int prefs_get(const char *key, char *out, size_t n)
-{
-    Pref p[PREFS_MAX];
-    int  np, i;
-    out[0] = 0;
-    if (!prefs_read(p, &np))
-        return 0;
-    for (i = 0; i < np; i++)
-        if (strcmp(p[i].key, key) == 0)
-        {
-            snprintf(out, n, "%s", p[i].val);
-            return 1;
-        }
-    return 0;
-}
-
-static void json_str(FILE *f, const char *s)
-{
-    fputc('"', f);
-    for (; *s; s++)
-    {
-        if (*s == '"' || *s == '\\')
-            fputc('\\', f);
-        fputc(*s, f);
-    }
-    fputc('"', f);
-}
-
-static int prefs_set(const char *key, const char *value)
-{
-    Pref  p[PREFS_MAX];
-    char  path[1024];
-    FILE *f;
-    int   np = 0, i, found = 0;
-    if (!prefs_path(path, sizeof path))
-        return 0;
-    prefs_read(p, &np); /* nothing there yet is fine */
-    for (i = 0; i < np; i++)
-        if (strcmp(p[i].key, key) == 0)
-        {
-            snprintf(p[i].val, sizeof p[i].val, "%s", value);
-            p[i].is_str = 1;
-            found       = 1;
-        }
-    if (!found && np < PREFS_MAX)
-    {
-        snprintf(p[np].key, sizeof p[np].key, "%s", key);
-        snprintf(p[np].val, sizeof p[np].val, "%s", value);
-        p[np].is_str = 1;
-        np++;
-    }
-    if (!(f = fopen(path, "w")))
-        return 0;
-    fputs("{\n", f);
-    for (i = 0; i < np; i++)
-    {
-        fputs("  ", f);
-        json_str(f, p[i].key);
-        fputs(": ", f);
-        if (p[i].is_str)
-            json_str(f, p[i].val);
-        else
-            fputs(p[i].val, f);
-        fputs(i + 1 < np ? ",\n" : "\n", f);
-    }
-    fputs("}\n", f);
-    fclose(f);
-    return 1;
-}
 
 /* ---- themes ------------------------------------------------------------ */
-
-#define DEFAULT_THEME "classic7" /* Apple's System 7 look, the game's own era */
-
-static int name_cmp(const void *a, const void *b)
-{
-    return strcmp((const char *)a, (const char *)b);
-}
-
-/*  Every pack under <assets>/themes -- a directory with a theme.txt --
- *  by name, sorted, for the menu. */
-static void scan_themes(App *a, const char *assets_dir)
-{
-    DIR           *d;
-    struct dirent *e;
-    RUiState      *s = &a->us;
-    snprintf(a->themes_dir, sizeof a->themes_dir, "%s/themes", assets_dir);
-    s->n_themes = 0;
-    if (!(d = opendir(a->themes_dir)))
-        return;
-    while ((e = readdir(d)) && s->n_themes < RUI_MAX_THEMES)
-    {
-        char        p[1200];
-        struct stat st;
-        if (e->d_name[0] == '.')
-            continue;
-        snprintf(p, sizeof p, "%s/%s/theme.txt", a->themes_dir, e->d_name);
-        if (stat(p, &st) != 0)
-            continue;
-        snprintf(s->theme_list[s->n_themes++], sizeof s->theme_list[0], "%s", e->d_name);
-    }
-    closedir(d);
-    qsort(s->theme_list, (size_t)s->n_themes, sizeof s->theme_list[0], name_cmp);
-}
-
-/*  Put a scheme on: by name from assets/themes, by path, or "none" for
- *  the hand-drawn look.  `why` is for the log -- default, saved
- *  preference, --theme, chosen.  A default pack that is not there is
- *  not a warning: assets/ is built from the game's own files and a
- *  fresh checkout has no schemes yet. */
-static int apply_theme_choice(App *a, const char *name, const char *why)
-{
-    char        path[1200];
-    const char *base;
-    size_t      len;
-    if (!a->ui)
-        return 0;
-    if (strcmp(name, "none") == 0)
-    {
-        ui_clear_theme(a->ui);
-        snprintf(a->us.theme_name, sizeof a->us.theme_name, "none");
-        R_NOTE("theme", "none (%s)", why);
-        return 1;
-    }
-    if (strchr(name, '/'))
-        snprintf(path, sizeof path, "%s", name);
-    else
-        snprintf(path, sizeof path, "%s/%s", a->themes_dir, name);
-    for (len = strlen(path); len > 1 && path[len - 1] == '/'; len--)
-        path[len - 1] = 0;
-    if (ui_set_theme(a->ui, path) != 0)
-    {
-        if (strcmp(why, "default") == 0)
-            R_DBG("theme", "no %s pack in %s; the hand-drawn look", name, a->themes_dir);
-        else
-            R_WARN("theme", "%s: not found (%s)", path, why);
-        return 0;
-    }
-    base = strrchr(path, '/');
-    base = base ? base + 1 : path;
-    snprintf(a->us.theme_name, sizeof a->us.theme_name, "%s", base);
-    R_NOTE("theme", "%s (%s)", base, why);
-    return 1;
-}
 
 /*  ==================================================================
  *  The city and its clock
@@ -643,8 +389,7 @@ static void shore_field(const RCity *c, uint8_t *out)
         {
             /*  ALTM's two heights: the table in bits 5..9 over the bed in
              *  bits 0..4.  The map edge draws this column with 284. */
-            depth = (int32_t)((c->altm[k] >> 5) & 0x1Fu) -
-                    (int32_t)(c->altm[k] & 0x1Fu);
+            depth = rcity_alt_table(c->altm[k]) - rcity_alt_ground(c->altm[k]);
             if (depth < 0)
                 depth = 0;
             /*  Surface water on the ground, XTER 0x30 on, has no bed of
@@ -670,7 +415,7 @@ static void shore_field(const RCity *c, uint8_t *out)
  *  enabled, no matter what the current isometric view has as the
  *  option"), because looking straight down at the sprites shows nothing.
  */
-static int geometry_on(const App *a)
+int geometry_on(const App *a)
 {
     /*  Turned or raised off the game's own camera, the mesh is forced on:
      *  the land art is one diamond drawn for one camera, and scattering
@@ -722,11 +467,11 @@ static int remesh(App *a)
     if (mesh_build(&a->mesh, a->view, &a->atlas, l, a->opts.underground, a->angle != 0.0f, geometry_on(a) && !a->opts.underground) != 0)
         return -1;
     shore_field(a->view, shore);
-    /*  SC2K_FIELD_DUMP=path writes the field as a binary PPM (r: water's
+    /*  --field-dump path writes the field as a binary PPM (r: water's
      *  distance to land, g: depth, b: land's distance to water; all x16). */
-    if (getenv("SC2K_FIELD_DUMP"))
+    if (opt_get("field-dump"))
     {
-        FILE *fp = fopen(getenv("SC2K_FIELD_DUMP"), "wb");
+        FILE *fp = fopen(opt_get("field-dump"), "wb");
         if (fp)
         {
             int32_t k;
@@ -743,11 +488,11 @@ static int remesh(App *a)
     if (traffic_init(&a->traffic, &a->mesh, a->view) != 0)
         return -1;
     a->traffic_time = 0.0f;
-    /*  SC2K_TRAFFIC_T=seconds advances the traffic that far on the
+    /*  --traffic-t seconds advances the traffic that far on the
      *  build, so a headless frame shows it under way. */
-    if (getenv("SC2K_TRAFFIC_T"))
+    if (opt_get("traffic-t"))
     {
-        float t = (float)atof(getenv("SC2K_TRAFFIC_T")), at = 0.0f;
+        float t = (float)atof(opt_get("traffic-t")), at = 0.0f;
         while (at < t)
         {
             traffic_step(&a->traffic, &a->mesh, 0.05f, at);
@@ -769,49 +514,6 @@ static int remesh(App *a)
           (int)l->tile_h,
           (int)l->alt_step);
     return 0;
-}
-
-/*  ==================================================================
- *  Camera and projection
- *
- *  Zoom, pitch, yaw and scroll, and the two directions between a tile
- *  and a pixel that the query box and the coordinate ruler both use.
- *  ================================================================== */
-/*  Continuous zoom, as the renderer brief has it (section 5): the three
- *  art sets are levels of detail across one range, each used where it is
- *  closest to native -- 8 px below 0.354x, 16 px to 0.707x, 32 px above,
- *  the switch points the geometric means -- and the canvas resolved by
- *  the remaining factor, never more than about 1.41x either way.  `mx`,
- *  `my` is the window point that stays put, in pixels. */
-static void zoom_to(App *a, float z, float mx, float my)
-{
-    int32_t set;
-    float   native, f, f_old;
-    float   cx, cy;
-    if (z < 0.125f)
-        z = 0.125f;
-    if (z > 8.0f)
-        z = 8.0f; /* past 4 the art is blocky, but the mesh is worth looking at */
-    set    = z >= 0.7071f ? 32 : (z >= 0.3536f ? 16 : 8);
-    native = (float)set / 32.0f;
-    f      = z / native;
-    f_old  = a->gv.zoom > 0.0f ? a->gv.zoom : 1.0f;
-    /* the canvas point under the pointer, in the current set's pixels */
-    cx = (float)a->gv.scroll_x + mx / ((float)a->gv.scale * f_old);
-    cy = (float)a->gv.scroll_y + my / ((float)a->gv.scale * f_old);
-    if (set != a->opts.zoom)
-    {
-        float ratio = (float)set / (float)a->opts.zoom;
-        cx *= ratio;
-        cy *= ratio;
-        a->opts.zoom  = set;
-        a->dirty      = 1;
-        a->mesh_dirty = 1;
-    }
-    a->gv.zoom     = f;
-    a->zoom_world  = z;
-    a->gv.scroll_x = (int32_t)(cx - mx / ((float)a->gv.scale * f));
-    a->gv.scroll_y = (int32_t)(cy - my / ((float)a->gv.scale * f));
 }
 
 /*  The backdrop: the sky, except in the underground view, which the
@@ -924,145 +626,6 @@ static const char *GRAPH_NAMES[RUI_N_GRAPH] = {
  *  slots the reconstruction has not named. */
 static const char *DEPT_NAMES[RUI_N_DEPT] = {
     NULL, NULL, NULL, "Ordinances", "Bonds", "Police", "Fire", "Health", "Schools", "Colleges", "Roads", "Highways", "Subways", "Rail", "Transit", "Power"};
-
-/*  The tile under a window point, from the sweep's own projection run
- *  backwards.  Along a diamond row + col and row - col are linear in y
- *  and x; the altitude term is settled by iterating on the tile found. */
-/*  The camera's two scales on the canvas, the same numbers terrain.vert
- *  projects with: pixels down the screen per unit of column plus row,
- *  and pixels up it per altitude level.  At the game's own pitch of 30
- *  they are half a tile height and one alt_step; raised to the map
- *  view's 90 the ground stops being foreshortened and height stops
- *  shifting a point at all. */
-static void cam_scales(const App *a, float *ysc, float *hsc)
-{
-    const RAtlasLevel *l  = a->sw.level;
-    float              pt = (a->gv.pitch > 0.0f ? a->gv.pitch : 30.0f) * 3.14159265f / 180.0f;
-    *ysc                  = (float)l->tile_h * 0.5f * (sinf(pt) / 0.5f);
-    *hsc                  = (float)l->alt_step * (cosf(pt) / 0.8660254f);
-}
-
-/*  Where a grid point lands on the canvas, at its own altitude. */
-static void grid_to_canvas(const App *a, float fc, float fr, float alt, float *ocx, float *ocy)
-{
-    const RAtlasLevel *l = a->sw.level;
-    float              ysc, hsc;
-    cam_scales(a, &ysc, &hsc);
-    *ocx = (float)a->sw.ox + (float)l->tile_w * 0.5f + (fr - fc) * (float)l->tile_w * 0.5f;
-    *ocy = (float)a->sw.oy - ((float)l->tile_h + 0.5f) + (fc + fr) * ysc - alt * hsc;
-}
-
-/*  The grid point under a window point, and the altitude it was found
- *  at: the ground diamond at its own drawn altitude, found by iterating
- *  on the altitude, and turned back about the pivot when the view is
- *  turned.  Runs the camera backwards, at whatever pitch it is at, so
- *  the query tool reads the map view as it reads the game's own (the
- *  user: "I'd like the query to work in map view").  Returns 0, or -1
- *  off the map. */
-static int screen_to_grid(App *a, float mx, float my, SDL_Window *win, float *ofc, float *ofr, float *oalt)
-{
-    const RAtlasLevel *l    = a->sw.level;
-    float              dens = SDL_GetWindowPixelDensity(win);
-    float              cx, cy, dif, altv = 0.0f, used = 0.0f, fc = 0.0f, fr = 0.0f;
-    float              ysc, hsc;
-    int                it;
-    if (!l || dens <= 0.0f)
-        return -1;
-    cam_scales(a, &ysc, &hsc);
-    {
-        float f = (float)a->gv.scale * (a->gv.zoom > 0.0f ? a->gv.zoom : 1.0f);
-        cx      = mx * dens / f + (float)a->gv.scroll_x;
-        cy      = my * dens / f + (float)a->gv.scroll_y;
-    }
-    dif = (cx - (float)a->sw.ox - (float)l->tile_w * 0.5f) /
-          ((float)l->tile_w * 0.5f); /* row - col */
-    for (it = 0; it < 4; ++it)
-    {
-        float   spl;
-        int32_t col, row, idx;
-        used = altv;
-        spl  = (cy - (float)a->sw.oy + used * hsc +
-                (float)l->tile_h + 0.5f) /
-               ysc; /* row + col */
-        fc   = (spl - dif) * 0.5f;
-        fr   = (spl + dif) * 0.5f;
-        if (a->angle != 0.0f)
-        {
-            /* the free rotation: turn back about the pivot */
-            float ang = -a->angle * 3.14159265f / 180.0f;
-            float xc = fc - a->gv.pivot_c, yc = fr - a->gv.pivot_r;
-            fc = xc * cosf(ang) - yc * sinf(ang) + a->gv.pivot_c;
-            fr = xc * sinf(ang) + yc * cosf(ang) + a->gv.pivot_r;
-        }
-        col = (int32_t)floorf(fc);
-        row = (int32_t)floorf(fr);
-        if (col < 0 || row < 0 || col >= R_MAP || row >= R_MAP)
-            return -1;
-        idx  = row * R_MAP + col;
-        altv = (float)(a->opts.underground
-                           ? (a->view->altm[idx] & 0x1Fu)
-                           : (a->view->xter[idx] >= 0x10u
-                                  ? ((a->view->altm[idx] >> 5) & 0x1Fu)
-                                  : (a->view->altm[idx] & 0x1Fu)));
-    }
-    *ofc  = fc;
-    *ofr  = fr;
-    *oalt = used;
-    return 0;
-}
-
-/*  The grid cell under the pointer, so every cell can be targeted on its
- *  own (the user: "it needs to be able to target individual grids").  A
- *  sprite standing in front of a cell does not take the pick; the
- *  footprint it belongs to is shown by the highlight instead. */
-static void pick_tile(App *a, float mx, float my, SDL_Window *win)
-{
-    float fc, fr, alt;
-    a->q_col = a->q_row = -1;
-    if (screen_to_grid(a, mx, my, win, &fc, &fr, &alt) != 0)
-        return;
-    a->q_col = (int32_t)floorf(fc);
-    a->q_row = (int32_t)floorf(fr);
-}
-
-/*  The camera's anchor: the grid point under the view's centre.  It is
- *  the pivot the camera turns about and the point it holds in the middle
- *  of the window while it moves, so turning or raising the camera leaves
- *  what the view looks at where it is (the user: "rotations centered
- *  around the current view").  The pivot never moves under the rotation,
- *  so the scroll only has to put its unturned canvas position back at the
- *  centre. */
-static void cam_hold(App *a, SDL_Window *win)
-{
-    float cx, cy, f;
-    int   pw, ph;
-    if (!win || !a->sw.level || !SDL_GetWindowSizeInPixels(win, &pw, &ph))
-        return;
-    f = (float)a->gv.scale * (a->gv.zoom > 0.0f ? a->gv.zoom : 1.0f);
-    grid_to_canvas(a, a->anch_c, a->anch_r, a->anch_alt, &cx, &cy);
-    a->gv.scroll_x = (int32_t)lroundf(cx - (float)pw * 0.5f / f);
-    a->gv.scroll_y = (int32_t)lroundf(cy - (float)ph * 0.5f / f);
-}
-
-/*  Take the point under the centre as the anchor, and pivot on it.  It is
- *  measured once, at the start of a move, so a move cannot walk the view
- *  away a rounded pixel at a time. */
-static void cam_anchor(App *a, SDL_Window *win)
-{
-    float dens = win ? SDL_GetWindowPixelDensity(win) : 0.0f;
-    float fc, fr, alt;
-    int   pw, ph;
-    if (!a->sw.level || dens <= 0.0f || !SDL_GetWindowSizeInPixels(win, &pw, &ph))
-        return;
-    if (screen_to_grid(a, (float)pw * 0.5f / dens, (float)ph * 0.5f / dens, win, &fc, &fr, &alt) != 0)
-        return;
-    a->anch_c     = fc;
-    a->anch_r     = fr;
-    a->anch_alt   = alt;
-    a->gv.pivot_c = fc;
-    a->gv.pivot_r = fr;
-    cam_hold(a, win);
-}
 
 /*  ==================================================================
  *  The interface, filled and applied
@@ -1177,7 +740,7 @@ static void ui_fill(App *a)
                 {
                     float f    = (float)a->gv.scale * (a->gv.zoom > 0.0f ? a->gv.zoom : 1.0f);
                     float dens = a->win_density > 0.0f ? a->win_density : 1.0f;
-                    float ang  = a->angle * 3.14159265f / 180.0f;
+                    float ang  = a->angle * ARC_DEG2RAD;
                     int   kq;
                     for (kq = 0; kq < 4; ++kq)
                     {
@@ -1206,7 +769,7 @@ static void ui_fill(App *a)
         int   ug   = a->opts.underground;
         float f    = (float)a->gv.scale * (a->gv.zoom > 0.0f ? a->gv.zoom : 1.0f);
         float dens = a->win_density > 0.0f ? a->win_density : 1.0f;
-        float ang  = a->angle * 3.14159265f / 180.0f;
+        float ang  = a->angle * ARC_DEG2RAD;
         int   axis, v;
         for (axis = 0; axis < 2 && a->us.coord_n < 64; ++axis)
             for (v = 0; v < 128 && a->us.coord_n < 64; v += 8)
@@ -1223,11 +786,11 @@ static void ui_fill(App *a)
                         ok = 0;
                         break;
                     }
-                    z        = t[0];
-                    c2       = (float)cc - a->gv.pivot_c;
-                    r2       = (float)rr - a->gv.pivot_r;
-                    rc       = c2 * cosf(ang) - r2 * sinf(ang) + a->gv.pivot_c;
-                    rw       = c2 * sinf(ang) + r2 * cosf(ang) + a->gv.pivot_r;
+                    z  = t[0];
+                    c2 = (float)cc - a->gv.pivot_c;
+                    r2 = (float)rr - a->gv.pivot_r;
+                    rc = c2 * cosf(ang) - r2 * sinf(ang) + a->gv.pivot_c;
+                    rw = c2 * sinf(ang) + r2 * cosf(ang) + a->gv.pivot_r;
                     grid_to_canvas(a, rc, rw, z, &cx, &cy);
                     end[e][0] = (cx - (float)a->gv.scroll_x) * f / dens;
                     end[e][1] = (cy - (float)a->gv.scroll_y) * f / dens;
@@ -1244,8 +807,8 @@ static void ui_fill(App *a)
             }
     }
     /* the switches */
-    s->speed       = a->speed;
-    s->geometry    = a->gv.geometry;
+    s->speed    = a->speed;
+    s->geometry = a->gv.geometry;
     /*  The road knobs, unless the window is mid-edit and owns them. */
     if (!s->tune_changed)
         memcpy(s->tune, mesh_tune(), sizeof s->tune);
@@ -1325,16 +888,22 @@ static void use_tool(App *a, SDL_Window *win)
         case RUI_TOOL_CENTER:
             SDL_GetWindowSizeInPixels(win, &pw, &ph);
             {
-                const RAtlasLevel *l   = a->sw.level;
-                int32_t            idx = row * R_MAP + col;
-                int32_t            alt = a->view->xter[idx] >= 0x10u
-                                             ? (int32_t)((a->view->altm[idx] >> 5) & 0x1Fu)
-                                             : (int32_t)(a->view->altm[idx] & 0x1Fu);
-                int32_t            cx  = a->sw.ox + (row - col) * (l->tile_w / 2) + l->tile_w / 2;
-                int32_t            cy  = a->sw.oy + (row + col) * (l->tile_h / 2) - alt * l->alt_step -
-                                         l->tile_h / 2;
-                a->gv.scroll_x         = cx - (pw / a->gv.scale) / 2;
-                a->gv.scroll_y         = cy - (ph / a->gv.scale) / 2;
+                /*  Centre through the camera's own anchor rather than a
+                 *  projection of its own.  The one that stood here was a
+                 *  fourth transcription and it was wrong twice: it put
+                 *  the origin half a tile out (tile_h / 2, not the
+                 *  tile_h + 0.5 every other path uses), took no account
+                 *  of pitch at all, and divided by gv.scale while
+                 *  ignoring gv.zoom -- so the tile you clicked did not
+                 *  land in the middle at any zoom but one, and never in
+                 *  the map view. */
+                int32_t idx   = row * R_MAP + col;
+                a->anch_c     = (float)col + 0.5f;
+                a->anch_r     = (float)row + 0.5f;
+                a->anch_alt   = (float)rcity_alt_surface(a->view->altm[idx], a->view->xter[idx]);
+                a->gv.pivot_c = a->anch_c;
+                a->gv.pivot_r = a->anch_r;
+                cam_hold(a, win);
             }
             break;
         default:
@@ -1357,92 +926,6 @@ static void use_tool(App *a, SDL_Window *win)
  *  makes the city square rather than a diamond (the user: "rotate it so
  *  that we see it square"); leaving takes both back, to the nearest of
  *  the original's own four rotations. */
-#define CAM_SECONDS 0.45f
-
-/*  Put the camera at a pitch and a yaw, and hold the anchor. */
-static void cam_set(App *a, float pitch, float yaw, SDL_Window *win)
-{
-    int turned  = a->angle != 0.0f;
-    a->gv.pitch = pitch;
-    a->angle    = yaw;
-    a->gv.angle = yaw;
-    /*  Turned, the mesh draws every water surface and all four cuts, so
-     *  crossing into or out of the snap rebuilds it. */
-    if ((a->angle != 0.0f) != turned)
-        a->mesh_dirty = 1;
-    cam_hold(a, win);
-}
-
-/*  Start a move to that pitch and yaw. */
-static void cam_go(App *a, float pitch, float yaw, SDL_Window *win)
-{
-    cam_anchor(a, win);
-    a->pitch_from = a->gv.pitch > 0.0f ? a->gv.pitch : 30.0f;
-    a->pitch_to   = pitch;
-    a->yaw_from   = a->angle;
-    a->yaw_to     = yaw;
-    a->cam_t      = win ? 0.0f : 1.0f;
-    if (a->cam_t >= 1.0f)
-        cam_set(a, pitch, yaw, win);
-}
-
-/*  A frame's worth of the move. */
-static void cam_step(App *a, float dt, SDL_Window *win)
-{
-    float u;
-    if (a->cam_t >= 1.0f || dt <= 0.0f)
-        return;
-    a->cam_t += dt / CAM_SECONDS;
-    if (a->cam_t > 1.0f)
-        a->cam_t = 1.0f;
-    u = a->cam_t * a->cam_t * (3.0f - 2.0f * a->cam_t);
-    cam_set(a,
-            a->pitch_from + (a->pitch_to - a->pitch_from) * u,
-            a->yaw_from + (a->yaw_to - a->yaw_from) * u,
-            win);
-    if (a->cam_t >= 1.0f)
-    {
-        /*  Arrived: the yaw comes back into 0..360, and a hair off the
-         *  snap is the snap. */
-        float y = fmodf(a->yaw_to + 360.0f, 360.0f);
-        if (fabsf(y) < 0.01f || fabsf(y - 360.0f) < 0.01f)
-            y = 0.0f;
-        a->yaw_to = y;
-        cam_set(a, a->pitch_to, y, win);
-    }
-}
-
-/*  Raise the camera to the map view, or lower it back to the game's own.
- *  The map view draws the mesh whatever the 3D switch says, so entering
- *  it may have to build the mesh first. */
-static void set_plan(App *a, int on, SDL_Window *win)
-{
-    float yaw = a->cam_t < 1.0f ? a->yaw_to : a->angle;
-    int   was = geometry_on(a);
-    if (!!on == !!a->plan)
-        return;
-    a->plan = on;
-    /*  Square, either way: the map view sits on the nearest 90 plus 45,
-     *  the city view on the nearest 90, which are the four rotations the
-     *  original itself has. */
-    yaw = on ? 90.0f * floorf(yaw / 90.0f + 0.5f) + 45.0f
-             : 90.0f * floorf((yaw - 45.0f) / 90.0f + 0.5f);
-    cam_go(a, on ? 90.0f : 30.0f, yaw, win);
-    if (geometry_on(a) != was)
-        a->mesh_dirty = 1;
-    a->dirty = 1;
-    ui_log(&a->us, on ? "Map view: the camera looks straight down" : "Back to the city view");
-}
-
-/*  Turn the camera by `deg`, from where it is going if it is already on
- *  its way, so keys pressed in a row add up instead of fighting. */
-static void rotate_by(App *a, float deg, SDL_Window *win)
-{
-    float yaw = (a->cam_t < 1.0f ? a->yaw_to : a->angle) + deg;
-    cam_go(a, a->gv.pitch, yaw, win);
-    if (a->yaw_to != 0.0f)
-        ui_log(&a->us, "Turned to %.0f degrees about the view's centre", (double)fmodf(a->yaw_to + 360.0f, 360.0f));
-}
 
 /*  What the UI changed or asked for. */
 static void ui_apply(App *a, SDL_Window *win, int pw, int ph)
@@ -1519,6 +1002,17 @@ static void ui_apply(App *a, SDL_Window *win, int pw, int ph)
             ui_log(s, "Could not load %s", s->load_path);
         }
         s->want_load = 0;
+    }
+    if (s->want_music)
+    {
+        if (a->mus)
+        {
+            music_set_enabled(a->mus, !music_enabled(a->mus));
+            s->music_on = music_enabled(a->mus);
+            prefs_set("music", s->music_on ? "on" : "off");
+            ui_log(s, "Music %s", s->music_on ? "on" : "off");
+        }
+        s->want_music = 0;
     }
     if (s->want_theme)
     {
@@ -1652,177 +1146,6 @@ static int shot_frame(App *a, SDL_Window *win, const char *path)
  *  was installed.  Either can still be given outright.
  * ------------------------------------------------------------------ */
 
-static int is_dir(const char *p)
-{
-    struct stat st;
-    return p && *p && stat(p, &st) == 0 && S_ISDIR(st.st_mode);
-}
-
-static int is_file(const char *p)
-{
-    struct stat st;
-    return p && *p && stat(p, &st) == 0 && S_ISREG(st.st_mode);
-}
-
-/*  an assets directory is one with the tile atlas in it */
-static int looks_like_assets(const char *p)
-{
-    char probe[1024];
-    snprintf(probe, sizeof probe, "%s/atlas.json", p);
-    return is_file(probe);
-}
-
-/*  $SC2K_ASSETS, then beside the binary, then up towards the repo root,
- *  then the working directory. */
-static int find_assets(char *out, size_t n, const char *argv0)
-{
-    const char *env = getenv("SC2K_ASSETS");
-    char        base[1024], probe[1024];
-    const char *slash;
-    int         up;
-
-    if (env && looks_like_assets(env))
-    {
-        snprintf(out, n, "%s", env);
-        return 1;
-    }
-    slash = argv0 ? strrchr(argv0, '/') : NULL;
-    if (slash)
-    {
-        size_t len = (size_t)(slash - argv0);
-        if (len >= sizeof base)
-            len = sizeof base - 1;
-        memcpy(base, argv0, len);
-        base[len] = 0;
-    }
-    else
-    {
-        snprintf(base, sizeof base, ".");
-    }
-    for (up = 0; up < 6; ++up)
-    {
-        char walk[1024];
-        int  k;
-        snprintf(walk, sizeof walk, "%s", base);
-        for (k = 0; k < up; ++k)
-        {
-            size_t l = strlen(walk);
-            snprintf(walk + l, sizeof walk - l, "/..");
-        }
-        snprintf(probe, sizeof probe, "%s/assets", walk);
-        if (looks_like_assets(probe))
-        {
-            snprintf(out, n, "%s", probe);
-            return 1;
-        }
-    }
-    if (looks_like_assets("assets"))
-    {
-        snprintf(out, n, "%s", "assets");
-        return 1;
-    }
-    return 0;
-}
-
-/*  $SC2K_CITIES, then the usual install, then ./Cities */
-/*  Where the cities are, most specific first.  `cities/` beside the
- *  build is the answer that needs no setup: the repository carries the
- *  collection, so a fresh clone can open one straight away.  The
- *  environment variable still wins, for a folder of your own. */
-static int find_cities(char *out, size_t n)
-{
-    static const char *const REL[] = {"cities", "../cities", "../../cities", "Cities", NULL};
-    const char              *env   = getenv("SC2K_CITIES");
-    const char              *home  = getenv("HOME");
-    char                     probe[1024];
-    int                      i;
-
-    if (is_dir(env))
-    {
-        snprintf(out, n, "%s", env);
-        return 1;
-    }
-    for (i = 0; REL[i]; i++)
-        if (is_dir(REL[i]))
-        {
-            snprintf(out, n, "%s", REL[i]);
-            return 1;
-        }
-    if (home)
-    {
-        snprintf(probe, sizeof probe, "%s/Downloads/SimCity 2000\xc2\xae Collection/Cities", home);
-        if (is_dir(probe))
-        {
-            snprintf(out, n, "%s", probe);
-            return 1;
-        }
-    }
-    return 0;
-}
-
-/*  Everything in the cities directory that is a file, sorted, so the
- *  load menu has something to show. */
-static int scan_cities(RUiState *s)
-{
-    DIR           *d;
-    struct dirent *e;
-    int            i, j;
-
-    s->n_cities = 0;
-    if (!s->city_dir[0] || !(d = opendir(s->city_dir)))
-        return 0;
-    while ((e = readdir(d)) && s->n_cities < R_MAX_CITIES)
-    {
-        char full[1024];
-        if (e->d_name[0] == '.')
-            continue;
-        snprintf(full, sizeof full, "%s/%s", s->city_dir, e->d_name);
-        if (!is_file(full))
-            continue;
-        snprintf(s->city_list[s->n_cities], sizeof s->city_list[0], "%s", e->d_name);
-        s->n_cities++;
-    }
-    closedir(d);
-    for (i = 1; i < s->n_cities; ++i) /* the list is short; keep it simple */
-        for (j = i; j > 0 && strcasecmp(s->city_list[j - 1], s->city_list[j]) > 0;
-             --j)
-        {
-            char t[80];
-            memcpy(t, s->city_list[j - 1], sizeof t);
-            memcpy(s->city_list[j - 1], s->city_list[j], sizeof t);
-            memcpy(s->city_list[j], t, sizeof t);
-        }
-    return s->n_cities;
-}
-
-/*  A city argument may be a path or just a name; a name is looked for in
- *  the cities directory. */
-static int resolve_city(char *out, size_t n, const char *arg, const char *dir)
-{
-    char probe[1024];
-    if (is_file(arg))
-    {
-        snprintf(out, n, "%s", arg);
-        return 1;
-    }
-    if (dir && *dir)
-    {
-        snprintf(probe, sizeof probe, "%s/%s", dir, arg);
-        if (is_file(probe))
-        {
-            snprintf(out, n, "%s", probe);
-            return 1;
-        }
-        snprintf(probe, sizeof probe, "%s/%s.sc2", dir, arg);
-        if (is_file(probe))
-        {
-            snprintf(out, n, "%s", probe);
-            return 1;
-        }
-    }
-    return 0;
-}
-
 /*  Everything the command line and the environment decide, in one place.
  *  It was two hundred lines at the top of game_main, sharing a scope with
  *  the five hundred that follow, so a name set here could be read -- or
@@ -1846,24 +1169,24 @@ static int parse_options(Startup *o, App *a, int argc, char **argv)
 {
     const char *check_out = NULL, *shot_out = NULL, *theme_dir = NULL;
     int         check = 0, i, ww = 1280, wh = 800;
-    /*  SC2K_WIN=WxH renders at a larger framebuffer, so a shot of the
+    /*  --win WxH renders at a larger framebuffer, so a shot of the
      *  same ground carries more pixels -- the window is otherwise fixed. */
-    if (getenv("SC2K_WIN"))
+    if (opt_get("win"))
     {
         int w2 = 0, h2 = 0;
-        if (sscanf(getenv("SC2K_WIN"), "%dx%d", &w2, &h2) == 2 && w2 > 63 && h2 > 63)
+        if (sscanf(opt_get("win"), "%dx%d", &w2, &h2) == 2 && w2 > 63 && h2 > 63)
         {
             ww = w2;
             wh = h2;
         }
     }
-    int         run_frames = 0, run_speed = 0, sprites = 0, want_geometry = 0;
-    float       zoomf      = 0.0f;
-    int         sound_test = 0, want_mesh_check = 0;
-    int         have_scroll = 0, scroll_x = 0, scroll_y = 0;
-    int         have_centre = 0, centre_col = 0, centre_row = 0;
-    int         have_pick = 0;
-    float       pick_x = 0.0f, pick_y = 0.0f;
+    int     run_frames = 0, run_speed = 0, sprites = 0, want_geometry = 0;
+    float   zoomf      = 0.0f;
+    int     sound_test = 0, want_mesh_check = 0;
+    int     have_scroll = 0, scroll_x = 0, scroll_y = 0;
+    int     have_centre = 0, centre_col = 0, centre_row = 0;
+    int     have_pick = 0;
+    float   pick_x = 0.0f, pick_y = 0.0f;
     int32_t pixel_scale = 0;
 
     char assets_dir[1024] = {0}, city_path[1024] = {0};
@@ -1877,8 +1200,8 @@ static int parse_options(Startup *o, App *a, int argc, char **argv)
      *      sc2kgpu path/to/City        by path
      *      sc2kgpu assets path/City    the old form, still understood
      *
-     *  --assets DIR overrides the search, as do $SC2K_ASSETS and
-     *  $SC2K_CITIES. */
+     *  --assets DIR overrides the search, as do $--assets and
+     *  $--cities. */
     if (argc >= 2 && argv[1][0] != '-')
     {
         if (looks_like_assets(argv[1]))
@@ -1917,6 +1240,7 @@ static int parse_options(Startup *o, App *a, int argc, char **argv)
                    "  --shot FILE   render one frame to a PNG and exit\n"
                    "  --run N       advance N frames headless\n"
                    "  --version     the version, one line\n"
+                   "  --song S OUT  render song S (a SONG id, 10000..10018, or a .mid) to OUT.wav and exit\n"
                    "  --theme NAME  a Kaleidoscope scheme: a pack under assets/themes, a path, or none;\n"
                    "                the default is classic7, and Options > Theme remembers a choice\n"
                    "\n"
@@ -1927,9 +1251,9 @@ static int parse_options(Startup *o, App *a, int argc, char **argv)
     memset(a, 0, sizeof *a);
     soft_defaults(&a->opts);
     a->gv.pivot_c = a->gv.pivot_r = 64.0f; /* until the view turns: the map's centre */
-    a->sky[0]                    = 16;
-    a->sky[1]                    = 20;
-    a->sky[2]                    = 22;
+    a->sky[0]                     = 16;
+    a->sky[1]                     = 20;
+    a->sky[2]                     = 22;
     for (i = first_opt; i < argc; ++i)
     {
         if (strcmp(argv[i], "--zoom") == 0 && i + 1 < argc)
@@ -1994,6 +1318,11 @@ static int parse_options(Startup *o, App *a, int argc, char **argv)
             log_set_colour(0);
         else if (strcmp(argv[i], "--sound-test") == 0 && i + 1 < argc)
             sound_test = atoi(argv[++i]); /* play one effect in a headless run */
+        else if (strcmp(argv[i], "--song") == 0 && i + 2 < argc)
+        {
+            song_arg = argv[++i];
+            song_out = argv[++i];
+        }
     }
     /*  The geometry and the water shader are the game's look; the
      *  sprites are the check's baseline and an option (--sprites, or
@@ -2013,22 +1342,20 @@ static int parse_options(Startup *o, App *a, int argc, char **argv)
         a->gv.pitch = 90.0f;
         a->angle = a->gv.angle = 90.0f * floorf(a->angle / 90.0f + 0.5f) + 45.0f;
     }
-    /*  SC2K_TUNE=w_road,w_rail,rmin_road,rmin_rail,rmax_road,rmax_rail,
+    /*  --tune w_road,w_rail,rmin_road,rmin_rail,rmax_road,rmax_rail,
      *  approach,margin,trim -- the same nine knobs the tuning window
      *  shows, for a headless render of a particular setting. */
-    if (getenv("SC2K_TUNE"))
+    if (opt_get("tune"))
     {
         float *t = mesh_tune();
-        sscanf(getenv("SC2K_TUNE"), "%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f",
-               &t[0], &t[1], &t[2], &t[3], &t[4], &t[5], &t[6], &t[7], &t[8], &t[9], &t[10],
-               &t[11]);
+        sscanf(opt_get("tune"), "%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f", &t[0], &t[1], &t[2], &t[3], &t[4], &t[5], &t[6], &t[7], &t[8], &t[9], &t[10], &t[11]);
     }
     a->q_col = a->q_row = -1;
-    a->us.show_palette = 1;
-    a->us.show_tuning  = getenv("SC2K_NO_TUNEWIN") ? 0 : 1;
-    a->us.show_coords  = getenv("SC2K_COORDS") ? 1 : 0; /* the road knobs, open on launch while they are being set */
-    a->us.show_log     = 0; /* under Windows > Messages */
-    a->us.tool         = -1;
+    a->us.show_palette  = 1;
+    a->us.show_tuning   = opt_set("no-tunewin") ? 0 : 1;
+    a->us.show_coords   = opt_set("coords") ? 1 : 0; /* the road knobs, open on launch while they are being set */
+    a->us.show_log      = 0;                         /* under Windows > Messages */
+    a->us.tool          = -1;
     {
         static const char *const BANNER[] = {
             "   ___                __",
@@ -2043,9 +1370,9 @@ static int parse_options(Startup *o, App *a, int argc, char **argv)
         snprintf(line, sizeof line, "\nArcology %s -- the SimCity 2000 simulation, reconstructed\n%s\n\n", ARC_VERSION_FULL, plat);
         log_raw(line);
         log_raw("SimCity 2000 is copyright (c) 1993-1995 Maxis, now part of Electronic Arts Inc.\n"
-                  "Not affiliated with, endorsed by, or connected to Electronic Arts or Maxis.\n"
-                  "Arcology is copyright (c) 2026 the Arcology authors, MIT licence.\n"
-                  "https://github.com/umamibeef/arcology\n");
+                "Not affiliated with, endorsed by, or connected to Electronic Arts or Maxis.\n"
+                "Arcology is copyright (c) 2026 the Arcology authors, MIT licence.\n"
+                "https://github.com/umamibeef/arcology\n");
     }
     if (check)
         R_NOTE("init", "arcology, check against %s", check_out ? check_out : "the original");
@@ -2063,30 +1390,30 @@ static int parse_options(Startup *o, App *a, int argc, char **argv)
     else
         R_NOTE("init", "arcology, %dx%d window", ww, wh);
     R_DBG("init", "zoom %d, scale %s, %s", (int)a->opts.zoom, pixel_scale < 1 ? "auto" : pixel_scale == 1 ? "1"
-                                                                                                         : "2",
+                                                                                                          : "2",
           a->gv.geometry ? "geometry" : "sprites");
 
-    o->check_out = check_out;
-    o->shot_out = shot_out;
-    o->theme_dir = theme_dir;
-    o->check = check;
-    o->ww = ww;
-    o->wh = wh;
-    o->run_frames = run_frames;
-    o->run_speed = run_speed;
-    o->zoomf = zoomf;
-    o->sound_test = sound_test;
+    o->check_out       = check_out;
+    o->shot_out        = shot_out;
+    o->theme_dir       = theme_dir;
+    o->check           = check;
+    o->ww              = ww;
+    o->wh              = wh;
+    o->run_frames      = run_frames;
+    o->run_speed       = run_speed;
+    o->zoomf           = zoomf;
+    o->sound_test      = sound_test;
     o->want_mesh_check = want_mesh_check;
-    o->have_scroll = have_scroll;
-    o->scroll_x = scroll_x;
-    o->scroll_y = scroll_y;
-    o->have_centre = have_centre;
-    o->centre_col = centre_col;
-    o->centre_row = centre_row;
-    o->have_pick = have_pick;
-    o->pick_x = pick_x;
-    o->pick_y = pick_y;
-    o->pixel_scale = pixel_scale;
+    o->have_scroll     = have_scroll;
+    o->scroll_x        = scroll_x;
+    o->scroll_y        = scroll_y;
+    o->have_centre     = have_centre;
+    o->centre_col      = centre_col;
+    o->centre_row      = centre_row;
+    o->have_pick       = have_pick;
+    o->pick_x          = pick_x;
+    o->pick_y          = pick_y;
+    o->pixel_scale     = pixel_scale;
     memcpy(o->assets_dir, assets_dir, sizeof o->assets_dir);
     memcpy(o->city_path, city_path, sizeof o->city_path);
     return 0;
@@ -2213,7 +1540,7 @@ static void frame_loop(App *a, SDL_Window *win)
                 else if (mod && k == SDLK_V)
                 {
                     a->opts.view = shift ? (a->opts.view + 11) % 12
-                                        : (a->opts.view + 1) % 12;
+                                         : (a->opts.view + 1) % 12;
                     a->dirty     = 1;
                 }
                 else if (mod && shift && k == SDLK_P)
@@ -2254,7 +1581,7 @@ static void frame_loop(App *a, SDL_Window *win)
             uint64_t now = SDL_GetTicksNS();
             if (a->last_ns)
             {
-                float ms   = (float)((double)(now - a->last_ns) / 1e6);
+                float ms    = (float)((double)(now - a->last_ns) / 1e6);
                 a->frame_ms = a->frame_ms > 0.0f ? a->frame_ms * 0.9f + ms * 0.1f : ms;
                 a->fps      = a->frame_ms > 0.0f ? 1000.0f / a->frame_ms : 0.0f;
                 /*  The camera's travel to and from the map view, a frame's
@@ -2287,7 +1614,6 @@ static void frame_loop(App *a, SDL_Window *win)
     }
 }
 
-
 int game_main(int argc, char **argv)
 {
     App         a;
@@ -2318,27 +1644,27 @@ int game_main(int argc, char **argv)
     int         i;
     if (parse_options(&o, &a, argc, argv) != 0)
         return 1;
-    check_out = o.check_out;
-    shot_out = o.shot_out;
-    theme_dir = o.theme_dir;
-    check = o.check;
-    ww = o.ww;
-    wh = o.wh;
-    run_frames = o.run_frames;
-    run_speed = o.run_speed;
-    zoomf = o.zoomf;
-    sound_test = o.sound_test;
+    check_out       = o.check_out;
+    shot_out        = o.shot_out;
+    theme_dir       = o.theme_dir;
+    check           = o.check;
+    ww              = o.ww;
+    wh              = o.wh;
+    run_frames      = o.run_frames;
+    run_speed       = o.run_speed;
+    zoomf           = o.zoomf;
+    sound_test      = o.sound_test;
     want_mesh_check = o.want_mesh_check;
-    have_scroll = o.have_scroll;
-    scroll_x = o.scroll_x;
-    scroll_y = o.scroll_y;
-    have_centre = o.have_centre;
-    centre_col = o.centre_col;
-    centre_row = o.centre_row;
-    have_pick = o.have_pick;
-    pick_x = o.pick_x;
-    pick_y = o.pick_y;
-    pixel_scale = o.pixel_scale;
+    have_scroll     = o.have_scroll;
+    scroll_x        = o.scroll_x;
+    scroll_y        = o.scroll_y;
+    have_centre     = o.have_centre;
+    centre_col      = o.centre_col;
+    centre_row      = o.centre_row;
+    have_pick       = o.have_pick;
+    pick_x          = o.pick_x;
+    pick_y          = o.pick_y;
+    pixel_scale     = o.pixel_scale;
     memcpy(assets_dir, o.assets_dir, sizeof assets_dir);
     memcpy(city_path, o.city_path, sizeof city_path);
 
@@ -2363,10 +1689,24 @@ int game_main(int argc, char **argv)
 
     if (!assets_dir[0] && !find_assets(assets_dir, sizeof assets_dir, argv[0]))
     {
-        R_ERR("assets", "not found; pass --assets DIR or set SC2K_ASSETS");
+        R_ERR("assets", "not found; pass --assets DIR");
         return 1;
     }
     R_DBG("assets", "%s", assets_dir);
+    if (song_out)
+    {
+        /*  A song to a WAV and out: no window, no device.  The check in
+         *  tests/music_check.py runs this; so can anyone who wants to
+         *  hear a song without the game. */
+        RMusic *mus = music_create(assets_dir, 0);
+        int     rc  = mus ? music_render_wav(mus, song_arg, song_out, 44100) : -1;
+        if (rc == 0)
+            R_NOTE("music", "%s -> %s", song_arg, song_out);
+        else
+            R_ERR("music", "could not render %s%s", song_arg, mus ? "" : " (no assets/music: run tools/import_assets.py)");
+        music_destroy(mus);
+        return rc ? 1 : 0;
+    }
     if (atlas_load(&a.atlas, assets_dir) != 0)
     {
         R_ERR("atlas", "%s", a.atlas.err);
@@ -2470,6 +1810,23 @@ int game_main(int argc, char **argv)
     {
         a.snd = sound_create(assets_dir);
         if (a.snd)
+        {
+            char on[16];
+            a.mus = music_create(assets_dir, sound_device(a.snd));
+            if (a.mus)
+            {
+                music_set_rand(a.mus, lib_rand); /* the game's own stream, as the original shares it */
+                /*  on unless the preference says off: the original's
+                 *  Options menu starts with Music checked */
+                int want = !(prefs_get("music", on, sizeof on) && strcmp(on, "off") == 0);
+                R_DBG("music", "%d songs, %d instruments", music_n_songs(a.mus), 17);
+                music_set_enabled(a.mus, want && !sound_test);
+                a.us.music_on = music_enabled(a.mus);
+            }
+            else
+                R_DBG("music", "none: run tools/import_assets.py for assets/music");
+        }
+        if (a.snd)
             R_DBG("sound", "%d effects", sound_loaded(a.snd));
         else
             R_WARN("sound", "no audio device");
@@ -2533,9 +1890,7 @@ int game_main(int argc, char **argv)
                 int32_t idx = centre_row * R_MAP + centre_col;
                 a.anch_c    = (float)centre_col + 0.5f;
                 a.anch_r    = (float)centre_row + 0.5f;
-                a.anch_alt  = (float)(a.view->xter[idx] >= 0x10u
-                                          ? ((a.view->altm[idx] >> 5) & 0x1Fu)
-                                          : (a.view->altm[idx] & 0x1Fu));
+                a.anch_alt  = (float)rcity_alt_surface(a.view->altm[idx], a.view->xter[idx]);
                 cam_hold(&a, win);
             }
         }
@@ -2549,7 +1904,7 @@ int game_main(int argc, char **argv)
     a.zoom_world = (float)a.opts.zoom / 32.0f;
     a.gv.zoom    = 1.0f;
     if (a.gv.pitch <= 0.0f)
-        a.gv.pitch = 30.0f; /* the game's own camera */
+        a.gv.pitch = ARC_PITCH_DEG; /* the game's own camera */
     a.cam_t = 1.0f;
     if (zoomf > 0.0f)
     {
@@ -2573,9 +1928,7 @@ int game_main(int argc, char **argv)
     {
         int32_t idx = (R_MAP / 2) * R_MAP + R_MAP / 2;
         a.anch_c = a.anch_r = (float)(R_MAP / 2);
-        a.anch_alt          = (float)(a.view->xter[idx] >= 0x10u
-                                          ? ((a.view->altm[idx] >> 5) & 0x1Fu)
-                                          : (a.view->altm[idx] & 0x1Fu));
+        a.anch_alt          = (float)rcity_alt_surface(a.view->altm[idx], a.view->xter[idx]);
         a.gv.pivot_c        = a.anch_c;
         a.gv.pivot_r        = a.anch_r;
         cam_hold(&a, win);
@@ -2601,6 +1954,7 @@ int game_main(int argc, char **argv)
                 break;
             a.gv.time = (float)((double)(SDL_GetTicksNS() - a.t0_ns) / 1e9);
             traffic_frame(&a, a.gv.time);
+            music_update(a.mus);
             gpu_frame(a.gpu, &a.gv, a.sky, NULL, NULL);
         }
         printf("run       %d frames at speed %d in %.2f s: date %d -> %d "
@@ -2662,9 +2016,9 @@ int game_main(int argc, char **argv)
     {
         int bad;
         /*  The turned build cuts all four edges: a closed surface.  With
-         *  SC2K_CHECK_OPEN set the plain build is checked instead, whose
+         *  --check-open set the plain build is checked instead, whose
          *  two uncut edges are open by design: the checker's own test. */
-        a.angle = getenv("SC2K_CHECK_OPEN") ? 0.0f : 1.0f;
+        a.angle = opt_set("check-open") ? 0.0f : 1.0f;
         if (remesh(&a) != 0)
             fprintf(stderr, "mesh build failed\n");
         bad = mesh_check(&a.mesh, 1);
@@ -2711,6 +2065,7 @@ int game_main(int argc, char **argv)
     mesh_free(&a.mesh);
     ops_free(&a.ops);
     ui_destroy(a.ui);
+    music_destroy(a.mus);
     sound_destroy(a.snd);
     gpu_destroy(a.gpu);
     SDL_DestroyWindow(win);

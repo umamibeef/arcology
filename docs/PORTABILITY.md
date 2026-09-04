@@ -1,8 +1,12 @@
-# Portability rules for the renderer
+# Portability rules
 
 Every rule here is enforced by the build or by a test, because a rule that
 is only written down is a rule that drifts. If you add a file, it inherits
 all of them.
+
+These began as the renderer's rules and lived under `src/render`, which
+stopped being true when the program was split up: they apply to `src/app`,
+`src/ui`, `src/audio` and `src/util` as much as to the drawing code.
 
 ## The build enforces these
 

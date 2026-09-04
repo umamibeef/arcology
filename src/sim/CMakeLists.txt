@@ -43,7 +43,7 @@ add_library(sc2kcore STATIC
     ext80.c       # soft 80-bit extended, the SANE subset the game uses
     sane.c        # the _FP68K trap, reduced to the 21 opwords that occur
     economy.c     # economyPass $34D04, the national economy
-    tables.c      # GENERATED - do not edit
+    generated/tables.c  # GENERATED - do not edit
     advisor.c
     arco.c        # .arco, the native world format
 )
@@ -66,10 +66,10 @@ if(NOT TARGET sc2k_vendor)
 endif()
 target_link_libraries(sc2kcore PUBLIC sc2k_vendor)
 
-# main.c holds the developer modes -- --verify, --clock, --growth and the
-# rest.  It is a library rather than an executable because a_main.c
+# dev.c holds the developer modes -- --verify, --clock, --growth and the
+# rest.  It is a library rather than an executable because app/main.c
 # dispatches into it: one binary, `arcology`, answers to all of them.
-add_library(sc2kdev STATIC main.c)
+add_library(sc2kdev STATIC dev.c testcity.c)
 target_link_libraries(sc2kdev PUBLIC sc2kcore)
 
 # The reconstruction is held to a strict standard on purpose: a silent
@@ -92,7 +92,10 @@ endif()
 # formatted, and runs as part of ctest so the style cannot drift.
 find_program(CLANG_FORMAT NAMES clang-format
              HINTS /opt/homebrew/bin /usr/local/bin)
-set(SC2K_SOURCES main.c city.c sim.c rng.c ext80.c sane.c tables.c arco.c
+#  The hand-written sources only.  generated/tables.c is machine output --
+#  its layout is gen_tables.py's business, and holding it to a style meant
+#  for people just made the generator and the checker argue.
+set(SC2K_SOURCES dev.c city.c sim.c rng.c ext80.c sane.c arco.c testcity.c
                  sc2k.h ext80.h arco.h)
 if(CLANG_FORMAT)
     add_custom_target(format

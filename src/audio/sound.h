@@ -10,15 +10,40 @@
 #ifndef R_SOUND_H
 #define R_SOUND_H
 
+#include <SDL3/SDL.h>
+
 enum
 {
-    R_SND_BULLDOZE = 500, R_SND_ERROR, R_SND_WIND, R_SND_PLOP, R_SND_EXPLODE,
-    R_SND_CLICK, R_SND_POLICE, R_SND_FIRE_LOOP, R_SND_DOZER, R_SND_FIRETRUCK,
-    R_SND_COPTER, R_SND_FLOOD, R_SND_BOOS, R_SND_CHEERS, R_SND_ZZAP,
-    R_SND_MAYDAY, R_SND_IMHIT, R_SND_SHIP, R_SND_TAKEOFF, R_SND_LAND,
-    R_SND_SIREN, R_SND_HORNS, R_SND_PRISON, R_SND_SCHOOLBELL, R_SND_TRAIN,
-    R_SND_SHOT, R_SND_ARCO, R_SND_ROAR,
-    R_SND_FIRST = 500, R_SND_LAST = 527
+    R_SND_BULLDOZE = 500,
+    R_SND_ERROR,
+    R_SND_WIND,
+    R_SND_PLOP,
+    R_SND_EXPLODE,
+    R_SND_CLICK,
+    R_SND_POLICE,
+    R_SND_FIRE_LOOP,
+    R_SND_DOZER,
+    R_SND_FIRETRUCK,
+    R_SND_COPTER,
+    R_SND_FLOOD,
+    R_SND_BOOS,
+    R_SND_CHEERS,
+    R_SND_ZZAP,
+    R_SND_MAYDAY,
+    R_SND_IMHIT,
+    R_SND_SHIP,
+    R_SND_TAKEOFF,
+    R_SND_LAND,
+    R_SND_SIREN,
+    R_SND_HORNS,
+    R_SND_PRISON,
+    R_SND_SCHOOLBELL,
+    R_SND_TRAIN,
+    R_SND_SHOT,
+    R_SND_ARCO,
+    R_SND_ROAR,
+    R_SND_FIRST = 500,
+    R_SND_LAST  = 527
 };
 
 typedef struct RSound RSound;
@@ -29,5 +54,7 @@ RSound *sound_create(const char *assets_dir);
 void    sound_destroy(RSound *s);
 void    sound_play(RSound *s, int id);
 int     sound_loaded(const RSound *s);
+/*  The device the effects play on, for the music to share. */
+SDL_AudioDeviceID sound_device(const RSound *s);
 
 #endif /* R_SOUND_H */

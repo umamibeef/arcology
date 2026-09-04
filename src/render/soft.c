@@ -7,9 +7,10 @@
  *  and tools/pixel_diff.py (what it paints).
  */
 #include "soft.h"
+#include "project.h"
 
-#include <stdlib.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "lodepng.h"
@@ -26,8 +27,8 @@ void soft_defaults(RSoftOpts *o)
     o->draw_terrain   = 1;
     o->draw_things    = 1;
     o->draw_buildings = 1;
-    o->focus_row = -1;
-    o->focus_col = -1;
+    o->focus_row      = -1;
+    o->focus_col      = -1;
 }
 
 static void put(uint8_t *px, const uint8_t rgb[3])
@@ -65,8 +66,7 @@ static int32_t terrain_tile(uint8_t xter)
 
 static int32_t tile_alt(uint16_t altm, uint8_t xter)
 {
-    return xter < 0x10u ? (int32_t) (altm & 0x1Fu)
-                        : (int32_t) ((altm >> 5) & 0x1Fu);
+    return (int32_t)rcity_alt_surface(altm, xter);
 }
 
 /*  Is this the tile the building is drawn at?
@@ -90,8 +90,7 @@ static int32_t tile_alt(uint16_t altm, uint8_t xter)
  *  threshold, and a heavier variant above a second one.  Returns the shape,
  *  or 0 for no car.
  */
-static int32_t traffic_car(const RCity *c, int32_t idx, int32_t row,
-                           int32_t col, int32_t xbld, int *flip)
+static int32_t traffic_car(const RCity *c, int32_t idx, int32_t row, int32_t col, int32_t xbld, int *flip)
 {
     int32_t t, lo, hi, k;
 
@@ -140,18 +139,18 @@ static int32_t traffic_car(const RCity *c, int32_t idx, int32_t row,
 
 static int draws_here(uint8_t xzon, uint8_t xbld, uint8_t mask)
 {
-    uint8_t corners = (uint8_t) (xzon & 0xF0u);
+    uint8_t corners = (uint8_t)(xzon & 0xF0u);
     if (corners & mask)
-        return 1; /* the anchor for this rotation, and 0xF0 single tiles */
+        return 1;                         /* the anchor for this rotation, and 0xF0 single tiles */
     return corners == 0u && xbld < 0x70u; /* unzoned 1x1: always */
 }
 
 /*  Set while dumping so the op list is printed instead of painted. */
-static int      g_dump = 0;
+static int g_dump = 0;
 /*  Where the --focus tile landed on the canvas.  Set by the sweep, read
  *  back through soft_focus_result. */
-static int32_t  g_focus_x = 0, g_focus_y = 0;
-static int      g_focus_ok = 0;
+static int32_t g_focus_x = 0, g_focus_y = 0;
+static int     g_focus_ok = 0;
 
 /*  The 2.5D passes.  g_pass is 0 for the original's single sweep, 1 while
  *  the terrain is painted (writes depth), 2 while everything else is
@@ -198,7 +197,7 @@ static ROp *ops_push(ROpList *ops)
     if (ops->n == ops->cap)
     {
         size_t ncap = ops->cap ? ops->cap * 2u : 8192u;
-        ROp   *nv   = (ROp *) realloc(ops->v, ncap * sizeof *nv);
+        ROp   *nv   = (ROp *)realloc(ops->v, ncap * sizeof *nv);
         if (!nv)
             return NULL;
         ops->v   = nv;
@@ -227,8 +226,7 @@ typedef struct
  *
  *  A shape with no art emits nothing: the original paints nothing for it,
  *  and the blit list the oracle is diffed against does not list it. */
-static ROp *emit(Emitter *e, int kind, int32_t shap, int32_t sx, int32_t sy,
-                 int flip, int32_t rise, int32_t stencil, int terrain)
+static ROp *emit(Emitter *e, int kind, int32_t shap, int32_t sx, int32_t sy, int flip, int32_t rise, int32_t stencil, int terrain)
 {
     const RTile *t = atlas_tile(e->l, shap);
     ROp         *op;
@@ -242,22 +240,21 @@ static ROp *emit(Emitter *e, int kind, int32_t shap, int32_t sx, int32_t sy,
         return NULL;
     }
     memset(op, 0, sizeof *op);
-    op->kind    = (uint8_t) kind;
+    op->kind    = (uint8_t)kind;
     op->shape   = shap;
     op->x       = sx;
-    op->y       = sy - (rise >= 0 ? rise : (int32_t) t->ay);
-    op->flip    = (uint8_t) (flip != 0);
+    op->y       = sy - (rise >= 0 ? rise : (int32_t)t->ay);
+    op->flip    = (uint8_t)(flip != 0);
     op->stencil = stencil;
-    op->terrain = (uint8_t) terrain;
+    op->terrain = (uint8_t)terrain;
     op->order   = e->order;
-    op->row     = (int16_t) e->row;
-    op->col     = (int16_t) e->col;
-    op->alt     = (int16_t) e->alt;
+    op->row     = (int16_t)e->row;
+    op->col     = (int16_t)e->col;
+    op->alt     = (int16_t)e->alt;
     return op;
 }
 
-static void emit_blit(Emitter *e, int32_t shap, int32_t sx, int32_t sy,
-                      int flip, int32_t rise, int32_t stencil, int terrain)
+static void emit_blit(Emitter *e, int32_t shap, int32_t sx, int32_t sy, int flip, int32_t rise, int32_t stencil, int terrain)
 {
     emit(e, R_OP_BLIT, shap, sx, sy, flip, rise, stencil, terrain);
 }
@@ -273,18 +270,16 @@ static void emit_blit(Emitter *e, int32_t shap, int32_t sx, int32_t sy,
  *  The op also names the road sprite it was stencilled onto, so a
  *  consumer that cannot read its destination can test the road's own
  *  texel instead. */
-static void emit_car(Emitter *e, int32_t shap, int32_t sx, int32_t sy,
-                     int flip, int32_t stencil, int32_t road, int32_t road_x,
-                     int32_t road_y, int road_flip)
+static void emit_car(Emitter *e, int32_t shap, int32_t sx, int32_t sy, int flip, int32_t stencil, int32_t road, int32_t road_x, int32_t road_y, int road_flip)
 {
     ROp *op = emit(e, R_OP_BLIT, shap, sx, sy, flip, -1, stencil, 0);
     if (op)
     {
         const RTile *rt = atlas_tile(e->l, road);
-        op->under_flip   = (uint8_t) (road_flip != 0);
-        op->under_shape  = rt ? road : 0;
-        op->under_x      = road_x;
-        op->under_y      = rt ? road_y - (int32_t) rt->ay : 0;
+        op->under_flip  = (uint8_t)(road_flip != 0);
+        op->under_shape = rt ? road : 0;
+        op->under_x     = road_x;
+        op->under_y     = rt ? road_y - (int32_t)rt->ay : 0;
     }
 }
 
@@ -293,16 +288,14 @@ static void emit_car(Emitter *e, int32_t shap, int32_t sx, int32_t sy,
  *  it when it already holds one of the dirt ramp's indices.  The op
  *  carries the silhouette; what it does to the destination is the
  *  consumer's business. */
-static void emit_shadow(Emitter *e, int32_t shap, int32_t sx, int32_t sy,
-                        int flip)
+static void emit_shadow(Emitter *e, int32_t shap, int32_t sx, int32_t sy, int flip)
 {
     emit(e, R_OP_SHADOW, shap, sx, sy, flip, -1, -1, 0);
 }
 
 /* ---- painting the ops -------------------------------------------------- */
 
-static void paint_blit(RImage *im, const RAtlas *a, const RAtlasLevel *l,
-                       const ROp *op)
+static void paint_blit(RImage *im, const RAtlas *a, const RAtlasLevel *l, const ROp *op)
 {
     const RTile *t = atlas_tile(l, op->shape);
     int32_t      yy, top = op->y, sx = op->x;
@@ -310,7 +303,7 @@ static void paint_blit(RImage *im, const RAtlas *a, const RAtlasLevel *l,
 
     if (!t)
         return;
-    for (yy = 0; yy < (int32_t) t->h; ++yy)
+    for (yy = 0; yy < (int32_t)t->h; ++yy)
     {
         int32_t        Y = top + yy;
         const uint8_t *src;
@@ -319,12 +312,12 @@ static void paint_blit(RImage *im, const RAtlas *a, const RAtlasLevel *l,
 
         if (Y < 0 || Y >= im->h)
             continue;
-        src = l->indices + ((size_t) t->y + (size_t) yy) * (size_t) l->w +
-              (size_t) t->x;
-        row = im->rgb + (size_t) Y * (size_t) im->w * 3u;
-        for (xx = 0; xx < (int32_t) t->w; ++xx)
+        src = l->indices + ((size_t)t->y + (size_t)yy) * (size_t)l->w +
+              (size_t)t->x;
+        row = im->rgb + (size_t)Y * (size_t)im->w * 3u;
+        for (xx = 0; xx < (int32_t)t->w; ++xx)
         {
-            int32_t v = src[flip ? (int32_t) t->w - 1 - xx : xx];
+            int32_t v = src[flip ? (int32_t)t->w - 1 - xx : xx];
             int32_t X;
             size_t  off;
             if (v == l->transparent)
@@ -332,8 +325,8 @@ static void paint_blit(RImage *im, const RAtlas *a, const RAtlasLevel *l,
             X = sx + xx;
             if (X < 0 || X >= im->w)
                 continue;
-            off = (size_t) Y * (size_t) im->w + (size_t) X;
-            if (op->stencil >= 0 && im->idx[off] != (uint8_t) op->stencil)
+            off = (size_t)Y * (size_t)im->w + (size_t)X;
+            if (op->stencil >= 0 && im->idx[off] != (uint8_t)op->stencil)
                 continue;
             /*  Terrain owned by a tile later in the sweep is in front of
              *  this pixel, whichever pass is painting. */
@@ -343,9 +336,9 @@ static void paint_blit(RImage *im, const RAtlas *a, const RAtlasLevel *l,
                     ++g_blocked;
                 continue;
             }
-            put(row + (size_t) X * 3u, a->palette[v]);
-            im->idx[off]  = (uint8_t) v;
-            im->prov[off] = (uint16_t) (op->shape - l->id_base);
+            put(row + (size_t)X * 3u, a->palette[v]);
+            im->idx[off]  = (uint8_t)v;
+            im->prov[off] = (uint16_t)(op->shape - l->id_base);
             if (g_pass == 1)
                 g_depth[off] = g_order;
         }
@@ -361,8 +354,7 @@ static void paint_blit(RImage *im, const RAtlas *a, const RAtlasLevel *l,
  *  so it darkens open ground and does nothing to roads, water or roofs.
  *  That is also why it is invisible to a blit-list oracle and to drawing a
  *  tile on a blank background: it depends on what is already there. */
-static void paint_shadow(RImage *im, const RAtlas *a, const RAtlasLevel *l,
-                         const ROp *op)
+static void paint_shadow(RImage *im, const RAtlas *a, const RAtlasLevel *l, const ROp *op)
 {
     const RTile *t = atlas_tile(l, op->shape);
     int32_t      yy, top = op->y, sx = op->x;
@@ -370,7 +362,7 @@ static void paint_shadow(RImage *im, const RAtlas *a, const RAtlasLevel *l,
 
     if (!t)
         return;
-    for (yy = 0; yy < (int32_t) t->h; ++yy)
+    for (yy = 0; yy < (int32_t)t->h; ++yy)
     {
         int32_t        Y = top + yy;
         const uint8_t *src;
@@ -378,18 +370,18 @@ static void paint_shadow(RImage *im, const RAtlas *a, const RAtlasLevel *l,
 
         if (Y < 0 || Y >= im->h)
             continue;
-        src = l->indices + ((size_t) t->y + (size_t) yy) * (size_t) l->w +
-              (size_t) t->x;
-        for (xx = 0; xx < (int32_t) t->w; ++xx)
+        src = l->indices + ((size_t)t->y + (size_t)yy) * (size_t)l->w +
+              (size_t)t->x;
+        for (xx = 0; xx < (int32_t)t->w; ++xx)
         {
             size_t  off;
-            int32_t X, v = src[flip ? (int32_t) t->w - 1 - xx : xx];
+            int32_t X, v = src[flip ? (int32_t)t->w - 1 - xx : xx];
             if (v == l->transparent)
                 continue;
             X = sx + xx;
             if (X < 0 || X >= im->w)
                 continue;
-            off = (size_t) Y * (size_t) im->w + (size_t) X;
+            off = (size_t)Y * (size_t)im->w + (size_t)X;
             if (g_pass && g_depth[off] > g_order)
             {
                 ++g_blocked;
@@ -404,15 +396,14 @@ static void paint_shadow(RImage *im, const RAtlas *a, const RAtlasLevel *l,
                 v = 110;
             else
                 continue;
-            im->idx[off] = (uint8_t) v;
-            im->prov[off] |= (uint16_t) R_PROV_SHADOW;
+            im->idx[off] = (uint8_t)v;
+            im->prov[off] |= (uint16_t)R_PROV_SHADOW;
             put(im->rgb + off * 3u, a->palette[v]);
         }
     }
 }
 
-static void paint(RImage *im, const RAtlas *a, const RAtlasLevel *l,
-                  const ROp *op)
+static void paint(RImage *im, const RAtlas *a, const RAtlasLevel *l, const ROp *op)
 {
     g_order = op->order;
     if (op->kind == R_OP_SHADOW)
@@ -426,22 +417,37 @@ static void paint(RImage *im, const RAtlas *a, const RAtlasLevel *l,
  *  0x1D4 + (value >> 5), leaving anything under 0x10 untinted; views 9..11
  *  already hold a shape id.  Returns 0 for "no tint".
  */
-static int32_t overlay_tile(const RCity *c, int32_t row, int32_t col,
-                            int32_t view)
+static int32_t overlay_tile(const RCity *c, int32_t row, int32_t col, int32_t view)
 {
     int32_t v;
     uint8_t b;
 
     switch (view)
     {
-        case R_VIEW_TRAFFIC:   v = c->xtrf[(row >> 1) * R_HALF + (col >> 1)]; break;
-        case R_VIEW_DENSITY:   v = c->xpop[(row >> 2) * R_QTR + (col >> 2)];  break;
-        case R_VIEW_GROWTH_VALUE: v = c->xrog[(row >> 2) * R_QTR + (col >> 2)]; break;
-        case R_VIEW_CRIME:     v = c->xcrm[(row >> 1) * R_HALF + (col >> 1)]; break;
-        case R_VIEW_POLICE:    v = c->xplc[(row >> 2) * R_QTR + (col >> 2)];  break;
-        case R_VIEW_POLLUTION: v = c->xplt[(row >> 1) * R_HALF + (col >> 1)]; break;
-        case R_VIEW_LANDVALUE: v = c->xval[(row >> 1) * R_HALF + (col >> 1)]; break;
-        case R_VIEW_FIRE:      v = c->xfir[(row >> 2) * R_QTR + (col >> 2)];  break;
+        case R_VIEW_TRAFFIC:
+            v = c->xtrf[(row >> 1) * R_HALF + (col >> 1)];
+            break;
+        case R_VIEW_DENSITY:
+            v = c->xpop[(row >> 2) * R_QTR + (col >> 2)];
+            break;
+        case R_VIEW_GROWTH_VALUE:
+            v = c->xrog[(row >> 2) * R_QTR + (col >> 2)];
+            break;
+        case R_VIEW_CRIME:
+            v = c->xcrm[(row >> 1) * R_HALF + (col >> 1)];
+            break;
+        case R_VIEW_POLICE:
+            v = c->xplc[(row >> 2) * R_QTR + (col >> 2)];
+            break;
+        case R_VIEW_POLLUTION:
+            v = c->xplt[(row >> 1) * R_HALF + (col >> 1)];
+            break;
+        case R_VIEW_LANDVALUE:
+            v = c->xval[(row >> 1) * R_HALF + (col >> 1)];
+            break;
+        case R_VIEW_FIRE:
+            v = c->xfir[(row >> 2) * R_QTR + (col >> 2)];
+            break;
 
         /*  $169E0 / $16A1C: conducting and supplied reads as 300,
          *  conducting only as 303; off the network, no tint. */
@@ -455,8 +461,10 @@ static int32_t overlay_tile(const RCity *c, int32_t row, int32_t col,
         /*  $16A52: growth arrows, thresholded rather than ramped. */
         case R_VIEW_GROWTH:
             v = c->xrog[(row >> 2) * R_QTR + (col >> 2)];
-            if (v >= 0x83) return 476;
-            if (v <= 0x7C) return 477;
+            if (v >= 0x83)
+                return 476;
+            if (v <= 0x7C)
+                return 477;
             return 0;
 
         default:
@@ -499,9 +507,7 @@ static int32_t overlay_tile(const RCity *c, int32_t row, int32_t col,
  *  Returns the number of shapes written, each with a y shift and a mirror
  *  flag (1..4).
  */
-static int underground_tiles(const RCity *c, int32_t idx, uint8_t mask,
-                             int32_t alt, int32_t out[6], int32_t dy[6],
-                             int flip[6], int gnd_anchor[6])
+static int underground_tiles(const RCity *c, int32_t idx, uint8_t mask, int32_t alt, int32_t out[6], int32_t dy[6], int flip[6], int gnd_anchor[6])
 {
     int32_t  v   = c->xund[idx];
     uint8_t  b   = c->xbit[idx];
@@ -514,8 +520,8 @@ static int underground_tiles(const RCity *c, int32_t idx, uint8_t mask,
     int32_t  lift = 0;
     /*  $166E6, the slope lift, sits in the generic XBLD tail only; the
      *  elevated path at $165EC branches over it to $1662E. */
-    int      onslope = 1;
-    int      n = 0;
+    int onslope = 1;
+    int n       = 0;
 
 /*  `ga` says which descriptor anchors the shape.  $16298 works out
  *  -$4(a6) ONCE, from the ground shape, and the pipe/subway ($16376), the
@@ -524,14 +530,14 @@ static int underground_tiles(const RCity *c, int32_t idx, uint8_t mask,
  *  ($162C8) and the XBLD network ($1670C) recompute it from their own.
  *  Anchoring a 34 px tunnel on its own art instead of on the 18 px
  *  diamond is what left the joins stepped at every corner. */
-#define UG_EMIT(sh, ddy, ff, ga)                                              \
-    do                                                                        \
-    {                                                                         \
-        out[n]        = (sh);                                                 \
-        dy[n]         = (ddy);                                                \
-        flip[n]       = (ff);                                                 \
-        gnd_anchor[n] = (ga);                                                 \
-        ++n;                                                                  \
+#define UG_EMIT(sh, ddy, ff, ga) \
+    do                           \
+    {                            \
+        out[n]        = (sh);    \
+        dy[n]         = (ddy);   \
+        flip[n]       = (ff);    \
+        gnd_anchor[n] = (ga);    \
+        ++n;                     \
     } while (0)
 
     if (tun == 1)
@@ -579,7 +585,7 @@ static int underground_tiles(const RCity *c, int32_t idx, uint8_t mask,
         return n;
 
     if (b & 0x04u) /* $166A4: drop to the water surface */
-        d = (((int32_t) (am & 0x1Fu)) - ((int32_t) ((am >> 5) & 0x1Fu))) * alt;
+        d = (((int32_t)(am & 0x1Fu)) - ((int32_t)((am >> 5) & 0x1Fu))) * alt;
     else if (onslope && gnd == 0x13E) /* $166E6: lift onto the slope */
         d = -alt;
     else
@@ -603,8 +609,7 @@ static int underground_tiles(const RCity *c, int32_t idx, uint8_t mask,
  *  ROAD under the vehicle, not its heading.  Returns the slot, or -1 for
  *  "do not draw"; *raise is 1 when the sprite sits one altitude level up.
  */
-static int32_t veh_slot(const RCity *c, int32_t idx, const uint8_t *rec,
-                        int *raise)
+static int32_t veh_slot(const RCity *c, int32_t idx, const uint8_t *rec, int *raise)
 {
     int32_t b = c->xbld[idx], d4, slot;
 
@@ -636,19 +641,56 @@ static int32_t veh_slot(const RCity *c, int32_t idx, const uint8_t *rec,
     return slot;
 }
 
-static void draw_thing(Emitter *e, const RCity *c, int32_t idx,
-                       const uint8_t *rec, int32_t zoom_level, int32_t sx,
-                       int32_t sy)
+/*  $01756A -- a raising bridge stands open while a ship is near.
+ *
+ *  The tile renderer draws the lift span, XBLD 0x58, and then asks: is
+ *  there a ship at all ($12E4, the count the ship step keeps), and if so
+ *  is one within eight tiles by $A6E4's Manhattan distance?  If it is,
+ *  the drawn id becomes 0x59 -- the same span, raised -- and that is why
+ *  the sim's SHIP_PASSABLE lists BOTH: a ship sails under either.
+ *
+ *  Without it the span never rises, and since things draw last in a tile
+ *  ($FABA, so a train covers its own track) the ship then sails visibly
+ *  over a closed bridge, which is what gave this away.
+ *
+ *  The original scans from slot 1 and takes the FIRST ship it finds, not
+ *  the nearest, and stops at slot 0x28.  Both are kept.
+ *
+ *  The rule is written twice over there, once per zoom's tile renderer --
+ *  $01756A and $017FD8, identical down to the threshold.  The sweep does
+ *  not branch on zoom at this point, so once here covers all three; the
+ *  raise was measured at 32, 16 and 8 px. */
+static int bridge_is_raised(const RCity *c, int32_t col, int32_t row)
 {
-    const RAtlasLevel *l = e->l;
-    int32_t type = rec[0];
-    int32_t head, shape, flip = 0, dx = 0, dy = 0;
+    int slot;
+    for (slot = 1; slot < 0x28 && slot < R_MAX_THINGS; ++slot)
+    {
+        const uint8_t *rec = c->xthg + (size_t)slot * 12u;
+        int32_t        dy, dx;
+        if (rec[0] != 3) /* $17586: type 3, a ship */
+            continue;
+        dy = (int32_t)rec[3] - row; /* $175B2 */
+        dx = (int32_t)rec[4] - col; /* $175AA */
+        if (dy < 0)
+            dy = -dy;
+        if (dx < 0)
+            dx = -dx;
+        return dy + dx < 8; /* $175C4: nearer than eight */
+    }
+    return 0;
+}
+
+static void draw_thing(Emitter *e, const RCity *c, int32_t idx, const uint8_t *rec, int32_t zoom_level, int32_t sx, int32_t sy)
+{
+    const RAtlasLevel *l    = e->l;
+    int32_t            type = rec[0];
+    int32_t            head, shape, flip = 0, dx = 0, dy = 0;
 
     if (type == 0 || type > 16)
         return;
     if (type == 12 || type == 13)
         return; /* $A128 is a bare branch to the exit */
-    if (zoom_level < (int32_t) R_THING_MINZOOM[type])
+    if (zoom_level < (int32_t)R_THING_MINZOOM[type])
         return;
     shape = R_THING_SHAPE[type];
     if (!shape)
@@ -698,7 +740,7 @@ static void draw_thing(Emitter *e, const RCity *c, int32_t idx,
     {
         const RTile *t = atlas_tile(l, l->id_base + shape);
         if (t)
-            dx += l->tile_w / 2 - (int32_t) t->w / 2;
+            dx += arc_half_wi(l->tile_w) - (int32_t)t->w / 2;
     }
 
     /*  A thing does not sit on its tile.  $A232 reads three more fields
@@ -726,14 +768,14 @@ static void draw_thing(Emitter *e, const RCity *c, int32_t idx,
          *  returns straight to the exit -- applying the generic tail to
          *  them put a train 12 px left and 35 px below its track. */
         int32_t sub_y = rec[6], sub_x = rec[7];
-        int32_t divx  = R_THING_DIVX[zoom_level & 3];
-        int32_t divy  = R_THING_DIVY[zoom_level & 3];
+        int32_t divx = R_THING_DIVX[zoom_level & 3];
+        int32_t divy = R_THING_DIVY[zoom_level & 3];
 
         if (divx)
             dx += (sub_y - sub_x) / divx;
         if (divy)
             dy += (sub_y + sub_x) / divy;
-        dy -= (int32_t) rec[5] * (2 << zoom_level);
+        dy -= (int32_t)rec[5] * (2 << zoom_level);
     }
     /*  $A370: only three thing types cast one -- 1, 2 and 16, the things
      *  that fly.  It is an allow-list, not an exclusion: a boat or a
@@ -743,15 +785,12 @@ static void draw_thing(Emitter *e, const RCity *c, int32_t idx,
      *  dropped by (altitude - 2) steps of 2<<zoom so it lands on the
      *  ground the thing is flying over. */
     if ((type == 1 || type == 2 || type == 16) && c->xbld[idx] < 0x70)
-        emit_shadow(e, l->id_base + shape, sx + dx,
-                    sy + dy + ((int32_t) rec[5] - 2) * (2 << zoom_level),
-                    flip);
+        emit_shadow(e, l->id_base + shape, sx + dx, sy + dy + ((int32_t)rec[5] - 2) * (2 << zoom_level), flip);
 
     emit_blit(e, l->id_base + shape, sx + dx, sy + dy, flip, -1, -1, 0);
 }
 
-int soft_sweep(const RAtlas *a, const RCity *c, const RSoftOpts *o, ROpList *ops,
-            RSweep *info)
+int soft_sweep(const RAtlas *a, const RCity *c, const RSoftOpts *o, ROpList *ops, RSweep *info)
 {
     const RAtlasLevel *l = NULL;
     int32_t            i, tw, th, alt, W, H, ox, oy, s, n = o->n;
@@ -777,7 +816,7 @@ int soft_sweep(const RAtlas *a, const RCity *c, const RSoftOpts *o, ROpList *ops
      *  note on `oy` below. */
     W  = n * tw + tw * 4;
     H  = n * th + 420 * th / 16;
-    ox = n * tw / 2;
+    ox = n * arc_half_wi(tw);
     /*  `ay` is the sprite's full height -- exactly the $1226 descriptor's
      *  +4 that the game subtracts at $16298 -- so this origin puts the
      *  canvas on the original's own coordinates and tools/pixel_diff.py
@@ -814,10 +853,10 @@ int soft_sweep(const RAtlas *a, const RCity *c, const RSoftOpts *o, ROpList *ops
         int32_t k;
         for (k = 0; k < R_MAP * R_MAP; ++k)
         {
-            int32_t v = c->xtxt[k];
+            int32_t v   = c->xtxt[k];
             thing_at[k] = (v >= 0xC9 && v <= 0xF0 && v - 0xC9 < R_MAX_THINGS)
-                              ? (int16_t) (v - 0xC9)
-                              : (int16_t) -1;
+                              ? (int16_t)(v - 0xC9)
+                              : (int16_t)-1;
         }
     }
 
@@ -840,7 +879,7 @@ int soft_sweep(const RAtlas *a, const RCity *c, const RSoftOpts *o, ROpList *ops
                 continue;
             /*  The painter's index: 1-based so that 0 in the depth plane
              *  means "no terrain here". */
-            E.order = (uint32_t) (s * n + dy) + 1u;
+            E.order = (uint32_t)(s * n + dy) + 1u;
             E.row   = o->y0 + dy;
             E.col   = o->x0 + dx;
 
@@ -850,15 +889,15 @@ int soft_sweep(const RAtlas *a, const RCity *c, const RSoftOpts *o, ROpList *ops
              *  Getting this backwards mirrors the entire map: the city
              *  still looks like a city, but every diagonal road runs the
              *  wrong way and the Hudson ends up on the wrong side. */
-            sx = ox + (dy - dx) * (tw / 2);
+            sx = ox + (dy - dx) * arc_half_wi(tw);
             /*  $01623E: the underground view masks ALTM with 0x1F and
              *  stops -- it always uses the GROUND altitude, never the
              *  water table.  Using the surface rule there shifts every
              *  tile that has water above it, which is what threw the
              *  subway joins out of line. */
-            E.alt = o->underground ? (int32_t) (c->altm[idx] & 0x1Fu)
+            E.alt = o->underground ? rcity_alt_ground(c->altm[idx])
                                    : tile_alt(c->altm[idx], c->xter[idx]);
-            sy    = oy + (dx + dy) * (th / 2) - E.alt * alt;
+            sy    = oy + (dx + dy) * arc_half_hi(th) - E.alt * alt;
 
             if (o->focus_row >= 0 && o->y0 + dy == o->focus_row &&
                 o->x0 + dx == o->focus_col)
@@ -888,8 +927,8 @@ int soft_sweep(const RAtlas *a, const RCity *c, const RSoftOpts *o, ROpList *ops
             if (o->draw_terrain && !o->underground &&
                 (o->y0 + dy == R_MAP - 1 || o->x0 + dx == R_MAP - 1))
             {
-                int32_t ga = (int32_t) (c->altm[idx] & 0x1Fu);
-                int32_t wa = (int32_t) ((c->altm[idx] >> 5) & 0x1Fu);
+                int32_t ga = rcity_alt_ground(c->altm[idx]);
+                int32_t wa = rcity_alt_table(c->altm[idx]);
                 int32_t k, y = sy + tile_alt(c->altm[idx], c->xter[idx]) * alt;
                 /*  One d3, walked UPWARD through both loops.  $17062 and
                  *  $170D4 are the same `subi.w #$c, d3`, and $170B2 picks
@@ -929,23 +968,23 @@ int soft_sweep(const RAtlas *a, const RCity *c, const RSoftOpts *o, ROpList *ops
              *  wireframe included, so there is no ground pass under it. */
             ground_here = o->underground
                               ? 0
-                              : (o->view != R_VIEW_NORMAL)
-                                    ? 1
-                                    : (zoom_level == 0
-                                       /*  The 8 px renderer is stingier
-                                        *  than the other two.  $186BA
-                                        *  gates the ground pass on
-                                        *  XBLD < 0x1D outright, and the
-                                        *  network branch it falls to,
-                                        *  $188F4, lays ground only when
-                                        *  XTER is 13 -- the case that
-                                        *  also lifts the network by one
-                                        *  altitude step.  Everything
-                                        *  else at that size carries its
-                                        *  own ground in the sprite. */
-                                       ? (b < 0x1D ||
-                                          (b < 0x61 && c->xter[idx] == 13))
-                                       : (b < 0x70 && !elevated));
+                          : (o->view != R_VIEW_NORMAL)
+                              ? 1
+                              : (zoom_level == 0
+                                     /*  The 8 px renderer is stingier
+                                      *  than the other two.  $186BA
+                                      *  gates the ground pass on
+                                      *  XBLD < 0x1D outright, and the
+                                      *  network branch it falls to,
+                                      *  $188F4, lays ground only when
+                                      *  XTER is 13 -- the case that
+                                      *  also lifts the network by one
+                                      *  altitude step.  Everything
+                                      *  else at that size carries its
+                                      *  own ground in the sprite. */
+                                     ? (b < 0x1D ||
+                                        (b < 0x61 && c->xter[idx] == 13))
+                                     : (b < 0x70 && !elevated));
             if (o->draw_terrain && ground_here)
             {
                 int32_t t;
@@ -984,17 +1023,15 @@ int soft_sweep(const RAtlas *a, const RCity *c, const RSoftOpts *o, ROpList *ops
                 int          uf[6], ug[6];
                 const RTile *gt = atlas_tile(
                     l, l->id_base + R_UGND_GROUND[c->xter[idx] & 0x7Fu]);
-                int32_t gh = gt ? (int32_t) gt->h : l->tile_h;
-                int     k, nu = underground_tiles(c, idx, mask, alt, u, udy,
-                                                  uf, ug);
+                int32_t gh = gt ? (int32_t)gt->h : l->tile_h;
+                int     k, nu = underground_tiles(c, idx, mask, alt, u, udy, uf, ug);
                 for (k = 0; k < nu; ++k)
-                    emit_blit(&E, l->id_base + u[k], sx, sy + udy[k], uf[k],
-                              ug[k] ? gh : -1, -1, 0);
+                    emit_blit(&E, l->id_base + u[k], sx, sy + udy[k], uf[k], ug[k] ? gh : -1, -1, 0);
             }
 
             if (!o->underground && o->view == R_VIEW_NORMAL &&
                 o->draw_buildings && b &&
-                draws_here(c->xzon[idx], (uint8_t) b, mask))
+                draws_here(c->xzon[idx], (uint8_t)b, mask))
             {
                 /*  A multi-tile building is anchored at the tile carrying
                  *  the rotation's corner bit, which for an FxF footprint is
@@ -1017,7 +1054,11 @@ int soft_sweep(const RAtlas *a, const RCity *c, const RSoftOpts *o, ROpList *ops
                 if (elevated && zoom_level != 0)
                 {
                     static const int8_t fp[4][4] = {
-                        {0, 0, 0, 0}, {0, -1, 1, -1}, {1, -1, 2, 0}, {1, 0, 1, 1}};
+                        {0, 0,  0, 0 },
+                        {0, -1, 1, -1},
+                        {1, -1, 2, 0 },
+                        {1, 0,  1, 1 }
+                    };
                     int k;
                     for (k = 0; k < 4; ++k)
                     {
@@ -1028,14 +1069,11 @@ int soft_sweep(const RAtlas *a, const RCity *c, const RSoftOpts *o, ROpList *ops
                             continue;
                         gt = terrain_tile(c->xter[r * R_MAP + cc]);
                         if (gt)
-                            emit_blit(&E, l->id_base + gt,
-                                      sx + fp[k][2] * (l->tile_w / 2),
-                                      sy + fp[k][3] * (l->tile_h / 2), 0, -1,
-                                      -1, 1);
+                            emit_blit(&E, l->id_base + gt, sx + fp[k][2] * (l->tile_w / 2), sy + fp[k][3] * (l->tile_h / 2), 0, -1, -1, 1);
                     }
                 }
                 drop = (bt && !o->no_drop)
-                           ? ((int32_t) bt->foot - 1) * l->tile_h / 2
+                           ? ((int32_t)bt->foot - 1) * l->tile_h / 2
                            : 0;
                 /*  XBIT bit 1 is the orientation flag and it is handed
                  *  straight to the blitter as its mirror argument --
@@ -1066,13 +1104,16 @@ int soft_sweep(const RAtlas *a, const RCity *c, const RSoftOpts *o, ROpList *ops
                          ((!elevated && c->xter[idx] == 13) ? l->alt_step
                                                             : 0);
 
+                /*  $01756A: the lift span draws raised with a ship about. */
+                if (b == 0x58u && bridge_is_raised(c, o->x0 + dx, o->y0 + dy))
+                    b = 0x59;
+
                 emit_blit(&E, l->id_base + b, sx, road_y, flip, -1, -1, 0);
 
                 if (o->draw_things && b < 0x70)
                 {
                     int     cflip = 0;
-                    int32_t car = traffic_car(c, idx, o->y0 + dy, o->x0 + dx,
-                                              b, &cflip);
+                    int32_t car   = traffic_car(c, idx, o->y0 + dy, o->x0 + dx, b, &cflip);
                     /*  $17506: the car's y is the road's plus the road's
                      *  height less the car's -- their BOTTOMS line up.
                      *  The op takes each sprite's own height off, so that
@@ -1093,11 +1134,7 @@ int soft_sweep(const RAtlas *a, const RCity *c, const RSoftOpts *o, ROpList *ops
                      *  $18E96 at all.  Carrying the 32 px rule down left
                      *  cars painted over the deck edges. */
                     if (car)
-                        emit_car(&E, l->id_base + car, sx, road_y, cflip,
-                                 (zoom_level == 2 && b >= 0x61 && b < 0x6C)
-                                     ? -1
-                                     : R_ROAD_INDEX,
-                                 l->id_base + b, sx, road_y, flip);
+                        emit_car(&E, l->id_base + car, sx, road_y, cflip, (zoom_level == 2 && b >= 0x61 && b < 0x6C) ? -1 : R_ROAD_INDEX, l->id_base + b, sx, road_y, flip);
                 }
 
                 /*  The no-power marker.  Three branches of the tile
@@ -1120,10 +1157,8 @@ int soft_sweep(const RAtlas *a, const RCity *c, const RSoftOpts *o, ROpList *ops
                  *  rise of 0 rather than the default. */
                 if ((c->xbit[idx] & 0xC0u) == 0x80u)
                 {
-                    int32_t off = l->tile_w / 2;
-                    emit_blit(&E, l->id_base + R_NO_POWER,
-                              sx - off + (bt ? (int32_t) bt->w / 2 : 0),
-                              sy - off, 0, 0, -1, 0);
+                    int32_t off = arc_half_wi(l->tile_w);
+                    emit_blit(&E, l->id_base + R_NO_POWER, sx - off + (bt ? (int32_t)bt->w / 2 : 0), sy - off, 0, 0, -1, 0);
                 }
             }
 
@@ -1134,8 +1169,7 @@ int soft_sweep(const RAtlas *a, const RCity *c, const RSoftOpts *o, ROpList *ops
              *  put the network back on top of the vehicle. */
             if (o->draw_things && o->view == R_VIEW_NORMAL &&
                 !o->underground && thing_at[idx] >= 0)
-                draw_thing(&E, c, idx, c->xthg + (size_t) thing_at[idx] * 12u,
-                           zoom_level, sx, sy);
+                draw_thing(&E, c, idx, c->xthg + (size_t)thing_at[idx] * 12u, zoom_level, sx, sy);
         }
     }
     if (E.oom)
@@ -1153,8 +1187,7 @@ int soft_sweep(const RAtlas *a, const RCity *c, const RSoftOpts *o, ROpList *ops
     return 0;
 }
 
-int soft_render(RImage *out, const RAtlas *a, const RCity *c,
-                  const RSoftOpts *o)
+int soft_render(RImage *out, const RAtlas *a, const RCity *c, const RSoftOpts *o)
 {
     ROpList            ops = {NULL, 0, 0};
     RSweep             sw;
@@ -1175,10 +1208,10 @@ int soft_render(RImage *out, const RAtlas *a, const RCity *c,
 
     out->w   = W;
     out->h   = H;
-    out->rgb = (uint8_t *) malloc((size_t) W * (size_t) H * 3u);
-    out->idx = (uint8_t *) malloc((size_t) W * (size_t) H);
+    out->rgb = (uint8_t *)malloc((size_t)W * (size_t)H * 3u);
+    out->idx = (uint8_t *)malloc((size_t)W * (size_t)H);
     /*  calloc: 0 is "background", and the fill below paints no sprite. */
-    out->prov = (uint16_t *) calloc((size_t) W * (size_t) H, sizeof(uint16_t));
+    out->prov = (uint16_t *)calloc((size_t)W * (size_t)H, sizeof(uint16_t));
     if (!out->rgb || !out->idx || !out->prov)
     {
         ops_free(&ops);
@@ -1188,20 +1221,20 @@ int soft_render(RImage *out, const RAtlas *a, const RCity *c,
         /*  The underground view fills its rect white before drawing
          *  ($15452 _FillRect), not with the sky colour. */
         static const uint8_t white[3] = {255, 255, 255};
-        const uint8_t *bg = o->underground ? white : o->sky;
-        size_t         npx = (size_t) W * (size_t) H;
+        const uint8_t       *bg       = o->underground ? white : o->sky;
+        size_t               npx      = (size_t)W * (size_t)H;
         /*  The game's screen is 8 bits per pixel, so the background is a
          *  palette entry like everything else.  Snap it to the nearest one
          *  and paint BOTH planes from that: otherwise an indexed export
          *  disagrees with the RGB one, and the shadow pass -- which reads
          *  the index plane -- would be testing a number no pixel has. */
-        int     pi, best = 0;
-        long    bestd = -1;
+        int  pi, best = 0;
+        long bestd = -1;
         for (pi = 0; pi < 256; ++pi)
         {
-            long dr = (long) a->palette[pi][0] - bg[0];
-            long dg = (long) a->palette[pi][1] - bg[1];
-            long db = (long) a->palette[pi][2] - bg[2];
+            long dr = (long)a->palette[pi][0] - bg[0];
+            long dg = (long)a->palette[pi][1] - bg[1];
+            long db = (long)a->palette[pi][2] - bg[2];
             long d  = dr * dr + dg * dg + db * db;
             if (bestd < 0 || d < bestd)
             {
@@ -1211,7 +1244,7 @@ int soft_render(RImage *out, const RAtlas *a, const RCity *c,
             if (!d)
                 break;
         }
-        memset(out->idx, (uint8_t) best, npx);
+        memset(out->idx, (uint8_t)best, npx);
         for (k = 0; k < npx; ++k)
             put(out->rgb + k * 3u, a->palette[best]);
     }
@@ -1227,9 +1260,7 @@ int soft_render(RImage *out, const RAtlas *a, const RCity *c,
         {
             const ROp *op = &ops.v[k];
             if (op->kind == R_OP_BLIT)
-                printf("%d %d %d %d %d %d\n", (int) op->row, (int) op->col,
-                       (int) op->shape, (int) (op->x - sw.ox),
-                       (int) (op->y - sw.oy), (int) op->flip);
+                printf("%d %d %d %d %d %d\n", (int)op->row, (int)op->col, (int)op->shape, (int)(op->x - sw.ox), (int)(op->y - sw.oy), (int)op->flip);
         }
         ops_free(&ops);
         return 0;
@@ -1250,8 +1281,8 @@ int soft_render(RImage *out, const RAtlas *a, const RCity *c,
     }
     else
     {
-        g_depth = (uint32_t *) calloc((size_t) W * (size_t) H,
-                                      sizeof(uint32_t));
+        g_depth = (uint32_t *)calloc((size_t)W * (size_t)H,
+                                     sizeof(uint32_t));
         if (!g_depth)
         {
             ops_free(&ops);
@@ -1299,19 +1330,19 @@ int soft_write_depth_png(const RImage *im, const char *path)
 {
     LodePNGState   st;
     unsigned char *png = NULL, *raw;
-    size_t         n = 0, npx = (size_t) im->w * (size_t) im->h, k;
+    size_t         n = 0, npx = (size_t)im->w * (size_t)im->h, k;
     unsigned       err;
 
     if (!g_depth)
         return -1;
-    raw = (unsigned char *) malloc(npx * 2u);
+    raw = (unsigned char *)malloc(npx * 2u);
     if (!raw)
         return -1;
     for (k = 0; k < npx; ++k)
     {
-        uint32_t v = g_depth[k] > 0xFFFFu ? 0xFFFFu : g_depth[k];
-        raw[k * 2u]      = (unsigned char) (v >> 8);
-        raw[k * 2u + 1u] = (unsigned char) (v & 0xFFu);
+        uint32_t v       = g_depth[k] > 0xFFFFu ? 0xFFFFu : g_depth[k];
+        raw[k * 2u]      = (unsigned char)(v >> 8);
+        raw[k * 2u + 1u] = (unsigned char)(v & 0xFFu);
     }
     lodepng_state_init(&st);
     st.info_raw.colortype       = LCT_GREY;
@@ -1319,8 +1350,7 @@ int soft_write_depth_png(const RImage *im, const char *path)
     st.info_png.color.colortype = LCT_GREY;
     st.info_png.color.bitdepth  = 16;
     st.encoder.auto_convert     = 0;
-    err = lodepng_encode(&png, &n, raw, (unsigned) im->w, (unsigned) im->h,
-                         &st);
+    err                         = lodepng_encode(&png, &n, raw, (unsigned)im->w, (unsigned)im->h, &st);
     if (!err)
         err = lodepng_save_file(png, n, path);
     free(png);
@@ -1342,7 +1372,7 @@ void image_free(RImage *im)
 
 uint32_t image_crc(const RImage *im)
 {
-    return lodepng_crc32(im->rgb, (size_t) im->w * (size_t) im->h * 3u);
+    return lodepng_crc32(im->rgb, (size_t)im->w * (size_t)im->h * 3u);
 }
 
 /*  The same image as a palette PNG.  Every pixel the renderer emits comes
@@ -1367,8 +1397,7 @@ int soft_focus_result(int32_t *x, int32_t *y)
  *  indices 155..203 and 224..238, so an export that renumbers them turns
  *  the animation into a no-op -- which is exactly what it did.
  */
-int image_write_png_indices(const RImage *im, const RAtlas *a,
-                              const char *path)
+int image_write_png_indices(const RImage *im, const RAtlas *a, const char *path)
 {
     LodePNGState   st;
     unsigned char *png = NULL;
@@ -1384,13 +1413,10 @@ int image_write_png_indices(const RImage *im, const RAtlas *a,
     st.encoder.auto_convert     = 0;
     for (i = 0; i < 256; ++i)
     {
-        lodepng_palette_add(&st.info_raw, a->palette[i][0], a->palette[i][1],
-                            a->palette[i][2], 255);
-        lodepng_palette_add(&st.info_png.color, a->palette[i][0],
-                            a->palette[i][1], a->palette[i][2], 255);
+        lodepng_palette_add(&st.info_raw, a->palette[i][0], a->palette[i][1], a->palette[i][2], 255);
+        lodepng_palette_add(&st.info_png.color, a->palette[i][0], a->palette[i][1], a->palette[i][2], 255);
     }
-    err = lodepng_encode(&png, &n, im->idx, (unsigned) im->w,
-                         (unsigned) im->h, &st);
+    err = lodepng_encode(&png, &n, im->idx, (unsigned)im->w, (unsigned)im->h, &st);
     if (!err)
         err = lodepng_save_file(png, n, path);
     free(png);
@@ -1411,8 +1437,7 @@ int image_write_png_indexed(const RImage *im, const char *path)
     st.info_png.color.colortype = LCT_RGB;
     st.info_png.color.bitdepth  = 8;
     st.encoder.auto_convert     = 1; /* palette when it fits, RGB when not */
-    err = lodepng_encode(&png, &n, im->rgb, (unsigned) im->w,
-                         (unsigned) im->h, &st);
+    err                         = lodepng_encode(&png, &n, im->rgb, (unsigned)im->w, (unsigned)im->h, &st);
     if (!err)
         err = lodepng_save_file(png, n, path);
     free(png);
@@ -1426,16 +1451,16 @@ int image_write_png_provenance(const RImage *im, const char *path)
      *  here is a picture; it is a plane of ids that a checker reads back. */
     LodePNGState   st;
     unsigned char *png = NULL, *raw;
-    size_t         n = 0, npx = (size_t) im->w * (size_t) im->h, k;
+    size_t         n = 0, npx = (size_t)im->w * (size_t)im->h, k;
     unsigned       err;
 
-    raw = (unsigned char *) malloc(npx * 2u);
+    raw = (unsigned char *)malloc(npx * 2u);
     if (!raw)
         return -1;
     for (k = 0; k < npx; ++k)
     {
-        raw[k * 2u]      = (unsigned char) (im->prov[k] >> 8);
-        raw[k * 2u + 1u] = (unsigned char) (im->prov[k] & 0xFFu);
+        raw[k * 2u]      = (unsigned char)(im->prov[k] >> 8);
+        raw[k * 2u + 1u] = (unsigned char)(im->prov[k] & 0xFFu);
     }
     lodepng_state_init(&st);
     st.info_raw.colortype       = LCT_GREY;
@@ -1443,8 +1468,7 @@ int image_write_png_provenance(const RImage *im, const char *path)
     st.info_png.color.colortype = LCT_GREY;
     st.info_png.color.bitdepth  = 16;
     st.encoder.auto_convert     = 0;
-    err = lodepng_encode(&png, &n, raw, (unsigned) im->w, (unsigned) im->h,
-                         &st);
+    err                         = lodepng_encode(&png, &n, raw, (unsigned)im->w, (unsigned)im->h, &st);
     if (!err)
         err = lodepng_save_file(png, n, path);
     free(png);
@@ -1471,8 +1495,7 @@ int image_write_png(const RImage *im, const char *path)
     st.info_png.color.colortype = LCT_RGB;
     st.info_png.color.bitdepth  = 8;
     st.encoder.auto_convert     = 0;
-    err = lodepng_encode(&png, &n, im->rgb, (unsigned) im->w,
-                         (unsigned) im->h, &st);
+    err                         = lodepng_encode(&png, &n, im->rgb, (unsigned)im->w, (unsigned)im->h, &st);
     if (!err)
         err = lodepng_save_file(png, n, path);
     free(png);

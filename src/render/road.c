@@ -46,7 +46,7 @@
  *  (mesh_hiway.c).
  */
 #include "mesh_int.h"
-
+#include "opt.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -126,7 +126,7 @@ static int band_fits(const uint8_t *mark, V2 a, V2 b, float hw)
     py = dx / len;
     for (sm = 0; sm <= ns; ++sm)
     {
-        float t = (float)sm / (float)ns;
+        float t  = (float)sm / (float)ns;
         float qx = a.x + dx * t, qy = a.y + dy * t;
         for (side = -1; side <= 1; side += 2)
         {
@@ -139,7 +139,6 @@ static int band_fits(const uint8_t *mark, V2 a, V2 b, float hw)
     return 1;
 }
 
-
 /*  Every corridor tile the band covers between a and b, stamped into
  *  `cov`.  Used to prove a node may be dropped: the merged edge has to
  *  cover everything the two edges it replaces covered, or the tiles it
@@ -151,12 +150,12 @@ static void band_cover(V2 a, V2 b, float hw, uint8_t *cov, uint8_t stamp)
     int   sm, ns, side;
     if (len < 1e-5f)
         return;
-    px  = -dy / len;
-    py  = dx / len;
-    ns  = (int)(len * 8.0f) + 2;
+    px = -dy / len;
+    py = dx / len;
+    ns = (int)(len * 8.0f) + 2;
     for (sm = 0; sm <= ns; ++sm)
     {
-        float t = (float)sm / (float)ns;
+        float t  = (float)sm / (float)ns;
         float qx = a.x + dx * t, qy = a.y + dy * t;
         for (side = -2; side <= 2; ++side)
         {
@@ -168,7 +167,6 @@ static void band_cover(V2 a, V2 b, float hw, uint8_t *cov, uint8_t stamp)
         }
     }
 }
-
 
 /*  The tiles a band along a->b covers that are NOT the run's own,
  *  stamped into `bad`.  A rail's minimum radius outranks its corridor, so
@@ -188,7 +186,7 @@ static void band_stray(const uint8_t *mark, V2 a, V2 b, float hw, uint8_t *bad, 
     ns = (int)(len * 12.0f) + 4;
     for (sm = 0; sm <= ns; ++sm)
     {
-        float t = (float)sm / (float)ns;
+        float t  = (float)sm / (float)ns;
         float qx = a.x + dx * t, qy = a.y + dy * t;
         for (side = -1; side <= 1; side += 2)
         {
@@ -205,8 +203,7 @@ static void band_stray(const uint8_t *mark, V2 a, V2 b, float hw, uint8_t *bad, 
 /*  Does a->b stray only onto tiles already stamped?  */
 static int32_t s_stray_hit = -1; /* the tile that failed, for the dump */
 
-static int band_stray_within(const uint8_t *mark, V2 a, V2 b, float hw, const uint8_t *bad,
-                             uint8_t stamp)
+static int band_stray_within(const uint8_t *mark, V2 a, V2 b, float hw, const uint8_t *bad, uint8_t stamp)
 {
     float dx = b.x - a.x, dy = b.y - a.y;
     float len = sqrtf(dx * dx + dy * dy), px, py;
@@ -218,7 +215,7 @@ static int band_stray_within(const uint8_t *mark, V2 a, V2 b, float hw, const ui
     ns = (int)(len * 12.0f) + 4;
     for (sm = 0; sm <= ns; ++sm)
     {
-        float t = (float)sm / (float)ns;
+        float t  = (float)sm / (float)ns;
         float qx = a.x + dx * t, qy = a.y + dy * t;
         for (side = -1; side <= 1; side += 2)
         {
@@ -238,8 +235,6 @@ static int band_stray_within(const uint8_t *mark, V2 a, V2 b, float hw, const ui
     }
     return 1;
 }
-
-
 
 /*  ------------------------------------------------------------------
  *  The corridor fit as it is actually solved elsewhere.
@@ -313,38 +308,75 @@ int line_meet(V2 a, V2 da, V2 b, V2 db, V2 *out)
     return 1;
 }
 
-static void span_region(const uint8_t *mark, const int32_t *tc, const int32_t *tr, int n, int j,
-                        int32_t *c0, int32_t *r0, int32_t *c1, int32_t *r1)
+/*  Is every tile of a rectangle part of the run? */
+static int rect_solid(const uint8_t *mark, int32_t c0, int32_t r0, int32_t c1, int32_t r1)
 {
-    int     k, i0 = j < 0 ? 0 : j;
+    int32_t x, y;
+    for (y = r0; y <= r1; ++y)
+        for (x = c0; x <= c1; ++x)
+            if (x < 0 || y < 0 || x >= R_MAP || y >= R_MAP || !mark[y * R_MAP + x])
+                return 0;
+    return 1;
+}
+
+static void span_region(const uint8_t *mark, const int32_t *tc, const int32_t *tr, int n, int j, int32_t *c0, int32_t *r0, int32_t *c1, int32_t *r1)
+{
+    int     k, i0 = j < 0 ? 0 : j, mid;
     int32_t a = tc[i0], b = tc[i0], c = tr[i0], d = tr[i0];
     for (k = 0; k < 4; ++k)
     {
         int i = j + k;
-        i     = i < 0 ? 0 : i >= n ? n - 1 : i;
+        i     = i < 0 ? 0 : i >= n ? n - 1
+                                   : i;
         a     = tc[i] < a ? tc[i] : a;
         b     = tc[i] > b ? tc[i] : b;
         c     = tr[i] < c ? tr[i] : c;
         d     = tr[i] > d ? tr[i] : d;
     }
-    for (k = c; k <= d; ++k)
+    if (rect_solid(mark, a, c, b, d))
     {
-        int32_t x;
-        for (x = a; x <= b; ++x)
-            if (x < 0 || k < 0 || x >= R_MAP || k >= R_MAP || !mark[k * R_MAP + x])
-            {
-                /*  Not solid: fall back to the span's middle tile. */
-                int mid = j + 1;
-                mid     = mid < 0 ? 0 : mid >= n ? n - 1 : mid;
-                *c0 = *c1 = tc[mid];
-                *r0 = *r1 = tr[mid];
-                return;
-            }
+        *c0 = a;
+        *c1 = b;
+        *r0 = c;
+        *r1 = d;
+        return;
     }
-    *c0 = a;
-    *c1 = b;
-    *r0 = c;
-    *r1 = d;
+    /*  Not solid.  This used to collapse straight to the span's middle
+     *  tile, which is the whole reason a bend in a staircase could not be
+     *  fitted: four control points forced into one tile have nowhere to
+     *  put a curve, and the one they produce leaves the corridor anyway.
+     *
+     *  An L-shaped neighbourhood is not solid, but half of it is: the
+     *  pair along either arm.  So the middle tile grows by one in each of
+     *  the four directions, and the largest solid rectangle that still
+     *  contains it wins.  That is twice the room at a corner, which is
+     *  exactly where it was missing. */
+    mid = j + 1;
+    mid = mid < 0 ? 0 : mid >= n ? n - 1
+                                 : mid;
+    *c0 = *c1 = tc[mid];
+    *r0 = *r1 = tr[mid];
+    {
+        static const int32_t DC[4] = {-1, 1, 0, 0};
+        static const int32_t DR[4] = {0, 0, -1, 1};
+        int32_t              best  = 1, e;
+        for (e = 0; e < 4; ++e)
+        {
+            int32_t nc0  = tc[mid] + (DC[e] < 0 ? DC[e] : 0);
+            int32_t nc1  = tc[mid] + (DC[e] > 0 ? DC[e] : 0);
+            int32_t nr0  = tr[mid] + (DR[e] < 0 ? DR[e] : 0);
+            int32_t nr1  = tr[mid] + (DR[e] > 0 ? DR[e] : 0);
+            int32_t area = (nc1 - nc0 + 1) * (nr1 - nr0 + 1);
+            if (area > best && rect_solid(mark, nc0, nr0, nc1, nr1))
+            {
+                best = area;
+                *c0  = nc0;
+                *c1  = nc1;
+                *r0  = nr0;
+                *r1  = nr1;
+            }
+        }
+    }
 }
 
 /*  One span of a uniform cubic B-spline. */
@@ -364,8 +396,7 @@ static V2 bspline_at(V2 a, V2 b, V2 c, V2 d, float t)
 /*  Smooth the control polygon inside its boxes, then hand back the curve
  *  it defines, sampled.  Returns the new point count, or 0 to say the
  *  caller should keep what it had. */
-static int spline_try(const uint8_t *mark, const int32_t *marked, int nm, const V2 *pt, int n,
-                      float hw, float inset, float rmin, int rounds, V2 *out, int cap)
+static int spline_try(const uint8_t *mark, const V2 *pt, int n, float hw, float inset, float rmin, int rounds, V2 *out, int cap)
 {
     static V2      ctl[MAX_PTS];
     static float   bx0[MAX_PTS], by0[MAX_PTS], bx1[MAX_PTS], by1[MAX_PTS];
@@ -418,10 +449,10 @@ static int spline_try(const uint8_t *mark, const int32_t *marked, int nm, const 
             float lx, ly, hx, hy;
             if (i2 < 0 || i2 >= n)
                 continue;
-            lx = (float)c0 + inset;
-            hx = (float)(c1 + 1) - inset;
-            ly = (float)r0 + inset;
-            hy = (float)(r1 + 1) - inset;
+            lx      = (float)c0 + inset;
+            hx      = (float)(c1 + 1) - inset;
+            ly      = (float)r0 + inset;
+            hy      = (float)(r1 + 1) - inset;
             bx0[i2] = lx > bx0[i2] ? lx : bx0[i2];
             bx1[i2] = hx < bx1[i2] ? hx : bx1[i2];
             by0[i2] = ly > by0[i2] ? ly : by0[i2];
@@ -446,8 +477,10 @@ static int spline_try(const uint8_t *mark, const int32_t *marked, int nm, const 
             by0[i] = (float)tr[i] + inset;
             by1[i] = (float)(tr[i] + 1) - inset;
         }
-        ctl[i].x = ctl[i].x < bx0[i] ? bx0[i] : ctl[i].x > bx1[i] ? bx1[i] : ctl[i].x;
-        ctl[i].y = ctl[i].y < by0[i] ? by0[i] : ctl[i].y > by1[i] ? by1[i] : ctl[i].y;
+        ctl[i].x = ctl[i].x < bx0[i] ? bx0[i] : ctl[i].x > bx1[i] ? bx1[i]
+                                                                  : ctl[i].x;
+        ctl[i].y = ctl[i].y < by0[i] ? by0[i] : ctl[i].y > by1[i] ? by1[i]
+                                                                  : ctl[i].y;
     }
     /*  Bending energy alone has no opinion about STRAIGHT: any lazy curve
      *  through the corridor's slack costs about the same as the straight
@@ -464,7 +497,7 @@ static int spline_try(const uint8_t *mark, const int32_t *marked, int nm, const 
     for (it = 0; it < 64; ++it)
         for (i = 1; i + 1 < n; ++i)
         {
-            const float lam = 0.6f;
+            const float lam = s_tune.tension;
             V2          t;
             if (i >= 2 && i + 2 < n)
             {
@@ -480,8 +513,10 @@ static int spline_try(const uint8_t *mark, const int32_t *marked, int nm, const 
                 t.x = (0.5f * (ctl[i - 1].x + ctl[i + 1].x) + lam * pt[i].x) / (1.0f + lam);
                 t.y = (0.5f * (ctl[i - 1].y + ctl[i + 1].y) + lam * pt[i].y) / (1.0f + lam);
             }
-            ctl[i].x = t.x < bx0[i] ? bx0[i] : t.x > bx1[i] ? bx1[i] : t.x;
-            ctl[i].y = t.y < by0[i] ? by0[i] : t.y > by1[i] ? by1[i] : t.y;
+            ctl[i].x = t.x < bx0[i] ? bx0[i] : t.x > bx1[i] ? bx1[i]
+                                                            : t.x;
+            ctl[i].y = t.y < by0[i] ? by0[i] : t.y > by1[i] ? by1[i]
+                                                            : t.y;
         }
     /*  And now the CONSTRAINT, which minimising curvature is not.  An
      *  energy expresses a preference and will settle happily on a harsh
@@ -509,8 +544,10 @@ static int spline_try(const uint8_t *mark, const int32_t *marked, int nm, const 
                 pull = 0.5f;
             mv.x     = ctl[i].x + (mid.x - ctl[i].x) * pull;
             mv.y     = ctl[i].y + (mid.y - ctl[i].y) * pull;
-            ctl[i].x = mv.x < bx0[i] ? bx0[i] : mv.x > bx1[i] ? bx1[i] : mv.x;
-            ctl[i].y = mv.y < by0[i] ? by0[i] : mv.y > by1[i] ? by1[i] : mv.y;
+            ctl[i].x = mv.x < bx0[i] ? bx0[i] : mv.x > bx1[i] ? bx1[i]
+                                                              : mv.x;
+            ctl[i].y = mv.y < by0[i] ? by0[i] : mv.y > by1[i] ? by1[i]
+                                                              : mv.y;
             ++moved;
         }
         if (!moved)
@@ -519,12 +556,14 @@ static int spline_try(const uint8_t *mark, const int32_t *marked, int nm, const 
          *  corner does not leave a kink beside it. */
         for (i = 1; i + 1 < n; ++i)
         {
-            const float lam = 0.6f;
+            const float lam = s_tune.tension;
             V2          t;
-            t.x = (0.5f * (ctl[i - 1].x + ctl[i + 1].x) + lam * pt[i].x) / (1.0f + lam);
-            t.y = (0.5f * (ctl[i - 1].y + ctl[i + 1].y) + lam * pt[i].y) / (1.0f + lam);
-            ctl[i].x = t.x < bx0[i] ? bx0[i] : t.x > bx1[i] ? bx1[i] : t.x;
-            ctl[i].y = t.y < by0[i] ? by0[i] : t.y > by1[i] ? by1[i] : t.y;
+            t.x      = (0.5f * (ctl[i - 1].x + ctl[i + 1].x) + lam * pt[i].x) / (1.0f + lam);
+            t.y      = (0.5f * (ctl[i - 1].y + ctl[i + 1].y) + lam * pt[i].y) / (1.0f + lam);
+            ctl[i].x = t.x < bx0[i] ? bx0[i] : t.x > bx1[i] ? bx1[i]
+                                                            : t.x;
+            ctl[i].y = t.y < by0[i] ? by0[i] : t.y > by1[i] ? by1[i]
+                                                            : t.y;
         }
     }
     /*  A clamped spline, by padding: the first and last control points
@@ -535,24 +574,42 @@ static int spline_try(const uint8_t *mark, const int32_t *marked, int nm, const 
     {
         static V2 pad[MAX_PTS + 4];
         int       np2 = 0, j2;
-        pad[np2++] = ctl[0];
-        pad[np2++] = ctl[0];
+        pad[np2++]    = ctl[0];
+        pad[np2++]    = ctl[0];
         for (i = 0; i < n; ++i)
             pad[np2++] = ctl[i];
         pad[np2++] = ctl[n - 1];
         pad[np2++] = ctl[n - 1];
-        per = 6;
+        per        = 6;
         while (per > 1 && (np2 - 3) * per + 1 > cap)
             --per;
         for (j2 = 0; j2 + 3 < np2; ++j2)
         {
             int k;
             for (k = 0; k < per && m + 1 < cap; ++k)
-                out[m++] = bspline_at(pad[j2], pad[j2 + 1], pad[j2 + 2], pad[j2 + 3],
-                                      (float)k / (float)per);
+                out[m++] = bspline_at(pad[j2], pad[j2 + 1], pad[j2 + 2], pad[j2 + 3], (float)k / (float)per);
         }
         if (m + 1 < cap)
             out[m++] = ctl[n - 1];
+        /*  Drop the samples that stand still.  A clamped spline repeats
+         *  its end control points, so the first and last spans have no
+         *  length and evaluate to the same point several times over --
+         *  seven copies of one end point in a Paris segment.  They cost
+         *  the loft a station each, and the corridor's surface is written
+         *  per station for the tile that station stands in: a tile whose
+         *  only station was spent on a duplicate never gets its shelf,
+         *  the terrain there stays where it was, and the road ends up
+         *  underneath it. */
+        {
+            int keep = 1, k2;
+            for (k2 = 1; k2 < m; ++k2)
+            {
+                float dx = out[k2].x - out[keep - 1].x, dy = out[k2].y - out[keep - 1].y;
+                if (dx * dx + dy * dy > 1e-6f)
+                    out[keep++] = out[k2];
+            }
+            m = keep;
+        }
     }
     /*  Checked as a swept band, not as a square: corridor_holds tests the
      *  four corners of an axis-aligned box, which asks for hw*sqrt(2) of
@@ -560,37 +617,22 @@ static int spline_try(const uint8_t *mark, const int32_t *marked, int nm, const 
     for (i = 0; i + 1 < m; ++i)
         if (!band_fits(mark, out[i], out[i + 1], hw))
         {
-            if (getenv("SC2K_SPLINE_DUMP"))
+            /*  Tried and dropped: holding the control points either side
+             *  of the escape further in and solving again, eight times
+             *  over.  It fires on every one of these and fixes none --
+             *  the curve simply escapes somewhere else, because the bend
+             *  is tighter than the corridor, not misplaced within it.
+             *  What these need is a smaller convex region at the bend,
+             *  which is a change to span_region, not more inset. */
+            if (opt_set("spline-dump"))
                 printf("SPLINE fallback at sample %d of %d (%.0f%% along) from %d controls\n",
-                       i, m, (double)(100.0 * i / (m > 1 ? m - 1 : 1)), n);
+                       i,
+                       m,
+                       (double)(100.0 * i / (m > 1 ? m - 1 : 1)),
+                       n);
             return 0;
         }
-    /*  And every tile of the run must still have road over it.  The
-     *  fillet path guarantees this by keeping a point at every gate; a
-     *  curve that smooths across a tile does not, and a tile whose
-     *  geometry goes missing is a hole in the city -- two of them in
-     *  JUNETOWN and FLARANGE before this check existed. */
-    {
-        static uint8_t seen[R_MAP * R_MAP];
-        static uint8_t cstamp = 0;
-        int            t2;
-        if (++cstamp == 0)
-        {
-            memset(seen, 0, sizeof seen);
-            cstamp = 1;
-        }
-        for (i = 0; i + 1 < m; ++i)
-            band_cover(out[i], out[i + 1], hw, seen, cstamp);
-        for (t2 = 0; t2 < nm; ++t2)
-            if (seen[marked[t2]] != cstamp)
-            {
-                if (getenv("SC2K_SPLINE_DUMP"))
-                    printf("SPLINE fallback: tile %d,%d would have no road over it\n",
-                           (int)(marked[t2] % R_MAP), (int)(marked[t2] / R_MAP));
-                return 0;
-            }
-    }
-    if (getenv("SC2K_SPLINE_DUMP"))
+    if (opt_set("spline-dump"))
         printf("SPLINE ok %d samples from %d control points\n", m, n);
     return m;
 }
@@ -602,26 +644,98 @@ static int spline_try(const uint8_t *mark, const int32_t *marked, int nm, const 
  *  that ALL of the harsh turns left in Toronto were in the fourteen per
  *  cent that bailed out, and none in the splined ones (the user: "why are
  *  you allowing harsh curves still"). */
-static int spline_fit(const uint8_t *mark, const int32_t *marked, int nm, const V2 *pt, int n,
-                      float hw, float rmin, V2 *out, int cap)
+/*  Fit one run, splitting it if it will not go in one piece.
+ *
+ *  The escapes are not one pathological bend: measured across Toronto,
+ *  the runs that fail carry a median of 81 control points against 25 for
+ *  the ones that fit, and the escape sits in the middle of them.  A long
+ *  run simply has more bends, and the fit was all or nothing -- one
+ *  escape anywhere threw the whole run back to the fillet path and every
+ *  hard corner in it.
+ *
+ *  So a run that will not go whole is cut in two and each half fitted on
+ *  its own.  The cut is made at the straightest interior point, where the
+ *  two halves meet at very nearly the same heading and the join does not
+ *  read as a corner.
+ */
+static int spline_span(const uint8_t *mark, const V2 *pt, int n, float hw, float rmin, V2 *out, int cap, int depth)
 {
-    /*  Two levers, tried in order: more control points, which pulls the
-     *  curve onto its polygon, and more inset, which gives it room to
-     *  bend.  Subdivision first -- it costs nothing but arithmetic. */
-    /*  More room to bend in, tried in order.  NOT more subdivision: past
-     *  two rounds the control points sit in boxes smaller than the space
-     *  between them, the polygon starts to zig-zag inside its own
-     *  corridor, and the curvature it was meant to fix gets worse -- 368
-     *  splined nodes over thirty degrees against none at two rounds. */
     static const float grow[4] = {1.0f, 1.15f, 1.35f, 1.6f};
-    int                g;
+    int                g, best = -1, half, m0, m1;
+    float              straightest = -1.0f;
     for (g = 0; g < 4; ++g)
     {
-        int m = spline_try(mark, marked, nm, pt, n, hw, hw * grow[g], rmin, 2, out, cap);
+        int m = spline_try(mark, pt, n, hw, hw * grow[g], rmin, 2, out, cap);
         if (m >= 2)
             return m;
     }
-    return 0;
+    if (depth >= 3 || n < 8)
+        return 0;
+    /*  The straightest interior vertex, kept away from either end so both
+     *  halves have something to work with. */
+    for (g = n / 4; g < n - n / 4; ++g)
+    {
+        V2    u  = {pt[g].x - pt[g - 1].x, pt[g].y - pt[g - 1].y};
+        V2    v  = {pt[g + 1].x - pt[g].x, pt[g + 1].y - pt[g].y};
+        float lu = sqrtf(u.x * u.x + u.y * u.y), lv = sqrtf(v.x * v.x + v.y * v.y);
+        float dot;
+        if (lu < 1e-5f || lv < 1e-5f)
+            continue;
+        dot = (u.x * v.x + u.y * v.y) / (lu * lv);
+        if (dot > straightest)
+        {
+            straightest = dot;
+            best        = g;
+        }
+    }
+    if (best < 2 || best > n - 3)
+        return 0;
+    half = best + 1; /* the join point belongs to both halves */
+    m0   = spline_span(mark, pt, half, hw, rmin, out, cap, depth + 1);
+    if (m0 < 2)
+        return 0;
+    m1 = spline_span(mark, pt + best, n - best, hw, rmin, out + m0, cap - m0, depth + 1);
+    if (m1 < 2)
+        return 0;
+    return m0 + m1;
+}
+
+static int spline_fit(const uint8_t *mark, const int32_t *marked, int nm, const V2 *pt, int n, float hw, float rmin, V2 *out, int cap)
+{
+    int m = spline_span(mark, pt, n, hw, rmin, out, cap, 0);
+    if (m < 2)
+        return 0;
+    /*  Every tile of the run must still have road over it.  The fillet
+     *  path guarantees this by keeping a point at every gate; a curve
+     *  that smooths across a tile does not, and a tile whose geometry
+     *  goes missing is a hole in the city -- two of them in JUNETOWN and
+     *  FLARANGE before this check existed.  It is asked once, of the
+     *  whole fitted line, because a split half covers only its own half.
+     */
+    {
+        static uint8_t seen[R_MAP * R_MAP];
+        static uint8_t cstamp = 0;
+        int            t2, i;
+        if (++cstamp == 0)
+        {
+            memset(seen, 0, sizeof seen);
+            cstamp = 1;
+        }
+        for (i = 0; i + 1 < m; ++i)
+            band_cover(out[i], out[i + 1], hw, seen, cstamp);
+        for (t2 = 0; t2 < nm; ++t2)
+            if (seen[marked[t2]] != cstamp)
+            {
+                if (opt_set("spline-dump"))
+                    printf("SPLINE fallback: tile %d,%d would have no road over it\n",
+                           (int)(marked[t2] % R_MAP),
+                           (int)(marked[t2] / R_MAP));
+                return 0;
+            }
+    }
+    if (opt_set("spline-dump"))
+        printf("SPLINE ok %d samples\n", m);
+    return m;
 }
 
 /*  ==================================================================
@@ -677,7 +791,6 @@ static float turn_radius(V2 a, V2 b, V2 c)
     return ab * bc * ca / (2.0f * ar2);
 }
 
-
 /*  ------------------------------------------------------------------
  *  The corridor fit, stage by stage.
  *
@@ -704,8 +817,8 @@ typedef struct
     int      nm;
     V2      *gl, *gr; /* each gate's two ends                       */
     int      ng;
-    V2      *p;      /* the line being fitted                       */
-    int     *gate;   /* the gate a point sits on, or -1 for free    */
+    V2      *p;    /* the line being fitted                       */
+    int     *gate; /* the gate a point sits on, or -1 for free    */
     int      n;
     float    hw, rmin, rmax, gro;
 } Fit;
@@ -714,13 +827,13 @@ typedef struct
  *  the corridor.  The three pull against each other on purpose. */
 static void fit_relax(Fit *F, int old_clear)
 {
-    uint8_t       *mark = F->mark;
-    V2            *p = F->p, *gl = F->gl, *gr = F->gr;
-    int           *gate = F->gate;
-    const int      n    = F->n;
-    const float    hw = F->hw, rmin = F->rmin;
-    int            i, it;
-    static V2      prev[MAX_PTS];
+    uint8_t    *mark = F->mark;
+    V2         *p = F->p, *gl = F->gl, *gr = F->gr;
+    int        *gate = F->gate;
+    const int   n    = F->n;
+    const float hw = F->hw, rmin = F->rmin;
+    int         i, it;
+    static V2   prev[MAX_PTS];
     /*  The relaxation, with the corridor as a wall.
      *
      *  Each sweep moves every point toward the mean of its neighbours,
@@ -784,114 +897,114 @@ static void fit_relax(Fit *F, int old_clear)
         }
         if (old_clear)
         {
-        for (i = 1; i + 1 < n; ++i)
-        {
-            int try_;
-            /*  Push until the band is inside, not by a fixed nudge: a
-             *  fixed one settles wherever the smoothing pull happens to
-             *  balance it, which is a road still over the line. */
-            for (try_ = 0; try_ < 16; ++try_)
+            for (i = 1; i + 1 < n; ++i)
             {
-                int   side, run, sm, out_n = 0;
-                V2    push = {0.0f, 0.0f};
-                for (run = 0; run < 2; ++run)
+                int try_;
+                /*  Push until the band is inside, not by a fixed nudge: a
+                 *  fixed one settles wherever the smoothing pull happens to
+                 *  balance it, which is a road still over the line. */
+                for (try_ = 0; try_ < 16; ++try_)
                 {
-                    V2    a = run ? p[i] : p[i - 1], b = run ? p[i + 1] : p[i];
-                    float dx = b.x - a.x, dy = b.y - a.y;
-                    float len = sqrtf(dx * dx + dy * dy), px, py;
-                    if (len < 1e-5f)
-                        continue;
-                    px = -dy / len;
-                    py = dx / len;
-                    for (sm = 0; sm <= 4; ++sm)
+                    int side, run, sm, out_n = 0;
+                    V2  push = {0.0f, 0.0f};
+                    for (run = 0; run < 2; ++run)
                     {
-                        float t  = (float)sm / 4.0f;
-                        float qx = a.x + dx * t, qy = a.y + dy * t;
-                        for (side = -1; side <= 1; side += 2)
+                        V2    a = run ? p[i] : p[i - 1], b = run ? p[i + 1] : p[i];
+                        float dx = b.x - a.x, dy = b.y - a.y;
+                        float len = sqrtf(dx * dx + dy * dy), px, py;
+                        if (len < 1e-5f)
+                            continue;
+                        px = -dy / len;
+                        py = dx / len;
+                        for (sm = 0; sm <= 4; ++sm)
                         {
-                            /*  A small margin, so the band is held just
-                             *  inside the corridor rather than touching
-                             *  it.  It cannot be large: a staircase is
-                             *  only 0.707 of a tile wide across its
-                             *  diagonal, so a wide margin forces the line
-                             *  to weave through the tile centres instead
-                             *  of running straight down it. */
-                            float   ex = qx + px * (hw + s_tune.margin) * (float)side;
-                            float   ey = qy + py * (hw + s_tune.margin) * (float)side;
-                            int32_t tc = (int32_t)floorf(ex), tr = (int32_t)floorf(ey);
-                            float   wgt;
-                            if (tc >= 0 && tr >= 0 && tc < R_MAP && tr < R_MAP &&
-                                mark[tr * R_MAP + tc])
-                                continue;
-                            /*  Out: back across the run, hardest where
-                             *  this point has most say over the sample. */
-                            wgt = run ? 1.0f - t : t;
-                            ++out_n;
-                            push.x -= px * (float)side * wgt;
-                            push.y -= py * (float)side * wgt;
+                            float t  = (float)sm / 4.0f;
+                            float qx = a.x + dx * t, qy = a.y + dy * t;
+                            for (side = -1; side <= 1; side += 2)
+                            {
+                                /*  A small margin, so the band is held just
+                                 *  inside the corridor rather than touching
+                                 *  it.  It cannot be large: a staircase is
+                                 *  only 0.707 of a tile wide across its
+                                 *  diagonal, so a wide margin forces the line
+                                 *  to weave through the tile centres instead
+                                 *  of running straight down it. */
+                                float   ex = qx + px * (hw + s_tune.margin) * (float)side;
+                                float   ey = qy + py * (hw + s_tune.margin) * (float)side;
+                                int32_t tc = (int32_t)floorf(ex), tr = (int32_t)floorf(ey);
+                                float   wgt;
+                                if (tc >= 0 && tr >= 0 && tc < R_MAP && tr < R_MAP &&
+                                    mark[tr * R_MAP + tc])
+                                    continue;
+                                /*  Out: back across the run, hardest where
+                                 *  this point has most say over the sample. */
+                                wgt = run ? 1.0f - t : t;
+                                ++out_n;
+                                push.x -= px * (float)side * wgt;
+                                push.y -= py * (float)side * wgt;
+                            }
                         }
                     }
-                }
-                if (!out_n)
-                    break;
-                {
-                    float pl = sqrtf(push.x * push.x + push.y * push.y);
-                    V2    was = p[i], mv;
-                    if (pl < 1e-5f)
+                    if (!out_n)
                         break;
-                    /*  A tenth of a tile a try, measured: bigger
-                     *  overshoots into the far wall and smaller settles
-                     *  where the smoothing pull balances it. */
-                    mv   = (V2){p[i].x + push.x / pl * 0.10f, p[i].y + push.y / pl * 0.10f};
-                    p[i] = gate[i] >= 0 ? gate_clamp(mv, gl[gate[i]], gr[gate[i]]) : mv;
-                    if (fabsf(p[i].x - was.x) + fabsf(p[i].y - was.y) < 1e-4f)
-                        break; /* the gate has no more room to give */
+                    {
+                        float pl  = sqrtf(push.x * push.x + push.y * push.y);
+                        V2    was = p[i], mv;
+                        if (pl < 1e-5f)
+                            break;
+                        /*  A tenth of a tile a try, measured: bigger
+                         *  overshoots into the far wall and smaller settles
+                         *  where the smoothing pull balances it. */
+                        mv   = (V2){p[i].x + push.x / pl * 0.10f, p[i].y + push.y / pl * 0.10f};
+                        p[i] = gate[i] >= 0 ? gate_clamp(mv, gl[gate[i]], gr[gate[i]]) : mv;
+                        if (fabsf(p[i].x - was.x) + fabsf(p[i].y - was.y) < 1e-4f)
+                            break; /* the gate has no more room to give */
+                    }
                 }
             }
-        }
         }
         else
         {
-        for (i = 1; i + 1 < n; ++i)
-        {
-            /*  Keep the point in the space a band of THIS width can
-             *  occupy, by projection rather than by shoving.
-             *
-             *  The smoothing does not know how wide the road is, so it
-             *  will happily move a point somewhere the band cannot go.
-             *  Pushing it back afterwards, a nudge at a time, leaves a
-             *  kink at every place it was pushed -- and the wider the
-             *  road, the more places, which is why widening it made the
-             *  geometry worse rather than better (the user: "the segment
-             *  doesn't grow into the available space as I increase the
-             *  road width ... it's like the initial curve doesn't take
-             *  the road width into account, when it should be").
-             *
-             *  Instead the point is pulled straight back toward where it
-             *  last stood -- which was feasible -- by bisection, so it
-             *  lands on the boundary of the space its own width allows
-             *  and the line stays smooth. */
-            V2  want = p[i], was = prev[i];
-            int fits = band_fits(mark, p[i - 1], want, hw) && band_fits(mark, want, p[i + 1], hw);
-            if (!fits)
+            for (i = 1; i + 1 < n; ++i)
             {
-                float lo = 0.0f, hi = 1.0f;
-                int   it2;
-                for (it2 = 0; it2 < 12; ++it2)
+                /*  Keep the point in the space a band of THIS width can
+                 *  occupy, by projection rather than by shoving.
+                 *
+                 *  The smoothing does not know how wide the road is, so it
+                 *  will happily move a point somewhere the band cannot go.
+                 *  Pushing it back afterwards, a nudge at a time, leaves a
+                 *  kink at every place it was pushed -- and the wider the
+                 *  road, the more places, which is why widening it made the
+                 *  geometry worse rather than better (the user: "the segment
+                 *  doesn't grow into the available space as I increase the
+                 *  road width ... it's like the initial curve doesn't take
+                 *  the road width into account, when it should be").
+                 *
+                 *  Instead the point is pulled straight back toward where it
+                 *  last stood -- which was feasible -- by bisection, so it
+                 *  lands on the boundary of the space its own width allows
+                 *  and the line stays smooth. */
+                V2  want = p[i], was = prev[i];
+                int fits = band_fits(mark, p[i - 1], want, hw) && band_fits(mark, want, p[i + 1], hw);
+                if (!fits)
                 {
-                    float mid = 0.5f * (lo + hi);
-                    V2    try2 = {was.x + (want.x - was.x) * mid, was.y + (want.y - was.y) * mid};
-                    if (band_fits(mark, p[i - 1], try2, hw) && band_fits(mark, try2, p[i + 1], hw))
-                        lo = mid;
-                    else
-                        hi = mid;
+                    float lo = 0.0f, hi = 1.0f;
+                    int   it2;
+                    for (it2 = 0; it2 < 12; ++it2)
+                    {
+                        float mid  = 0.5f * (lo + hi);
+                        V2    try2 = {was.x + (want.x - was.x) * mid, was.y + (want.y - was.y) * mid};
+                        if (band_fits(mark, p[i - 1], try2, hw) && band_fits(mark, try2, p[i + 1], hw))
+                            lo = mid;
+                        else
+                            hi = mid;
+                    }
+                    p[i] = (V2){was.x + (want.x - was.x) * lo, was.y + (want.y - was.y) * lo};
+                    if (gate[i] >= 0)
+                        p[i] = gate_clamp(p[i], gl[gate[i]], gr[gate[i]]);
                 }
-                p[i] = (V2){was.x + (want.x - was.x) * lo, was.y + (want.y - was.y) * lo};
-                if (gate[i] >= 0)
-                    p[i] = gate_clamp(p[i], gl[gate[i]], gr[gate[i]]);
+                prev[i] = p[i];
             }
-            prev[i] = p[i];
-        }
         }
     }
 }
@@ -951,7 +1064,7 @@ static void fit_collapse(Fit *F)
 /*  Nodes far enough apart to be swept. */
 static void fit_spacing(Fit *F, int32_t ex0, int32_t ex1)
 {
-    uint8_t       *mark = F->mark;
+    uint8_t       *mark   = F->mark;
     const int32_t *marked = F->marked;
     const int      nm     = F->nm;
     V2            *p      = F->p;
@@ -980,22 +1093,22 @@ static void fit_spacing(Fit *F, int32_t ex0, int32_t ex1)
         static uint8_t cov[R_MAP * R_MAP];
         static uint8_t stray_t[R_MAP * R_MAP];
         static uint8_t stamp = 0, stray_stamp = 0;
-        int            pass, dropped = 1;
-        /*  SC2K_NO_SPACING=1 leaves the nodes where the fit put them, for
+        int            pass, dropped          = 1;
+        /*  --no-spacing 1 leaves the nodes where the fit put them, for
          *  a side by side of what the spacing buys. */
-        if (getenv("SC2K_NO_SPACING"))
+        if (opt_set("no-spacing"))
             dropped = 0;
         for (pass = 0; pass < 8 && dropped; ++pass)
         {
             dropped = 0;
             for (i = 1; i + 1 < n; ++i)
             {
-                V2    a = p[i - 1], b = p[i], c2 = p[i + 1];
-                float ax = b.x - a.x, ay = b.y - a.y;
-                float bx = c2.x - b.x, by = c2.y - b.y;
-                float la = sqrtf(ax * ax + ay * ay), lb = sqrtf(bx * bx + by * by);
-                float dot, theta, need, shorter;
-                int   t2, ok = 1;
+                V2      a = p[i - 1], b = p[i], c2 = p[i + 1];
+                float   ax = b.x - a.x, ay = b.y - a.y;
+                float   bx = c2.x - b.x, by = c2.y - b.y;
+                float   la = sqrtf(ax * ax + ay * ay), lb = sqrtf(bx * bx + by * by);
+                float   dot, theta, need, shorter;
+                int     t2, ok = 1;
                 uint8_t pair;
                 if (la < 1e-5f || lb < 1e-5f)
                     continue;
@@ -1018,10 +1131,14 @@ static void fit_spacing(Fit *F, int32_t ex0, int32_t ex1)
                 band_stray(mark, b, c2, hw, stray_t, stray_stamp);
                 if (!band_stray_within(mark, a, c2, hw, stray_t, stray_stamp))
                 {
-                    if (getenv("SC2K_SPACE_DUMP"))
+                    if (opt_set("space-dump"))
                         printf("SPACE node %d at %.2f,%.2f short %.2f need %.2f: "
                                "the merged line strays further, onto tile %d,%d\n",
-                               i, (double)b.x, (double)b.y, (double)shorter, (double)need,
+                               i,
+                               (double)b.x,
+                               (double)b.y,
+                               (double)shorter,
+                               (double)need,
                                s_stray_hit >= 0 ? (int)(s_stray_hit % R_MAP) : -1,
                                s_stray_hit >= 0 ? (int)(s_stray_hit / R_MAP) : -1);
                     continue;
@@ -1057,10 +1174,14 @@ static void fit_spacing(Fit *F, int32_t ex0, int32_t ex1)
                 }
                 if (!ok)
                 {
-                    if (getenv("SC2K_SPACE_DUMP"))
+                    if (opt_set("space-dump"))
                         printf("SPACE node %d at %.2f,%.2f short %.2f need %.2f: "
                                "the merge would leave a tile bare\n",
-                               i, (double)b.x, (double)b.y, (double)shorter, (double)need);
+                               i,
+                               (double)b.x,
+                               (double)b.y,
+                               (double)shorter,
+                               (double)need);
                     continue;
                 }
                 for (t2 = i; t2 + 1 < n; ++t2)
@@ -1080,10 +1201,10 @@ static void fit_spacing(Fit *F, int32_t ex0, int32_t ex1)
 static void fit_radii(Fit *F, V2 *out, float *rad, int n, int splined)
 {
     static uint8_t near_end[MAX_PTS];
-    uint8_t    *mark = F->mark;
-    const float hw = F->hw, gro = F->gro;
-    float       rmax = F->rmax;
-    int         k;
+    uint8_t       *mark = F->mark;
+    const float    hw = F->hw, gro = F->gro;
+    float          rmax = F->rmax;
+    int            k;
     /*  Each corner takes the largest radius whose arc stays in the
      *  corridor: the sweep is as wide as the room allows, which is the
      *  point of a band narrower than its tile.  A joint between two
@@ -1114,10 +1235,10 @@ static void fit_radii(Fit *F, V2 *out, float *rad, int n, int splined)
          *  segment of the road to be the one guiding the rest of the
          *  segment").  `gro` is the width against the family's default,
          *  so the shipped widths keep the tuned number. */
-        const float approach = s_tune.approach * (getenv("SC2K_NOSCALE") ? 1.0f : gro);
+        const float approach = s_tune.approach * (opt_set("noscale") ? 1.0f : gro);
         float       run[MAX_PTS];
         float       acc = 0.0f;
-        run[0] = 0.0f;
+        run[0]          = 0.0f;
         for (k = 1; k < n; ++k)
         {
             acc += sqrtf((out[k].x - out[k - 1].x) * (out[k].x - out[k - 1].x) +
@@ -1182,9 +1303,9 @@ static void fit_radii(Fit *F, V2 *out, float *rad, int n, int splined)
         {
             float d     = r * tanf(0.5f * theta);
             float cross = ui.x * uo.y - ui.y * uo.x;
-            V2    t1 = {b.x - ui.x * d, b.y - ui.y * d}, cen;
-            V2    nrm = cross > 0.0f ? (V2){-ui.y, ui.x} : (V2){ui.y, -ui.x};
-            int   ok  = 1, sm;
+            V2    t1    = {b.x - ui.x * d, b.y - ui.y * d}, cen;
+            V2    nrm   = cross > 0.0f ? (V2){-ui.y, ui.x} : (V2){ui.y, -ui.x};
+            int   ok    = 1, sm;
             if (d > 0.5f * li || d > 0.5f * lo)
                 continue;
             cen = (V2){t1.x + nrm.x * r, t1.y + nrm.y * r};
@@ -1210,9 +1331,9 @@ static void fit_radii(Fit *F, V2 *out, float *rad, int n, int splined)
 
 int path_fit(const RCity *c_unused, const int32_t *tcol, const int32_t *trow, int nt, float hw, V2 start, V2 goal, float rmax, float rmin, float gro, int32_t ex0, int32_t ex1, V2 *out, float *rad, int cap)
 {
-    static V2      gl[MAX_PTS], gr[MAX_PTS], p[MAX_PTS];
+    static V2 gl[MAX_PTS], gr[MAX_PTS], p[MAX_PTS];
     /*  Two ways to keep the line inside its corridor, chosen by the
-     *  "wide fit" knob (SC2K_OLD_CLEAR=1 forces the first, for headless
+     *  "wide fit" knob (--old-clear 1 forces the first, for headless
      *  comparisons).  The first nudges a point out of a violation a step
      *  at a time; the second projects it back into the room its own
      *  width allows.  The second holds up far better as the width grows
@@ -1228,7 +1349,7 @@ int path_fit(const RCity *c_unused, const int32_t *tcol, const int32_t *trow, in
     Fit            F;
     (void)c_unused; /* the corridor is the run's own cells; nothing else is consulted */
     old_clear = s_tune.wide_fit > 0.5f ? 0 : 1;
-    if (getenv("SC2K_OLD_CLEAR"))
+    if (opt_set("old-clear"))
         old_clear = 1;
     if (nt < 1 || cap < 2)
         return 0;
@@ -1275,11 +1396,11 @@ int path_fit(const RCity *c_unused, const int32_t *tcol, const int32_t *trow, in
      *  that freedom: they belong to no gate, they may sit anywhere the
      *  band fits, and it is they that let a turn become an arc that
      *  starts in the tile before it. */
-    p[n++]   = start;
-    gate[0]  = -1;
+    p[n++]  = start;
+    gate[0] = -1;
     for (i = 0; i < ng && n + 2 < MAX_PTS; ++i)
     {
-        V2 g = {0.5f * (gl[i].x + gr[i].x), 0.5f * (gl[i].y + gr[i].y)};
+        V2 g    = {0.5f * (gl[i].x + gr[i].x), 0.5f * (gl[i].y + gr[i].y)};
         V2 back = p[n - 1];
         gate[n] = -1;
         p[n++]  = (V2){0.5f * (back.x + g.x), 0.5f * (back.y + g.y)};
@@ -1292,8 +1413,8 @@ int path_fit(const RCity *c_unused, const int32_t *tcol, const int32_t *trow, in
         p[n]    = (V2){0.5f * (p[n - 1].x + goal.x), 0.5f * (p[n - 1].y + goal.y)};
         ++n;
     }
-    gate[n] = -1;
-    p[n++]  = goal;
+    gate[n]  = -1;
+    p[n++]   = goal;
     F.mark   = mark;
     F.marked = marked;
     F.nm     = nm;
@@ -1320,8 +1441,7 @@ int path_fit(const RCity *c_unused, const int32_t *tcol, const int32_t *trow, in
     if (s_tune.spline > 0.5f)
     {
         static V2 sp[MAX_PTS];
-        int       ms = spline_fit(mark, marked, nm, out, n, hw, rmin, sp,
-                                  cap < MAX_PTS ? cap : MAX_PTS);
+        int       ms = spline_fit(mark, marked, nm, out, n, hw, rmin, sp, cap < MAX_PTS ? cap : MAX_PTS);
         if (ms >= 2)
         {
             memcpy(out, sp, (size_t)ms * sizeof(V2));
@@ -1329,14 +1449,14 @@ int path_fit(const RCity *c_unused, const int32_t *tcol, const int32_t *trow, in
             splined = 1;
         }
     }
-    /*  SC2K_PATH_DUMP=1 prints every stage of every segment in a form
+    /*  --path-dump 1 prints every stage of every segment in a form
      *  tools/plan.py draws as a plan view: the corridor's tiles, its
      *  gates and the fitted line.  Seeing the stages from above is how
      *  this is worked on (the user: "you can probably do all this in 2D
      *  for previews eh? ... much easier for you to see too"). */
     F.n = n;
     fit_radii(&F, out, rad, n, splined);
-    /*  SC2K_CURVE_DUMP=1: every corner of every fitted path -- where it
+    /*  --curve-dump 1: every corner of every fitted path -- where it
      *  is, how far it turns, and the radius it was given.  A radius of 0
      *  is a hard corner, infinite curvature; anything under the band's
      *  own half width would turn the inner kerb inside out.  This is the
@@ -1344,7 +1464,7 @@ int path_fit(const RCity *c_unused, const int32_t *tcol, const int32_t *trow, in
      *  corner rather than judged by eye (the user: "use a metric that
      *  samples every point of the road segment"). */
     s_last_splined = splined;
-    if (getenv("SC2K_CURVE_DUMP"))
+    if (opt_set("curve-dump"))
         for (k = 1; k + 1 < n; ++k)
         {
             V2    ui = {out[k].x - out[k - 1].x, out[k].y - out[k - 1].y};
@@ -1365,12 +1485,9 @@ int path_fit(const RCity *c_unused, const int32_t *tcol, const int32_t *trow, in
              *  three points, which is what a curve has and a corner does
              *  not -- the one number that compares a fillet fit with a
              *  fit that has no fillets. */
-            printf("CURVE %.3f %.3f %.1f %.3f %.3f %.3f %.4f %.4f %d\n", (double)out[k].x,
-                   (double)out[k].y, (double)(acosf(dot) * 57.2958f), (double)rad[k], (double)hw,
-                   (double)turn_radius(out[k - 1], out[k], out[k + 1]), (double)li, (double)lo,
-                   splined);
+            printf("CURVE %.3f %.3f %.1f %.3f %.3f %.3f %.4f %.4f %d\n", (double)out[k].x, (double)out[k].y, (double)(acosf(dot) * 57.2958f), (double)rad[k], (double)hw, (double)turn_radius(out[k - 1], out[k], out[k + 1]), (double)li, (double)lo, splined);
         }
-    if (getenv("SC2K_PATH_DUMP"))
+    if (opt_set("path-dump"))
     {
         int d;
         printf("PATH hw=%.3f\nTILES", (double)hw);
@@ -1394,9 +1511,6 @@ int path_fit(const RCity *c_unused, const int32_t *tcol, const int32_t *trow, in
 
 /* ---- stage one, upright: the corridor's grade ---------------------------- */
 
-
-
-
 /* ---- the segment pipeline (the road spec, part 3.10) ------------------ */
 
 /*  A network is walked as segments between its nodes, the junction and
@@ -1411,10 +1525,6 @@ int path_fit(const RCity *c_unused, const int32_t *tcol, const int32_t *trow, in
  *  the direction at each sample, its dashes and crosswalks placed by
  *  the distance from the junction.  There is no join inside a segment
  *  to get wrong, and a segment meets its junction box square on. */
-
-
-
-
 
 /*  ==================================================================
  *  Pieces
@@ -1482,8 +1592,8 @@ int fillet_r(const V2 *q, int n, const float *rad, Piece *out, int *count)
         t1 = (V2){q[i].x - u_in.x * d, q[i].y - u_in.y * d};
         t2 = (V2){q[i].x + u_out.x * d, q[i].y + u_out.y * d};
         /* the arc's centre: off t1 along the inward normal of u_in, toward the turn */
-        n1    = cross > 0.0f ? (V2){-u_in.y, u_in.x} : (V2){u_in.y, -u_in.x};
-        cen   = (V2){t1.x + n1.x * R, t1.y + n1.y * R};
+        n1  = cross > 0.0f ? (V2){-u_in.y, u_in.x} : (V2){u_in.y, -u_in.x};
+        cen = (V2){t1.x + n1.x * R, t1.y + n1.y * R};
         if (np + 2 > MAX_PIECES)
             return -1;
         if (v2len((V2){t1.x - cur.x, t1.y - cur.y}) > 1e-4f)
@@ -1635,15 +1745,17 @@ static int net_record(RRoadNet *net, const Sample *smp, int ns, float total, int
     sg->total = total;
     sg->cls   = cls;
     memcpy(sg->node, s_seg_node, sizeof sg->node);
-    sg->kind[0]  = s_seg_kind[0];
-    sg->kind[1]  = s_seg_kind[1];
-    sg->ctrl[0]  = s_seg_ctrl[0];
-    sg->ctrl[1]  = s_seg_ctrl[1];
+    sg->kind[0] = s_seg_kind[0];
+    sg->kind[1] = s_seg_kind[1];
+    sg->ctrl[0] = s_seg_ctrl[0];
+    sg->ctrl[1] = s_seg_ctrl[1];
     /*  Where the traffic runs, across the strip.  These are fractions of
      *  the road's own width, so a change of width carries the lanes with
      *  it instead of leaving the cars off the asphalt. */
-    sg->lane_out = ROAD_W * (cls == 0 ? 0.200f : cls == 1 ? 0.306f : 0.317f);
-    sg->lane_in  = ROAD_W * (cls == 0 ? 0.200f : cls == 1 ? 0.115f : 0.162f);
+    sg->lane_out = ROAD_W * (cls == 0 ? 0.200f : cls == 1 ? 0.306f
+                                                          : 0.317f);
+    sg->lane_in  = ROAD_W * (cls == 0 ? 0.200f : cls == 1 ? 0.115f
+                                                          : 0.162f);
     if (s_hiway)
     {
         /*  A deck's lanes, from the 7.1 section: the half deck is a tile
@@ -1697,14 +1809,14 @@ static float s_zorig[8192];
  *  being carved out of it.  One height per grid corner, shared by the
  *  four tiles around it, so the bend is continuous and the walls close
  *  what is left. */
-float   s_zcap[GRID * GRID];
-uint8_t s_corr[GRID * GRID];  /* the corner belongs to a corridor: its height is the corridor's */
-float   s_zlow[GRID * GRID];
-RRoadTune s_tune = {0.50f, 0.62f, 0.9f, 3.0f, 6.0f, 8.0f, 0.8f, 0.04f, 0.45f, 0.0f, 0.0f, 0.0f};
+float     s_zcap[GRID * GRID];
+uint8_t   s_corr[GRID * GRID]; /* the corner belongs to a corridor: its height is the corridor's */
+float     s_zlow[GRID * GRID];
+RRoadTune s_tune = {0.50f, 0.62f, 0.9f, 3.0f, 6.0f, 8.0f, 0.8f, 0.04f, 0.45f, 0.0f, 0.0f, 0.0f, 0.60f};
 
 float *mesh_tune(void)
 {
-    return &s_tune.road_w; /* twelve floats, in the struct's own order */
+    return &s_tune.road_w; /* thirteen floats, in the struct's own order */
 }
 
 float        s_tilez[R_MAP * R_MAP * 4];
@@ -1745,11 +1857,10 @@ void s_tile_reset(int32_t i)
 {
     s_tiled[i] = 1e9f;
 }
-float   s_zdist[GRID * GRID]; /* how far the nearest station that set it was */
-int   s_pass; /* 0 not capping, 1 collecting the caps, 2 building on them */
+float s_zdist[GRID * GRID]; /* how far the nearest station that set it was */
+int   s_pass;               /* 0 not capping, 1 collecting the caps, 2 building on them */
 
-static int put_prism_clip_m(RMesh *m, const RCity *c, uint8_t mask_bit, float order, float cx, float cy, float dx, float dy, float len, float wid, float zb, float zf, float z0, float z1, float paint, float mat);
-
+int put_prism_clip_m(RMesh *m, const RCity *c, uint8_t mask_bit, float order, float cx, float cy, float dx, float dy, float len, float wid, float zb, float zf, float z0, float z1, float paint, float mat);
 
 /*  ------------------------------------------------------------------
  *  Lofting, stage by stage.  The ribbon is swept from the stations, but
@@ -1767,21 +1878,17 @@ static int put_prism_clip_m(RMesh *m, const RCity *c, uint8_t mask_bit, float or
  *  ================================================================== */
 /*  Signals, lighting, and everything else that stands BESIDE the line
  *  rather than being part of the ribbon. */
-static int loft_furniture(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, Family f,
-                          Sample *smp, int ns, float hw, float mat, float total, int pin0,
-                          int pin1)
+static int loft_furniture(RMesh *m, const RCity *c, uint8_t mask_bit, Family f, Sample *smp, int ns, float hw, float total, int pin0, int pin1)
 {
     int i;
-    (void)comp;
-    (void)mat;
-    (void)total;
     /*  A rail's signalling (spec 5.6), right-hand running: the track to
      *  the right of the walk carries traffic forward and its signals
      *  stand on its outer side facing back; the other track's face
-     *  forward on the other side.  A block signal every ten tiles,
-     *  green; an absolute one, red, a tile before a junction; a whistle
-     *  post two tiles before a level crossing; none on or beside a
-     *  crossing. */
+     *  forward on the other side.  A block signal every ten tiles, an
+     *  absolute one a tile before a junction, a whistle post two tiles
+     *  before a level crossing; none on or beside a crossing.  The
+     *  signals show their block's occupancy and nothing more: the trains
+     *  do not obey them (the user: "trains don't need stop lights"). */
     /*  Street lighting (spec 1.6, 6.4): on an avenue or a boulevard a
      *  cobra-head luminaire on a davit arm every two tiles, thirty
      *  metres, staggered side to side: a round pole on the sidewalk
@@ -1936,11 +2043,9 @@ static int loft_furniture(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, 
 /*  Heights only: this stage writes the shelf the corridor's tiles wear
  *  and emits no geometry of its own, which is why it needs neither the
  *  mesh nor the city. */
-static int loft_surface(int comp, Family f, Sample *smp, int ns, float hw, float total)
+static int loft_surface(Family f, Sample *smp, int ns, float hw)
 {
     int i;
-    (void)comp;
-    (void)total;
     /*  The corridor's surface (the user: "you immediately notch out those
      *  tiles out of the terrain... you then create a surface that
      *  bisects these corridors... this surface defines the top of the
@@ -1955,9 +2060,9 @@ static int loft_surface(int comp, Family f, Sample *smp, int ns, float hw, float
      *  ribbon a hair above the ground with the corners merely capped, so
      *  the two fought wherever the ground moved between stations. */
     if (s_pass == 1)
-        {
+    {
         const float shelf_grade = f == F_RAIL ? 0.12f : 0.25f; /* the profile's own ceiling */
-    for (i = 0; i < ns; ++i)
+        for (i = 0; i < ns; ++i)
         {
             int32_t capc = (int32_t)floorf(smp[i].pos.x), capr = (int32_t)floorf(smp[i].pos.y);
             int     cq;
@@ -1987,8 +2092,7 @@ static int loft_surface(int comp, Family f, Sample *smp, int ns, float hw, float
                     if (cd >= s_tiled[sl])
                         continue;
                     s_tiled[sl] = cd;
-                    s_tilez[sl] = profile_at(smp, ns,
-                                             smp[i].s + ax * smp[i].dir.x + ay * smp[i].dir.y);
+                    s_tilez[sl] = profile_at(smp, ns, smp[i].s + ax * smp[i].dir.x + ay * smp[i].dir.y);
                 }
             }
             for (cq = 0; cq < 4; ++cq)
@@ -1997,8 +2101,8 @@ static int loft_surface(int comp, Family f, Sample *smp, int ns, float hw, float
                 float   dx, dy;
                 if (gc < 0 || gr < 0 || gc >= GRID || gr >= GRID)
                     continue;
-                dx = (float)gc - smp[i].pos.x;
-                dy = (float)gr - smp[i].pos.y;
+                dx       = (float)gc - smp[i].pos.x;
+                dy       = (float)gr - smp[i].pos.y;
                 float d2 = dx * dx + dy * dy;
                 if (d2 > (hw + 0.8f) * (hw + 0.8f))
                     continue;
@@ -2058,7 +2162,7 @@ static int loft_surface(int comp, Family f, Sample *smp, int ns, float hw, float
                         along = 0.75f;
                     if (along < -0.75f)
                         along = -0.75f;
-                    zc = smp[i].z + grade * along;
+                    zc                      = smp[i].z + grade * along;
                     s_zdist[gr * GRID + gc] = d2;
                     s_zcap[gr * GRID + gc]  = zc;
                     if (s_corr[gr * GRID + gc] != 1 || zc < s_zlow[gr * GRID + gc])
@@ -2073,12 +2177,9 @@ static int loft_surface(int comp, Family f, Sample *smp, int ns, float hw, float
 
 /*  The fitted line drawn over the world it made: centreline, band edges
  *  and piece boundaries, when the tuning window asks to see them. */
-static int loft_overlay(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, Family f,
-                        Sample *smp, int ns, float hw, const Piece *pc, int np)
+static int loft_overlay(RMesh *m, const RCity *c, uint8_t mask_bit, Sample *smp, int ns, float hw, const Piece *pc, int np)
 {
     int i;
-    (void)comp;
-    (void)f;
     /*  The fitted centreline, drawn over the road it made, when the
      *  tuning window asks for it: a hairline down the middle of the band
      *  through every station, so the curve the fit produced can be seen
@@ -2092,15 +2193,17 @@ static int loft_overlay(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, Fa
             float px, py, q0[2], q1[2], r0[2], r1[2];
             if (dl < 1e-5f)
                 continue;
-            px = -dy / dl * 0.02f;
-            py = dx / dl * 0.02f;
-            q0[0] = ax - px; q0[1] = ay - py;
-            q1[0] = ax + px; q1[1] = ay + py;
-            r0[0] = bx - px; r0[1] = by - py;
-            r1[0] = bx + px; r1[1] = by + py;
-            if (strip_quad_z(m, c, mask_bit, tile_order(c, (int32_t)floorf(ax), (int32_t)floorf(ay), mask_bit) + 0.45f,
-                             q0, q1, r0, r1, smp[i - 1].z + 0.06f, smp[i].z + 0.06f,
-                             4.0f, 4.0f, 0.0f, 0.0f, MAT_VEHICLE) != 0)
+            px    = -dy / dl * 0.02f;
+            py    = dx / dl * 0.02f;
+            q0[0] = ax - px;
+            q0[1] = ay - py;
+            q1[0] = ax + px;
+            q1[1] = ay + py;
+            r0[0] = bx - px;
+            r0[1] = by - py;
+            r1[0] = bx + px;
+            r1[1] = by + py;
+            if (strip_quad_z(m, c, mask_bit, tile_order(c, (int32_t)floorf(ax), (int32_t)floorf(ay), mask_bit) + 0.45f, q0, q1, r0, r1, smp[i - 1].z + 0.06f, smp[i].z + 0.06f, 4.0f, 4.0f, 0.0f, 0.0f, MAT_VEHICLE) != 0)
                 return -1;
             /*  And the width it carries: the band's two edges, so the
              *  carriageway can be read against the corridor it sits in
@@ -2113,10 +2216,7 @@ static int loft_overlay(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, Fa
                     float e1[2] = {ax + ox * sgn + px * 0.5f, ay + oy * sgn + py * 0.5f};
                     float f0[2] = {bx + ox * sgn - px * 0.5f, by + oy * sgn - py * 0.5f};
                     float f1[2] = {bx + ox * sgn + px * 0.5f, by + oy * sgn + py * 0.5f};
-                    if (strip_quad_z(m, c, mask_bit,
-                                     tile_order(c, (int32_t)floorf(ax), (int32_t)floorf(ay), mask_bit) + 0.44f,
-                                     e0, e1, f0, f1, smp[i - 1].z + 0.05f, smp[i].z + 0.05f,
-                                     7.0f, 7.0f, 0.0f, 0.0f, MAT_VEHICLE) != 0)
+                    if (strip_quad_z(m, c, mask_bit, tile_order(c, (int32_t)floorf(ax), (int32_t)floorf(ay), mask_bit) + 0.44f, e0, e1, f0, f1, smp[i - 1].z + 0.05f, smp[i].z + 0.05f, 7.0f, 7.0f, 0.0f, 0.0f, MAT_VEHICLE) != 0)
                         return -1;
                 }
             }
@@ -2148,8 +2248,7 @@ static int loft_overlay(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, Fa
                 continue;
             {
                 float z = surface_at_world(c, mask_bit, pos.x, pos.y) + 0.08f;
-                if (put_box(m, c, mask_bit, tile_order(c, tc, tr, mask_bit) + 0.46f,
-                            pos.x, pos.y, 0.05f, 0.05f, z, z + 0.04f, MAT_VEHICLE, paint) != 0)
+                if (put_box(m, c, mask_bit, tile_order(c, tc, tr, mask_bit) + 0.46f, pos.x, pos.y, 0.05f, 0.05f, z, z + 0.04f, MAT_VEHICLE, paint) != 0)
                     return -1;
             }
             if (k2 < np)
@@ -2159,7 +2258,6 @@ static int loft_overlay(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, Fa
     }
     return 0;
 }
-
 
 int loft(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, Family f, const Piece *pc, int np, float total, float zeb0, float zeb1, int pin0, int pin1)
 {
@@ -2171,7 +2269,7 @@ int loft(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, Family f, const P
     int           k, ns = 0, i;
     float         s = 0.0f;
     /* the samples */
-    if (getenv("SC2K_LOFT_DUMP"))
+    if (opt_set("loft-dump"))
     {
         float tl = 0.0f;
         for (k = 0; k < np; ++k)
@@ -2180,13 +2278,13 @@ int loft(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, Family f, const P
     }
     for (k = 0; k < np; ++k)
     {
-        const Piece *p  = &pc[k];
+        const Piece *p = &pc[k];
         /*  How finely the strip is cut along its length.  An arc gets a
          *  station every twenty-fifth of a tile and a straight every
          *  sixteenth: fine enough that a curve reads as a curve at the
          *  closest zoom and against the map view's own grid (the user:
          *  "can you increase the resolution of the segmentation?"). */
-        int          nd = p->arc ? (int)ceilf(p->len / 0.04f) : (int)ceilf(p->len / 0.0625f);
+        int nd = p->arc ? (int)ceilf(p->len / 0.04f) : (int)ceilf(p->len / 0.0625f);
         if (nd < 1)
             nd = 1;
         for (i = (ns ? 1 : 0); i <= nd; ++i)
@@ -2398,7 +2496,7 @@ int loft(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, Family f, const P
                 u = 0.0f;
             if (u > 1.0f)
                 u = 1.0f;
-            u = u * u * (3.0f - 2.0f * u); /* eased, so it leaves a node level */
+            u        = u * u * (3.0f - 2.0f * u); /* eased, so it leaves a node level */
             smp[i].z = az[k2] + (az[k2 + 1] - az[k2]) * u;
         }
     }
@@ -2528,27 +2626,26 @@ int loft(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, Family f, const P
         return -1;
     if (f == F_RAIL && ns >= 2 && net_record(&m->railnet, smp, ns, total, 0, 1) != 0)
         return -1;
-    if (loft_furniture(m, c, mask_bit, comp, f, smp, ns, hw, mat, total, pin0, pin1) != 0)
+    if (loft_furniture(m, c, mask_bit, f, smp, ns, hw, total, pin0, pin1) != 0)
         return -1;
-    if (loft_surface(comp, f, smp, ns, hw, total) != 0)
+    if (loft_surface(f, smp, ns, hw) != 0)
         return -1;
-    if (loft_overlay(m, c, mask_bit, comp, f, smp, ns, hw, pc, np) != 0)
+    if (loft_overlay(m, c, mask_bit, smp, ns, hw, pc, np) != 0)
         return -1;
 
-    /*  SC2K_PROF_DUMP=1 prints the finished profile of every segment:
+    /*  --prof-dump 1 prints the finished profile of every segment:
      *  the distance along, the ground under the cross-section, and the
      *  height the band was given.  tools/profile.py draws it, which is
      *  how the grade smoothing is looked at (the user: "I want to see
      *  how the smoothing of grade is happening"). */
-    if (getenv("SC2K_PROF_DUMP"))
+    if (opt_set("prof-dump"))
     {
         int d;
         printf("PROF f=%d hiway=%d n=%d\n", (int)f, s_hiway, ns);
         for (d = 0; d < ns; ++d)
         {
             float g = section_height(c, mask_bit, smp[d].pos, smp[d].dir, hw);
-            printf("  %.4f %.4f %.4f %.3f %.3f\n", (double)smp[d].s, (double)g, (double)smp[d].z,
-                   (double)smp[d].pos.x, (double)smp[d].pos.y);
+            printf("  %.4f %.4f %.4f %.3f %.3f\n", (double)smp[d].s, (double)g, (double)smp[d].z, (double)smp[d].pos.x, (double)smp[d].pos.y);
         }
     }
     /* the quads and their skirts */
@@ -2574,8 +2671,9 @@ int loft(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, Family f, const P
         if (tr >= R_MAP)
             tr = R_MAP - 1;
         order        = tile_order(c, tc, tr, mask_bit);
-        s_road_class = s_hiway ? 3.0f : f != F_ROAD ? 0.0f : s_seg_class >= 0.0f ? s_seg_class
-                                                                : road_class(c, tc, tr);
+        s_road_class = s_hiway ? 3.0f : f != F_ROAD       ? 0.0f
+                                    : s_seg_class >= 0.0f ? s_seg_class
+                                                          : road_class(c, tc, tr);
         /* a deck carries no level crossing's markings: it flies over the line */
         if (f == F_ROAD && !s_hiway && pv->xd > 0.45f && 0.5f * (pv->xd + cu->xd) < 1.55f)
         {
@@ -2621,13 +2719,13 @@ int loft(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, Family f, const P
             static const float conc[3] = {1.0f, 0.0f, MAT_PIER}; /* plain, as the platform is */
             float              ref[3]  = {1.0f, 1.0f, 1.0f};
 
-            float              u0[3] = {a0[0], a0[1], pv->z - HIWAY_GIRDER}, u1[3] = {a1[0], a1[1], pv->z - HIWAY_GIRDER};
-            float              v0[3] = {b0[0], b0[1], cu->z - HIWAY_GIRDER}, v1[3] = {b1[0], b1[1], cu->z - HIWAY_GIRDER};
-            float              dn[3] = {0.0f, 0.0f, -1.0f}, tri[3][3];
+            float u0[3] = {a0[0], a0[1], pv->z - HIWAY_GIRDER}, u1[3] = {a1[0], a1[1], pv->z - HIWAY_GIRDER};
+            float v0[3] = {b0[0], b0[1], cu->z - HIWAY_GIRDER}, v1[3] = {b1[0], b1[1], cu->z - HIWAY_GIRDER};
+            float dn[3] = {0.0f, 0.0f, -1.0f}, tri[3][3];
             /*  Behind the deck in the painter's order: depth here is the
              *  sweep's slot, not a height, so a soffit at the same order
              *  as the road it hangs under drew through it in stripes. */
-            const float        sof = order;
+            const float sof = order;
             memcpy(tri[0], u0, sizeof tri[0]);
             memcpy(tri[1], v1, sizeof tri[1]);
             memcpy(tri[2], u1, sizeof tri[2]);
@@ -2642,7 +2740,7 @@ int loft(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, Family f, const P
             if (i == 1 || i == ns - 1)
             {
                 const float *e0 = i == 1 ? a0 : b0, *e1 = i == 1 ? a1 : b1;
-                float        zt = i == 1 ? pv->z : cu->z;
+                float        zt    = i == 1 ? pv->z : cu->z;
                 float        t0[3] = {e0[0], e0[1], zt}, t1[3] = {e1[0], e1[1], zt};
                 float        q0[3] = {e0[0], e0[1], zt - HIWAY_GIRDER}, q1[3] = {e1[0], e1[1], zt - HIWAY_GIRDER};
                 float        ax = e1[1] - e0[1], ay = e0[0] - e1[0], al = sqrtf(ax * ax + ay * ay), en[3];
@@ -2686,17 +2784,17 @@ int loft(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, Family f, const P
                  *  does not look right"). */
                 static const float conc[3] = {1.0f, 0.0f, MAT_PIER};
                 const float        pw      = 0.035f; /* the parapet's thickness */
-                float              ia[2] = {ea[0] - nrm[0] * pw, ea[1] - nrm[1] * pw};
-                float              ib[2] = {eb[0] - nrm[0] * pw, eb[1] - nrm[1] * pw};
+                float              ia[2]   = {ea[0] - nrm[0] * pw, ea[1] - nrm[1] * pw};
+                float              ib[2]   = {eb[0] - nrm[0] * pw, eb[1] - nrm[1] * pw};
                 float              inn[3] = {-nrm[0], -nrm[1], 0.0f}, up[3] = {0.0f, 0.0f, 1.0f};
-                float g0[3] = {ea[0], ea[1], pv->z - HIWAY_GIRDER};
-                float g1[3] = {eb[0], eb[1], cu->z - HIWAY_GIRDER};
-                float p0[3] = {ea[0], ea[1], pv->z + HIWAY_PARAPET};
-                float p1[3] = {eb[0], eb[1], cu->z + HIWAY_PARAPET};
-                float k0[3] = {ia[0], ia[1], pv->z + HIWAY_PARAPET};
-                float k1[3] = {ib[0], ib[1], cu->z + HIWAY_PARAPET};
-                float n0[3] = {ia[0], ia[1], pv->z};
-                float n1[3] = {ib[0], ib[1], cu->z};
+                float              g0[3] = {ea[0], ea[1], pv->z - HIWAY_GIRDER};
+                float              g1[3] = {eb[0], eb[1], cu->z - HIWAY_GIRDER};
+                float              p0[3] = {ea[0], ea[1], pv->z + HIWAY_PARAPET};
+                float              p1[3] = {eb[0], eb[1], cu->z + HIWAY_PARAPET};
+                float              k0[3] = {ia[0], ia[1], pv->z + HIWAY_PARAPET};
+                float              k1[3] = {ib[0], ib[1], cu->z + HIWAY_PARAPET};
+                float              n0[3] = {ia[0], ia[1], pv->z};
+                float              n1[3] = {ib[0], ib[1], cu->z};
                 {
                     /*  The girder's face is in the deck's own shadow, as
                      *  the art draws it: a dark line under the
@@ -2734,10 +2832,6 @@ int loft(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, Family f, const P
     }
     return 0;
 }
-
-
-
-
 
 /*  ==================================================================
  *  Walking the network
@@ -2848,7 +2942,7 @@ static void pieces_trim(Piece *pc, int *np, float s, int back)
         else
         {
             float dx = p->b.x - p->a.x, dy = p->b.y - p->a.y;
-            float f  = s / (p->len > 1e-6f ? p->len : 1.0f);
+            float f = s / (p->len > 1e-6f ? p->len : 1.0f);
             if (back)
             {
                 p->b.x -= dx * f;
@@ -2868,6 +2962,95 @@ static void pieces_trim(Piece *pc, int *np, float s, int back)
 /*  Walk one segment of a family from a node tile out through link `e`,
  *  collect its centreline, straighten, fillet and loft it.  `visited`
  *  marks (tile, link) so each segment is walked once, from either end. */
+/*  Which way a run leaves a junction, measured over a real baseline
+ *  rather than from the tangent of its first piece.
+ *
+ *  The tangent was fine while a piece was a straight or a swept arc a
+ *  tile long.  Under the spline fit a piece is one dense sample, so the
+ *  heading came from a few hundredths of a tile and swung to whatever
+ *  that fragment happened to point at -- at Paris 97,116 a run that
+ *  leaves diagonally reported due west, the junction trimmed its arm back
+ *  to the cap on the strength of it, and the road ended up under the
+ *  terrain the pad no longer covered.
+ *
+ *  A junction wants to know where the road goes, which is a property of
+ *  the run, not of its first infinitesimal.
+ *
+ *  Only under the spline fit.  The fillet's pieces are straights and
+ *  swept arcs a good fraction of a tile long, and the tangent at the
+ *  start of one IS where the road goes; measuring a chord instead moved
+ *  junctions that were right and cost a city on the sweep.  The
+ *  granularity is what makes the tangent meaningless, so the remedy
+ *  belongs where the granularity is.
+ *
+ *  A piece long enough to have a heading of its own keeps it either way. */
+#define ARM_BASE 0.25f
+
+static void arm_heading(const Piece *pc, int np, float total, int from_end, V2 *pos, V2 *dir)
+{
+    const float  base  = total < 1.0f ? total * 0.5f : 0.50f;
+    const Piece *first = from_end ? &pc[np - 1] : &pc[0];
+    if (s_tune.spline < 0.5f || first->len >= ARM_BASE)
+    {
+        piece_at(first, from_end ? first->len : 0.0f, pos, dir);
+        if (from_end)
+        {
+            dir->x = -dir->x;
+            dir->y = -dir->y;
+        }
+        return;
+    }
+    float at, seek, acc = 0.0f;
+    V2    at_base, d0; /* the point at the baseline: only its heading is wanted */
+    int   i;
+    if (from_end)
+    {
+        piece_at(&pc[np - 1], pc[np - 1].len, pos, &d0);
+        seek = total - base;
+    }
+    else
+    {
+        piece_at(&pc[0], 0.0f, pos, &d0);
+        seek = base;
+    }
+    at_base = *pos;
+    for (i = 0; i < np; ++i)
+    {
+        if (acc + pc[i].len >= seek || i == np - 1)
+        {
+            at = seek - acc;
+            at = at < 0.0f ? 0.0f : at > pc[i].len ? pc[i].len
+                                                   : at;
+            piece_at(&pc[i], at, &at_base, dir);
+            break;
+        }
+        acc += pc[i].len;
+    }
+    /*  The tangent where the run has gone far enough to mean it, rather
+     *  than the chord to there: a chord over half a tile turns a curving
+     *  approach into a straight one and moves the junction with it. */
+    if (from_end)
+    {
+        dir->x = -dir->x;
+        dir->y = -dir->y;
+    }
+    {
+        float l = sqrtf(dir->x * dir->x + dir->y * dir->y);
+        if (l < 1e-4f)
+        {
+            *dir = d0; /* a run with no length to speak of keeps its tangent */
+            if (from_end)
+            {
+                dir->x = -dir->x;
+                dir->y = -dir->y;
+            }
+            return;
+        }
+        dir->x /= l;
+        dir->y /= l;
+    }
+}
+
 int walk_segment(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit, int comp, Family f, int32_t col, int32_t row, int e, uint8_t *visited)
 {
     static V2      pts[MAX_PTS];
@@ -2877,11 +3060,11 @@ int walk_segment(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bi
     static Piece   pieces[MAX_PIECES];
     int            nt = 0;
     float          hw = f == F_ROAD ? ROAD_W * 0.5f : RAIL_W * 0.5f;
-    int          n = 0, k, nk, np, kind0 = node_kind(c, l, f, col, row), kind1 = 0;
-    int          square0 = 0, square1 = 0; /* an end that runs square to a carrier */
-    int32_t      cc = col, cr = row, back = (e + 2) & 3, guard = 0;
-    int          ee    = e;
-    float        total = 0.0f;
+    int            n = 0, k, nk, np, kind0 = node_kind(c, l, f, col, row), kind1 = 0;
+    int            square0 = 0, square1 = 0; /* an end that runs square to a carrier */
+    int32_t        cc = col, cr = row, back = (e + 2) & 3, guard = 0;
+    int            ee    = e;
+    float          total = 0.0f;
     if (visited[(row * R_MAP + col) * 4 + e])
         return 0;
     visited[(row * R_MAP + col) * 4 + e] = 1;
@@ -2933,7 +3116,7 @@ int walk_segment(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bi
             }
             break;
         }
-        pts[n++]                            = (V2){(float)cc + 0.5f, (float)cr + 0.5f};
+        pts[n++] = (V2){(float)cc + 0.5f, (float)cr + 0.5f};
         if (nt < MAX_PTS)
         {
             tcol[nt]   = cc;
@@ -2983,17 +3166,17 @@ int walk_segment(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bi
      *  differently from the eye. */
     /*  The corridor is tested against the road's own half width, not a
      *  fraction of it: what has to fit inside the corridor is the road. */
-    nk = path_fit(c, tcol, trow, nt, hw, pts[0], pts[n - 1], f == F_ROAD ? s_tune.road_rmax : s_tune.rail_rmax,
-                  f == F_ROAD ? ROAD_RMIN : RAIL_RMIN,
-                  hw / ((f == F_ROAD ? 0.50f : 0.62f) * 0.5f),
-                  kind0 == 2 ? (int32_t)(row * R_MAP + col) : -1,
-                  kind1 == 2 ? (int32_t)(cr * R_MAP + cc) : -1, q, rad, MAX_PTS);
+    nk = path_fit(c, tcol, trow, nt, hw, pts[0], pts[n - 1], f == F_ROAD ? s_tune.road_rmax : s_tune.rail_rmax, f == F_ROAD ? ROAD_RMIN : RAIL_RMIN, hw / ((f == F_ROAD ? 0.50f : 0.62f) * 0.5f), kind0 == 2 ? (int32_t)(row * R_MAP + col) : -1, kind1 == 2 ? (int32_t)(cr * R_MAP + cc) : -1, q, rad, MAX_PTS);
     if (nk < 2)
         return 0;
     {
-        /*  SC2K_ROAD_DUMP=1 prints every segment of six tiles or more;
-         *  SC2K_ROAD_DUMP=col,row every segment through that tile. */
-        const char *dump = getenv("SC2K_ROAD_DUMP");
+        /*  --road-dump prints every segment of six tiles or more;
+         *  --road-dump C,R every segment through that tile.  The switch
+         *  is value-OPTIONAL, so its presence is asked separately from
+         *  its value: reading the value alone made a bare --road-dump
+         *  print nothing at all. */
+        const int   on   = opt_set("road-dump");
+        const char *dump = on ? opt_get("road-dump") : NULL;
         int         dc = -1, dr = -1, show = 0;
         if (dump && sscanf(dump, "%d,%d", &dc, &dr) == 2)
         {
@@ -3001,7 +3184,7 @@ int walk_segment(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bi
                 if ((int32_t)floorf(pts[k].x) == dc && (int32_t)floorf(pts[k].y) == dr)
                     show = 1;
         }
-        else if (dump && n >= 6)
+        else if (on && n >= 6)
             show = 1;
         if (show)
         {
@@ -3017,7 +3200,7 @@ int walk_segment(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bi
     /* stage two's sweeps, each corner on the radius its room allows */
     if (fillet_r(q, nk, rad, pieces, &np) != 0 || np == 0)
     {
-        if (getenv("SC2K_PATH_DUMP"))
+        if (opt_set("path-dump"))
             printf("  fillet refused: %d points\n", nk);
         return 0;
     }
@@ -3032,7 +3215,7 @@ int walk_segment(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bi
         if (kind0 == 2)
         {
             RArm *a = &s_arm[FAMX(f)][(row * R_MAP + col) * 4 + e];
-            piece_at(&pieces[0], 0.0f, &pos, &dir);
+            arm_heading(pieces, np, total, 0, &pos, &dir);
             a->ax   = pos.x;
             a->ay   = pos.y;
             a->dx   = dir.x;
@@ -3042,11 +3225,11 @@ int walk_segment(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bi
         if (kind1 == 2)
         {
             RArm *a = &s_arm[FAMX(f)][(cr * R_MAP + cc) * 4 + back];
-            piece_at(&pieces[np - 1], pieces[np - 1].len, &pos, &dir);
+            arm_heading(pieces, np, total, 1, &pos, &dir);
             a->ax   = pos.x;
             a->ay   = pos.y;
-            a->dx   = -dir.x;
-            a->dy   = -dir.y;
+            a->dx   = dir.x; /* arm_heading already points away from the junction */
+            a->dy   = dir.y;
             a->have = 1;
         }
     }
@@ -3055,9 +3238,9 @@ int walk_segment(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bi
         /*  Where this path passes each tile it crosses, and its
          *  direction there: the nearest point to the tile's middle.  A
          *  level crossing is built from the road's and the rail's. */
-        float    s;
-        int      pi = 0;
-        float    acc = 0.0f;
+        float s;
+        int   pi  = 0;
+        float acc = 0.0f;
         for (s = 0.0f; s <= total; s += 0.05f)
         {
             V2      pos, dir;
@@ -3151,8 +3334,7 @@ int walk_segment(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bi
             paint = (k3 == 0 || k3 + 1 == nk) ? 7.0f : (rad[k3] > 0.001f ? 3.0f : 1.0f);
             half  = (k3 == 0 || k3 + 1 == nk) ? 0.05f : 0.075f;
             z     = surface_at_world(c, mask_bit, q[k3].x, q[k3].y) + 0.10f;
-            if (put_box(m, c, mask_bit, tile_order(c, tc, tr, mask_bit) + 0.47f,
-                        q[k3].x, q[k3].y, half, half, z, z + 0.04f, MAT_VEHICLE, paint) != 0)
+            if (put_box(m, c, mask_bit, tile_order(c, tc, tr, mask_bit) + 0.47f, q[k3].x, q[k3].y, half, half, z, z + 0.04f, MAT_VEHICLE, paint) != 0)
                 return 0;
         }
     }
@@ -3310,11 +3492,10 @@ int    s_measure;
  *
  *  Returns the number of points written, or 0 if there is nothing to
  *  draw. */
-int junction_poly(const RCity *c, Family f, int32_t col, int32_t row, int links,
-                  V2 *out, uint8_t *mouth, int max, float trim[4])
+int junction_poly(const RCity *c, Family f, int32_t col, int32_t row, int links, V2 *out, uint8_t *mouth, int max, float trim[4])
 {
     float cx = (float)col + 0.5f, cy = (float)row + 0.5f;
-    float w  = (f == F_ROAD ? ROAD_W : RAIL_W) * 0.5f;
+    float w = (f == F_ROAD ? ROAD_W : RAIL_W) * 0.5f;
     /*  The junction is sized by the band that runs through it, not by a
      *  fixed number of tiles.  A wider road needs its mouth pushed
      *  further out -- otherwise the arms fatten while the intersection
@@ -3324,7 +3505,7 @@ int junction_poly(const RCity *c, Family f, int32_t col, int32_t row, int links,
      *  default half-width, so at the shipped widths the numbers are the
      *  ones that were tuned by eye, and only moving a width moves them. */
     float ref = (f == F_ROAD ? 0.50f : 0.62f) * 0.5f;
-    float gro = getenv("SC2K_NOSCALE") ? 1.0f : w / ref; /* for before/after shots */
+    float gro = opt_set("noscale") ? 1.0f : w / ref; /* for before/after shots */
     float far = 0.62f * gro;
     typedef struct
     {
@@ -3346,9 +3527,9 @@ int junction_poly(const RCity *c, Family f, int32_t col, int32_t row, int links,
          *  leaves.  Both come from the fit the drawing pass will repeat
          *  exactly, so the mouth this cuts is a point ON that path and
          *  the strip leaves it square. */
-        d = a->have ? (V2){a->dx, a->dy} : (V2){ROAD_DU[e], ROAD_DV[e]};
-        o = a->have ? (V2){a->ax, a->ay}
-                    : (V2){cx + ROAD_DU[e] * w, cy + ROAD_DV[e] * w};
+        d           = a->have ? (V2){a->dx, a->dy} : (V2){ROAD_DU[e], ROAD_DV[e]};
+        o           = a->have ? (V2){a->ax, a->ay}
+                              : (V2){cx + ROAD_DU[e] * w, cy + ROAD_DV[e] * w};
         arm[na].d   = d;
         arm[na].o   = o;
         arm[na].ang = atan2f(d.y, d.x);
@@ -3363,9 +3544,9 @@ int junction_poly(const RCity *c, Family f, int32_t col, int32_t row, int links,
         int j = i;
         while (j > 0 && arm[j - 1].ang > arm[j].ang)
         {
-            Arm t = arm[j - 1];
-            arm[j - 1]       = arm[j];
-            arm[j]           = t;
+            Arm t      = arm[j - 1];
+            arm[j - 1] = arm[j];
+            arm[j]     = t;
             --j;
         }
     }
@@ -3401,7 +3582,7 @@ int junction_poly(const RCity *c, Family f, int32_t col, int32_t row, int links,
     for (i = 0; i < na; ++i)
     {
         /*  Arm i's own corners: the one before it and the one after. */
-        V2    d  = arm[i].d, o = arm[i].o;
+        V2    d = arm[i].d, o = arm[i].o;
         V2    ca = corner[(i + na - 1) % na], cb = corner[i];
         float ta = (ca.x - o.x) * d.x + (ca.y - o.y) * d.y;
         float tb = (cb.x - o.x) * d.x + (cb.y - o.y) * d.y;
@@ -3418,12 +3599,11 @@ int junction_poly(const RCity *c, Family f, int32_t col, int32_t row, int links,
             t = s_tune.trim_cap * gro;
         trim[arm[i].e] = t;
     }
-    if (getenv("SC2K_JUNC_DUMP"))
+    if (opt_set("junc-dump"))
     {
         printf("JUNC %d %d", (int)col, (int)row);
         for (i = 0; i < na; ++i)
-            printf(" %.3f,%.3f,%.3f,%.3f", (double)arm[i].d.x, (double)arm[i].d.y,
-                   (double)trim[arm[i].e], (double)w);
+            printf(" %.3f,%.3f,%.3f,%.3f", (double)arm[i].d.x, (double)arm[i].d.y, (double)trim[arm[i].e], (double)w);
         printf("\n");
     }
     /*  The outline is the hull of every arm's mouth and every corner
@@ -3438,13 +3618,13 @@ int junction_poly(const RCity *c, Family f, int32_t col, int32_t row, int links,
         for (i = 0; i < na && nc + 3 <= 12; ++i)
         {
             V2    d = arm[i].d, o = arm[i].o, p = {-arm[i].d.y, arm[i].d.x};
-            float t = trim[arm[i].e];
+            float t    = trim[arm[i].e];
             cmouth[nc] = 1;
-            cand[nc++]  = (V2){o.x + d.x * t - p.x * w, o.y + d.y * t - p.y * w};
+            cand[nc++] = (V2){o.x + d.x * t - p.x * w, o.y + d.y * t - p.y * w};
             cmouth[nc] = 1;
-            cand[nc++]  = (V2){o.x + d.x * t + p.x * w, o.y + d.y * t + p.y * w};
+            cand[nc++] = (V2){o.x + d.x * t + p.x * w, o.y + d.y * t + p.y * w};
             cmouth[nc] = 0;
-            cand[nc++]  = corner[i];
+            cand[nc++] = corner[i];
         }
         /*  By angle about the middle, which for points that all lie
          *  outside it is the hull's own order; one pass of the turn test
@@ -3491,7 +3671,7 @@ int junction_poly(const RCity *c, Family f, int32_t col, int32_t row, int links,
         }
         n = hn;
     }
-    if (getenv("SC2K_JUNC_DUMP"))
+    if (opt_set("junc-dump"))
     {
         printf("JPOLY %d %d", (int)col, (int)row);
         for (i = 0; i < n; ++i)
@@ -3522,7 +3702,7 @@ int build_junction(RMesh *m, const RCity *c, uint8_t mask_bit, Family f, int32_t
      *  the terrain and the box tilts off the shelf.  Until the junction
      *  tiles are marked whole, the terrain's own height is the safer
      *  reference. */
-    float zj = surface_at_world(c, mask_bit, cx, cy) + 0.03f;
+    float zj     = surface_at_world(c, mask_bit, cx, cy) + 0.03f;
     s_road_class = 0.0f; /* the box is plain asphalt; a median ends at the junction */
     if (f == F_ROAD)
         s_junc_ctrl[row * R_MAP + col] = (uint8_t)junction_control(c, col, row, links);
@@ -3624,7 +3804,7 @@ int build_junction(RMesh *m, const RCity *c, uint8_t mask_bit, Family f, int32_t
         V2      poly[16];
         uint8_t mouth[16];
         float   trm[4];
-        int     np = junction_poly(c, f, col, row, links, poly, mouth, 16, trm), i;
+        int     np    = junction_poly(c, f, col, row, links, poly, mouth, 16, trm), i;
         float   rc[3] = {0.0f, 0.0f, mat}, ref[3] = {0.5f, 0.5f, 0.5f}, ref2[3] = {-1.0f, -1.0f, -1.0f};
         if (np < 3)
         {
@@ -3644,16 +3824,17 @@ int build_junction(RMesh *m, const RCity *c, uint8_t mask_bit, Family f, int32_t
              *  follow the ground, and a triangle running from the middle
              *  straight to the rim cuts under it on the way (the road
              *  clip check: twelve tiles, terrain above by 0.02). */
-            V2    m0 = {0.5f * (cx + p0.x), 0.5f * (cy + p0.y)};
-            V2    m1 = {0.5f * (cx + p1.x), 0.5f * (cy + p1.y)};
-            float z0  = surface_at_world(c, mask_bit, p0.x, p0.y) + 0.05f;
-            float z1  = surface_at_world(c, mask_bit, p1.x, p1.y) + 0.05f;
-            float zm0 = surface_at_world(c, mask_bit, m0.x, m0.y) + 0.05f;
-            float zm1 = surface_at_world(c, mask_bit, m1.x, m1.y) + 0.05f;
+            V2          m0           = {0.5f * (cx + p0.x), 0.5f * (cy + p0.y)};
+            V2          m1           = {0.5f * (cx + p1.x), 0.5f * (cy + p1.y)};
+            float       z0           = surface_at_world(c, mask_bit, p0.x, p0.y) + 0.05f;
+            float       z1           = surface_at_world(c, mask_bit, p1.x, p1.y) + 0.05f;
+            float       zm0          = surface_at_world(c, mask_bit, m0.x, m0.y) + 0.05f;
+            float       zm1          = surface_at_world(c, mask_bit, m1.x, m1.y) + 0.05f;
             const float fan[3][3][3] = {
-                {{cx, cy, zj}, {m0.x, m0.y, zm0}, {m1.x, m1.y, zm1}},
-                {{m0.x, m0.y, zm0}, {p0.x, p0.y, z0}, {p1.x, p1.y, z1}},
-                {{m0.x, m0.y, zm0}, {p1.x, p1.y, z1}, {m1.x, m1.y, zm1}}};
+                {{cx, cy, zj},      {m0.x, m0.y, zm0}, {m1.x, m1.y, zm1}},
+                {{m0.x, m0.y, zm0}, {p0.x, p0.y, z0},  {p1.x, p1.y, z1} },
+                {{m0.x, m0.y, zm0}, {p1.x, p1.y, z1},  {m1.x, m1.y, zm1}}
+            };
             int k;
             for (k = 0; k < 3; ++k)
             {
@@ -3715,8 +3896,7 @@ int build_junction(RMesh *m, const RCity *c, uint8_t mask_bit, Family f, int32_t
                         zf = za;
                     if (zb > zf)
                         zf = zb;
-                    if (strip_quad_z(m, c, mask_bit, order + 0.02f, q0, q1, o0, o1,
-                                     zf, zf, 1.0f, 0.80f, -1.0f, -1.0f, mat) != 0)
+                    if (strip_quad_z(m, c, mask_bit, order + 0.02f, q0, q1, o0, o1, zf, zf, 1.0f, 0.80f, -1.0f, -1.0f, mat) != 0)
                         return -1;
                 }
             }
@@ -3756,12 +3936,8 @@ int build_junction(RMesh *m, const RCity *c, uint8_t mask_bit, Family f, int32_t
             {
                 /* the return: a fan from the corner point over the quarter circle about (iu, iv)...
                  * drawn as the region between the corner and the arc, as a fan from the corner */
-                float ang0 = atan2f(ROAD_DV[ea] * h, ROAD_DU[ea] * h);
-                float ang1 = atan2f(ROAD_DV[eb] * h, ROAD_DU[eb] * h);
-                float t0   = atan2f(-(ROAD_DV[ea] + ROAD_DV[eb]), -(ROAD_DU[ea] + ROAD_DU[eb]));
+                float t0 = atan2f(-(ROAD_DV[ea] + ROAD_DV[eb]), -(ROAD_DU[ea] + ROAD_DU[eb]));
                 int   i;
-                (void)ang0;
-                (void)ang1;
                 /* the arc about (iu, iv), radius sw, spanning the 90 degrees that face the corner */
                 for (i = 0; i < 6; ++i)
                 {
@@ -3781,8 +3957,6 @@ int build_junction(RMesh *m, const RCity *c, uint8_t mask_bit, Family f, int32_t
                     if (put_tri_r2(m, (const float (*)[3])tri, NULL, order + 0.15f, rc, ref, ref2, 0) != 0)
                         return -1;
                 }
-                (void)ku;
-                (void)kv;
             }
         }
     return 0;
@@ -3818,72 +3992,3 @@ int build_power_tile(RMesh *m, const RCity *c, int32_t col, int32_t row, uint8_t
         return put_wire(m, c, mask_bit, order, cx, (float)row, top - 0.1f, cx, (float)row + 1.0f, top - 0.1f, 0.1f);
     return put_wire(m, c, mask_bit, order, (float)col, cy, top - 0.1f, (float)col + 1.0f, cy, top - 0.1f, 0.1f);
 }
-
-/*  A prism clipped to the tile grid, each piece in the depth slot of
- *  the tile under it (the user: "train cars get masked off once in a
- *  while, like they flicker").  A car had carried the order of the tile
- *  under its centre, and the part of it over the next tile toward the
- *  viewer lay under that tile's ground until the centre crossed, when
- *  the whole car stood up at once.  `order` is the centre tile's slot
- *  with the fraction the pieces keep above each tile's ground. */
-static int put_prism_clip_m(RMesh *m, const RCity *c, uint8_t mask_bit, float order, float cx, float cy, float dx, float dy, float len, float wid, float zb, float zf, float z0, float z1, float paint, float mat)
-{
-    static const float up[3] = {0.0f, 0.0f, 1.0f};
-    float              ax = dx * len * 0.5f, ay = dy * len * 0.5f, bx = -dy * wid * 0.5f, by = dx * wid * 0.5f;
-    float              p[4][3], top[4][3], col[3] = {paint, 0.0f, mat}, nrm[3], t3[3][3];
-    float              ref[3] = {paint, paint, paint}, ref2[3] = {0.0f, 0.0f, 0.0f};
-    int                k;
-    p[0][0] = cx - ax - bx;
-    p[0][1] = cy - ay - by;
-    p[1][0] = cx + ax - bx;
-    p[1][1] = cy + ay - by;
-    p[2][0] = cx + ax + bx;
-    p[2][1] = cy + ay + by;
-    p[3][0] = cx - ax + bx;
-    p[3][1] = cy - ay + by;
-    for (k = 0; k < 4; ++k)
-    {
-        float zg  = (k == 1 || k == 2) ? zf : zb;
-        p[k][2]   = zg + z0;
-        top[k][0] = p[k][0];
-        top[k][1] = p[k][1];
-        top[k][2] = zg + z1;
-    }
-    for (k = 0; k < 4; ++k)
-    {
-        const float *a = p[k], *b = p[(k + 1) & 3], *ta = top[k], *tb = top[(k + 1) & 3];
-        float        ex = b[0] - a[0], ey = b[1] - a[1], el = sqrtf(ex * ex + ey * ey);
-        if (el < 1e-6f)
-            continue;
-        nrm[0] = ey / el;
-        nrm[1] = -ex / el;
-        nrm[2] = 0.0f;
-        memcpy(t3[0], ta, sizeof t3[0]);
-        memcpy(t3[1], tb, sizeof t3[1]);
-        memcpy(t3[2], b, sizeof t3[2]);
-        if (put_tri_road_n(m, c, mask_bit, order, (const float (*)[3])t3, nrm, col, ref, ref2) != 0)
-            return -1;
-        memcpy(t3[0], ta, sizeof t3[0]);
-        memcpy(t3[1], b, sizeof t3[1]);
-        memcpy(t3[2], a, sizeof t3[2]);
-        if (put_tri_road_n(m, c, mask_bit, order, (const float (*)[3])t3, nrm, col, ref, ref2) != 0)
-            return -1;
-    }
-    memcpy(t3[0], top[0], sizeof t3[0]);
-    memcpy(t3[1], top[1], sizeof t3[1]);
-    memcpy(t3[2], top[2], sizeof t3[2]);
-    if (put_tri_road_n(m, c, mask_bit, order, (const float (*)[3])t3, up, col, ref, ref2) != 0)
-        return -1;
-    memcpy(t3[0], top[0], sizeof t3[0]);
-    memcpy(t3[1], top[2], sizeof t3[1]);
-    memcpy(t3[2], top[3], sizeof t3[2]);
-    return put_tri_road_n(m, c, mask_bit, order, (const float (*)[3])t3, up, col, ref, ref2);
-}
-
-int put_prism_clip(RMesh *m, const RCity *c, uint8_t mask_bit, float order, float cx, float cy, float dx, float dy, float len, float wid, float zb, float zf, float z0, float z1, float paint)
-{
-    return put_prism_clip_m(m, c, mask_bit, order, cx, cy, dx, dy, len, wid, zb, zf, z0, z1, paint, MAT_VEHICLE);
-}
-
-/*  Every network: the power lines per tile; the roads and rails as
- *  junctions and segments. */

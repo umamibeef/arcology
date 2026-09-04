@@ -2,7 +2,7 @@
 #
 #  Everything the project builds lands in a single binary here: the game,
 #  the verification driver, the atlas dumper and the software rasteriser,
-#  dispatched by a_main.c.  Build from the repository root:
+#  dispatched by app/main.c.  Build from the repository root:
 #
 #      cmake -B build && cmake --build build && ctest --test-dir build
 #
@@ -66,9 +66,14 @@ add_library(sc2krender STATIC
     atlas.c     # the sprite atlas and its manifest
     city.c      # a City as the renderer wants to see it
     soft.c      # the sweep and the software rasteriser
-    tables.c    # GENERATED from the A5 image - do not edit
+    generated/tables.c  # GENERATED from the A5 image - do not edit
 )
-target_include_directories(sc2krender PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_include_directories(sc2krender PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}"
+                          "${CMAKE_CURRENT_SOURCE_DIR}/../util"
+                          "${CMAKE_CURRENT_SOURCE_DIR}/../audio"
+                          "${CMAKE_CURRENT_SOURCE_DIR}/../ui"
+                          "${CMAKE_CURRENT_SOURCE_DIR}/../app"
+                          "${CMAKE_CURRENT_SOURCE_DIR}/generated")
 target_link_libraries(sc2krender PUBLIC sc2k_vendor sc2kcore
                       PRIVATE sc2k_warnings)
 
@@ -112,8 +117,10 @@ if(SDL3_FOUND)
     FetchContent_MakeAvailable(spdlog)
 
     add_executable(arcology
-        a_main.c                          # the dispatcher
-        app.c gpu.c log.cpp adapt.c shaders.c sound.c
+        ../app/main.c                     # the dispatcher
+        ../app/app.c ../app/paths.c
+        prefs.c camera.c gpu.c adapt.c generated/shaders.c
+        ../util/log.cpp ../util/opt.c ../util/fs.c ../audio/sound.c ../audio/music.c
         mesh.c mesh_tile.c mesh_emit.c mesh_net.c road.c
         mesh_hiway.c mesh_check.c traffic.c
         atlasdump.c softmain.c)       # --atlas and --soft
@@ -156,18 +163,19 @@ if(SDL3_FOUND)
         else()
             target_compile_options(sc2k_imgui PRIVATE -w)
         endif()
-        target_sources(arcology PRIVATE ui.cpp)
+        target_sources(arcology PRIVATE ../ui/ui.cpp)
         target_link_libraries(arcology PRIVATE sc2k_imgui)
         target_compile_definitions(arcology PRIVATE SC2K_IMGUI=1)
     else()
-        target_sources(arcology PRIVATE ui_none.c)
+        target_sources(arcology PRIVATE ../ui/ui_none.c)
     endif()
     install(TARGETS arcology RUNTIME DESTINATION bin)
 else()
     #  No SDL3, so no game -- but the developer modes must still be
     #  reachable, because that is what the checkers in tools/ drive and
-    #  what ctest runs.  a_stub.c stands in for the game and says why.
-    add_executable(arcology a_main.c a_stub.c atlasdump.c softmain.c)
+    #  what ctest runs.  app/stub.c stands in for the game and says why.
+    add_executable(arcology ../app/main.c ../app/stub.c atlasdump.c softmain.c
+                        ../util/opt.c)
     target_link_libraries(arcology PRIVATE sc2krender sc2kdev sc2k_warnings)
     install(TARGETS arcology RUNTIME DESTINATION bin)
     message(STATUS "SDL3 not found: arcology is built without the game "
@@ -188,6 +196,14 @@ endif()
 
 # ---- tests ---------------------------------------------------------------
 enable_testing()
+#  These two need no assets and no built binary: they read the tree.
+#  Registered outside the assets check so a clone without the game's art
+#  still enforces the seam and the projection.
+add_test(NAME seam COMMAND ${Python3_EXECUTABLE}
+         "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/seam_check.py")
+add_test(NAME projection COMMAND ${Python3_EXECUTABLE}
+         "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/project_check.py")
+
 if(EXISTS "${SC2K_ASSETS}/atlas.json")
     add_test(NAME atlas_loads COMMAND arcology --atlas "${SC2K_ASSETS}")
     set_tests_properties(atlas_loads PROPERTIES
@@ -212,9 +228,14 @@ if(Python3_FOUND AND EXISTS "${SC2K_ASSETS}/atlas.json")
     add_test(NAME blit_matches_game
              COMMAND ${Python3_EXECUTABLE}
                      "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/blit_check.py")
+    #  the music player: the pitch rule as an octave, and the theme's length
+    add_test(NAME music_check
+             COMMAND ${Python3_EXECUTABLE}
+                     "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/music_check.py"
+                     $<TARGET_FILE:arcology>)
     add_test(NAME invariants
              COMMAND ${Python3_EXECUTABLE}
-                     "${CMAKE_CURRENT_SOURCE_DIR}/tests/invariants.py")
+                     "${CMAKE_CURRENT_SOURCE_DIR}/../../tests/invariants.py")
 endif()
 #  The terrain mesh must be watertight: no edge of any triangle may be
 #  free.  mesh_check counts them; the build fails the test on the first.

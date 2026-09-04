@@ -99,6 +99,8 @@ def main():
                              str(fork), str(out)])
     run("sound     (snd )", [str(HERE / "snd.py"), str(fork),
                              str(out / "sounds")])
+    run("music     (MIDI, INST, SONG)", [str(HERE / "music.py"), str(fork),
+                             str(out / "music")])
 
     print("\nassets are in %s" % out)
     missing = [n for n in ("tiles32.png", "ui.png", "atlas.json")

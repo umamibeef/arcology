@@ -3,6 +3,7 @@
  *  Split out of mesh.c; see mesh_int.h.
  */
 #include "mesh_int.h"
+#include "opt.h"
 
 /* ---- the check --------------------------------------------------------- */
 
@@ -162,10 +163,10 @@ int mesh_check_roads(const RMesh *m, int verbose)
         t                           = row * R_MAP + col;
         list[start[t] + count[t]++] = i;
     }
-    /*  SC2K_TILE_DUMP=col,row prints every face whose centroid lies on
+    /*  --tile-dump col,row prints every face whose centroid lies on
      *  that tile, any material, for inspection. */
     {
-        const char *dump = getenv("SC2K_TILE_DUMP");
+        const char *dump = opt_get("tile-dump");
         int         dc, dr;
         if (dump && sscanf(dump, "%d,%d", &dc, &dr) == 2)
             for (i = 0; i < n_tri; ++i)
@@ -232,7 +233,7 @@ int mesh_check_roads(const RMesh *m, int verbose)
                     ++tiles[t].n;
                     if (worst > tiles[t].worst)
                         tiles[t].worst = worst;
-                    if (getenv("SC2K_CLIP_DUMP") && tiles[t].n <= 2)
+                    if (opt_set("clip-dump") && tiles[t].n <= 2)
                     {
                         printf("  clip at %.2f,%.2f road z %.2f mat %g tri (%.2f,%.2f,%.2f) (%.2f,%.2f,%.2f) (%.2f,%.2f,%.2f) order %g; ground +%.2f\n",
                                (double)x,
@@ -346,7 +347,7 @@ int mesh_check_roads(const RMesh *m, int verbose)
 
 int mesh_check(const RMesh *m, int verbose)
 {
-    if (getenv("SC2K_SPIKE_CHECK"))
+    if (opt_set("spike-check"))
     {
         /* ground top faces spanning over a level, or wider than a tile: a deformed or mis-welded face */
         uint32_t i, n = m->n_land / 3u, bad = 0;

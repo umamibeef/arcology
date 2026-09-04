@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """profile.py -- draw a corridor's grade, side on.
 
-    SC2K_PROF_DUMP=1 build/arcology assets <city> --mesh-check --roads3d \
+    build/arcology assets <city> --mesh-check --roads3d --prof-dump \
         | python3 tools/profile.py out.png [min-climb-in-levels]
 
 One panel per segment, tallest climb first: the ground under the band in

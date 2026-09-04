@@ -26,6 +26,7 @@
 #include <stdint.h>
 
 #include "atlas.h"
+#include "meshvert.h"
 #include "soft.h"
 
 struct SDL_Window;
@@ -40,7 +41,7 @@ typedef struct
     int32_t scale;              /* integer pixel scale, target to screen     */
     float   zoom;               /* continuous zoom on top of it: the canvas
                                  * is resolved by scale * zoom; 1 or 0 = none */
-    int geometry;                 /* the mesh instead of the land art: the
+    int geometry;               /* the mesh instead of the land art: the
                                  * ground, the water shader inside the water
                                  * sprites, and the roads, rails and traffic
                                  * as strips on it                            */
@@ -56,19 +57,6 @@ typedef struct
                                  * point under the view's centre             */
     float time;                 /* seconds, for the water                    */
 } RGpuView;
-
-/*  One vertex of the terrain mesh.  pos is column, row, altitude in levels
- *  and the tile's painter's index; nrm is the face normal in world units;
- *  nrm's fourth component is the height field's curvature at the vertex,
- *  col's first two its smoothed gradient, in world units, so the ground
- *  material can read the topology without the facets; col's alpha is the
- *  palette index. */
-typedef struct
-{
-    float pos[4];
-    float nrm[4];
-    float col[4];
-} RMeshVert;
 
 RGpu *gpu_create(struct SDL_Window *win, const RAtlas *a, char *err, size_t err_len);
 void  gpu_destroy(RGpu *g);

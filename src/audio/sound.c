@@ -16,13 +16,7 @@
 #define N_STREAMS 8
 
 static const char *const FILES[N_SOUNDS] = {
-    "500-BullDoze.wav", "501-Error.wav", "502-WIND.wav", "503-PLOP.wav",
-    "504-Explode.wav", "505-Click.wav", "506-POLICE.wav", "507-Looping_Fire.wav",
-    "508-Dozer.wav", "509-FireTruck.wav", "510-COPTER.wav", "511-FLOOD.wav",
-    "512-BOOS.wav", "513-CHEERS.wav", "514-ZZap.wav", "515-MAYDAY5_VOC.wav",
-    "516-IMHIT_VOC.wav", "517-SHIP3_VOC.wav", "518-Takeoff.wav", "519-Land.wav",
-    "520-Siren2.wav", "521-Horns7_5.wav", "522-Prison2.wav", "523-ScBell1.wav",
-    "524-TrainB7_5.wav", "525-Shot1.wav", "526-Arco2.wav", "527-Roar1.wav"};
+    "500-BullDoze.wav", "501-Error.wav", "502-WIND.wav", "503-PLOP.wav", "504-Explode.wav", "505-Click.wav", "506-POLICE.wav", "507-Looping_Fire.wav", "508-Dozer.wav", "509-FireTruck.wav", "510-COPTER.wav", "511-FLOOD.wav", "512-BOOS.wav", "513-CHEERS.wav", "514-ZZap.wav", "515-MAYDAY5_VOC.wav", "516-IMHIT_VOC.wav", "517-SHIP3_VOC.wav", "518-Takeoff.wav", "519-Land.wav", "520-Siren2.wav", "521-Horns7_5.wav", "522-Prison2.wav", "523-ScBell1.wav", "524-TrainB7_5.wav", "525-Shot1.wav", "526-Arco2.wav", "527-Roar1.wav"};
 
 struct RSound
 {
@@ -40,7 +34,7 @@ RSound *sound_create(const char *assets_dir)
     int     k;
     if (!SDL_InitSubSystem(SDL_INIT_AUDIO))
         return NULL;
-    s = (RSound *) calloc(1, sizeof *s);
+    s = (RSound *)calloc(1, sizeof *s);
     if (!s)
         return NULL;
     s->dev = SDL_OpenAudioDevice(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, NULL);
@@ -74,6 +68,11 @@ void sound_destroy(RSound *s)
             SDL_free(s->data[k]);
     SDL_CloseAudioDevice(s->dev);
     free(s);
+}
+
+SDL_AudioDeviceID sound_device(const RSound *s)
+{
+    return s ? s->dev : 0;
 }
 
 int sound_loaded(const RSound *s)
@@ -116,6 +115,6 @@ void sound_play(RSound *s, int id)
         s->stream[slot] = NULL;
         return;
     }
-    SDL_PutAudioStreamData(s->stream[slot], s->data[k], (int) s->len[k]);
+    SDL_PutAudioStreamData(s->stream[slot], s->data[k], (int)s->len[k]);
     SDL_FlushAudioStream(s->stream[slot]);
 }

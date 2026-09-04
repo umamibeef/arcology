@@ -905,7 +905,8 @@ static void menu_bar(RUi *u, RUiState *s)
         menu_item("Auto-Budget", nullptr, false, false);
         menu_item("Auto-Goto", nullptr, true, false);
         menu_item("Sound Effects", nullptr, true, false);
-        menu_item("Music", nullptr, true, false);
+        if (menu_item("Music", nullptr, s->music_on != 0))
+            s->want_music = 1;
         ImGui::Separator();
         /*  The Kaleidoscope schemes: None, then every pack found under
          *  assets/themes.  A pick is a request; app puts the scheme
@@ -1174,13 +1175,11 @@ static void tuning_window(RUiState *s)
      *  is made rather than described (the user: "how about you give me
      *  knobs to tweak live?").  The window is the game's own, through
      *  mac_begin, so it wears whatever theme is on. */
-    static const char *NAME[9] = {
-        "road width", "rail width", "road min radius", "rail min radius",
-        "road max sweep", "rail max sweep", "node approach",
-        "corridor margin", "junction trim"};
-    static const float LO[9]  = {0.15f, 0.15f, 0.05f, 0.05f, 0.5f, 0.5f, 0.0f, 0.0f, 0.10f};
-    static const float HI[9]  = {1.00f, 1.00f, 4.00f, 8.00f, 12.0f, 16.0f, 2.0f, 0.3f, 0.60f};
-    static const float DEF[9] = {0.50f, 0.62f, 0.90f, 3.00f, 6.00f, 8.00f, 0.8f, 0.04f, 0.45f};
+    static const char *NAME[10] = {
+        "road width", "rail width", "road min radius", "rail min radius", "road max sweep", "rail max sweep", "node approach", "corridor margin", "junction trim", "spline tension"};
+    static const float LO[10]  = {0.15f, 0.15f, 0.05f, 0.05f, 0.5f, 0.5f, 0.0f, 0.0f, 0.10f, 0.0f};
+    static const float HI[10]  = {1.00f, 1.00f, 4.00f, 8.00f, 12.0f, 16.0f, 2.0f, 0.3f, 0.60f, 3.0f};
+    static const float DEF[10] = {0.50f, 0.62f, 0.90f, 3.00f, 6.00f, 8.00f, 0.8f, 0.04f, 0.45f, 0.60f};
     int                k;
     if (!mac_begin("Road tuning", &s->show_tuning, 340.0f, ImVec2(110.0f, 300.0f)))
     {
@@ -1188,15 +1187,15 @@ static void tuning_window(RUiState *s)
         return;
     }
     ImGui::PushItemWidth(150.0f);
-    for (k = 0; k < 9; ++k)
-        if (ImGui::SliderFloat(NAME[k], &s->tune[k], LO[k], HI[k], "%.3f"))
+    for (k = 0; k < 10; ++k)
+        if (ImGui::SliderFloat(NAME[k], &s->tune[k < 9 ? k : 12], LO[k], HI[k], "%.3f"))
             s->tune_changed = 1;
     ImGui::PopItemWidth();
     ImGui::Separator();
     if (ImGui::Button("Defaults"))
     {
-        for (k = 0; k < 9; ++k)
-            s->tune[k] = DEF[k];
+        for (k = 0; k < 10; ++k)
+            s->tune[k < 9 ? k : 12] = DEF[k];
         s->tune_changed = 1;
     }
     ImGui::SameLine();
@@ -1297,7 +1296,7 @@ static void load_popup(RUi *u, RUiState *s)
     else
     {
         ImGui::TextUnformatted("No cities directory found.");
-        ImGui::TextUnformatted("Set SC2K_CITIES, or type a path below.");
+        ImGui::TextUnformatted("Set --cities, or type a path below.");
     }
 
     ImGui::Separator();
@@ -1554,19 +1553,16 @@ extern "C" void ui_frame(RUi *u, RUiState *s)
          *  of the ruler and the default font at this distance is too
          *  small to pick off a screenshot (the user: "Resolution is too
          *  low"). */
-        const float  band = 34.0f;
-        const float  tsz  = 22.0f;
+        const float band = 34.0f;
+        const float tsz  = 22.0f;
         ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
         ImGui::SetNextWindowSize(disp);
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
         ImGui::PushStyleColor(ImGuiCol_WindowBg, IM_COL32(0, 0, 0, 0));
-        ImGui::Begin("##ruler", nullptr,
-                     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs |
-                         ImGuiWindowFlags_NoNav |
-                         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing);
+        ImGui::Begin("##ruler", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing);
         ImDrawList *dl = ImGui::GetWindowDrawList();
-        const float  ey   = disp.y - band; /* columns are numbered here */
-        const float  ex   = disp.x - band; /* and rows here            */
+        const float ey = disp.y - band; /* columns are numbered here */
+        const float ex = disp.x - band; /* and rows here            */
         dl->AddRectFilled(ImVec2(0, ey), ImVec2(disp.x, disp.y), IM_COL32(18, 22, 24, 190));
         dl->AddRectFilled(ImVec2(ex, 0), ImVec2(disp.x, disp.y), IM_COL32(18, 22, 24, 190));
         for (int k = 0; k < s->coord_n; ++k)
@@ -1586,7 +1582,8 @@ extern "C" void ui_frame(RUi *u, RUiState *s)
             if (fabsf(den) > 1e-3f)
             {
                 t = ((col ? want - p0.y : want - p0.x)) / den;
-                t = t < 0.0f ? 0.0f : t > 1.0f ? 1.0f : t;
+                t = t < 0.0f ? 0.0f : t > 1.0f ? 1.0f
+                                               : t;
             }
             ImVec2 at(p0.x + (p1.x - p0.x) * t, p0.y + (p1.y - p0.y) * t);
             snprintf(txt, sizeof txt, "%c%d", s->coord_axis[k], (int)s->coord_v[k]);
@@ -1595,19 +1592,15 @@ extern "C" void ui_frame(RUi *u, RUiState *s)
             {
                 if (at.x < 2.0f || at.x > ex - 22.0f)
                     continue;
-                dl->AddLine(ImVec2(at.x, ey - 8.0f), ImVec2(at.x, ey + 5.0f),
-                            IM_COL32(255, 240, 120, 230), 2.0f);
-                dl->AddText(ImGui::GetFont(), tsz, ImVec2(at.x + 3.0f, ey + 5.0f),
-                            IM_COL32(255, 240, 120, 255), txt);
+                dl->AddLine(ImVec2(at.x, ey - 8.0f), ImVec2(at.x, ey + 5.0f), IM_COL32(255, 240, 120, 230), 2.0f);
+                dl->AddText(ImGui::GetFont(), tsz, ImVec2(at.x + 3.0f, ey + 5.0f), IM_COL32(255, 240, 120, 255), txt);
             }
             else
             {
                 if (at.y < 2.0f || at.y > ey - 22.0f)
                     continue;
-                dl->AddLine(ImVec2(ex - 8.0f, at.y), ImVec2(ex + 5.0f, at.y),
-                            IM_COL32(255, 240, 120, 230), 2.0f);
-                dl->AddText(ImGui::GetFont(), tsz, ImVec2(ex + 6.0f, at.y - tsz * 0.5f),
-                            IM_COL32(255, 240, 120, 255), txt);
+                dl->AddLine(ImVec2(ex - 8.0f, at.y), ImVec2(ex + 5.0f, at.y), IM_COL32(255, 240, 120, 230), 2.0f);
+                dl->AddText(ImGui::GetFont(), tsz, ImVec2(ex + 6.0f, at.y - tsz * 0.5f), IM_COL32(255, 240, 120, 255), txt);
             }
         }
         ImGui::End();

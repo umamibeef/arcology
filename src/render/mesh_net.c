@@ -39,7 +39,6 @@
  *  width of the road so that it remains consistent"), and the turned
  *  inspection view uses the true width. */
 
-
 /*  A road's class, from the traffic on it (the user: "avenues,
  *  boulevards, etc where appropriate"): 0 a two-lane road, 1 an avenue
  *  with a double centre line and four lanes, 2 a boulevard with a
@@ -253,7 +252,6 @@ float surface_at_world(const RCity *c, uint8_t mask_bit, float x, float y)
         row = R_MAP - 1;
     return surface_at(c, col, row, mask_bit, x - (float)col, y - (float)row);
 }
-
 
 const float ROAD_MU[4] = {0.5f, 1.0f, 0.5f, 0.0f}; /* edge midpoints, N E S W */
 const float ROAD_MV[4] = {0.0f, 0.5f, 1.0f, 0.5f};
@@ -471,9 +469,7 @@ int put_tri_road_n(RMesh *m, const RCity *c, uint8_t mask_bit, float order, cons
             uint8_t b = c->xbld[tr * R_MAP + tc];
             order     = tile_order(c, tc, tr, mask_bit) + frac;
             if (col[2] > 10.5f && col[2] < 11.5f && (b == 0x45u || b == 0x46u) &&
-                on_crossing_panel(c, tc, tr,
-                                  (tri[0][0] + tri[1][0] + tri[2][0]) / 3.0f,
-                                  (tri[0][1] + tri[1][1] + tri[2][1]) / 3.0f))
+                on_crossing_panel(c, tc, tr, (tri[0][0] + tri[1][0] + tri[2][0]) / 3.0f, (tri[0][1] + tri[1][1] + tri[2][1]) / 3.0f))
                 pcol = xcol;
         }
         return put_tri_r2(m, tri, nrm, order, pcol, ref, ref2, 0);
@@ -649,8 +645,8 @@ int put_cyl(RMesh *m, const RCity *c, uint8_t mask_bit, float order, float cx, f
     {
         N = 12
     };
-    float g   = surface_at_world(c, mask_bit, cx, cy);
-    float hi  = g + z1;
+    float g       = surface_at_world(c, mask_bit, cx, cy);
+    float hi      = g + z1;
     float col3[3] = {0.0f, 0.0f, mat}, ref[3] = {0.0f, 0.0f, 0.0f};
     float px[N], py[N], pz[N];
     int   k;
@@ -666,12 +662,12 @@ int put_cyl(RMesh *m, const RCity *c, uint8_t mask_bit, float order, float cx, f
     }
     for (k = 0; k < N; ++k)
     {
-        int   j     = (k + 1) % N;
-        float mx    = 0.5f * (px[k] + px[j]) - cx, my = 0.5f * (py[k] + py[j]) - cy;
-        float ml    = sqrtf(mx * mx + my * my), nrm[3], tri[3][3];
-        nrm[0]      = ml > 1e-6f ? mx / ml : 1.0f;
-        nrm[1]      = ml > 1e-6f ? my / ml : 0.0f;
-        nrm[2]      = 0.0f;
+        int   j  = (k + 1) % N;
+        float mx = 0.5f * (px[k] + px[j]) - cx, my = 0.5f * (py[k] + py[j]) - cy;
+        float ml  = sqrtf(mx * mx + my * my), nrm[3], tri[3][3];
+        nrm[0]    = ml > 1e-6f ? mx / ml : 1.0f;
+        nrm[1]    = ml > 1e-6f ? my / ml : 0.0f;
+        nrm[2]    = 0.0f;
         tri[0][0] = px[k];
         tri[0][1] = py[k];
         tri[0][2] = hi;
@@ -695,15 +691,15 @@ int put_cyl(RMesh *m, const RCity *c, uint8_t mask_bit, float order, float cx, f
     for (k = 1; k + 1 < N; ++k)
     {
         float up[3] = {0.0f, 0.0f, 1.0f}, tri[3][3];
-        tri[0][0] = px[0];
-        tri[0][1] = py[0];
-        tri[0][2] = hi;
-        tri[1][0] = px[k];
-        tri[1][1] = py[k];
-        tri[1][2] = hi;
-        tri[2][0] = px[k + 1];
-        tri[2][1] = py[k + 1];
-        tri[2][2] = hi;
+        tri[0][0]   = px[0];
+        tri[0][1]   = py[0];
+        tri[0][2]   = hi;
+        tri[1][0]   = px[k];
+        tri[1][1]   = py[k];
+        tri[1][2]   = hi;
+        tri[2][0]   = px[k + 1];
+        tri[2][1]   = py[k + 1];
+        tri[2][2]   = hi;
         if (put_tri_road_n(m, c, mask_bit, order, (const float (*)[3])tri, up, col3, ref, ref) != 0)
             return -1;
     }

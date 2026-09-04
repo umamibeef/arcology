@@ -1,4 +1,8 @@
-/*  main.c -- the verification driver.
+/*  dev.c -- the verification driver and every developer mode.
+ *
+ *  It was called main.c and holds no main: `arcology` has one entry point
+ *  in src/app, which dispatches here by mode name.  The file is the
+ *  library the CMake target sc2kdev is named for.
  *
  *  The point of the reconstruction is that it can be checked, so this
  *  runs every check there is and prints one table.  Three kinds of
@@ -407,7 +411,7 @@ static void pct_err(const char *label, long ok, long total, long err, long cells
            note);
 }
 
-/*  The developer modes of `arcology`.  a_main.c dispatches here when
+/*  The developer modes of `arcology`.  app/main.c dispatches here when
  *  argv[1] names one of them; see ARC_DEV_MODES there. */
 int sc2k_dev_main(int argc, char **argv)
 {
@@ -429,41 +433,6 @@ int sc2k_dev_main(int argc, char **argv)
     /*  --allocmicro: place one special building of every id and report
      *  the marker and the record it produced.  tools/micro_alloc_check.py
      *  drives $EEAE against this. */
-    if (argc >= 3 && !strcmp(argv[1], "--allocmicro"))
-    {
-        City *c = (City *)calloc(1, sizeof *c);
-        int   b;
-        if (!c)
-            return 1;
-        if (!city_load(argv[2], c))
-        {
-            fprintf(stderr, "not a city\n");
-            free(c);
-            return 1;
-        }
-        rng_seed(1, 1);
-        for (b = 0xC6; b <= 0xFF; b++)
-        {
-            int m    = sim_alloc_micro(c, 3, 3, b);
-            int slot = m ? m - 0x33 : -1;
-            printf("%02X %3d", b, m);
-            if (slot >= 0 && c->xmic && (size_t)(slot * 8 + 8) <= c->xmic_len)
-            {
-                int k;
-                printf(" ");
-                for (k = 0; k < 8; k++)
-                    printf("%02x", c->xmic[slot * 8 + k]);
-            }
-            printf("\n");
-        }
-        city_free(c);
-        free(c);
-        return 0;
-    }
-
-    /*  --allocmicro: place one special building of every id in turn and
-     *  report the marker and the record it produced.
-     *  tools/micro_alloc_check.py drives $EEAE against this. */
     if (argc >= 3 && !strcmp(argv[1], "--allocmicro"))
     {
         City *c = (City *)calloc(1, sizeof *c);

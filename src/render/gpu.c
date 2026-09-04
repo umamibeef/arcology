@@ -1,6 +1,8 @@
 /*  gpu.c -- see gpu.h. */
 #include "gpu.h"
 #include "log.h"
+#include "opt.h"
+#include "project.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -46,7 +48,7 @@ enum
                         *  buildings to be shown in the map view as well",
                         *  then "You can simply overlay the original
                         *  sprite!"), drawn over the tint on its own tile. */
-    K_ROAD_ART   = 9   /* a power, road, rail or crossing piece: XBLD
+    K_ROAD_ART = 9     /* a power, road, rail or crossing piece: XBLD
                         *  0x0E..0x48, one contiguous run.
                         *
                         *  This kind is not a label, it is the
@@ -772,19 +774,19 @@ int gpu_set_ops(RGpu *g, const ROpList *ops, const RSweep *sw)
             /*  The underground lattice is emitted as a plain sprite, not
              *  as terrain; it is the empty tile's art all the same. */
             int32_t sh         = op->shape - l->id_base;
-            g->kind[g->n_inst] = (sh >= 305 && sh <= 318)     ? K_UG_LATTICE
+            g->kind[g->n_inst] = (sh >= 305 && sh <= 318)                                     ? K_UG_LATTICE
                                  : ((sh >= 0x0E && sh <= 0x50) || (sh >= 0x61 && sh <= 0x68)) ? K_ROAD_ART
-                                 : (op->stencil >= 0)         ? K_CAR
-                                 : (sh >= 374 && sh <= 378)   ? K_TRAIN
-                                 : (sh >= 0xC6 && sh <= 0xFF) ? K_LANDMARK
-                                                              : K_SPRITE;
+                                 : (op->stencil >= 0)                                         ? K_CAR
+                                 : (sh >= 374 && sh <= 378)                                   ? K_TRAIN
+                                 : (sh >= 0xC6 && sh <= 0xFF)                                 ? K_LANDMARK
+                                                                                              : K_SPRITE;
         }
         {
-            /*  Debug: SC2K_GPU_DUMP=row,col prints a tile's instances. */
+            /*  Debug: --gpu-dump row,col prints a tile's instances. */
             static int dr = -2, dc = -2;
             if (dr == -2)
             {
-                const char *e = getenv("SC2K_GPU_DUMP");
+                const char *e = opt_get("gpu-dump");
                 dr = dc = -1;
                 if (e)
                     sscanf(e, "%d,%d", &dr, &dc);
@@ -971,17 +973,17 @@ typedef struct
  *  a view that never asked: it gets the game's own 30. */
 static float view_pitch(const RGpuView *v)
 {
-    return v->pitch > 0.0f ? v->pitch : 30.0f;
+    return v->pitch > 0.0f ? v->pitch : ARC_PITCH_DEG;
 }
 
-/*  SC2K_NO_SHADOW=1: draw no silhouettes, so a frame at the snap and a
+/*  --no-shadow 1: draw no silhouettes, so a frame at the snap and a
  *  frame a hair off it differ only in how they order what is left. */
 static int g_no_shadow = -1;
 
 /*  Is the camera off the game's own view -- turned, or raised? */
 static int cam_free(const RGpuView *v)
 {
-    return v->angle != 0.0f || fabsf(view_pitch(v) - 30.0f) > 0.01f;
+    return v->angle != 0.0f || !arc_is_game_pitch(view_pitch(v));
 }
 
 /*  A sprite's distance from a turned camera, in tiles along the way it
@@ -995,16 +997,16 @@ static int cam_free(const RGpuView *v)
  *  again, farthest first, and this is the key. */
 typedef struct
 {
-    float  k;
+    float    k;
     uint32_t i;
-    RInst  in;
+    RInst    in;
 } SortInst;
 
 static float sprite_key(const RInst *in, const RGpuView *v, const RAtlasLevel *l)
 {
-    float ang = v->angle * 3.14159265f / 180.0f;
+    float ang = v->angle * ARC_DEG2RAD;
     float ca = cosf(ang), sa = sinf(ang);
-    float pt = view_pitch(v) * 3.14159265f / 180.0f;
+    float pt = view_pitch(v) * ARC_DEG2RAD;
     float sp = sinf(pt), cp = cosf(pt);
     float nf = l && l->tile_w ? floorf((float)in->dst[2] / (float)l->tile_w + 0.5f) : 1.0f;
     float half, fx, fy, dx, dy, tx, ty, front;
@@ -1013,15 +1015,15 @@ static float sprite_key(const RInst *in, const RGpuView *v, const RAtlasLevel *l
     half = (nf - 1.0f) * 0.5f;
     /*  The middle of the footprint: the art is anchored at the block's
      *  leftmost tile, the greatest column and the least row. */
-    fx = (float)in->under[2] + 0.5f - half;
-    fy = (float)in->under[3] + 0.5f + half;
-    dx = fx - v->pivot_c;
-    dy = fy - v->pivot_r;
-    tx = dx * ca - dy * sa + v->pivot_c;
-    ty = dx * sa + dy * ca + v->pivot_r;
+    fx    = (float)in->under[2] + 0.5f - half;
+    fy    = (float)in->under[3] + 0.5f + half;
+    dx    = fx - v->pivot_c;
+    dy    = fy - v->pivot_r;
+    tx    = dx * ca - dy * sa + v->pivot_c;
+    ty    = dx * sa + dy * ca + v->pivot_r;
     front = half * (fabsf(ca + sa) + fabsf(ca - sa));
-    return (tx + ty + front) * (cp / 0.8660254f) + in->misc[1] * (sp - 0.5f) +
-           (ty - tx) * 0.0015f;
+    return (tx + ty + front) * (cp / ARC_PITCH_COS0) + in->misc[1] * (sp - ARC_PITCH_SIN0) +
+           (ty - tx) * ARC_SPRITE_SKEW;
 }
 
 static int sort_cmp(const void *a, const void *b)
@@ -1042,9 +1044,9 @@ static int sort_sprites(RGpu *g, RInst *v0, uint32_t n, const RGpuView *v, const
     static SortInst *buf = NULL;
     static uint32_t  cap = 0;
     uint32_t         k;
-    static int off = -1;
+    static int       off = -1;
     if (off < 0)
-        off = getenv("SC2K_NO_SORT") != NULL; /* draw in the sweep's order, to show what it costs */
+        off = opt_set("no-sort"); /* draw in the sweep's order, to show what it costs */
     if (n < 2 || off)
         return 0;
     if (n > cap)
@@ -1089,7 +1091,7 @@ static int build_visible(RGpu *g, const RGpuView *v, Ranges *r)
     {
         uint32_t start = n;
         if (g_no_shadow < 0)
-            g_no_shadow = getenv("SC2K_NO_SHADOW") != NULL;
+            g_no_shadow = opt_set("no-shadow");
         for (k = 0; k < g->n_inst; ++k)
         {
             const RInst *in   = &g->inst[k];
@@ -1117,7 +1119,7 @@ static int build_visible(RGpu *g, const RGpuView *v, Ranges *r)
             else
                 /*  A silhouette is cast on the unturned canvas and its
                  *  depth is the sweep's own slot, so it is right at the
-                 *  snap and nowhere else.  SC2K_NO_SHADOW drops them at
+                 *  snap and nowhere else.  --no-shadow drops them at
                  *  the snap too, which is how the two depth models are
                  *  measured against each other. */
                 want = (kind == K_SHADOW) && v->angle == 0.0f && !g_no_shadow;
@@ -1166,20 +1168,20 @@ static void cam_for(const RGpu *g, const RGpuView *v, CamU *u)
      *  rhombus is th tall and is centred on that hexagon, which is
      *  one pixel inside the sprite on the top and bottom rows, the
      *  residual tools/terrain_shapes.py records. */
-    u->proj[0] = l ? (float)(g->sw.ox + l->tile_w / 2) : 0.0f;
-    u->proj[1] = l ? (float)g->sw.oy - ((float)l->tile_h + 0.5f) : 0.0f;
-    u->proj[2] = l ? (float)(l->tile_w / 2) : 16.0f;
-    u->proj[3] = l ? (float)(l->tile_h / 2) : 8.0f;
-    u->alt[0]  = l ? (float)l->alt_step : 12.0f;
+    u->proj[0] = l ? arc_origin_x((float)g->sw.ox, (float)l->tile_w) : 0.0f;
+    u->proj[1] = l ? arc_origin_y((float)g->sw.oy, (float)l->tile_h) : 0.0f;
+    u->proj[2] = l ? arc_half_w((float)l->tile_w) : arc_half_w(ARC_TILE_W_MAX);
+    u->proj[3] = l ? arc_half_h((float)l->tile_h) : arc_half_h(ARC_TILE_H_MAX);
+    u->alt[0]  = l ? (float)l->alt_step : ARC_ALT_STEP_MAX;
     u->alt[1]  = (float)(2 * R_MAP * R_MAP + 2); /* the depth divisor */
-    u->alt[2]  = cosf(v->angle * 3.14159265f / 180.0f);
-    u->alt[3]  = sinf(v->angle * 3.14159265f / 180.0f);
+    u->alt[2]  = cosf(v->angle * ARC_DEG2RAD);
+    u->alt[3]  = sinf(v->angle * ARC_DEG2RAD);
     /*  The free camera: turned off the snap, or raised off the game's own
      *  pitch.  Either way the painter's slot stops ordering the tiles. */
-    u->rot[0]  = (v->angle != 0.0f || fabsf(view_pitch(v) - 30.0f) > 0.01f) ? 1.0f : 0.0f;
-    u->rot[1]  = v->pivot_c;
-    u->rot[2]  = v->pivot_r;
-    u->rot[3]  = view_pitch(v) * 3.14159265f / 180.0f;
+    u->rot[0] = (v->angle != 0.0f || !arc_is_game_pitch(view_pitch(v))) ? 1.0f : 0.0f;
+    u->rot[1] = v->pivot_c;
+    u->rot[2] = v->pivot_r;
+    u->rot[3] = view_pitch(v) * ARC_DEG2RAD;
 }
 
 /*  The terrain mesh, in the depth pass. */
@@ -1310,13 +1312,13 @@ static int draw_frame(RGpu *g, SDL_GPUCommandBuffer *cmd, const RGpuView *v, SDL
 
     cam_for(g, v, &cam);
     memset(&fu, 0, sizeof fu);
-    fu.p[0]   = g->transparent;
-    fu.p[1]   = v->geometry ? 1 : 0;    /* the water sprites drop their rim  */
+    fu.p[0] = g->transparent;
+    fu.p[1] = v->geometry ? 1 : 0; /* the water sprites drop their rim  */
     /*  and shade their water -- underground there is no sky to reflect. */
     fu.p[2]   = (v->geometry && !v->underground) ? 1 : 0;
     fu.f[0]   = v->time;
-    fu.f[1]   = (float)(l->tile_w / 2);
-    fu.f[2]   = (float)(l->tile_h / 2);
+    fu.f[1]   = arc_half_w((float)l->tile_w);
+    fu.f[2]   = arc_half_h((float)l->tile_h);
     fu.sun[0] = g->sun[0];
     fu.sun[1] = g->sun[1];
     fu.sun[2] = g->sun[2];
@@ -1385,7 +1387,7 @@ static int draw_frame(RGpu *g, SDL_GPUCommandBuffer *cmd, const RGpuView *v, SDL
     off += r.n_sprite;
     /*  per frame, so it stays behind its own switch rather than
      *  riding on --verbose */
-    if (getenv("SC2K_GPU_DEBUG"))
+    if (opt_set("gpu-debug"))
         R_DBG("gpu", "terrain %u water %u sprite %u shadow %u, mesh %u", (unsigned)r.n_terrain, (unsigned)r.n_water, (unsigned)r.n_sprite, (unsigned)r.n_shadow, (unsigned)(v->geometry ? g->mesh_n : 0));
     SDL_EndGPURenderPass(rp);
 

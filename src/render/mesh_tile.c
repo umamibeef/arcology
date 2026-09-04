@@ -7,21 +7,21 @@
 /*  The tables and the field the other pieces read; the state the
  *  segment pipeline carries across its stages. */
 const uint8_t CODE_MASK[14] = {0, 9, 3, 6, 12, 11, 7, 14, 13, 1, 2, 4, 8, 5};
-const int EDGE_A[4] = {NW, NE, SW, SW};
-const int EDGE_B[4] = {NE, SE, SE, NW};
-const int   NBR_A[4]     = {SW, NW, NW, SE};
-const int   NBR_B[4]     = {SE, SW, NE, NE};
-const int   EDGE_DR[4]   = {-1, 0, 1, 0};
-const int   EDGE_DC[4]   = {0, 1, 0, -1};
-const float EDGE_N[4][3] = {
+const int     EDGE_A[4]     = {NW, NE, SW, SW};
+const int     EDGE_B[4]     = {NE, SE, SE, NW};
+const int     NBR_A[4]      = {SW, NW, NW, SE};
+const int     NBR_B[4]      = {SE, SW, NE, NE};
+const int     EDGE_DR[4]    = {-1, 0, 1, 0};
+const int     EDGE_DC[4]    = {0, 1, 0, -1};
+const float   EDGE_N[4][3]  = {
     {0.0f,  -1.0f, 0.0f},
     {1.0f,  0.0f,  0.0f},
     {0.0f,  1.0f,  0.0f},
     {-1.0f, 0.0f,  0.0f}
 };
-float s_h[GRID * GRID]; /* the ground: one height per corner      */
-float s_k[GRID * GRID]; /* curvature: positive in a hollow        */
-float s_b[GRID * GRID]; /* the bed: the seabed at a corner that   */
+float          s_h[GRID * GRID]; /* the ground: one height per corner      */
+float          s_k[GRID * GRID]; /* curvature: positive in a hollow        */
+float          s_b[GRID * GRID]; /* the bed: the seabed at a corner that   */
 float          s_road_class;
 float          s_seg_class = -1.0f;        /* the class of the segment being lofted, or -1 for the tile's */
 int32_t        s_seg_node[2][2];           /* the node tiles of the segment being lofted */
@@ -69,12 +69,12 @@ int32_t slope_code(uint8_t xter)
 
 static float ground_of(const RCity *c, int32_t idx)
 {
-    return (float)(c->altm[idx] & 0x1Fu);
+    return (float)rcity_alt_ground(c->altm[idx]);
 }
 
 static float table_of(const RCity *c, int32_t idx)
 {
-    return (float)((c->altm[idx] >> 5) & 0x1Fu);
+    return (float)rcity_alt_table(c->altm[idx]);
 }
 
 /*  The grid index of a tile's corner k. */
@@ -155,7 +155,6 @@ static float pad_level(const RCity *c, int32_t idx)
         return table_of(c, idx);
     return ground_of(c, idx) + (saddle_lift(c, idx) ? 1.0f : 0.0f);
 }
-
 
 /*  Rule 2: what a tile draws, its four corner heights in the enum's
  *  order.  Both sides of every edge go through here. */

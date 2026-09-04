@@ -95,13 +95,13 @@ typedef struct
     /*  geometry is the one switch: the terrain mesh, the water shader
      *  and the road strips together.  plan is the map view, the camera
      *  raised to look straight down. */
-    int     geometry, plan, grid, plain_sweep, underground;
+    int geometry, plan, grid, plain_sweep, underground;
     /*  The road geometry's knobs, live: the two widths, the tightest and
      *  widest curve each family may take, the straight approach at a
      *  node, the corridor margin and the junction trim.  The app fills
      *  them from the mesh and takes them back when tune_changed. */
-    float   tune[12];
-    int     tune_changed, show_tuning;
+    float tune[13];
+    int   tune_changed, show_tuning;
     /*  Tile numbers drawn on the map, so a cell can be named rather than
      *  pointed at (the user: "Give me a coordinate system and I can point
      *  out which cells are problematic"). */
@@ -111,7 +111,7 @@ typedef struct
     float   coord_b[64][2];
     short   coord_v[64];    /* which column, or which row                    */
     char    coord_axis[64]; /* 'c' for a column, 'r' for a row               */
-    int32_t view; /* 0..11, the game's map views       */
+    int32_t view;           /* 0..11, the game's map views       */
     int     show_city, show_budget, show_graphs, show_disasters,
         show_query, show_renderer, show_log;
 
@@ -137,6 +137,8 @@ typedef struct
     int  n_themes;
     char theme_name[64];
     int  want_theme;
+    /*  the music: on or off, and the request to flip it */
+    int music_on, want_music;
 } RUiState;
 
 /*  The thirty-four buttons of the tool palette, in the order the

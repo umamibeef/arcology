@@ -82,6 +82,20 @@ port's view switches add shift (⇧⌘T geometry, ⇧⌘G grid, ⇧⌘P screensh
 ⇧⌘V through the data views). The bare keys are game controls, not menu shortcuts: 1 to 5 for the speeds, space to
 pause, + and - to zoom, [ and ] for the pixel scale, the arrows to scroll.
 
+### Music
+
+The Macintosh original carries its own music engine, Steve Hales' SoundMusicSys ("MIDI Synth 3.87" in its `MDRV`
+resource): every song is a `MIDI` resource, every instrument an `INST` naming an `snd ` sample, and a `SONG` per song says
+which instrument each MIDI channel plays. Arcology plays that data back with a small sample-based player of its own,
+following the engine's rules as read from its BSD descendant, miniBAE: the channel is the instrument, a note is its sample
+resampled from the root key at the engine's reference rate, looped while held where the sample loops. The songs start on
+the original's own schedule, read from its code: a random pick among nine songs, never one of the last four, with a fixed
+per-song wait that leaves anything from no silence to nearly two minutes between songs. Options > Music switches it and
+the choice is kept with the theme in `settings.json`. `arcology --song 10018 theme.wav` renders a song headless.
+
+Like the art, none of it ships: `tools/import_assets.py` reads the songs, instruments and samples out of your own copy
+into `assets/music` and `assets/sounds`.
+
 ## Importing the game's resources
 
 Arcology ships no art, no sound and no interface graphics. All of it is read out of a real, Macintosh SimCity 2000

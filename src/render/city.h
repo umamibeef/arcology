@@ -13,10 +13,33 @@
 
 #include <stdint.h>
 
-#define R_MAP  128
-#define R_HALF 64
-#define R_QTR  32
+#define R_MAP        128
+#define R_HALF       64
+#define R_QTR        32
 #define R_MAX_THINGS 64 /* the fullest shipped city has 40 */
+
+/*  Altitude, out of ALTM.  The word holds two heights: the land in bits
+ *  0 to 4 and the water table in bits 5 to 9.  Which one a tile stands at
+ *  is XTER's business -- below 0x10 it is dry and reads the land, at or
+ *  above it the surface is water and reads the table.
+ *
+ *  This was written out three times, in the sweep, in the mesh's tile
+ *  code and in the app's centring tool, each time as raw shifts and
+ *  masks.  The layout belongs next to the type it decodes. */
+static inline int rcity_alt_ground(unsigned altm)
+{
+    return (int)(altm & 0x1Fu);
+}
+
+static inline int rcity_alt_table(unsigned altm)
+{
+    return (int)((altm >> 5) & 0x1Fu);
+}
+
+static inline int rcity_alt_surface(unsigned altm, unsigned xter)
+{
+    return xter < 0x10u ? rcity_alt_ground(altm) : rcity_alt_table(altm);
+}
 
 typedef struct
 {
