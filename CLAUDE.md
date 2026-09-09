@@ -114,6 +114,48 @@ every hash differs with nothing moved, which is why the script prints the
 size it got.
 
 
+## Where the renderer's code lives
+
+    src/render/walk/    reading the map: the network walk, the pieces a
+                        tile carries, the footway network.  GOAL 4 empties
+                        this: what it does belongs in a script.
+    src/render/geo/     making geometry: the corridor fit, the loft, the
+                        lane router, junctions, footways, furniture,
+                        models, grading.  GOALS 2 and 3 turn these into
+                        services a script calls.
+    src/render/net/     the four families (road, rail, highway, power),
+                        the plumbing that turns a Lua declaration into
+                        one, the segment table, the number store, the
+                        running world, the debug report.
+    src/render/mesh/    chunks, shapes, emission, the incremental rebuild.
+    scripts/            the numbers, the rules, the families, the models
+                        and the drive.
+
+`net/hiway.c` is the outlier: 3469 lines that walk the map, make geometry
+and declare a family all at once.  It is the largest single obstacle to
+goals 2 to 4 and wants cutting three ways.
+
+`net/internal.h` is shared by all three of `walk/`, `geo/` and `net/`, so
+the boundary between them is a convention and not yet enforced.
+
+## Traps when extending the script API
+
+Goals 1 to 3 all add API, and these four cost real time every time.
+
+* **`src/script/lint.c` carries a stub `world` handle** as a
+  `luaL_dostring` string, and it must list **every** `w:` method or
+  `lua_lint` fails.  `RULES[]` gives each rule's answer shape and
+  `rule_args` supplies an argument that exercises its body.  Add all three
+  when adding a rule.
+* **`arc.rules.<name>` may be nil.**  Index it through a local --
+  `local fn = arc.rules[rule]; w:control_is(i, fn and fn(at))`.
+* **A static holding a pass's state must own its data**, never point at a
+  caller's stack local.
+* **`arc.put.f32` truncates a float in Lua**, which is what makes
+  script-side geometry bit-identical to the C.  A number worked out to
+  more places than the mesh can hold lands a few millionths off and two
+  edges overlap instead of meeting.
+
 ## Output: never printf
 
 `printf` is not used anywhere in `src/render` or `src/app`.
