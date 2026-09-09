@@ -1,7 +1,11 @@
 /*  mesh/tile.c -- what a tile is, and the ground field.  Split out of
  *  mesh.c; see mesh/internal.h. */
+#include <string.h>
+
+#include "log.h"
 #include "mesh/internal.h"
 #include "net/internal.h"
+#include "script.h"
 
 /*  The tables and the field the other pieces read; the state the
  *  segment pipeline carries across its stages. */
@@ -24,39 +28,71 @@ float s_b[GRID * GRID]; /* the bed: the seabed at a corner that   */
 
 /* ---- what a tile is ---------------------------------------------------- */
 
-/*  Water: XTER 0x10 and up.  Submerged and shore slopes, 0x10..0x2F, are
- *  a body at ALTM's table over a bed at ALTM's level; streams, canals
- *  and the waterfall, 0x30 on, have their table at their level.  The
- *  original draws every one flat at its table (tile_alt in soft.c):
- *  the low nibble says where the art puts its rim, not a height.  A
- *  stream with a slope nibble among flat neighbours, Bay View's column
- *  110, row 19, drew as a bump while it was read as a height. */
+/*  What a tile's two bytes mean to the ground, all four the SCRIPT'S
+ *  (scripts/ground_tiles.lua) and all four looked up at every tile of
+ *  the map.  Read once a generation into tables of their own: the
+ *  question is asked millions of times a build and answered by the byte
+ *  alone.
+ *
+ *  With no rule nothing is water, nothing is built and nothing slopes,
+ *  which is what a run that cannot find the scripts draws. */
+/*  What a tile's two bytes mean to the ground, all of it the SCRIPT'S
+ *  and pushed down by it (scripts/ground_tiles.lua).  A table of 256,
+ *  read straight: the question is asked millions of times a build and
+ *  answered by the byte alone.
+ *
+ *  With no table nothing is water, nothing is built and nothing slopes,
+ *  which is what a run that cannot find the scripts draws. */
+
+/*  Water.  Submerged and shore slopes are a body at ALTM's table over a
+ *  bed at ALTM's level; streams, canals and the waterfall have their
+ *  table at their level.  The original draws every one flat at its table
+ *  (tile_alt in soft.c): the low nibble says where the art puts its rim,
+ *  not a height, and a stream with a slope nibble among flat neighbours
+ *  read as a height draws as a bump. */
 int is_water(uint8_t xter)
 {
-    return xter >= 0x10u;
+    return script_bytes("water_tiles")[xter];
 }
 
 /*  A structure: anything but bare ground and trees. */
 static int is_structure(uint8_t xbld)
 {
-    return xbld >= 0x0Eu;
+    return script_bytes("built_tiles")[xbld];
 }
 
-/*  The network pieces drawn by a sprite that fits a slope: across every
- *  shipped city these stand on a sloped terrain code every time and the
- *  others on flat ground.  Power lines 0x10..0x13, roads 0x1F..0x22, rail
- *  0x2E..0x31, highway 0x3F..0x42, and the elevated pieces 0x61..0x64. */
+/*  A network piece drawn by a sprite that fits a slope, so the ground
+ *  under it keeps its slope rather than being levelled. */
 static int sloped_piece(uint8_t b)
 {
-    return (b >= 0x10u && b <= 0x13u) || (b >= 0x1Fu && b <= 0x22u) ||
-           (b >= 0x2Eu && b <= 0x31u) || (b >= 0x3Fu && b <= 0x42u) ||
-           (b >= 0x61u && b <= 0x64u);
+    return script_bytes("sloped_tiles")[b];
 }
 
+/*  The slope a terrain byte carries, 0 flat. */
 int32_t slope_code(uint8_t xter)
 {
-    int32_t code = (xter < 0x40u) ? (xter & 0x0F) : 0;
-    return code > 13 ? 0 : code;
+    return script_bytes("slope_codes")[xter];
+}
+
+/*  The map view's tint for a tile something was placed on, or 0 to leave
+ *  it to the zone under it. */
+int structure_tint(uint8_t xbld)
+{
+    return script_bytes("structure_tints")[xbld];
+}
+
+/*  A building proper: one with a footprint and an anchor, as against a
+ *  network piece drawn tile by tile. */
+int building_tile(uint8_t xbld)
+{
+    return script_bytes("building_tiles")[xbld];
+}
+
+/*  An elevated piece, which takes its order from the neighbour that owns
+ *  the span rather than from its own tile. */
+int elevated_tile(uint8_t xbld)
+{
+    return script_bytes("elevated_tiles")[xbld];
 }
 
 static float ground_of(const RCity *c, int32_t idx)
@@ -82,8 +118,7 @@ int32_t corner_gi(int32_t col, int32_t row, int k)
 int saddle_lift(const RCity *c, int32_t idx)
 {
     uint8_t xter = c->xter[idx], xbld = c->xbld[idx];
-    return xter < 0x10u && (xter & 0x0F) == 13 && is_structure(xbld) &&
-           xbld < 0x61u;
+    return xter < 0x10u && (xter & 0x0F) == 13 && script_bytes("saddle_tiles")[xbld];
 }
 
 /*  The tile's own plane: ALTM's level plus the slope code's lifts.  For
@@ -104,7 +139,7 @@ static int32_t anchor_of(const RCity *c, int32_t col, int32_t row, uint8_t mask_
     int32_t idx = row * R_MAP + col, best = 99, ai = idx;
     uint8_t b = c->xbld[idx];
     int     dr, dc;
-    if (b < 0x70u || (c->xzon[idx] & mask_bit))
+    if (!building_tile(b) || (c->xzon[idx] & mask_bit))
         return idx;
     for (dr = 0; dr >= -3; --dr)
         for (dc = 0; dc <= 3; ++dc)
@@ -147,17 +182,16 @@ static float pad_level(const RCity *c, int32_t idx)
 
 /*  Rule 2: what a tile draws, its four corner heights in the enum's
  *  order.  Both sides of every edge go through here. */
-/*  Does a corridor level this tile?  Every surface network piece does --
- *  and so do the four crossing pieces a viaduct flies over, 0x4B to 0x4E,
- *  which carry a road or a line under the deck (piece.c).  They were shut
- *  out with the rest of the highway ids and drew a flat pad instead, so a
- *  road climbing under a viaduct stepped: its shelf asked for 4.27 to 4.73
- *  at Atlanta 36,64 and 36,65 and the ground was drawn at 4.00, with the
- *  next tile jumping to 4.73. The deck itself still levels nothing: it
- *  stands clear and its columns take up the difference. */
+/*  Does a corridor level this tile?  Which bytes it may is the script's
+ *  (scripts/ground_tiles.lua): every surface network piece, and the
+ *  pieces a viaduct flies over, which carry a road or a line under the
+ *  deck.  A tile shut out of this draws a flat pad instead, and a road
+ *  climbing under a viaduct then steps where its shelf asked for a
+ *  slope.  The deck itself levels nothing: it stands clear and its
+ *  columns take up the difference. */
 static int corridor_levels(uint8_t xbld)
 {
-    return xbld < 0x49u || (xbld >= 0x4Bu && xbld <= 0x4Eu);
+    return script_bytes("levelling_tiles")[xbld];
 }
 
 Kind tile_top(const RCity *c, int32_t col, int32_t row, uint8_t mask_bit, float z[4])
@@ -165,7 +199,7 @@ Kind tile_top(const RCity *c, int32_t col, int32_t row, uint8_t mask_bit, float 
     int32_t idx  = row * R_MAP + col;
     uint8_t xter = c->xter[idx], xbld = c->xbld[idx];
     int     k;
-    if (xbld >= 0x70u)
+    if (building_tile(xbld))
     {
         float lv = pad_level(c, anchor_of(c, col, row, mask_bit));
         for (k = 0; k < 4; ++k)
@@ -203,11 +237,10 @@ Kind tile_top(const RCity *c, int32_t col, int32_t row, uint8_t mask_bit, float 
     if (is_structure(xbld))
     {
         /*  A highway ramp carries its own deck, lofted down to the
-         *  ground by the band walk, so the tile under it is flat: its
-         *  own plane on a saddle drew a pair of twisted brown wedges at
-         *  the foot of every elevated highway (Oakland, column 104,
-         *  row 44). */
-        if (slope_code(xter) != 0 && sloped_piece(xbld) && !(xbld >= 0x61u && xbld <= 0x64u))
+         *  ground by the band walk, so the tile under it is flat.  Given
+         *  its own plane on a saddle it draws a pair of twisted brown
+         *  wedges at the foot of the elevated highway instead. */
+        if (slope_code(xter) != 0 && sloped_piece(xbld) && !elevated_tile(xbld))
         {
             own_plane(c, idx, z);
             return T_PLANE;
@@ -239,13 +272,13 @@ float tile_order(const RCity *c, int32_t col, int32_t row, uint8_t mask_bit)
 {
     int32_t idx = row * R_MAP + col;
     uint8_t b   = c->xbld[idx];
-    if (b >= 0x70u)
+    if (building_tile(b))
     {
         int32_t ai = anchor_of(c, col, row, mask_bit);
         int32_t ar = ai / R_MAP, ac = ai % R_MAP;
         return (float)((ac + ar) * R_MAP + ar + 1);
     }
-    if (b >= 0x61u && b < 0x6Cu && !(c->xzon[idx] & mask_bit))
+    if (elevated_tile(b) && !(c->xzon[idx] & mask_bit))
     {
         static const int dr[3] = {0, -1, -1};
         static const int dc[3] = {1, 1, 0};
@@ -256,8 +289,7 @@ float tile_order(const RCity *c, int32_t col, int32_t row, uint8_t mask_bit)
             if (ar < 0 || ac >= R_MAP)
                 continue;
             ai = ar * R_MAP + ac;
-            if (c->xbld[ai] >= 0x61u && c->xbld[ai] < 0x6Cu &&
-                (c->xzon[ai] & mask_bit))
+            if (elevated_tile(c->xbld[ai]) && (c->xzon[ai] & mask_bit))
                 return (float)((ac + ar) * R_MAP + ar + 1);
         }
     }

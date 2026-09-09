@@ -33,6 +33,16 @@ world, and the simulation then runs in a more complicated sandbox.
 baseline, not the limit of what the engine can hold.** Original content
 round-trips exactly; the enhanced world is a superset of it.
 
+That is the simulation's aim. The renderer's is its own, and the two must
+not be confused:
+
+**Lua is handed the simulation data, imagines a world on top of it, and
+asks C to draw that world in 3D with primitives.** How the renderer reads
+the simulation — how a road sweeps through its corridor, how an on-ramp
+cell raises a climb to a highway, what an intersection draws, how many
+lanes a road carries — is changed by editing a script. See
+:ref:`scripting`.
+
 .. toctree::
    :maxdepth: 2
    :caption: The simulation

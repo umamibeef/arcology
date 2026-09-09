@@ -63,7 +63,6 @@ extern float s_tilez[R_MAP * R_MAP * 4];
 void         s_tile_reset(int32_t i);
 void         shelf_node(int32_t col, int32_t row); /* a tile where edges meet: they share one level there (grade.c) */
 void         shelf_steps(int *n, float *worst); /* corridor tiles disagreeing at a shared corner (grade.c) */
-void         shelf_reconcile(void); /* one height per corridor corner, so a corridor's tiles are continuous (grade.c) */
 
 /*  The structure's proportions, measured off the original's own
  *  rendering of Four Cities' viaduct rather than the specification: the
@@ -78,7 +77,6 @@ void         shelf_reconcile(void); /* one height per corridor corner, so a corr
  *  has its edges on tile boundaries, and the S at Toronto 113,42 -- two
  *  R3 arcs -- overhangs the warehouse beside its exit by 0.04 of a tile
  *  at the very end: the parapet's width, not a lane. */
-#define HIWAY_EDGE       0.05f
 /*  Stations a loft may hold.  8190 was a whole ring highway's worth and
  *  Babar's ring ran out of it on its last stretch, leaving six ramps
  *  with no deck beside them; the count moves with the deck's width
@@ -235,6 +233,7 @@ int   piece_family(uint8_t b, Family *f);
 int net_stands_up(uint8_t b);
 int net_carrier(uint8_t b);
 int net_road_over_rail(uint8_t b);
+int net_rail_crossing(uint8_t b);  /* a crossing a railway is part of, on either axis (net/piece.c) */
 int net_road_on(uint8_t b);
 int net_road_near(uint8_t b);
 /*  The highway tiles, as arc.rules.hiway_tiles names them. */
@@ -278,7 +277,13 @@ int put_wire_paint(RMesh *m, const RCity *c, uint8_t mask_bit, float order, floa
 int put_signal(RMesh *m, const RCity *c, int32_t col, int32_t row, uint8_t mask_bit, float order, int e, float h);
 int put_bar(RMesh *m, const RCity *c, uint8_t mask_bit, float order, float x0, float y0, float z0, float x1, float y1, float z1, float fx, float fy, float w, float d, float mat, float code, float phase);
 int put_lamp_face(RMesh *m, float order, float x, float y, float g, float z, float fx, float fy, float sz, float phase, float code);
-int build_crossing(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit, int32_t col, int32_t row, int second);
+/*  A LEVEL CROSSING, in three: the ask gathers it and opens its shape,
+ *  the script measures it, and the draw lays the panel and the
+ *  approaches.  Every measurement follows from the angle the road and
+ *  the line cross at, which is why the script sits between the two. */
+int  build_crossing(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit, int32_t col, int32_t row, int second);
+void net_crossing_ask(int32_t *col, int32_t *row, float *sine, float *road, float *rail);
+void net_crossing_frame(const ScriptXing *fr);
 int put_gate(RMesh *m, const RCity *c, uint8_t mask_bit, float order, float x, float y, float fx, float fy, int along_u);
 int put_rail_signal(RMesh *m, const RCity *c, uint8_t mask_bit, float order, float x, float y, float fx, float fy, int absolute, float s_along, int dir);
 int put_second_train_sign(RMesh *m, const RCity *c, uint8_t mask_bit, float order, float x, float y, float fx, float fy);
@@ -288,10 +293,28 @@ int fillet(const V2 *q, int n, float rmax, Piece *out, int *count);
 void net_serve_tiles(const int32_t *tcol, const int32_t *trow, int nt); /* a drawn segment's tiles (walk.c) */
 int  net_tile_served(int32_t i);                                        /* for the check: a tile with a line, wherever it runs */
 float arm_cut(Family f, int col, int row, int e); /* how far from its mouth an arm's strip is cut, as the segment is cut (lane.c) */
-int path_fit(const RCity *c, const int32_t *tcol, const int32_t *trow, int nt, float hw, V2 start, V2 goal, float rmax, float rmin, float gro, float reserve, int32_t ex0, int32_t ex1, int free_reach, V2 *out, float *rad, float *tlim, int cap);
+int  path_fit_begin(const RCity *c, const int32_t *tcol, const int32_t *trow, int nt, float hw, V2 start, V2 goal, float rmax, float rmin, float gro, float reserve, int32_t ex0, int32_t ex1, int free_reach, V2 *out, float *rad, float *tlim, int cap);
+int  path_fit_end(void);
 int fillet_r(const V2 *q, int n, const float *rad, Piece *out, int *count);
 /*  The same with a tangent budget per vertex, which is what the tangent
  *  fit hands over; fillet_r is this with half of each edge. */
+/*  One boundary of the tangent fit, as the scripts read it: whether the
+ *  two lines meet, whether either was let leave its own cells, and how
+ *  far ahead the far line's next crossing and its own end lie. */
+typedef struct
+{
+    int   has_after, met, free, cross, free_join;
+    float ahead, reach;
+} PathPair;
+
+void *path_handle(void);
+int  path_lined(void);
+int  path_pairs(void);
+int  path_pair(int k, PathPair *out);
+void path_after_is(int crossing);
+const char *path_try(const char *how, void **obj);
+int  path_held(void);
+int  path_finish(void);
 int  fillet_t(const V2 *q, int n, const float *rad, const float *tlim, Piece *out, int *count);
 void tlim_half(const V2 *q, int n, float *tlim);
 /*  The same fit on a chain of points with a corridor of the caller's
@@ -300,7 +323,6 @@ void path_fit_probes(void);
 /*  The fit's own arithmetic, which the composition asks for by name: the
  *  corridor sweep at a corner, a corner's demand for tangent, what an
  *  end may spare, and the tally a finished corner falls in. */
-float path_fit_sweep(const void *mark, V2 a, V2 b, V2 c, float tl, float rmax, float rmin, float band, int *tight);
 float path_fit_demand(V2 a, V2 b, V2 c);
 float path_fit_need(V2 a, V2 b, V2 c, float rmin);
 void  path_fit_count(const char *what);
@@ -322,6 +344,8 @@ typedef struct GroundFan GroundFan;
 typedef struct OrientFan OrientFan;
 typedef struct ShelfFan  ShelfFan;
 typedef struct XLaneFan  XLaneFan;
+RunFan   *path_runs(void);
+ChainFan *path_chain(void);
 int   path_run_perp(const RunFan *x, int a, int b);
 int   path_run_spread(const RunFan *x, int i, int j, float *lo, float *hi);
 void  path_run_chord(RunFan *x, int i, int j, float off);
@@ -343,7 +367,7 @@ void  path_chain_run(ChainFan *c, int i);
  *  that reach the arc hold, and the vertex placed. */
 int   path_join_holds(const JoinFan *j, int leg);
 int   path_join_covers(const JoinFan *j);
-float path_join_arc(const JoinFan *j, float tl);
+SweepFan *path_join_arc(const JoinFan *j, float tl);
 int   path_join_legs(const JoinFan *j, float r);
 void  path_join_place(JoinFan *j);
 /*  The biarc between two parallel lines: one placing of the S, the
@@ -365,6 +389,8 @@ void  path_step_end(StepFan *w, int side);
 void  path_step_point(StepFan *w, int t);
 /*  The corridor sweep at one corner: whether an arc of this radius holds
  *  there and leaves nothing bare, and the radius settled on. */
+SweepFan *path_sweep_ask(const void *mark, V2 a, V2 b, V2 c, float tlim, float rmax, float rmin, float hw);
+float     path_sweep_take(int *tight);
 int   path_sweep_holds(SweepFan *s, float r);
 void  path_sweep_answer(SweepFan *s, float r, int tight);
 /*  A fitted path cut into pieces: one corner read, a corner left as a
@@ -409,6 +435,7 @@ int   hiway_orient_side(const OrientFan *o, int k, int *deck, int *axis, int *ro
 void  hiway_orient_answer(OrientFan *o, int kind, int dside, int rside, int eside, int off, int roads);
 /*  Reconciling the shelf: the copies of one corner, the copies round a
  *  node's tile, and the level they are all given. */
+int   shelf_ask(ShelfFan *s); /* the corridor corners a shelf rule reconciles (grade.c) */
 int   shelf_copies(const ShelfFan *s, int gx, int gy, int *owner, float *dist, float *z, int max);
 void  shelf_set(ShelfFan *s, int gx, int gy, int owner, float z);
 int   shelf_node_at(const ShelfFan *s, int i, int32_t *col, int32_t *row);
@@ -422,7 +449,8 @@ void  xlane_merge(XLaneFan *x, int la, int lb);
 int   xlane_link(XLaneFan *x, int la, int lb);
 void path_fit_tally_get(int fam, void *dst, size_t cap); /* the fit's tallies, around a fit that may be discarded */
 void path_fit_tally_set(int fam, const void *src, size_t cap);
-int  path_fit_points(const uint8_t *mark, const uint8_t *own, const V2 *pts, int n, float hw, V2 start, V2 goal, float rmax, float rmin, float gro, int32_t ex0, int32_t ex1, int free_lines, V2 *out, float *rad, float *tlim, int cap);
+int  path_fit_points_begin(const uint8_t *mark, const uint8_t *own, const V2 *pts, int n, float hw, V2 start, V2 goal, float rmax, float rmin, float gro, int32_t ex0, int32_t ex1, int free_lines, V2 *out, float *rad, float *tlim, int cap);
+int  path_fit_points_end(void);
 void path_fit_prims(void);
 void fit_family(int fam); /* the tangent fit's family code, set before a fit: a family's fit_fam */
 int  path_biarc(V2 A, V2 t0, V2 B, V2 t1, V2 *c0, V2 *c1, float *d);
@@ -511,7 +539,7 @@ typedef struct
 } RCross;
 extern RCross s_cross[2][R_MAP * R_MAP];
 float         node_altitude(const RCity *c, int32_t col, int32_t row);
-#include "net/walkway.h" /* the sidewalk network: where the footways run and what they join */
+#include "walk/walkway.h" /* the sidewalk network: where the footways run and what they join */
 
 /*  The road surface's STACK, as fractions of a tile's painter's slot.
  *  Everything laid on the road lies at one height on the graded ground,
@@ -542,6 +570,9 @@ float       net_geo_value(int i);
 float       net_geo(int *cache, const char *name);
 /*  The look's knobs, the same way (net/road.c). */
 int         net_tune_set(const char *name, float v);
+/*  A knob by name, to keep: a family holds pointers at its width and
+ *  its radii so every use reads the live value. */
+const float *net_tune_at(const char *name);
 const char *net_tune_name(int i, float *v);
 
 /*  Outline points: four mouths' two corners each, and four returns of one
@@ -573,6 +604,7 @@ int junction_poly(const RCity *c, Family f, int32_t col, int32_t row, int links,
 
 int walk_segment(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit, int comp, Family f, int32_t col, int32_t row, int e, uint8_t *visited);
 int build_junction_at(const char *where, const char *who, RMesh *m, const RCity *c, uint8_t mask_bit, Family f, int32_t col, int32_t row, int links, float order);
+int            build_junction_done(void);
 #define build_junction(...) build_junction_at(__FILE__ ":" R_STR(__LINE__), __func__, __VA_ARGS__)
 int net_compensate(void); /* the width compensation this build lofts with (walk.c) */
 int build_power_tile(RMesh *m, const RCity *c, int32_t col, int32_t row, uint8_t mask_bit, int links, float order, int crossing);
@@ -580,6 +612,41 @@ int put_prism_clip_m(RMesh *m, const RCity *c, uint8_t mask_bit, float order, fl
 int put_prism_clip(RMesh *m, const RCity *c, uint8_t mask_bit, float order, float cx, float cy, float dx, float dy, float len, float wid, float zb, float zf, float z0, float z1, float paint);
 int road_under_deck(const RCity *c, float x, float y, float px, float py);
 int build_highways(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit, int comp);
+void build_hiway_bands_begin(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit, int comp);
+int  build_hiway_band_next(void);
+int  net_orients(const RCity *c);
+int  net_ramp_sides(const RCity *c);
+int  net_ramp_side_at(int i, int *free_side, int *room, int *back);
+void net_ramp_side_is(int i, int keep);
+int  net_ramp_spans(void);
+int  net_ramp_span_at(int i, float *at, int *len, int *leaves, int *sgn);
+void net_ramp_span_is(int i, int have, float top, float foot, float total, float ds);
+int  net_ramp_shares(void);
+int  net_ramp_share_at(int k, float *gap, int *cap);
+void net_ramp_share_is(int k, int half);
+OrientFan *net_orient_at(int i);
+void net_ramp_fork_is(int straight, int along, int against, int fork);
+int  net_ramp_fork(int straight, int along, int against);
+void net_band_start_is(int back, int on, int way);
+int  net_band_start(int back, int on);
+int  build_hiway_band_chained(void);
+StairFan *net_hw_chain(void);
+int  build_hiway_band_fitted(void);
+int  net_hw_fits(void);
+int  net_hw_fit_begin(int w);
+void net_hw_fit_done(int w);
+const char *net_hw_fit_choice(const int **free_, const int **held);
+void net_hw_fit_choice_is(int keep_free);
+int  net_hw_fit_take(V2 *q, float *rad, float *tlim);
+int  build_hiway_band_done(void);
+int  build_highway_ramps(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit, int comp);
+void build_ramps_begin(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit, int comp);
+int  build_ramp_next(void);
+int  build_ramp_done(void);
+SlideFan *net_ramp_slide(void);
+int  build_ramp_lofts(void);
+int  build_ramp_loft(int i);
+int build_highway_links(RMesh *m, const RCity *c, uint8_t mask_bit);
 
 /*  lane.c: lanes as primitives -- the router, and the lanes at an
  *  intersection (docs/future.rst, "Lanes as primitives"). */
@@ -622,7 +689,10 @@ const ScriptFamily *net_family_rules(Family f);
 /*  Where a family's lanes run at that class, from the centreline, inner
  *  first: arc.rules.lanes's answer.  Answers how many were written. */
 int net_lane_offsets(Family f, int cls, float *off, int max);
-int                 sidewalk_draw(RMesh *m, const RCity *c, uint8_t mask_bit); /* the footways, drawn from the network once it is complete */
+void net_lane_runs_reset(void);
+int  net_lane_runs(void);
+void net_lane_run_at(int i, const char **fam, int *cls);
+void net_lane_run_is(int i, const float *off, int n);
 void                sidewalk_reset(const RCity *c);
 int                 sidewalk_add(int kind, V2 a, V2 b, V2 oa, V2 ob); /* oa, ob: the way out past each end, or zero */
 void                sidewalk_stats_print(void);
@@ -645,6 +715,14 @@ typedef struct
     const void *w;   /* the WalkPath */
     const void *st;  /* its WalkSt stations */
 } WalkFan;
+
+/*  The footways, from the network once it is complete.  The PASS is the
+ *  script's (scripts/compose/world.lua): these gather one path at a time
+ *  and it composes them.  `outline` says which rule to ask -- in outline
+ *  the bands stand aside and the network is drawn in their place. */
+int                 sidewalk_count(void);
+int                 sidewalk_outline(void);
+int                 sidewalk_gather(RMesh *m, const RCity *c, uint8_t mask_bit, int i, WalkFan *out, ShapeId *sh);
 
 /*  One lane, connector or band edge as the outline view draws it: the
  *  pieces the fit produced, the paint they are drawn in, how far over
@@ -679,6 +757,7 @@ typedef struct
     float  res0, res1, rmax, rmin, band, share, trim_cap;
     const void *mark; /* the corridor, for the sweep */
 } FitFan;
+FitFan   *path_ending(void);
 
 /*  A junction's ring as the footway reads it: which of its edges carry a
  *  band and which are a road's mouth, which way each faces into the
@@ -747,6 +826,12 @@ typedef struct
     float        order, lift, slot;
 } XingFan;
 
+const XingFan *net_crossing_panel(void);
+int            net_crossing_approaches(void);
+int            net_crossing_approach(int i, ScriptApproachAsk *out);
+float net_crossing_order(void);
+int            net_crossing_place(const ScriptApproach *mk);
+
 /*  The deck's own surface near a point, for a line that belongs to a
  *  band rather than to the ground (net/lane.c). */
 float deck_z_near(const RCity *c, uint8_t mask_bit, int band, V2 p);
@@ -809,6 +894,11 @@ int           lane_table_count(void);                                           
 int           lane_table_get(int i, int *cls, int *fam, const Piece **pc, int *np, float *w);
 void          lane_check_ends(void);
 void          hiway_lanes(const RCity *c);
+XLaneFan     *lane_cross_ask(RMesh *m, const RCity *c, uint8_t mask_bit);
+void          net_wires_reset(void);
+int           net_wires(void);
+LaneFan      *net_wire_at(int i);
+void          net_wire_done(int i);
 int           lane_transitions(RMesh *m, const RCity *c, uint8_t mask_bit);
 #define LANE_CLS_ROAD 0
 #define LANE_CLS_TURN 1 /* a junction's connector: the near lane inside a crossing piece's box */
@@ -1171,6 +1261,27 @@ typedef struct
     int          ns;
     const RLoft *d; /* what the loft was asked to draw, for the stages other modules supply */
 } Loft;
+
+
+/*  The strip the loft worked out, and the slab laid over it.  The loft
+ *  stops before the slab, so what is drawn over the stations is settled
+ *  outside it; net_loft_compose is that, for the callers still in C. */
+Loft       *net_loft_strip(void);
+void        net_loft_slab_done(double tp);
+int         net_loft_draws(void);
+const char *net_loft_taper(void);
+void  net_stage_hand(void *obj, const char *kind);
+void *net_stage_taken(const char **kind);
+const char *net_loft_profile(GroundFan **g);
+const char *net_loft_dropped(void);
+const char *net_loft_works(void);
+const char *net_loft_record(void);
+const char *net_loft_furniture(void);
+const char *net_loft_furniture_rule(void);
+int         net_loft_recorded(void);
+Loft       *net_loft_working(void);
+Loft       *net_loft_curves(void);
+int         net_loft_close(void);
 struct JBox /* JBox, declared above with the sidewalk's API */
 {
     RMesh       *m;
@@ -1187,10 +1298,6 @@ struct JBox /* JBox, declared above with the sidewalk's API */
     int          comp;         /* the width compensation the build lofts with (walk.c net_compensate), for the box's own lofts */
 };
 
-/*  What a family answers for, so no generic stage branches on the family:
- *  the road's answers are road.c's (net_road), the rail's rail.c's
- *  (net_rail), a deck's or a ramp's hiway.c's (net_hiway).  The knobs are
- *  pointers into the live tuning. */
 /*  One station pair of a strip, as the slab lays it: what the family
  *  may restyle (the across range, the along offset, the class, the
  *  material and along of its markings) and what it may build beside. */
@@ -1207,40 +1314,78 @@ typedef struct
     float         ma, al_a, al_b; /* the material and the along at either station */
 } LoftPair;
 
+/*  A FAMILY: how one kind of line is drawn -- how wide it is, which
+ *  material it wears, which of the loft's stages it supplies and what it
+ *  builds at a junction.  So no generic stage has to branch on which
+ *  family it is working for.
+ *
+ *  None of it is a C table.  A SCRIPT declares a family --
+ *  scripts/families/road.lua and its neighbours -- and net/family.c
+ *  builds this from the declaration, so another way to draw a highway is
+ *  a file in scripts/families rather than a change here.  The knobs are
+ *  pointers into the live tuning, by name.
+ *
+ *  Each STAGE is NAMED rather than pointed at.  A name net/family.c has
+ *  registered as a primitive binds to that C function; any other name
+ *  binds to the rule `arc.rules.<name>`, which is handed the thing the
+ *  stage works on.  Ask net_family_has whether a family supplies a
+ *  stage and call it through net_family_<stage>: which of the two
+ *  answers is the registry's business and no call site's. */
+typedef enum
+{
+    NH_CONTROL = 0, /* a junction's control */
+    NH_BOX,         /* the junction box on the outline, or the family's own drawing */
+    NH_RECORD,      /* what a strip records for the traffic and the passes */
+    NH_CROSSING,    /* a tile whose second piece is this family's: it crosses the first */
+    NH_FLIES,       /* the grading: 1 where the strip stands clear of the ground and notches nothing */
+    NH_TAPER,       /* the stations' widths: a ramp's narrowing */
+    NH_PROFILE,     /* the heights along the strip, in place of the ramp between nodes */
+    NH_WORKS,       /* what stands under or beside the strip, before the slab: piers */
+    NH_TRAFFIC,     /* where the traffic runs across the strip, as fractions of a tile */
+    NH_FURNITURE,   /* the strip's furniture: a road's lamps, a rail's signals */
+    NET_HOOKS
+} NetHook;
+extern const char *const NET_HOOK_NAME[NET_HOOKS]; /* the stage names a declaration uses (net/family.c) */
+
 typedef struct NetFamily
 {
     const char  *name;
-    Family       f;                                                                                                          /* the tile family it answers for; the highway's is the road's */
-    const float *width;                                                                                                      /* the strip's width across, the live knob */
-    const float *rmin, *rmax;                                                                                                /* the fit's tightest and widest radius */
-    float        ref_width;                                                                                                  /* the width the junction outline's numbers were tuned at */
-    float        mat;                                                                                                        /* the strip's and the box's material */
-    LoftKind     loft;                                                                                                       /* the loft kind a segment of it is drawn as */
-    int          fit_fam;                                                                                                    /* the tangent fit's family code */
-    float        junc_lift;                                                                                                  /* the box's order over the ground's: a rail's a hair over a road's */
-    float        shelf_grade;                                                                                                /* the grading's ceiling on the profile's own grade, levels per tile */
-    int          curbs;                                                                                                      /* the outline has curb returns and hands trims back; a rail's has none */
-    int          ramps;                                                                                                      /* a ramp may attach beside a junction */
-    int          ends_at_buildings;                                                                                          /* a building tile ends a segment with a turning head */
-    int          caps;                                                                                                       /* a dead end gets a round cap */
-    int          classed;                                                                                                    /* segments carry a class from their tiles: lanes, lamps */
-    int (*control)(const RCity *c, int32_t col, int32_t row, int links);                                                     /* a junction's control, or NULL for none */
-    int (*box)(JBox *jb);                                                                                                    /* the junction box on the outline, or the family's own drawing */
-    int (*record)(Loft *x);                                                                                                  /* what a strip records for the traffic and the passes */
-    int (*crossing)(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit, int32_t col, int32_t row, int second); /* a tile whose second piece is this family's: it crosses the first */
-    /*  The loft's stages a family supplies; NULL takes the ground strip's way. */
-    int (*flies)(const RLoft *d, float over);                                                                              /* the grading: 1 where the strip stands clear of the ground and notches nothing */
-    void (*taper)(Loft *x);                                                                                                /* the stations' widths: a ramp's narrowing */
-    int (*profile)(Loft *x);                                                                                               /* the heights along the strip, in place of the ramp between nodes */
-    int (*works)(Loft *x);                                                                                                 /* what stands under or beside the strip, before the slab: piers */
-    int (*pair)(Loft *x, LoftPair *p);                                                                                     /* restyle a pair before its quad: markings, class, the across range */
-    void (*traffic_lanes)(const RLoft *d, int cls, float *lane_in, float *lane_out);                                       /* where the traffic runs across the strip, as fractions of a tile */
-    int (*furniture)(Loft *x);                                                                                             /* the strip's furniture: a road's lamps, a rail's signals; under the furniture pass's switch */
-    int (*tile)(RMesh *m, const RCity *c, int32_t col, int32_t row, uint8_t mask_bit, int links, float order, int second); /* a family drawn tile by tile, not walked: power lines */
-    /*  The lane pass: where a family's lanes lie by class (the count each
-     *  way, `off` inner first), the paint its lane wires are drawn in,
-     *  and what its lanes do at a dead end. */
-    int (*lanes)(int cls, float *off);
+    Family       f;         /* the tile family it answers for; the highway's is the road's */
+    const float *width;     /* the strip's width across, the live knob */
+    const float *rmin, *rmax; /* the fit's tightest and widest radius */
+    float        ref_width; /* the width the junction outline's numbers were tuned at */
+    float        mat;       /* the strip's and the box's material */
+    LoftKind     loft;      /* the loft kind a segment of it is drawn as */
+    int          fit_fam;   /* the tangent fit's family code */
+    float        junc_lift; /* the box's order over the ground's: a rail's a hair over a road's */
+    float        shelf_grade; /* the grading's ceiling on the profile's own grade, levels per tile */
+    int          curbs;     /* the outline has curb returns and hands trims back; a rail's has none */
+    int          ramps;     /* a ramp may attach beside a junction */
+    int          ends_at_buildings; /* a building tile ends a segment with a turning head */
+    int          caps;      /* a dead end gets a round cap */
+    int          classed;   /* segments carry a class from their tiles: lanes, lamps */
+    /*  The stages, as the declaration's names resolved: the primitive,
+     *  or NULL where `rule` holds a rule's name instead. */
+    int (*control)(const RCity *c, int32_t col, int32_t row, int links);
+    int (*box)(JBox *jb);
+    const char *ask[NET_HOOKS]; /* the rule a primitive of two halves asks for in between them */
+    const char *ask_after[NET_HOOKS]; /* ... and the one its second half asks in turn */
+    int (*box_done)(JBox *jb); /* the half of it that runs after the drive has composed the asphalt */
+    int (*record)(Loft *x);
+    int (*record_done)(Loft *x);
+    int (*crossing)(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit, int32_t col, int32_t row, int second);
+    int (*flies)(const RLoft *d, float over);
+    void (*taper)(Loft *x);
+    int (*profile)(Loft *x);
+    int (*profile_done)(Loft *x);
+    int (*works)(Loft *x);
+    void (*traffic)(const RLoft *d, int cls, float *lane_in, float *lane_out);
+    int (*furniture)(Loft *x);
+    int (*furniture_done)(Loft *x);
+    const char *rule[NET_HOOKS]; /* the rule each stage answers with where no primitive does */
+    /*  The lane pass: the paint its lane wires are drawn in, and what its
+     *  lanes do at a dead end.  Where the lanes lie is arc.rules.lanes's,
+     *  through net_lane_offsets. */
     float lane_paint;
     int   lane_ends; /* NET_LANE_ENDS_* */
     /*  How far beside its own tiles, in tiles of free ground, a line may
@@ -1267,11 +1412,90 @@ enum
     NET_LANE_ENDS_CAP,     /* a road: round the cap, lane for lane */
     NET_LANE_ENDS_REVERSE, /* a rail: the train reverses; the arriving track names the leaving one */
 };
-#define NET_WALKED 2
-extern const NetFamily *const net_walked[NET_WALKED];  /* the families the walk visits, in order: the road, the rail (net/walk.c) */
-int                           loft_furniture(Loft *x); /* the furniture pass: the family's, under the switch (net/furniture.c) */
-extern const NetFamily        net_road, net_rail, net_hiway, net_power;
-const NetFamily              *net_family(Family f); /* by tile family (net/walk.c) */
+
+/*  A family as a script declares it, before the names are resolved.  The
+ *  knobs, the loft kind, the tile family, the lane ending and every
+ *  stage arrive as NAMES, which is what lets a declaration name a thing
+ *  the C has never heard of. */
+#define NET_FAM_MAX 8
+typedef struct NetFamilyDecl
+{
+    const char *name;
+    const char *tiles;   /* the tile family it answers for: "road", "rail", "power" */
+    int         answers; /* it is the family that tile family means */
+    int         walk;    /* the walk visits it, at this place in the order; -1 for a family the walk never reaches */
+    const char *width, *rmin, *rmax; /* the live knobs, by name */
+    float       ref_width, mat;
+    const char *loft; /* "road", "rail", "deck", "ramp" */
+    int         fit;
+    float       junc_lift, shelf_grade;
+    int         curbs, ramps, ends_at_buildings, caps, classed;
+    const char *stage[NET_HOOKS];
+    float       lane_paint;
+    const char *lane_ends; /* "open", "cap", "reverse" */
+    int         free_reach;
+    float       turnout;
+    const char *slot;
+    int         deck;
+} NetFamilyDecl;
+/*  Declare one, replacing any of the same name.  Answers 0, or -1 with
+ *  the reason logged: a name no knob, loft kind, tile family or stage
+ *  answers to is a fault the script has to hear about. */
+int  net_family_define(const NetFamilyDecl *d);
+/*  The same reading, declaring nothing: what the LINT does.  `rule`
+ *  takes 1 at each stage the declaration answered with a rule rather
+ *  than a primitive, so the lint knows which rule names a family
+ *  invented and can stop calling them unknown. */
+int  net_family_check(const NetFamilyDecl *d, int *rule);
+void net_family_reset(void); /* before a reading of the scripts: what stands is what this reading declares */
+int  net_family_count(void);
+const NetFamily *net_family_at(int i);
+const NetFamily *net_family_named(const char *name);
+/*  Whether a family supplies a stage at all, and the stages themselves.
+ *  A stage a script answers is called through the same door as one the C
+ *  answers. */
+int  net_family_has(const NetFamily *fam, NetHook h);
+void net_family_control_ask(const NetFamily *fam, const RCity *c, int32_t col, int32_t row, int links);
+const char *net_family_stage_rule(const NetFamily *fam, NetHook h);
+int  net_family_stage_primitive(const NetFamily *fam, NetHook h);
+int  net_family_record_done(const NetFamily *fam, Loft *x);
+int  net_family_furniture_done(const NetFamily *fam, Loft *x);
+int  net_family_profile_done(const NetFamily *fam, Loft *x);
+const char *net_family_stage_rule_after(const NetFamily *fam, NetHook h);
+void net_road_lamps_are(const ScriptLamp *lamp, int n);
+void net_road_walks_drew(int drew);
+void net_rail_cross_ask(const float **cross, int *n);
+void net_rail_marks_are(const ScriptMark *mk, int n);
+int  net_family_box(const NetFamily *fam, JBox *jb);
+int  net_family_box_done(const NetFamily *fam, JBox *jb);
+JuncFan *net_junction_fan(void); /* the outline the drive lays a junction's asphalt on (road.c) */
+void           net_box_lofts_reset(void);
+int            net_box_loft_add(const JBox *jb, const RLoft *d, const Piece *pc, int np, float total);
+int            net_box_lofts(void);
+int            net_box_loft(int i);
+int  net_family_record(const NetFamily *fam, Loft *x);
+int  net_family_crossing(const NetFamily *fam, RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit, int32_t col, int32_t row, int second);
+int  net_family_flies(const NetFamily *fam, const RLoft *d, float over);
+void net_family_taper(const NetFamily *fam, Loft *x);
+int  net_family_profile(const NetFamily *fam, Loft *x);
+int  net_family_works(const NetFamily *fam, Loft *x);
+void net_family_traffic(const NetFamily *fam, const RLoft *d, int cls, float *lane_in, float *lane_out);
+void        net_traffic_runs_reset(void);
+int         net_traffic_runs(void);
+const char *net_traffic_run_at(int i, int *cls);
+void        net_traffic_run_is(int i, float in, float out);
+int  net_family_furniture(const NetFamily *fam, Loft *x);
+/*  A stage's C primitive, registered by the module that holds it, under
+ *  the name a declaration reaches it by. */
+typedef void (*NetHookFn)(void);
+void net_hook_add(NetHook h, const char *name, NetHookFn fn);
+void net_hook_add_split(NetHook h, const char *name, NetHookFn fn, NetHookFn after, const char *ask);
+void net_hook_add_split2(NetHook h, const char *name, NetHookFn fn, NetHookFn after, const char *ask, const char *ask_after);
+extern const NetFamily *net_walked[NET_FAM_MAX]; /* the families the walk visits, in the order their declarations asked for */
+extern int              net_n_walked;
+int                     loft_furniture(Loft *x); /* the furniture pass: the family's, under the switch (net/furniture.c) */
+extern const NetFamily *net_road, *net_rail, *net_hiway, *net_power;
+const NetFamily        *net_family(Family f); /* by tile family (net/family.c) */
 
 /* ---- net/walk.c: the walk over the map, a segment's stages, the per-segment context the stages share, the profile */
 /*  Where a building pass's time goes, stage by stage (--times): the
@@ -1311,7 +1535,42 @@ extern float   s_wk_rad[], s_wk_tlim[MAX_PTS];
 extern int32_t s_wk_tcol[], s_wk_trow[MAX_PTS], s_wk_marks[2 * MAX_PTS];
 extern Piece   s_wk_pieces[];
 int            seg_measure_arms(Seg *x);
+/*  The networks in two passes, with the script's own between them: the
+ *  measure fits every segment and settles the trims and the crossings'
+ *  paths, and the draw lays the junctions and the strips.  The level
+ *  crossings and the power lines fall in the gap, because a crossing is
+ *  built from the two paths the measure fitted. */
 int            build_networks(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel *l, uint8_t mask_bit, int comp);
+int            build_networks_draw(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit, int comp);
+int            build_draw_families(void);
+void           build_draw_boxes_begin(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit, int fk);
+int            build_draw_box_next(void);
+void           build_draw_begin(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit, int comp, int fk);
+int            build_draw_next(void);
+int            build_draw_done(void);
+int            build_networks_drawn(void);
+int            build_networks_controls(const RCity *c, const RAtlasLevel *l);
+int            build_networks_trims(const RCity *c, const RAtlasLevel *l);
+/*  Every junction the walk visits, so the script can be asked for each
+ *  one's ring between the fit and the trims. */
+int            build_junction_count(const RCity *c, const RAtlasLevel *l);
+int            build_junction_nth(const RCity *c, const RAtlasLevel *l, int i, Family *f, int32_t *col, int32_t *row, int *links);
+void           junction_rings_reset(void);
+void           junction_ring_keep(const OutlineFan *o);
+int            junction_ask(const RCity *c, Family f, int32_t col, int32_t row, int links, OutlineFan *o, V2 *out, uint8_t *mouth, float *trim);
+
+/*  What stage three measured and left for the drive to have answered:
+ *  each junction's control, and each mouth's crosswalk depth. */
+void           net_control_asks_reset(void);
+void           net_xwalk_asks_reset(void);
+void           net_control_ask(const char *rule, int32_t col, int32_t row, int links, const int *cls, const int *traf, int busy);
+int            net_control_asked(void);
+const char    *net_control_ask_at(int i, int32_t *col, int32_t *row, int *links, const int **cls, const int **traf, int *busy);
+void           net_control_is(int i, int ctrl);
+void           net_xwalk_ask(int32_t col, int32_t row, int e, int fx, int ctrl, float want, float room, float straight, float cap);
+int            net_xwalk_asked(void);
+int            net_xwalk_ask_at(int i, int32_t *col, int32_t *row, int *e, int *ctrl, float *want, float *room, float *straight);
+void           net_xwalk_deep(int i, float d);
 
 /* ---- net/table.c: the segment table and the sample cache */
 extern RSeg    s_segs[];
@@ -1344,6 +1603,18 @@ void arm_heading(const Piece *pc, int np, float total, int from_end, V2 *pos, V2
 /* ---- road.c: the road family */
 float *mesh_tune(void);
 int    seg_class(Seg *x);
+void   seg_class_counts(const Seg *x, int cnt[3]);
+int    net_seg_class_of(int32_t col, int32_t row, int e);
+int    build_networks_classes(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit, int comp);
+int    net_fits(void);
+void   net_fits_reset(void);
+int    net_fit_begin(const RCity *c, int i);
+int    net_fit_done(int i);
+const char *net_fit_choice(const int **free_, const int **held);
+void   net_fit_choice_is(int keep_free);
+int    net_seg_fit_of(Family f, int32_t col, int32_t row, int e, V2 *q, float *rad, float *tlim, int cap);
+int    net_seg_class_at(int i, int cnt[3]);
+void   net_seg_class_is(int i, int cls);
 
 /* ---- rail.c: the rail family */
 int seg_measure_crossings(Seg *x);

@@ -12,7 +12,7 @@ happens to share it.  Nothing would say so.  These are names like
 renderer or a tool would also want.
 
 So the rule is: a function in src/sim is either `static`, or it is
-declared in a header.  sc2k.h is the simulation's face to the rest of
+declared in a header.  sim.h is the simulation's face to the rest of
 the program; sim_int.h is what its own files ask of each other.  A
 definition in neither is a leak, and the fix is almost always to put
 `static` back.
@@ -31,7 +31,7 @@ SIM = ROOT / "src" / "sim"
 #  The mode entry points.  src/app/main.c declares all five together as
 #  its dispatch table, which is the one place a reader would go to count
 #  them -- a header would only scatter them.
-ALLOWED = {"main", "sc2k_dev_main", "testcity_main", "atlas_main",
+ALLOWED = {"main", "arc_dev_main", "testcity_main", "atlas_main",
            "soft_main", "game_main"}
 
 DEFN = re.compile(
@@ -79,7 +79,7 @@ def main():
         print("src/sim leaks names into the whole program:")
         for b in bad:
             print("   ", b)
-        print("\nMake it static, or declare it in sc2k.h (the simulation's face to\n"
+        print("\nMake it static, or declare it in sim.h (the simulation's face to\n"
               "the program) or sim_int.h (what its own files ask of each other).")
         return 1
     print("layer_check: every function in src/sim is either static or declared in "

@@ -10,9 +10,9 @@ All four ran in this location and passed:
 - `ctest` -- every test but the two that need the 1995 game folder
   (`no_broken_segments`, `blit_matches_game`); both fail only on
   `PermissionError` reaching into `~/Downloads`, not on anything in the
-  code.  Point `SC2K_CITIES` at a readable copy of the game folder and
+  code.  Point `ARC_CITIES` at a readable copy of the game folder and
   they register and run.
-- `tools/prove.sh` -- five edits on Atlanta, incremental against full:
+- `tools/incr_check.py` (ctest `incremental_rebuild`) -- five edits on Atlanta, incremental against full:
   **SAME** on all five, including the ramp at 72,88, the deck over a road
   at 105,84 and the junction at 90,81.
 - `tools/sweep3.sh` -- 102 cities against a build of the tree as it stood

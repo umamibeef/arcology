@@ -58,7 +58,7 @@ arc.rules.strip = function (s)
     local cut, dip = fam.strip.cut, fam.strip.dip
     local app = fam.approach
 
-    for i = 2, n do
+    for i = 1, n - 1 do
         local pv, cu = station(s, i - 1), station(s, i)
         --  The ground's own line at the two STATIONS, which a pair cut
         --  short at a crossing band still answers to: a station below it

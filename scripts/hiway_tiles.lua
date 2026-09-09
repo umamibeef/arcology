@@ -11,7 +11,7 @@
 --  an east-west band, 0x61 and 0x63 a north-south one.  Two of the 200
 --  ramp tiles in the collection disagree.
 
-arc.rules.hiway_tiles = function ()
+do
     local t = {}
     for _, b in ipairs {0x49, 0x4B, 0x4D, 0x4F} do t[b] = {kind = "deck", axis = "ew"} end
     for _, b in ipairs {0x4A, 0x4C, 0x4E, 0x50} do t[b] = {kind = "deck", axis = "ns"} end
@@ -30,5 +30,5 @@ arc.rules.hiway_tiles = function ()
     for b = 0x65, 0x68 do t[b] = {kind = "curve", axis = "ns"} end
     --  The interchange, a 2x2 where four bands meet.
     t[0x69] = {kind = "junction", axis = "ns"}
-    return t
+    arc.highways(t)
 end

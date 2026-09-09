@@ -7,9 +7,12 @@
 
 #include "dump.h"
 #include "mesh/internal.h"
+#include "log.h"
 #include "net/internal.h"
-#include "net/model.h"
+#include "geo/model.h"
 #include "opt.h"
+
+static int gix_deck_ground_margin = -1, gix_lane_road = -1, gix_ramp_head_back = -1, gix_ramp_probe_step = -1;
 
 /*  The lane drop (spec 7.3): what a ramp took from the deck at each
  *  station.  The table is by tile and map side; a station's right and
@@ -101,18 +104,20 @@ void hiway_drop_gore(DropFan *d, int i, int side)
     smp[i].zr[side] = smp[i].z;
 }
 
-/*  The lane drop at each station of a deck: arc.rules.lane_drop works it
+/*  The lane drop at each station of a deck: arc.rules.drop works it
  *  out. */
 static void hiway_lane_stations(Sample *smp, int ns)
 {
-    DropFan d;
+    static DropFan s_drop;
+    DropFan        d;
     memset(&d, 0, sizeof d);
     d.smp    = smp;
     d.n      = ns;
     d.nramps = s_hw_nramps;
     d.reach  = s_tune.hiway_reach;
     d.narrow = HIWAY_LANE_IN;
-    script_rule_object("lane_drop", "drop", &d);
+    s_drop   = d;
+    net_stage_hand(&s_drop, "drop");
 }
 
 /*  A deck's edge: the girder's fascia down from the carriageway, in the
@@ -123,7 +128,8 @@ int deck_edge(RMesh *m, const RCity *c, uint8_t mask_bit, float order, const flo
 {
     static const float conc[3]  = {1.0f, 0.0f, MAT_PIER}; /* cast concrete, plain */
     static const float shade[3] = {1.0f, 1.0f, MAT_PIER};
-    const float        pw       = 0.035f; /* the parapet's thickness */
+    static int         gix_deck_parapet    = -1;
+    const float        pw       = net_geo(&gix_deck_parapet, "deck_parapet");
     float              ia[2]    = {ea[0] - nrm[0] * pw, ea[1] - nrm[1] * pw};
     float              ib[2]    = {eb[0] - nrm[0] * pw, eb[1] - nrm[1] * pw};
     float              inn[3] = {-nrm[0], -nrm[1], 0.0f}, up[3] = {0.0f, 0.0f, 1.0f};
@@ -231,15 +237,8 @@ int road_under_deck(const RCity *c, float x, float y, float px, float py)
  *  up in it. */
 static int hiway_kind(uint8_t b, int *east_west)
 {
-    static uint8_t kind[256], ew[256];
-    static int     gen = -1;
-    if (gen != script_generation())
-    {
-        memset(kind, 0, sizeof kind);
-        memset(ew, 0, sizeof ew);
-        script_rule_hiway_tiles(kind, ew, 256);
-        gen = script_generation();
-    }
+    const unsigned char *kind, *ew;
+    script_highways(&kind, &ew);
     *east_west = ew[b];
     return kind[b];
 }
@@ -989,59 +988,136 @@ void hiway_stair_centre(StairFan *s, int i, int j)
     s->chain[s->nc++] = (V2){mid.x / (float)m, mid.y / (float)m};
 }
 
-/*  The points the fit is given, as arc.rules.stair picks them. */
-static int hw_chain(HwWalk *x, V2 *chain)
+/*  The points the fit is given, as arc.rules.stair picks them: the band
+ *  is read here and the rule picks from it, so the chain stands ready
+ *  before the fit is set up. */
+static V2       s_hw_chain[MAX_PTS];
+static StairFan s_hw_stair;
+
+static void hw_chain_ask(const HwWalk *x)
 {
-    StairFan s;
-    memset(&s, 0, sizeof s);
-    s.c     = x->c;
-    s.pts   = x->pts;
-    s.block = x->block;
-    s.n     = x->n;
-    s.gap   = (int)s_tune.hiway_stair;
-    s.chain = chain;
-    script_rule_object("stair", "stair", &s);
-    return s.nc;
+    memset(&s_hw_stair, 0, sizeof s_hw_stair);
+    s_hw_stair.c     = x->c;
+    s_hw_stair.pts   = x->pts;
+    s_hw_stair.block = x->block;
+    s_hw_stair.n     = x->n;
+    s_hw_stair.gap   = (int)s_tune.hiway_stair;
+    s_hw_stair.chain = s_hw_chain;
+}
+
+StairFan *net_hw_chain(void)
+{
+    return s_hw_stair.n > 0 ? &s_hw_stair : NULL;
 }
 
 /*  The fit two ways, the better kept: with free lines and the band's
  *  ramp tiles in its corridor -- the deck as straight as its corridor
  *  allows -- and the plain fit.  Which of the two is better is
  *  arc.rules.fit_choice's. */
-static int hw_fit_best(const RCity *c, const HwWalk *x, const int32_t *own, int n_own, const V2 *chain, int nc, V2 band0, V2 band1, V2 *q, float *rad, float *tlim)
+/*  The fit two ways, the better kept: with free lines and the band's
+ *  ramp tiles in its corridor -- the deck as straight as its corridor
+ *  allows -- and the plain fit.  Which of the two is better is
+ *  arc.rules.fit_choice's, so the band reads what each fit needs, the
+ *  drive runs both and settles the choice, and the walk takes the one
+ *  that was kept. */
+static struct
 {
-    static V2    q2[MAX_PTS];
-    static float rad2[MAX_PTS], tlim2[MAX_PTS];
-    static char  tally[2][512], before[512]; /* the fit's tallies after each way, and before both */
-    int          nk[2], corners[2] = {0, 0}, tight[2] = {0, 0}, w, k, keep;
-    path_fit_tally_get(2, before, sizeof before);
-    for (w = 0; w < 2; ++w)
-    {
-        V2    *qq = w ? q : q2;
-        float *rr = w ? rad : rad2, *tt = w ? tlim : tlim2;
-        path_fit_tally_set(2, before, sizeof before);
-        nk[w] = path_fit_points(hiway_corridor(c, own, n_own, w), hiway_own_mask(x), chain, nc, s_tune.hiway_w, band0, band1, s_tune.hiway_rmax, s_tune.hiway_rmin, 1.0f, -1, -1, w, qq, rr, tt, MAX_PTS);
-        for (k = 1; k + 1 < nk[w]; ++k)
-            if (rr[k] < 0.01f)
-                ++corners[w];
-            else if (rr[k] < s_tune.hiway_rmin)
-                ++tight[w];
-        path_fit_tally_get(2, tally[w], sizeof tally[w]);
-    }
-    {
-        const int free_[3] = {corners[1], tight[1], nk[1]}, held[3] = {corners[0], tight[0], nk[0]};
-        keep               = script_rule_fit_choice("hiway", free_, held);
-    }
+    const RCity   *c;
+    const HwWalk  *x;
+    const int32_t *own;
+    const V2      *chain;
+    int            n_own, nc, live;
+    V2             band0, band1;
+} s_hwfit;
+static V2    s_hwfit_q[2][MAX_PTS];
+static float s_hwfit_rad[2][MAX_PTS], s_hwfit_tlim[2][MAX_PTS];
+static int   s_hwfit_nk[2], s_hwfit_sc[2][3];
+static char  s_hwfit_tally[2][512], s_hwfit_before[512];
+static int   s_hwfit_kept = -1;
+
+static void hw_fit_ask(const RCity *c, const HwWalk *x, const int32_t *own, int n_own, const V2 *chain, int nc, V2 band0, V2 band1)
+{
+    s_hwfit.c     = c;
+    s_hwfit.x     = x;
+    s_hwfit.own   = own;
+    s_hwfit.n_own = n_own;
+    s_hwfit.chain = chain;
+    s_hwfit.nc    = nc;
+    s_hwfit.band0 = band0;
+    s_hwfit.band1 = band1;
+    s_hwfit.live  = 1;
+    s_hwfit_nk[0] = s_hwfit_nk[1] = 0;
+    path_fit_tally_get(2, s_hwfit_before, sizeof s_hwfit_before);
+}
+
+int net_hw_fits(void)
+{
+    return s_hwfit.live ? 2 : 0;
+}
+
+int net_hw_fit_begin(int w)
+{
+    if (!s_hwfit.live || w < 0 || w > 1)
+        return 0;
+    path_fit_tally_set(2, s_hwfit_before, sizeof s_hwfit_before);
+    return path_fit_points_begin(hiway_corridor(s_hwfit.c, s_hwfit.own, s_hwfit.n_own, w),
+                                 hiway_own_mask(s_hwfit.x), s_hwfit.chain, s_hwfit.nc,
+                                 s_tune.hiway_w, s_hwfit.band0, s_hwfit.band1,
+                                 s_tune.hiway_rmax, s_tune.hiway_rmin, 1.0f, -1, -1, w,
+                                 s_hwfit_q[w], s_hwfit_rad[w], s_hwfit_tlim[w], MAX_PTS);
+}
+
+void net_hw_fit_done(int w)
+{
+    int k;
+    if (!s_hwfit.live || w < 0 || w > 1)
+        return;
+    s_hwfit_nk[w]    = path_fit_points_end();
+    s_hwfit_sc[w][0] = s_hwfit_sc[w][1] = 0;
+    s_hwfit_sc[w][2] = s_hwfit_nk[w];
+    for (k = 1; k + 1 < s_hwfit_nk[w]; ++k)
+        if (s_hwfit_rad[w][k] < 0.01f)
+            ++s_hwfit_sc[w][0];
+        else if (s_hwfit_rad[w][k] < s_tune.hiway_rmin)
+            ++s_hwfit_sc[w][1];
+    path_fit_tally_get(2, s_hwfit_tally[w], sizeof s_hwfit_tally[w]);
+}
+
+const char *net_hw_fit_choice(const int **free_, const int **held)
+{
+    if (!s_hwfit.live)
+        return NULL;
+    *free_ = s_hwfit_sc[1];
+    *held  = s_hwfit_sc[0];
+    return "hiway";
+}
+
+/*  The one the script kept, into the band's own arrays, and the tally
+ *  that goes with it. */
+void net_hw_fit_choice_is(int keep_free)
+{
+    const int w = keep_free ? 1 : 0;
+    if (!s_hwfit.live)
+        return;
+    s_hwfit.live = 0;
+    s_hwfit_kept = w;
     if (g_dev.path_dump)
-        dumpf("FIT %s kept: free %d corners %d tight %d nodes, plain %d corners %d tight %d nodes\n", keep ? "free" : "plain", corners[1], tight[1], nk[1], corners[0], tight[0], nk[0]);
-    path_fit_tally_set(2, tally[keep], sizeof tally[keep]); /* the kept fit's tallies alone */
-    if (!keep)
-    {
-        memcpy(q, q2, sizeof(V2) * (size_t)nk[0]);
-        memcpy(rad, rad2, sizeof(float) * (size_t)nk[0]);
-        memcpy(tlim, tlim2, sizeof(float) * (size_t)nk[0]);
-    }
-    return nk[keep];
+        dumpf("FIT %s kept: free %d corners %d tight %d nodes, plain %d corners %d tight %d nodes\n",
+              keep_free ? "free" : "plain",
+              s_hwfit_sc[1][0], s_hwfit_sc[1][1], s_hwfit_sc[1][2],
+              s_hwfit_sc[0][0], s_hwfit_sc[0][1], s_hwfit_sc[0][2]);
+    path_fit_tally_set(2, s_hwfit_tally[w], sizeof s_hwfit_tally[w]); /* the kept fit's tallies alone */
+}
+
+int net_hw_fit_take(V2 *q, float *rad, float *tlim)
+{
+    const int w = s_hwfit_kept;
+    int       k;
+    if (w < 0)
+        return 0;
+    for (k = 0; k < s_hwfit_nk[w]; ++k)
+        q[k] = s_hwfit_q[w][k], rad[k] = s_hwfit_rad[w][k], tlim[k] = s_hwfit_tlim[w][k];
+    return s_hwfit_nk[w];
 }
 
 /*  The corridor fit, straightened as a road is and filleted with the
@@ -1086,7 +1162,7 @@ static int hw_fit(HwWalk *x)
      *  block's arc takes the radius a highway wants.  Nothing has to be
      *  covered: where the arc cuts inside a block, the ground shows under
      *  the viaduct, as it should. */
-    fit_family(net_hiway.fit_fam);
+    fit_family(net_hiway->fit_fam);
     /*  Every one of the band's own tiles must end up under the deck, as a
      *  road's must under its strip: the corridor says where the deck MAY
      *  sweep, the own tiles where it MUST pass.  Without that rule a long
@@ -1098,11 +1174,32 @@ static int hw_fit(HwWalk *x)
      *  the deck's own width and no wider: at a full tile each side its
      *  inner edge at a corner samples the on-ramp tile beside the deck,
      *  which is not free air, and every fillet is refused down to a kink. */
-    {
-        static V2 chain[MAX_PTS];
-        int       nc = hw_chain(x, chain);
-        nk           = hw_fit_best(c, x, own, n_own, chain, nc, band0, band1, q, rad, tlim);
-    }
+    hw_fit_ask(c, x, own, n_own, s_hw_chain, s_hw_stair.nc, band0, band1);
+    (void)pts, (void)pieces, (void)q, (void)rad, (void)tlim, (void)np, (void)col, (void)row, (void)n, (void)nk;
+    x->ramp0 = ramp0;
+    x->ramp1 = ramp1;
+    return 0;
+}
+
+/*  And the fit the drive kept, into the band: its pieces, its nodes and
+ *  its own tiles, which the building pass replays from rather than
+ *  walking and fitting it again. */
+static int hw_fit_take(HwWalk *x)
+{
+    const RCity *c      = x->c;
+    int32_t      col    = x->col;
+    int32_t      row    = x->row;
+    V2          *pts    = x->pts;
+    Piece       *pieces = x->pieces;
+    int32_t     *own    = x->own;
+    V2          *q      = x->q;
+    float       *rad    = x->rad;
+    float       *tlim   = x->tlim;
+    int          n_own  = x->n_own;
+    int          n      = x->n;
+    int          np     = x->np;
+    int          nk     = net_hw_fit_take(q, rad, tlim);
+    (void)c;
     if (nk < 2)
     {
         x->nk = nk;
@@ -1150,10 +1247,8 @@ static int hw_fit(HwWalk *x)
      *  it from here rather than walking and fitting it again. */
     if (s_pass != 2)
         x->table = seg_store_band(x->col, x->row, x->ew, x->sign, pieces, np, q, rad, tlim, nk, own, n_own);
-    x->nk    = nk;
-    x->np    = np;
-    x->ramp0 = ramp0;
-    x->ramp1 = ramp1;
+    x->nk = nk;
+    x->np = np;
     return 0;
 }
 
@@ -1218,7 +1313,13 @@ static int hw_overlay(HwWalk *x)
     return 0;
 }
 
-/*  The deck lofted on the pieces, and its lanes. */
+/*  The band the walk lofted, held for the drive: it composes the deck,
+ *  and build_hiway_band_done lays the lanes under it. */
+static HwWalk s_hw_hold;
+static int    s_hw_live;
+static int    s_hw_band_of_hold;
+
+/*  The deck lofted on the pieces.  Its lanes follow the composition. */
 static int hw_loft(HwWalk *x)
 {
     RMesh       *m        = x->m;
@@ -1243,9 +1344,9 @@ static int hw_loft(HwWalk *x)
     if (ramp0 >= total)
         ramp1 = 0.0f; /* all ramp: one slope, not two */
     d.f             = F_ROAD;
-    d.fam           = &net_hiway;
+    d.fam           = net_hiway;
     d.hw            = s_tune.hiway_w; /* the deck's half width */
-    d.ground_margin = 0.06f;          /* and it reads the ground a hair beyond its edges */
+    d.ground_margin = net_geo(&gix_deck_ground_margin, "deck_ground_margin"); /* it reads the ground a hair beyond its edges */
     d.mat           = MAT_HIWAY;
     d.kind          = LOFT_DECK;
     d.ramp0         = ramp0;
@@ -1265,11 +1366,29 @@ static int hw_loft(HwWalk *x)
         if (mesh_want_tile(own[guard] % R_MAP, own[guard] / R_MAP))
             d.records_only = 0;
     rc = loft(m, c, mask_bit, comp, &d, pieces, np, total);
-    /* the deck's six lanes, under this band (lane.c) */
-    if (rc == 0 && lane_deck(m, c, mask_bit, pieces, np, s_tune.hiway_w, s_hw_band) != 0) /* the lanes at fractions of the deck's half width */
-        return -1;
-    return rc;
+    if (rc != 0)
+        return rc;
+    s_hw_hold = *x;
+    s_hw_band_of_hold = s_hw_band;
+    s_hw_live = 1;
+    return 0;
 }
+
+/*  The deck composed, and its six lanes laid under it (lane.c) at
+ *  fractions of the deck's half width.  The drive composes the deck
+ *  between the loft and this. */
+int build_hiway_band_done(void)
+{
+    int rc = net_loft_close();
+    if (rc != 0 || !s_hw_live)
+        return rc;
+    s_hw_live = 0;
+    return lane_deck(s_hw_hold.m, s_hw_hold.c, s_hw_hold.mask_bit, s_hw_hold.pieces, s_hw_hold.np, s_tune.hiway_w, s_hw_band_of_hold);
+}
+
+/*  The band the walk fitted, held while the drive runs its fit. */
+static HwWalk s_hw_pend;
+static int    s_hw_pend_live;
 
 static int walk_hiway(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, int32_t col, int32_t row, int ew, int sign, uint8_t *seen)
 {
@@ -1288,16 +1407,42 @@ static int walk_hiway(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, int3
     x.cc = col, x.cr = row, x.cew = ew;
     x.dx = ew ? sign : 0, x.dy = ew ? 0 : sign; /* the walk runs either way along the band */
     x.table = -1;
-    /*  The stages: the tiles, the ends, the fit, the overlay, the loft. */
+    /*  The stages: the tiles, the ends, the fit -- which the drive runs,
+     *  so the walk stops here and build_hiway_band_fitted takes up the
+     *  overlay and the loft. */
     hw_walk(&x);
     if (x.n < 2)
         return 0;
     hw_ends(&x);
-    if (hw_fit(&x) != 0)
+    /*  The band is held HERE, before the fit reads it: the fit keeps a
+     *  handle on the band it is fitting, and the drive runs it after
+     *  this walk has returned. */
+    s_hw_pend      = x;
+    s_hw_pend_live = 1;
+    hw_chain_ask(&s_hw_pend);
+    return 0;
+}
+
+/*  And the fit set up from the chain the rule picked. */
+int build_hiway_band_chained(void)
+{
+    if (!s_hw_pend_live)
+        return 0; /* a band the building pass replayed: it was never walked */
+    if (hw_fit(&s_hw_pend) != 0)
+        s_hw_pend_live = 0;
+    return 0;
+}
+
+int build_hiway_band_fitted(void)
+{
+    if (!s_hw_pend_live)
+        return 0; /* a band the building pass replayed: it was never fitted */
+    s_hw_pend_live = 0;
+    if (hw_fit_take(&s_hw_pend) != 0)
         return 0;
-    if (hw_overlay(&x) != 0)
+    if (hw_overlay(&s_hw_pend) != 0)
         return 0;
-    return hw_loft(&x);
+    return hw_loft(&s_hw_pend);
 }
 
 /*  The on-ramps: 0x5D to 0x60, one id per direction.  Each is one tile
@@ -1369,18 +1514,65 @@ void hiway_orient_answer(OrientFan *o, int kind, int dside, int rside, int eside
 }
 
 /*  Which side of an on-ramp's tile is the deck's and which the road's:
- *  arc.rules.ramp_orient reads them.  1 a ramp beside a deck, 2 a deck
+ *  arc.rules.orient reads them.  1 a ramp beside a deck, 2 a deck
  *  end-on, 0 neither. */
+/*  Every on-ramp tile read once, before any of them is built: which
+ *  side of it the deck lies, which the road, and which way round it
+ *  runs are arc.rules.orient's, and they follow from the map alone. */
+#define ORIENTS_MAX 4096
+
+static struct
+{
+    int32_t   col, row;
+    OrientFan o;
+} s_orient[ORIENTS_MAX];
+static int s_n_orient;
+
+int net_orients(const RCity *c)
+{
+    int32_t col, row;
+    s_n_orient = 0;
+    for (row = 0; row < R_MAP; ++row)
+        for (col = 0; col < R_MAP && s_n_orient < ORIENTS_MAX; ++col)
+        {
+            if (!net_hiway_onramp(c->xbld[row * R_MAP + col]))
+                continue;
+            memset(&s_orient[s_n_orient].o, 0, sizeof s_orient[0].o);
+            s_orient[s_n_orient].col   = col;
+            s_orient[s_n_orient].row   = row;
+            s_orient[s_n_orient].o.c   = c;
+            s_orient[s_n_orient].o.col = col;
+            s_orient[s_n_orient].o.row = row;
+            s_orient[s_n_orient].o.dside = s_orient[s_n_orient].o.rside = s_orient[s_n_orient].o.eside = -1;
+            ++s_n_orient;
+        }
+    return s_n_orient;
+}
+
+OrientFan *net_orient_at(int i)
+{
+    return i >= 0 && i < s_n_orient ? &s_orient[i].o : NULL;
+}
+
+static const OrientFan *orient_of(int32_t col, int32_t row)
+{
+    int i;
+    for (i = 0; i < s_n_orient; ++i)
+        if (s_orient[i].col == col && s_orient[i].row == row)
+            return &s_orient[i].o;
+    return NULL;
+}
+
 static int ramp_orient(const RCity *c, int32_t col, int32_t row, int *dside, int *rside, int *eside, V2 *along, V2 *toward, int *off, int *roads)
 {
     static const int32_t DC[4] = {0, 1, 0, -1}, DR[4] = {-1, 0, 1, 0};
+    const OrientFan     *op    = orient_of(col, row);
     OrientFan            o;
+    (void)c;
     memset(&o, 0, sizeof o);
-    o.c     = c;
-    o.col   = col;
-    o.row   = row;
     o.dside = o.rside = o.eside = -1;
-    script_rule_object("ramp_orient", "orient", &o);
+    if (op)
+        o = *op;
     *dside = o.dside;
     *rside = o.rside;
     *eside = o.eside;
@@ -1427,6 +1619,83 @@ static int taper_room(const RCity *c, int32_t d0c, int32_t d0r, int32_t tvx, int
     return L;
 }
 
+/*  Two ramps on one side of a deck whose tapers face each other would
+ *  run their strips into one another.  The pairs are read here and the
+ *  tiles between them divided by arc.rules.ramp_share. */
+static struct
+{
+    int   i, j;
+    float gap;
+} s_share[ORIENTS_MAX];
+static int s_n_share;
+
+/*  Which way each ramp's taper lies, read once before the ramps are
+ *  listed: how much deck it has each way, and whether the side away from
+ *  its road is open at all.  It follows from the map and from the
+ *  orientation the drive has already settled, so it is asked for here
+ *  and looked up where the ramp is built. */
+static struct
+{
+    int32_t col, row;
+    int     free_side, room, back;
+} s_side_ask[ORIENTS_MAX];
+static int     s_n_side_ask;
+static uint8_t s_side_keep[R_MAP * R_MAP];
+
+int net_ramp_sides(const RCity *c)
+{
+    static const int32_t DC[4] = {0, 1, 0, -1}, DR[4] = {-1, 0, 1, 0};
+    int32_t              col, row;
+    s_n_side_ask = 0;
+    memset(s_side_keep, 0, sizeof s_side_keep);
+    for (row = 0; row < R_MAP; ++row)
+        for (col = 0; col < R_MAP && s_n_side_ask < ORIENTS_MAX; ++col)
+        {
+            int     dside, rside, eside, off, roads, along_roads = 0, k4;
+            V2      along, toward;
+            int32_t d0c, d0r;
+            if (!net_hiway_onramp(c->xbld[row * R_MAP + col]))
+                continue;
+            if (ramp_orient(c, col, row, &dside, &rside, &eside, &along, &toward, &off, &roads) != 1)
+                continue;
+            d0c = col + (int32_t)toward.x;
+            d0r = row + (int32_t)toward.y;
+            for (k4 = 0; k4 < 4; ++k4)
+            {
+                int32_t nc = col + DC[k4], nr = row + DR[k4];
+                if (k4 == dside || k4 == ((dside + 2) & 3) || nc < 0 || nr < 0 || nc >= R_MAP || nr >= R_MAP)
+                    continue;
+                if (net_road_on(c->xbld[nr * R_MAP + nc]))
+                    ++along_roads;
+            }
+            s_side_ask[s_n_side_ask].col       = col;
+            s_side_ask[s_n_side_ask].row       = row;
+            s_side_ask[s_n_side_ask].free_side = along_roads != 1;
+            s_side_ask[s_n_side_ask].room      = taper_room(c, d0c, d0r, off ? -(int32_t)along.x : (int32_t)along.x, off ? -(int32_t)along.y : (int32_t)along.y);
+            s_side_ask[s_n_side_ask].back      = s_side_ask[s_n_side_ask].free_side
+                                                    ? taper_room(c, d0c, d0r, off ? (int32_t)along.x : -(int32_t)along.x, off ? (int32_t)along.y : -(int32_t)along.y)
+                                                    : -1;
+            ++s_n_side_ask;
+        }
+    return s_n_side_ask;
+}
+
+int net_ramp_side_at(int i, int *free_side, int *room, int *back)
+{
+    if (i < 0 || i >= s_n_side_ask)
+        return 0;
+    *free_side = s_side_ask[i].free_side;
+    *room      = s_side_ask[i].room;
+    *back      = s_side_ask[i].back;
+    return 1;
+}
+
+void net_ramp_side_is(int i, int keep)
+{
+    if (i >= 0 && i < s_n_side_ask)
+        s_side_keep[s_side_ask[i].row * R_MAP + s_side_ask[i].col] = keep != 0;
+}
+
 /*  The lane drop: every ramp beside a deck is listed for the loft and the
  *  ramp builder.  Its taper lies on the side away from its road when a road
  *  lies along the deck's axis (on the road's side the strip would run over
@@ -1468,7 +1737,7 @@ void hiway_lanes(const RCity *c)
             {
                 int room  = taper_room(c, d0c, d0r, off ? -(int32_t)along.x : (int32_t)along.x, off ? -(int32_t)along.y : (int32_t)along.y);
                 int back  = free_side ? taper_room(c, d0c, d0r, off ? (int32_t)along.x : -(int32_t)along.x, off ? (int32_t)along.y : -(int32_t)along.y) : -1;
-                int keep  = script_rule_ramp_side(free_side, room, back);
+                int keep  = s_side_keep[row * R_MAP + col];
                 best_off  = keep ? off : !off;
                 best      = keep ? room : back;
             }
@@ -1490,6 +1759,7 @@ void hiway_lanes(const RCity *c)
      *  reads as one ramp with a merge lane into the highway. */
     {
         int i, j;
+        s_n_share = 0;
         for (i = 0; i < s_hw_nramps; ++i)
             for (j = i + 1; j < s_hw_nramps; ++j)
             {
@@ -1504,15 +1774,45 @@ void hiway_lanes(const RCity *c)
                 if (tvp.x * dx + tvp.y * dy <= 0.0f || tvq.x * dx + tvq.y * dy >= 0.0f)
                     continue;                                           /* not facing */
                 gap  = fabsf(dx * p->along.x + dy * p->along.y) - 1.0f; /* tiles between the two deck tiles */
-                half = (float)script_rule_ramp_share(gap, HIWAY_LANE_TAPER);
-                if (half < 0.0f)
-                    continue;
-                if ((float)p->len > half)
-                    p->len = (int)half;
-                if ((float)q->len > half)
-                    q->len = (int)half;
+                (void)half;
+                if (s_n_share < ORIENTS_MAX)
+                {
+                    s_share[s_n_share].i   = i;
+                    s_share[s_n_share].j   = j;
+                    s_share[s_n_share].gap = gap;
+                    ++s_n_share;
+                }
             }
     }
+}
+
+int net_ramp_shares(void)
+{
+    return s_n_share;
+}
+
+int net_ramp_share_at(int k, float *gap, int *cap)
+{
+    if (k < 0 || k >= s_n_share)
+        return 0;
+    *gap = s_share[k].gap;
+    *cap = HIWAY_LANE_TAPER;
+    return 1;
+}
+
+/*  The tiles the two share, as the rule divided them: each taper takes
+ *  its half and no more. */
+void net_ramp_share_is(int k, int half)
+{
+    HwRamp *p, *q;
+    if (k < 0 || k >= s_n_share || half < 0)
+        return;
+    p = &s_hw_ramps[s_share[k].i];
+    q = &s_hw_ramps[s_share[k].j];
+    if ((float)p->len > (float)half)
+        p->len = half;
+    if ((float)q->len > (float)half)
+        q->len = half;
 }
 
 static int s_ramp_forms[6]; /* head-on, -, short taper, -, orphan, lane drop */
@@ -1657,7 +1957,7 @@ static int ramp_classify(Ramp *x)
                 int     straight = 0;
                 if (sc >= 0 && sr >= 0 && sc < R_MAP && sr < R_MAP)
                     straight = net_road_near(c->xbld[sr * R_MAP + sc]);
-                fork = script_rule_ramp_fork(straight, in, away);
+                fork = net_ramp_fork(straight, in, away);
             }
             mdir = away ? (V2){-pp.x, -pp.y} : pp; /* the lane's direction away from the ramp on the road */
         }
@@ -1670,6 +1970,95 @@ static int ramp_classify(Ramp *x)
     x->mdir   = mdir;
     x->along  = along;
     x->toward = toward;
+    return 0;
+}
+
+/*  ------------------------------------------------------------------
+ *  Where each ramp's descent runs along its deck
+ *
+ *  It follows from the station of the deck the ramp stands nearest, the
+ *  taper the ramp was given and which way round it runs -- all settled
+ *  by the time the bands are lofted -- so every ramp's is read here and
+ *  the ramp builder looks the answer up.
+ *  ------------------------------------------------------------------ */
+static struct
+{
+    int32_t col, row;
+    float   at;
+    int     len, leaves, sgn;
+    float   top, foot, total, ds;
+    int     have;
+} s_span[ORIENTS_MAX];
+static int s_n_span;
+
+/*  The deck station a ramp stands nearest, by the same search the ramp
+ *  builder makes. */
+static int ramp_station(const HwRamp *rp)
+{
+    float best = s_tune.hiway_reach;
+    int   k, iref = -1;
+    for (k = 0; k < s_hw_nst; ++k)
+    {
+        float d = v2len((V2){s_hw_st[k].pos.x - rp->c0.x, s_hw_st[k].pos.y - rp->c0.y});
+        if (d < best)
+            best = d, iref = k;
+    }
+    return iref;
+}
+
+int net_ramp_spans(void)
+{
+    int r;
+    s_n_span = 0;
+    for (r = 0; r < s_hw_nramps && s_n_span < ORIENTS_MAX; ++r)
+    {
+        const HwRamp *rp   = &s_hw_ramps[r];
+        int           iref = ramp_station(rp);
+        if (iref < 0)
+            continue;
+        s_span[s_n_span].col    = rp->rc;
+        s_span[s_n_span].row    = rp->rr;
+        s_span[s_n_span].at     = s_hw_st[iref].s;
+        s_span[s_n_span].len    = rp->len;
+        s_span[s_n_span].leaves = rp->off;
+        s_span[s_n_span].sgn    = s_hw_st[iref].dir.x * rp->along.x + s_hw_st[iref].dir.y * rp->along.y > 0.0f ? 1 : -1;
+        s_span[s_n_span].have   = 0;
+        ++s_n_span;
+    }
+    return s_n_span;
+}
+
+int net_ramp_span_at(int i, float *at, int *len, int *leaves, int *sgn)
+{
+    if (i < 0 || i >= s_n_span)
+        return 0;
+    *at = s_span[i].at, *len = s_span[i].len, *leaves = s_span[i].leaves, *sgn = s_span[i].sgn;
+    return 1;
+}
+
+void net_ramp_span_is(int i, int have, float top, float foot, float total, float ds)
+{
+    if (i < 0 || i >= s_n_span)
+        return;
+    s_span[i].have  = have;
+    s_span[i].top   = top;
+    s_span[i].foot  = foot;
+    s_span[i].total = total;
+    s_span[i].ds    = ds;
+}
+
+static int ramp_span_of(int32_t col, int32_t row, float *top, float *foot, float *total, float *ds)
+{
+    int i;
+    for (i = 0; i < s_n_span; ++i)
+        if (s_span[i].col == col && s_span[i].row == row)
+        {
+            if (!s_span[i].have)
+                return 0;
+            *top = s_span[i].top, *foot = s_span[i].foot;
+            *total = s_span[i].total, *ds = s_span[i].ds;
+            return 1;
+        }
     return 0;
 }
 
@@ -1692,8 +2081,10 @@ static int ramp_geometry(Ramp *x)
     band                    = s_hw_st[iref].band;
     side                    = (((float)col + 0.5f - s_hw_st[iref].pos.x) * s_hw_st[iref].dir.y - ((float)row + 0.5f - s_hw_st[iref].pos.y) * s_hw_st[iref].dir.x) > 0.0f ? 1 : -1;
     sgn                     = s_hw_st[iref].dir.x * rp->along.x + s_hw_st[iref].dir.y * rp->along.y > 0.0f ? 1 : -1;
-    /*  Where the descent runs along the band: arc.rules.ramp_span's. */
-    script_rule_ramp_span(s_hw_st[iref].s, rp->len, rp->off, sgn, &s_top, &s_foot, &total_len, &ds);
+    /*  Where the descent runs along the band: arc.rules.ramp_span's,
+     *  read before any ramp was built. */
+    s_top = s_foot = total_len = ds = 0.0f;
+    ramp_span_of(col, row, &s_top, &s_foot, &total_len, &ds);
     x->rp        = rp;
     x->iref      = iref;
     x->side      = side;
@@ -1986,7 +2377,7 @@ static int ramp_exits(const Piece *pc, int np, V2 centre, V2 rd, float *beyond)
     for (k = 0; k < np; ++k)
     {
         float t;
-        for (t = 0.0f;; t += 0.05f)
+        for (t = 0.0f;; t += net_geo(&gix_ramp_probe_step, "ramp_probe_step"))
         {
             V2    pos, dir;
             float side, lat;
@@ -2088,9 +2479,11 @@ void hiway_slide_note(const SlideFan *s, int tried, int off, int unroutable, int
         dumpf("RAMP %d,%d slide: none of %d candidates (%d off the lane, %d unroutable, %d miss the road edge)\n", (int)x->col, (int)x->row, tried, off, unroutable, missed);
 }
 
-/*  The join slid along the deck and along the road: arc.rules.ramp_slide
+/*  The join slid along the deck and along the road: arc.rules.slide
  *  walks the placings. */
-static int ramp_slide(const Ramp *x, int lane, V2 B0, V2 tB0, V2 trav, Piece *pc, int *np, float *rmin, V2 *B, V2 *tB, float *merge, float *taper)
+static SlideFan s_slide;
+
+static SlideFan *ramp_slide_ask(const Ramp *x, int lane, V2 B0, V2 tB0, V2 trav, Piece *pc, int *np, float *rmin, V2 *B, V2 *tB, float *merge, float *taper)
 {
     static Piece tmp[MAX_PIECES];
     SlideFan     s;
@@ -2115,11 +2508,30 @@ static int ramp_slide(const Ramp *x, int lane, V2 B0, V2 tB0, V2 trav, Piece *pc
     s.tB        = tB;
     s.out_merge = merge;
     s.out_taper = taper;
-    script_rule_object("ramp_slide", "slide", &s);
-    return s.best > 0.0f;
+    s_slide     = s;
+    return &s_slide;
 }
 
-static int ramp_join(Ramp *x)
+/*  And whether the rule found a placing that held. */
+static int ramp_slide_took(void)
+{
+    return s_slide.best > 0.0f;
+}
+
+/*  The join's own working, held while the drive slides it: the rule
+ *  walks the placings along the road's lane and answers the best. */
+static struct
+{
+    float taper, merge, rmin;
+    int   np, np1, np2, road_lane, fork, road_port, off, side, slid;
+    V2    B, tB, F, tF, A, rd, mdir, along, toward;
+    const HwRamp *rp;
+    Piece        *pc;
+} s_join;
+
+static void ramp_join_finish(Ramp *x);
+
+static SlideFan *ramp_join_ask(Ramp *x)
 {
     float              taper     = 0.0f, merge = -1.0f;
     const RCity       *c         = x->c;
@@ -2188,12 +2600,19 @@ static int ramp_join(Ramp *x)
          *  The foot stays the tile logic's anchor; the two legs through it,
          *  which turned inside half a tile, are the fallback when no slide
          *  leaves the ramp tile across its road edge. */
-        if (road_lane >= 0 && ramp_slide(x, road_lane, B, tB, trav, pc, &np1, &rmin, &B, &tB, &merge, &taper))
+        if (road_lane >= 0)
         {
-            np2 = 0;
-            np  = np1;
+            s_join.taper = taper, s_join.merge = merge, s_join.rmin = rmin;
+            s_join.np = np, s_join.np1 = np1, s_join.np2 = np2;
+            s_join.road_lane = road_lane, s_join.fork = fork, s_join.road_port = road_port;
+            s_join.off = off, s_join.side = side, s_join.slid = 0;
+            s_join.B = B, s_join.tB = tB, s_join.F = F, s_join.tF = tF, s_join.A = A;
+            s_join.rd = rd, s_join.mdir = mdir, s_join.along = along, s_join.toward = toward;
+            s_join.rp = rp, s_join.pc = pc;
+            return ramp_slide_ask(x, road_lane, B, tB, trav, pc, &s_join.np1, &s_join.rmin,
+                                  &s_join.B, &s_join.tB, &s_join.merge, &s_join.taper);
         }
-        else if (np1 < MAX_PIECES && lane_route(F, tF, B, tB, pc + np1, &np2, &rmin) == 0)
+        if (np1 < MAX_PIECES && lane_route(F, tF, B, tB, pc + np1, &np2, &rmin) == 0)
         {
             int q2;
             np    = np1 + np2;
@@ -2232,7 +2651,51 @@ static int ramp_join(Ramp *x)
     x->road_port = road_port;
     x->taper     = taper;
     x->merge     = merge;
-    return 0;
+    return NULL;
+}
+
+/*  What the join comes to once the rule has slid it: the placing it
+ *  found, or the two legs through the foot where it found none. */
+static void ramp_join_finish(Ramp *x)
+{
+    Piece *pc = s_join.pc;
+    float  taper = s_join.taper, merge = s_join.merge, rmin = s_join.rmin;
+    int    np = s_join.np, np1 = s_join.np1, np2 = s_join.np2;
+    V2     B = s_join.B, tB = s_join.tB, F = s_join.F, tF = s_join.tF;
+    if (ramp_slide_took())
+    {
+        np2 = 0;
+        np  = np1;
+    }
+    else if (np1 < MAX_PIECES && lane_route(F, tF, B, tB, pc + np1, &np2, &rmin) == 0)
+    {
+        int q2;
+        np    = np1 + np2;
+        taper = net_family_rules(F_ROAD)->ramp_taper; /* the join and a little of the descent */
+        for (q2 = np1; q2 < np; ++q2)
+            taper += pc[q2].len;
+    }
+    x->rp        = s_join.rp;
+    x->side      = s_join.side;
+    x->fork      = s_join.fork;
+    x->np        = np;
+    x->np1       = np1;
+    x->np2       = np2;
+    x->road_lane = s_join.road_lane;
+    x->off       = s_join.off;
+    x->rmin      = rmin;
+    x->rd        = s_join.rd;
+    x->mdir      = s_join.mdir;
+    x->A         = s_join.A;
+    x->F         = F;
+    x->tF        = tF;
+    x->B         = B;
+    x->tB        = tB;
+    x->along     = s_join.along;
+    x->toward    = s_join.toward;
+    x->road_port = s_join.road_port;
+    x->taper     = taper;
+    x->merge     = merge;
 }
 
 /*  An ON ramp was built deck-to-road: reversed into travel order. */
@@ -2366,119 +2829,231 @@ static int ramp_finish(Ramp *x)
     return 0;
 }
 
-static int build_ramps(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit, int comp)
+/*  ------------------------------------------------------------------
+ *  The ramps' lofts, held for the drive
+ *
+ *  Reading a ramp draws nothing, so the pass reads every one of them and
+ *  then the drive lofts and composes each in the order they were read.
+ *  ------------------------------------------------------------------ */
+#define RAMP_LOFTS_MAX 2048
+#define RAMP_PIECES    64
+
+static struct
 {
-    /*  The grading pass builds the ramps too: a ramp grades no shelf, but
-     *  its loft caps the terrain field under it, and the field is
-     *  smoothed as a whole -- skipping them moved a road's station ninety
-     *  tiles away by a hundredth (Atlanta 6,5). */
-    static Piece pc[MAX_PIECES];
-    int32_t      col, row;
+    RLoft d;
+    Piece pc[RAMP_PIECES];
+    int   np;
+    float total;
+} s_ramp_loft[RAMP_LOFTS_MAX];
+static int          s_n_ramp_loft;
+static RMesh       *s_ramp_m;
+static const RCity *s_ramp_c;
+static uint8_t      s_ramp_mask;
+static int          s_ramp_comp;
+
+static int ramp_loft_add(const RLoft *d, const Piece *pc, int np, float total)
+{
+    int k;
+    if (s_n_ramp_loft >= RAMP_LOFTS_MAX || np > RAMP_PIECES)
+    {
+        R_ERR("net", "no room for a ramp's strip: %d ramps of %d pieces is the most held",
+              RAMP_LOFTS_MAX, RAMP_PIECES);
+        return -1;
+    }
+    k                  = s_n_ramp_loft++;
+    s_ramp_loft[k].d   = *d;
+    s_ramp_loft[k].np  = np;
+    s_ramp_loft[k].total = total;
+    memcpy(s_ramp_loft[k].pc, pc, sizeof(Piece) * (size_t)np);
+    return 0;
+}
+
+int build_ramp_lofts(void)
+{
+    return s_n_ramp_loft;
+}
+
+int build_ramp_loft(int i)
+{
+    double tp = prof_now();
+    int    rc;
+    if (i < 0 || i >= s_n_ramp_loft)
+        return 0;
+    rc = loft(s_ramp_m, s_ramp_c, s_ramp_mask, s_ramp_comp, &s_ramp_loft[i].d,
+              s_ramp_loft[i].pc, s_ramp_loft[i].np, s_ramp_loft[i].total);
+    net_prof_add(NET_PROF_RAMP_LOFT, prof_now() - tp);
+    return rc;
+}
+
+/*  ------------------------------------------------------------------
+ *  The ramps, one at a time
+ *
+ *  The grading pass builds them too: a ramp grades no shelf, but its
+ *  loft caps the terrain field under it, and the field is smoothed as a
+ *  whole.  Each is read up to the join the rule slides along the road,
+ *  and taken up again once it has answered.
+ *  ------------------------------------------------------------------ */
+static Piece s_rt_pc[MAX_PIECES];
+static struct
+{
+    RMesh             *m;
+    const RCity       *c;
+    const RAtlasLevel *l;
+    uint8_t            mask_bit;
+    int                comp;
+    int32_t            row, col;
+    Ramp               x;
+    SlideFan          *fan;
+    int                joined, np, off, form, flat, lane_off;
+    float              taper, z0, climb;
+} s_rt;
+
+void build_ramps_begin(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit, int comp)
+{
+    memset(&s_rt, 0, sizeof s_rt);
+    s_rt.m = m, s_rt.c = c, s_rt.l = l, s_rt.mask_bit = mask_bit, s_rt.comp = comp;
+    s_n_ramp_loft = 0;
+    s_ramp_m = m, s_ramp_c = c, s_ramp_mask = mask_bit, s_ramp_comp = comp;
     if (s_pass != 1)
     {
         memset(s_ramp_forms, 0, sizeof s_ramp_forms);
         memset(s_ramp_lost, 0, sizeof s_ramp_lost);
     }
-    for (row = 0; row < R_MAP; ++row)
-        for (col = 0; col < R_MAP; ++col)
-        {
-            uint8_t              b     = c->xbld[row * R_MAP + col];
-            static const int32_t DC[4] = {0, 1, 0, -1}, DR[4] = {-1, 0, 1, 0}; /* N E S W */
-            int                  dside, rside, eside, k, np, off, roads, form = 0, how, flat = 0;
-            int                  lane_off = 0;    /* the ramp's: an OFF ramp's lane descends to its road end */
-            float                taper    = 0.0f; /* the ramp's: how much of its road end narrows to the road lane's width */
-            float                z0       = 0.0f; /* ... and how far up its deck end sits */
-            V2                   along, toward;
-            float                climb = 0.0f, total = 0.0f;
-            if (!net_hiway_onramp(b))
-                continue;
-            how = ramp_orient(c, col, row, &dside, &rside, &eside, &along, &toward, &off, &roads);
-            if (how == 2)
-            {
-                /*  At a band's end, head-on: straight across from the far
-                 *  edge to the deck's, climbing. */
-                V2 from   = {(float)col + 0.5f - (float)DC[eside] * 0.47f, (float)row + 0.5f - (float)DR[eside] * 0.47f};
-                V2 to     = {(float)col + 0.5f + (float)DC[eside] * 0.5f, (float)row + 0.5f + (float)DR[eside] * 0.5f};
-                pc[0].arc = 0;
-                pc[0].a   = from;
-                pc[0].b   = to;
-                pc[0].len = v2len((V2){to.x - from.x, to.y - from.y});
-                np        = 1;
-                climb     = pc[0].len;
-                off       = 0;
-                form      = 0;
-                if (g_dev.path_dump)
-                    dumpf("PATH hw=%.3f\nTILES %d,%d\nGATES\nPTS %.3f,%.3f %.3f,%.3f\nRAD 0.000 0.000\nTLIM 0.000 0.000\n", (double)RAMP_HW, (int)col, (int)row, (double)from.x, (double)from.y, (double)to.x, (double)to.y);
-            }
-            else if (how == 0)
-            {
-                if (s_pass != 1)
-                    ++s_ramp_forms[4];
-                s_ramp_lost[(row)*R_MAP + (col)] = 5;
-                if (g_dev.lane_dump && s_pass != 1)
-                    dumpf("RAMP %d,%d lost: %s\n", (int)col, (int)row, "no deck touching the tile");
-                continue; /* no deck touching it: left to its sprite */
-            }
-            else
-            {
-                /*  The ramp (spec 7.3), as ONE ROUTED LANE (lane.c): the stages
-                 *  below find the deck beside the tile, say what the road does,
-                 *  pose the descent, route it, join the road, and hand the
-                 *  pieces to the loft as a strip like any other. */
-                Ramp x;
-                memset(&x, 0, sizeof x);
-                x.m = m, x.c = c, x.mask_bit = mask_bit, x.comp = comp, x.col = col, x.row = row, x.pc = pc;
-                x.iref = -1, x.best = s_tune.hiway_reach, x.deck_lane = -1, x.road_lane = -1, x.road_port = -1, x.l = l;
-                x.along = along, x.toward = toward, x.off = off, x.dside = dside, x.rside = rside, x.eside = eside, x.how = how, x.roads = roads;
-                if (ramp_find(&x) != 0)
-                    continue;
-                ramp_classify(&x);
-                ramp_geometry(&x);
-                if (ramp_poses(&x) != 0)
-                    continue;
-                if (ramp_route(&x) != 0)
-                    continue;
-                ramp_join(&x);
-                ramp_reverse(&x);
-                if (ramp_finish(&x) != 0)
-                    return -1;
-                np = x.np, flat = x.flat, form = x.form, off = x.off, lane_off = x.lane_off, z0 = x.z0, climb = x.climb;
-                taper = x.taper;
-            }
-            for (k = 0; k < np; ++k)
-                total += pc[k].len;
-            {
-                /*  A ramp: concrete from the road to the deck, it grades
-                 *  nothing; a lane drop's is flat, one lane wide, drawn as
-                 *  the deck's outer lane, its height eased by the loft; an
-                 *  older form lifts over `climb` at the deck end. */
-                RLoft d   = {0};
-                d.f       = F_ROAD;
-                d.fam     = &net_hiway;
-                d.hw      = RAMP_HW;
-                d.mat     = flat ? MAT_HIWAY_LANE : MAT_HIWAY; /* a lane piece is drawn as the deck's outer lane */
-                d.kind    = LOFT_RAMP;
-                d.struct_ = 1;
-                d.flat = d.lane_piece = flat;
-                d.lane_off            = lane_off;
-                d.z0                  = flat ? z0 : 0.0f;
-                d.ramp0               = flat ? 0.0f : off ? 0.0f
-                                                          : climb; /* the lift climbs the first `climb` */
-                d.ramp1               = flat ? 0.0f : off ? climb
-                                                          : 0.0f; /* ... or falls over the end */
-                d.pin0 = d.pin1 = 1;
-                d.cls           = -1.0f;
-                d.taper         = taper;
-                d.hw_end        = ROAD_W * 0.2f;        /* a road lane's half width, where its centre lies */
-                d.taper_start   = !off && taper > 0.0f; /* an ON ramp starts at the road */
-                double tp       = prof_now();
-                if (loft(m, c, mask_bit, comp, &d, pc, np, total) != 0)
-                    return -1;
-                net_prof_add(NET_PROF_RAMP_LOFT, prof_now() - tp);
-            }
-            if (s_pass != 1)
-                ++s_ramp_forms[form];
-        }
+}
+
+/*  One ramp read.  Answers 1 with one in hand -- ask net_ramp_slide for
+ *  the join it wants slid, which is nothing where it wants none -- and 0
+ *  when there are no more. */
+static int ramp_tile(int32_t col, int32_t row)
+{
+    const RCity         *c     = s_rt.c;
+    const RAtlasLevel   *l     = s_rt.l;
+    static const int32_t DC[4] = {0, 1, 0, -1}, DR[4] = {-1, 0, 1, 0}; /* N E S W */
+    uint8_t              b     = c->xbld[row * R_MAP + col];
+    int                  dside, rside, eside, off, roads, how;
+    V2                   along, toward;
+    s_rt.fan = NULL, s_rt.joined = 0;
+    s_rt.np = 0, s_rt.form = 0, s_rt.flat = 0, s_rt.lane_off = 0;
+    s_rt.taper = 0.0f, s_rt.z0 = 0.0f, s_rt.climb = 0.0f;
+    if (!net_hiway_onramp(b))
+        return 0;
+    how = ramp_orient(c, col, row, &dside, &rside, &eside, &along, &toward, &off, &roads);
+    if (how == 2)
+    {
+        /*  At a band's end, head-on: straight across from the far edge to
+         *  the deck's, climbing. */
+        float back     = net_geo(&gix_ramp_head_back, "ramp_head_back");
+        V2 from        = {(float)col + 0.5f - (float)DC[eside] * back, (float)row + 0.5f - (float)DR[eside] * back};
+        V2 to          = {(float)col + 0.5f + (float)DC[eside] * 0.5f, (float)row + 0.5f + (float)DR[eside] * 0.5f};
+        s_rt_pc[0].arc = 0;
+        s_rt_pc[0].a   = from;
+        s_rt_pc[0].b   = to;
+        s_rt_pc[0].len = v2len((V2){to.x - from.x, to.y - from.y});
+        s_rt.np        = 1;
+        s_rt.climb     = s_rt_pc[0].len;
+        s_rt.off       = 0;
+        s_rt.form      = 0;
+        if (g_dev.path_dump)
+            dumpf("PATH hw=%.3f\nTILES %d,%d\nGATES\nPTS %.3f,%.3f %.3f,%.3f\nRAD 0.000 0.000\nTLIM 0.000 0.000\n", (double)RAMP_HW, (int)col, (int)row, (double)from.x, (double)from.y, (double)to.x, (double)to.y);
+        return 1;
+    }
+    if (how == 0)
+    {
+        if (s_pass != 1)
+            ++s_ramp_forms[4];
+        s_ramp_lost[row * R_MAP + col] = 5;
+        if (g_dev.lane_dump && s_pass != 1)
+            dumpf("RAMP %d,%d lost: %s\n", (int)col, (int)row, "no deck touching the tile");
+        return 0; /* no deck touching it: left to its sprite */
+    }
+    /*  The ramp (spec 7.3), as ONE ROUTED LANE (lane.c): the stages below
+     *  find the deck beside the tile, say what the road does, pose the
+     *  descent, route it, join the road, and hand the pieces to the loft
+     *  as a strip like any other. */
+    memset(&s_rt.x, 0, sizeof s_rt.x);
+    s_rt.x.m = s_rt.m, s_rt.x.c = c, s_rt.x.mask_bit = s_rt.mask_bit, s_rt.x.comp = s_rt.comp;
+    s_rt.x.col = col, s_rt.x.row = row, s_rt.x.pc = s_rt_pc;
+    s_rt.x.iref = -1, s_rt.x.best = s_tune.hiway_reach, s_rt.x.deck_lane = -1;
+    s_rt.x.road_lane = -1, s_rt.x.road_port = -1, s_rt.x.l = l;
+    s_rt.x.along = along, s_rt.x.toward = toward, s_rt.x.off = off;
+    s_rt.x.dside = dside, s_rt.x.rside = rside, s_rt.x.eside = eside;
+    s_rt.x.how = how, s_rt.x.roads = roads;
+    if (ramp_find(&s_rt.x) != 0)
+        return 0;
+    ramp_classify(&s_rt.x);
+    ramp_geometry(&s_rt.x);
+    if (ramp_poses(&s_rt.x) != 0)
+        return 0;
+    if (ramp_route(&s_rt.x) != 0)
+        return 0;
+    s_rt.fan    = ramp_join_ask(&s_rt.x);
+    s_rt.joined = 1;
+    return 1;
+}
+
+int build_ramp_next(void)
+{
+    while (s_rt.row < R_MAP)
+    {
+        const int32_t col = s_rt.col, row = s_rt.row;
+        if (++s_rt.col >= R_MAP)
+            s_rt.col = 0, ++s_rt.row;
+        if (ramp_tile(col, row))
+            return 1;
+    }
+    return 0;
+}
+
+SlideFan *net_ramp_slide(void)
+{
+    return s_rt.fan;
+}
+
+/*  And the ramp laid: concrete from the road to the deck, it grades
+ *  nothing; a lane drop's is flat, one lane wide, drawn as the deck's
+ *  outer lane, its height eased by the loft; an older form lifts over
+ *  `climb` at the deck end. */
+int build_ramp_done(void)
+{
+    RLoft d = {0};
+    float total = 0.0f;
+    int   k;
+    if (s_rt.joined)
+    {
+        if (s_rt.fan)
+            ramp_join_finish(&s_rt.x);
+        ramp_reverse(&s_rt.x);
+        if (ramp_finish(&s_rt.x) != 0)
+            return -1;
+        s_rt.np = s_rt.x.np, s_rt.flat = s_rt.x.flat, s_rt.form = s_rt.x.form;
+        s_rt.off = s_rt.x.off, s_rt.lane_off = s_rt.x.lane_off;
+        s_rt.z0 = s_rt.x.z0, s_rt.climb = s_rt.x.climb, s_rt.taper = s_rt.x.taper;
+    }
+    s_rt.fan = NULL, s_rt.joined = 0;
+    for (k = 0; k < s_rt.np; ++k)
+        total += s_rt_pc[k].len;
+    d.f       = F_ROAD;
+    d.fam     = net_hiway;
+    d.hw      = RAMP_HW;
+    d.mat     = s_rt.flat ? MAT_HIWAY_LANE : MAT_HIWAY; /* a lane piece is drawn as the deck's outer lane */
+    d.kind    = LOFT_RAMP;
+    d.struct_ = 1;
+    d.flat = d.lane_piece = s_rt.flat;
+    d.lane_off            = s_rt.lane_off;
+    d.z0                  = s_rt.flat ? s_rt.z0 : 0.0f;
+    d.ramp0               = s_rt.flat ? 0.0f : s_rt.off ? 0.0f
+                                                        : s_rt.climb; /* the lift climbs the first `climb` */
+    d.ramp1               = s_rt.flat ? 0.0f : s_rt.off ? s_rt.climb
+                                                        : 0.0f; /* ... or falls over the end */
+    d.pin0 = d.pin1 = 1;
+    d.cls           = -1.0f;
+    d.taper         = s_rt.taper;
+    d.hw_end        = ROAD_W * net_geo(&gix_lane_road, "lane_road"); /* a road lane's half width, where its centre lies */
+    d.taper_start   = !s_rt.off && s_rt.taper > 0.0f;   /* an ON ramp starts at the road */
+    if (ramp_loft_add(&d, s_rt_pc, s_rt.np, total) != 0)
+        return -1;
+    if (s_pass != 1)
+        ++s_ramp_forms[s_rt.form];
     return 0;
 }
 
@@ -2520,12 +3095,169 @@ static int hw_replay(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, int i
     return hw_loft(&x);
 }
 
+static double s_hw_tp; /* where the ramps ended, so the links time from there */
+
+/*  ------------------------------------------------------------------
+ *  The bands, one at a time
+ *
+ *  The building pass reads every band the grading pass kept, in the
+ *  order it walked them, since the ramps find a band's stations by its
+ *  number; the grading pass walks each band from an END, and then walks
+ *  what no end reached -- a band between two blocks, or a loop -- both
+ *  ways from wherever it is found.  The drive composes each deck between
+ *  its loft and the lanes laid under it.
+ *  ------------------------------------------------------------------ */
+static uint8_t s_hw_seen[R_MAP * R_MAP];
+static struct
+{
+    RMesh             *m;
+    const RCity       *c;
+    const RAtlasLevel *l;
+    uint8_t            mask_bit;
+    int                comp;
+    int                phase; /* 0 the table, 1 from the ends, 2 what no end reached, 3 nothing left */
+    int                i;     /* the table entry, in phase 0 */
+    int32_t            row, col;
+    int                way; /* phase 2 walks each cell both ways */
+} s_hwb;
+
+/*  How a ramp's foot meets the road it lands on.  Three things are known
+ *  about the road tile the ramp comes down beside -- whether a road
+ *  carries straight on through its far side, and whether one runs each
+ *  way across it -- so there are eight readings in all, and the drive
+ *  settles every one of them before any ramp is read. */
+static int s_ramp_fork[2][2][2];
+
+void net_ramp_fork_is(int straight, int along, int against, int fork)
+{
+    if (straight >= 0 && straight < 2 && along >= 0 && along < 2 && against >= 0 && against < 2)
+        s_ramp_fork[straight][along][against] = fork;
+}
+
+int net_ramp_fork(int straight, int along, int against)
+{
+    return straight && along && against ? s_ramp_fork[1][1][1]
+                                        : s_ramp_fork[straight != 0][along != 0][against != 0];
+}
+
+/*  Which way to walk a band from a cell that could start one: away from
+ *  the end it has, or nowhere where it has two.  There are four readings
+ *  in all -- a neighbour behind, a neighbour on, both or neither -- so
+ *  the drive settles every one of them before the walk begins and the
+ *  walk reads the answer off. */
+static int s_band_way[2][2];
+
+void net_band_start_is(int back, int on, int way)
+{
+    if (back >= 0 && back < 2 && on >= 0 && on < 2)
+        s_band_way[back][on] = way;
+}
+
+int net_band_start(int back, int on)
+{
+    return back >= 0 && back < 2 && on >= 0 && on < 2 ? s_band_way[back][on] : 0;
+}
+
+void build_hiway_bands_begin(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit, int comp)
+{
+    memset(&s_hwb, 0, sizeof s_hwb);
+    memset(s_hw_seen, 0, sizeof s_hw_seen);
+    s_hwb.m = m, s_hwb.c = c, s_hwb.l = l, s_hwb.mask_bit = mask_bit, s_hwb.comp = comp;
+    s_hwb.phase = s_pass == 2 && seg_table_count() > 0 && !g_dev.no_replay ? 0 : 1;
+}
+
+static void hwb_step_tile(void)
+{
+    s_hwb.way = 0;
+    if (++s_hwb.col < R_MAP)
+        return;
+    s_hwb.col = 0;
+    if (++s_hwb.row < R_MAP)
+        return;
+    s_hwb.row = 0;
+    ++s_hwb.phase;
+}
+
+int build_hiway_band_next(void)
+{
+    RMesh             *m        = s_hwb.m;
+    const RCity       *c        = s_hwb.c;
+    const uint8_t      mask_bit = s_hwb.mask_bit;
+    const int          comp     = s_hwb.comp;
+    while (s_hwb.phase < 3)
+    {
+        int32_t pcol, prow, col = s_hwb.col, row = s_hwb.row;
+        int     ew;
+        if (s_hwb.phase == 0)
+        {
+            const RSeg *r;
+            int         i = s_hwb.i;
+            if (i >= seg_table_count())
+            {
+                s_hwb.phase = 3;
+                continue;
+            }
+            ++s_hwb.i;
+            r = seg_table_entry(i);
+            if (!r || !r->band)
+                continue;
+            if (hw_replay(m, c, mask_bit, comp, i, r) != 0)
+                return -1;
+            return 1;
+        }
+        if (!hiway_cell(c, col, row, &pcol, &prow, &ew) || pcol != col || prow != row ||
+            (s_hwb.way == 0 && s_hw_seen[row * R_MAP + col]))
+        {
+            hwb_step_tile();
+            continue;
+        }
+        if (s_hwb.phase == 1)
+        {
+            /*  A band is walked from an END, away from it.  Whether it
+             *  carries on either way from this cell -- a band cell of
+             *  the same axis, or a curve block, which means the band
+             *  turns a corner there into another -- is measured here;
+             *  which way to walk is arc.rules.band_start's. */
+            int     back = 0, on = 0, e2, side[4], way;
+            int32_t qc, qr, bc, br;
+            bc = ew ? col - 1 : col;
+            br = ew ? row : row - 1;
+            if (bc >= 0 && br >= 0 && ((hiway_cell(c, bc, br, &qc, &qr, &e2) && e2 == ew && qc == bc && qr == br) || hiway_block(c, bc, br, &qc, &qr, side)))
+                back = 1;
+            bc = ew ? col + 1 : col;
+            br = ew ? row : row + 1;
+            if (bc < R_MAP && br < R_MAP && ((hiway_cell(c, bc, br, &qc, &qr, &e2) && e2 == ew && qc == bc && qr == br) || hiway_block(c, bc, br, &qc, &qr, side)))
+                on = 1;
+            way = net_band_start(back, on);
+            hwb_step_tile();
+            if (!way)
+                continue;
+            if (walk_hiway(m, c, mask_bit, comp, col, row, ew, way, s_hw_seen) != 0)
+                return -1;
+            return 1;
+        }
+        /*  The start cell's own half is lofted twice, once per
+         *  direction; rare enough to bear. */
+        if (s_hwb.way == 0)
+        {
+            s_hwb.way = 1;
+            if (walk_hiway(m, c, mask_bit, comp, col, row, ew, 1, s_hw_seen) != 0)
+                return -1;
+            return 1;
+        }
+        s_hw_seen[row * R_MAP + col] = 0;
+        hwb_step_tile();
+        if (walk_hiway(m, c, mask_bit, comp, col, row, ew, -1, s_hw_seen) != 0)
+            return -1;
+        return 1;
+    }
+    return 0;
+}
+
 int build_highways(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit, int comp)
 {
-    static uint8_t seen[R_MAP * R_MAP];
-    int32_t        col, row;
-    double         tp;
-    memset(seen, 0, sizeof seen);
+    int32_t col, row;
+    double  tp;
     tp = prof_now();
     hiway_free_air(c, l);
     net_prof_add(NET_PROF_HW_AIR, prof_now() - tp), tp = prof_now();
@@ -2534,71 +3266,17 @@ int build_highways(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_
     s_hw_band   = 0;
     s_hwb_count = 0;
     s_hwb_fill  = 0;
-    if (s_pass == 2 && seg_table_count() > 0 && !g_dev.no_replay)
-    {
-        /*  The building pass: every band the grading pass kept, in the
-         *  order it walked them (the ramps find a band's stations by its
-         *  number), lofted from the table without a walk or a fit. */
-        int i;
-        for (i = 0; i < seg_table_count(); ++i)
-        {
-            const RSeg *r = seg_table_entry(i);
-            if (r && r->band && hw_replay(m, c, mask_bit, comp, i, r) != 0)
-                return -1;
-        }
-    }
-    else
-    {
-        for (row = 0; row < R_MAP; ++row)
-            for (col = 0; col < R_MAP; ++col)
-            {
-                int32_t pcol, prow;
-                int     ew;
-                int32_t bc, br;
-                if (!hiway_cell(c, col, row, &pcol, &prow, &ew))
-                    continue;
-                if (pcol != col || prow != row || seen[row * R_MAP + col])
-                    continue;
-                /*  A band is walked from an END, away from it.  Whether it
-                 *  carries on either way from this cell -- a band cell of
-                 *  the same axis, or a curve block, which means the band
-                 *  turns a corner there into another -- is measured here;
-                 *  which way to walk is arc.rules.band_start's. */
-                {
-                    int     back = 0, on = 0, e2, side[4], way;
-                    int32_t qc, qr;
-                    bc = ew ? col - 1 : col;
-                    br = ew ? row : row - 1;
-                    if (bc >= 0 && br >= 0 && ((hiway_cell(c, bc, br, &qc, &qr, &e2) && e2 == ew && qc == bc && qr == br) || hiway_block(c, bc, br, &qc, &qr, side)))
-                        back = 1;
-                    bc = ew ? col + 1 : col;
-                    br = ew ? row : row + 1;
-                    if (bc < R_MAP && br < R_MAP && ((hiway_cell(c, bc, br, &qc, &qr, &e2) && e2 == ew && qc == bc && qr == br) || hiway_block(c, bc, br, &qc, &qr, side)))
-                        on = 1;
-                    way = script_rule_band_start(back, on);
-                    if (way && walk_hiway(m, c, mask_bit, comp, col, row, ew, way, seen) != 0)
-                        return -1;
-                }
-            }
-        /*  What no end reached -- a band between two blocks, or a loop --
-         *  walked both ways from wherever it is found.  The start cell's own
-         *  half is lofted twice, once per direction; rare enough to bear. */
-        for (row = 0; row < R_MAP; ++row)
-            for (col = 0; col < R_MAP; ++col)
-            {
-                int32_t pcol, prow;
-                int     ew;
-                if (!hiway_cell(c, col, row, &pcol, &prow, &ew))
-                    continue;
-                if (pcol != col || prow != row || seen[row * R_MAP + col])
-                    continue;
-                if (walk_hiway(m, c, mask_bit, comp, col, row, ew, 1, seen) != 0)
-                    return -1;
-                seen[row * R_MAP + col] = 0;
-                if (walk_hiway(m, c, mask_bit, comp, col, row, ew, -1, seen) != 0)
-                    return -1;
-            }
-    }
+    build_hiway_bands_begin(m, c, l, mask_bit, comp);
+    (void)col, (void)row;
+    s_hw_tp = tp;
+    return 0;
+}
+
+/*  And what stands on the bands the drive has just had composed: every
+ *  network tile tinted for outline mode, and the ramps. */
+int build_highway_ramps(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit, int comp)
+{
+    double tp = s_hw_tp;
     net_prof_add(NET_PROF_HW_BANDS, prof_now() - tp), tp = prof_now();
     /*  Every ramp tile marked orange on the ground, for outline mode: the
      *  corridor markers' ground-highlight pipeline; the shader shows it
@@ -2620,11 +3298,17 @@ int build_highways(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_
                 return -1;
         }
     }
-    net_prof_add(NET_PROF_HW_TINT, prof_now() - tp), tp = prof_now();
-    if (build_ramps(m, c, l, mask_bit, comp) != 0)
-        return -1;
-    net_prof_add(NET_PROF_HW_RAMPS, prof_now() - tp), tp = prof_now();
-    /* the bands' ends into the roads they become (lane.c) */
+    net_prof_add(NET_PROF_HW_TINT, prof_now() - tp);
+    build_ramps_begin(m, c, l, mask_bit, comp);
+    s_hw_tp = prof_now();
+    return 0;
+}
+
+/*  And the bands' ends into the roads they become (lane.c), once the
+ *  drive has carried the open ends across the crossings. */
+int build_highway_links(RMesh *m, const RCity *c, uint8_t mask_bit)
+{
+    double tp = s_hw_tp;
     if (lane_transitions(m, c, mask_bit) != 0)
         return -1;
     net_prof_add(NET_PROF_HW_TRANS, prof_now() - tp), tp = prof_now();
@@ -2669,14 +3353,15 @@ void hiway_prof_set(ProfFan *p, int i, float z)
     ((Sample *)p->smp)[i].z = z;
 }
 
-/*  A highway strip's elevation: arc.rules.hiway_profile lays it out. */
+/*  A highway strip's elevation: arc.rules.profile lays it out. */
 static int hiway_profile(Loft *x)
 {
     Sample *smp = x->smp;
     int     ns  = x->ns, i;
     if (ns > 2)
     {
-        ProfFan p;
+        static ProfFan s_prof;
+        ProfFan        p;
         memset(&p, 0, sizeof p);
         p.smp        = smp;
         p.n          = ns;
@@ -2691,7 +3376,8 @@ static int hiway_profile(Loft *x)
         p.grade      = s_tune.hiway_grade;
         p.stiff      = ns <= LOFT_MAX_ST ? s_tune.hiway_stiff : 0.0f;
         p.lift       = HIWAY_LIFT;
-        script_rule_object("hiway_profile", "profile", &p);
+        s_prof       = p;
+        net_stage_hand(&s_prof, "profile");
     }
     else
     {
@@ -2711,39 +3397,39 @@ static int hiway_profile(Loft *x)
             smp[i].z += HIWAY_LIFT * lift;
         }
     }
-    /*  The lane drop: what a ramp took from the deck, station by station;
-     *  and the stations themselves, for the ramps built after the bands. */
-    if (!x->d->struct_)
-    {
-        hiway_lane_stations(smp, ns);
-        for (i = 0; i < ns && s_hw_nst < HW_MAX_ST; ++i)
-        {
-            s_hw_st[s_hw_nst].pos  = smp[i].pos;
-            s_hw_st[s_hw_nst].dir  = smp[i].dir;
-            s_hw_st[s_hw_nst].s    = smp[i].s;
-            s_hw_st[s_hw_nst].z    = smp[i].z;
-            s_hw_st[s_hw_nst].band = x->d->band;
-            ++s_hw_nst;
-        }
-    }
     return 0;
 }
 
-/*  The pair's across range and along offset: a turn-out at the foot of
- *  a lane drop is one lane, drawn as the deck's outer lane; a deck's
- *  narrowed sides are told apart by an along offset.  The class is the
- *  highway's own. */
-static int hiway_pair(Loft *x, LoftPair *p)
+/*  The lane drop: what a ramp took from the deck, station by station;
+ *  and the stations themselves, for the ramps built after the bands.
+ *  Both read the deck's heights, so both wait until the rule that
+ *  shapes them has answered. */
+static int hiway_profile_done(Loft *x)
 {
-    if (x->d->lane_piece)
+    if (x->d->struct_)
+        return 0;
+    hiway_lane_stations(x->smp, x->ns);
+    return 0;
+}
+
+/*  And the stations themselves, for the ramps built after the bands:
+ *  they are the deck's heights, so they are read once the lane drop has
+ *  taken what a ramp took from them. */
+static int hiway_works(Loft *x)
+{
+    Sample *smp = x->smp;
+    int     ns  = x->ns, i;
+    if (x->d->struct_)
+        return 0;
+    for (i = 0; i < ns && s_hw_nst < HW_MAX_ST; ++i)
     {
-        p->acr  = -1.0f;
-        p->acl  = -HIWAY_LANE_IN;
-        p->aoff = 4000.0f;
+        s_hw_st[s_hw_nst].pos  = smp[i].pos;
+        s_hw_st[s_hw_nst].dir  = smp[i].dir;
+        s_hw_st[s_hw_nst].s    = smp[i].s;
+        s_hw_st[s_hw_nst].z    = smp[i].z;
+        s_hw_st[s_hw_nst].band = x->d->band;
+        ++s_hw_nst;
     }
-    else if (!x->d->struct_)
-        p->aoff = (p->acr > -0.99f ? 1000.0f : 0.0f) + (p->acl < 0.99f ? 2000.0f : 0.0f);
-    p->cls = 3.0f;
     return 0;
 }
 
@@ -2769,42 +3455,15 @@ static void hiway_traffic_lanes(const RLoft *d, int cls, float *lane_in, float *
     *lane_out = 0.681f;
 }
 
-/*  The highway is walked by its own bands, not by tile family (its tiles
- *  are the road's), so only what the loft asks a family for is filled. */
-const NetFamily net_hiway = {
-    "highway",
-    F_ROAD,
-    &s_tune.road_w,
-    &s_tune.road_rmin,
-    &s_tune.road_rmax,
-    0.50f,
-    MAT_HIWAY,
-    LOFT_DECK,
-    2, /* the fit's family code */
-    0.0f,
-    0.25f,
-    0,
-    0,
-    0,
-    0,
-    0,
-    NULL,
-    NULL,
-    hiway_record,
-    NULL,
-    hiway_flies,
-    hiway_taper,
-    hiway_profile,
-    NULL, /* works: the deck's piers and caps, stubbed out (see above) */
-    hiway_pair,
-    hiway_traffic_lanes,
-    NULL,
-    NULL,
-    NULL, /* a deck's lanes are its own (lane_deck) */
-    7.0f, /* a deck's lane wires in light grey */
-    NET_LANE_ENDS_OPEN,
-    0, /* keeps to its tiles */
-    0.0f, /* no turnout: its junctions hand back curb trims */
-    "slot_strip", /* a deck carries its own height and meets nothing on the ground */
-    1,            /* a deck: its quads carry a gore and an underside */
-};
+/*  What this file lends the declarations: the deck's stages.  The
+ *  highway is walked by its own bands, not by tile family (its tiles are
+ *  the road's), so only what the loft asks a family for is here. */
+void hiway_primitives(void)
+{
+    net_hook_add(NH_RECORD, "deck_record", (NetHookFn)hiway_record);
+    net_hook_add(NH_FLIES, "deck_flies", (NetHookFn)hiway_flies);
+    net_hook_add(NH_TAPER, "deck_taper", (NetHookFn)hiway_taper);
+    net_hook_add_split2(NH_PROFILE, "deck_profile", (NetHookFn)hiway_profile, (NetHookFn)hiway_profile_done, "profile", "drop");
+    net_hook_add(NH_WORKS, "deck_works", (NetHookFn)hiway_works);
+    net_hook_add(NH_TRAFFIC, "deck_traffic", (NetHookFn)hiway_traffic_lanes);
+}

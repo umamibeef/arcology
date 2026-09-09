@@ -16,10 +16,10 @@ local OVER, SLOT = 0.02, 0.4
 arc.rules.zone_tint = function (t)
     local d = t:info()
     if d.zone == 0 then return true end
-    local x0, y0, z0 = t:at(1)
-    local x1, y1, z1 = t:at(2)
-    local x2, y2, z2 = t:at(3)
-    local x3, y3, z3 = t:at(4)
+    local x0, y0, z0 = t:at(0)
+    local x1, y1, z1 = t:at(1)
+    local x2, y2, z2 = t:at(2)
+    local x3, y3, z3 = t:at(3)
     local order = d.order + SLOT
     t:tri(x0, y0, z0 + OVER, x1, y1, z1 + OVER, x2, y2, z2 + OVER,
           d.zone, 0.0, arc.mat.zone, order)

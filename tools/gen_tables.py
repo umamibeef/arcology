@@ -30,7 +30,7 @@ w(' *')
 w(' *  Source: the A5 initialized-data image reconstructed from the DATA 0')
 w(' *  resource of SimCity 2000(R) 1.2.  A5 offsets are given per table.')
 w(' */')
-w('#include "sc2k.h"')
+w('#include "sim.h"')
 w('')
 
 # ---- building names (only 0xC6..0xFF are real entries) --------------

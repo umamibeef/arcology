@@ -25,7 +25,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from sc2kpack import read_indexed_png
+from artpack import read_indexed_png
 from gif import write_gif_anim
 
 EXE = HERE.parent / "build/arcology"
@@ -39,7 +39,7 @@ def main():
     #  Any arcology --soft arguments, passed straight through, so an animated
     #  figure can be framed exactly like the still it replaces (--focus
     #  included) rather than only by --crop.
-    ap.add_argument("--sc2k", nargs=argparse.REMAINDER, default=[])
+    ap.add_argument("--arcology", nargs=argparse.REMAINDER, default=[])
     ap.add_argument("--crop", default=None)
     ap.add_argument("--scale", type=int, default=2)
     ap.add_argument("--frames", type=int, default=24)
@@ -50,7 +50,7 @@ def main():
 
     #  A private directory per run: two renders sharing one frame file
     #  would read each other's frames.
-    tmp = Path(tempfile.mkdtemp(prefix="sc2kanim-"))
+    tmp = Path(tempfile.mkdtemp(prefix="arcanim-"))
     #  The pixels are identical in every frame, so render them once and
     #  collect only the palettes; write_gif_anim then emits the picture
     #  once and the moving colours as tiny transparent overlays.
@@ -61,7 +61,7 @@ def main():
                "--indexed", "--phase", str(k)]
         if a.crop:
             cmd += ["--crop", a.crop, "--scale", str(a.scale)]
-        cmd += a.sc2k
+        cmd += a.arcology
         if a.underground:
             cmd.append("--underground")
         subprocess.run(cmd, capture_output=True, check=True)

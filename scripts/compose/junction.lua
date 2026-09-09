@@ -24,9 +24,9 @@ arc.rules.junction = function (j)
     if d.square then j:quad() end
     if n < 3 then return true end
     local cx, cy, zj = d.x, d.y, d.z
-    for i = 1, n do
+    for i = 0, n - 1 do
         local p0x, p0y = j:at(i)
-        local p1x, p1y = j:at(i % n + 1)
+        local p1x, p1y = j:at((i + 1) % n)
         if math.abs(p0x - p1x) >= 1e-5 or math.abs(p0y - p1y) >= 1e-5 then
             local m0x, m0y = arc.f32(0.5 * arc.f32(cx + p0x)), arc.f32(0.5 * arc.f32(cy + p0y))
             local m1x, m1y = arc.f32(0.5 * arc.f32(cx + p1x)), arc.f32(0.5 * arc.f32(cy + p1y))

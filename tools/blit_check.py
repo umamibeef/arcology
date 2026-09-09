@@ -19,14 +19,14 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from runsim import Sim, A5
-from sc2kpack import read_indexed_png, TRANSPARENT
+from artpack import read_indexed_png, TRANSPARENT
 from shapedec import tileset_streams
 
 BLIT = 0x18E96
 #  A city to render.  The repository ships its own, so this works
-#  from a fresh clone; SC2K_CITIES points it at your game folder instead.
+#  from a fresh clone; ARC_CITIES points it at your game folder instead.
 CITY = os.environ.get(
-    "SC2K_CITY",
+    "ARC_CITY",
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "cities",
                  "bayview.sc2"))
 
@@ -38,7 +38,7 @@ def main():
 
     at = json.loads((HERE.parent / ("assets/tiles%d.json" % a.zoom)).read_text())
     fr = {int(k): v["frame"] for k, v in at["frames"].items()}
-    meta = at["meta"]["sc2k"]["tiles"]
+    meta = at["meta"]["arc"]["tiles"]
     _w, _h, rows, _pal = read_indexed_png(
         HERE.parent / ("assets/tiles%d.png" % a.zoom))
 
@@ -83,7 +83,7 @@ def main():
         return [[e.rd(fb + (Y + j) * W + (X + i), 1) for i in range(w)]
                 for j in range(h)]
 
-    base_id = at["meta"]["sc2k"]["id_base"]
+    base_id = at["meta"]["arc"]["id_base"]
     bad, tested, skipped = [], 0, 0
     for sid in sorted(streams):
         if sid not in fr or sid * 8 + 8 > 0x2EE0:

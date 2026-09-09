@@ -18,7 +18,7 @@
  *  straights on a slope +10 north-south-west tee +6 south-west corner +11
  *  east-south-west tee +7 east-south corner +12 north-east-south tee +13
  *  north-east-west tee +14 crossroads */
-#include "sc2k.h"
+#include "sim.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

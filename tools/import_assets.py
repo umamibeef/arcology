@@ -9,7 +9,7 @@ exists and why `assets/` is not something you can download.
 
 It runs the three extractors in turn:
 
-    sc2kpack.py extract   SHAP  ->  tiles8/16/32.png + JSON      the map art
+    artpack.py extract   SHAP  ->  tiles8/16/32.png + JSON      the map art
     pict.py --atlas       PICT  ->  ui.png + ui.json            the interface
     snd.py                snd   ->  sounds/*.wav                the effects
 
@@ -93,7 +93,7 @@ def main():
     print("reading %s (%d bytes)" % (fork, fork.stat().st_size))
     print("writing  %s\n" % out)
 
-    run("map art  (SHAP)", [str(HERE / "sc2kpack.py"), "extract",
+    run("map art  (SHAP)", [str(HERE / "artpack.py"), "extract",
                             "--rsrc", str(fork), "--out", str(out)])
     run("interface (PICT)", [str(HERE / "pict.py"), "--atlas",
                              str(fork), str(out)])

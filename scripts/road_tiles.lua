@@ -12,12 +12,15 @@
 --  A ramp looks for all three; a lane looking for something to connect
 --  to along the deck looks only at the first two.
 
-arc.rules.road_tiles = function ()
+--  The three are numbered, and the numbers are the vocabulary the
+--  pipeline reads: 1 a road proper, 2 a crossing that is still a road to
+--  anything joining it, 3 a deck with a road beneath it.
+do
     local t = {}
-    for b = 0x1D, 0x2B do t[b] = "road" end
-    for b = 0x43, 0x48 do t[b] = "crossing" end
-    for _, b in ipairs {0x4B, 0x4C, 0x4F, 0x50} do t[b] = "under" end
-    return t
+    for b = 0x1D, 0x2B do t[b] = 1 end
+    for b = 0x43, 0x48 do t[b] = 2 end
+    for _, b in ipairs {0x4B, 0x4C, 0x4F, 0x50} do t[b] = 3 end
+    arc.bytes("road_tiles", t, "number")
 end
 
 --  Ground a fitted line may sweep across, when its family is allowed to
@@ -28,10 +31,10 @@ end
 --
 --  Bare ground, rubble and trees are free.  Anything built or laid is
 --  not, and water is refused by the terrain layer rather than here.
-arc.rules.open_tiles = function ()
+do
     local t = {}
     for b = 0x00, 0x0D do t[b] = true end
-    return t
+    arc.bytes("open_tiles", t)
 end
 
 --  A building that STANDS UP, as a raised highway sees the map.
@@ -44,10 +47,10 @@ end
 --
 --  The highway ids themselves are neither: another deck IS in the way,
 --  being at the same height, and arc.rules.hiway_tiles names those.
-arc.rules.standing_tiles = function ()
+do
     local t = {}
     for b = 0x69, 0xFF do t[b] = true end
-    return t
+    arc.bytes("standing_tiles", t)
 end
 
 --  A CARRIER: a tile a road runs ON INTO rather than stopping at.
@@ -59,10 +62,10 @@ end
 --
 --  The run covers the bridges and tunnel ends, the six crossings, and
 --  every highway id up to and including the interchange.
-arc.rules.carrier_tiles = function ()
+do
     local t = {}
     for b = 0x3B, 0x69 do t[b] = true end
-    return t
+    arc.bytes("carrier_tiles", t)
 end
 
 --  A road crossing a RAILWAY, which is a node of both networks: the two
@@ -72,6 +75,4 @@ end
 --
 --  The road-under-a-power-line crossings are not this: a power line has
 --  no altitude of its own to agree about.
-arc.rules.rail_crossing_tiles = function ()
-    return {[0x45] = true, [0x46] = true}
-end
+arc.bytes("rail_crossing_tiles", {[0x45] = true, [0x46] = true})

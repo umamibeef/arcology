@@ -19,8 +19,9 @@
 --  signal where the junction is busy; a local against an avenue puts the
 --  stop on the local legs; three legs with a local stem, a stop on the
 --  stem; four local legs, a two-way stop on the quieter axis.
-arc.rules.control = function (col, row, arms, busy)
+arc.rules.control = function (at)
     local ctrl = {0, 0, 0, 0}
+    local arms, busy = at.arms or {}, at.busy
     local n, hi, lo = 0, 0, 9
     for e = 1, 4 do
         if arms[e] then
@@ -120,12 +121,12 @@ arc.rules.power_tile = function (at)
 end
 
 --  A level crossing's gate on one approach (spec 3.15): the flashers,
---  lit while the arm is off its rest, and the striped arm itself,
---  swung about the mechanism's shaft beside the mast.  `at.angle` is
---  where the traffic has swung it -- 0 down across the lane, 88 up --
---  and `at.len` how far it reaches; `at.fx, at.fy` face the driver it
---  stops.  The arm rises as it lifts, so its tip is higher than its
---  pivot by the sine of the angle.
+--  lit while the arm is off its rest, and the striped arm itself, swung
+--  about the mechanism's shaft beside the mast.  `at.angle` is where the
+--  traffic has swung it -- 0 down across the lane, gate_up up -- and
+--  `at.len` how far it reaches; `at.fx, at.fy` face the driver it stops.
+--  The arm rises as it lifts, so its tip is higher than its pivot by the
+--  sine of the angle.
 arc.rules.gate_arm = function (at)
     local wu, wv = -at.fy, at.fx
     local px, py = at.x + wu * arc.geo.gate_shaft, at.y + wv * arc.geo.gate_shaft
@@ -235,12 +236,13 @@ arc.rules.rail_marks = function (m)
     return out
 end
 
---  A level crossing's gate, once a frame (spec 3.15): the arm falls
---  while a train stands within gate_warn tiles of the crossing on either
---  track -- about three seconds at the speed a train runs -- and rises
---  again once the approach is clear.  `g.angle` is where the arm is now,
---  0 flat across the road and gate_up its rest; `g.near` how far along
---  the rail's axis the nearest train car is.
+--  A level crossing's gate, once a beat (spec 3.15): the arm falls while
+--  a train stands within gate_warn tiles of the crossing on either track
+--  -- about three seconds at the speed a train runs -- and rises again
+--  once the approach is clear.  `g.angle` is where the arm is now, 0 flat
+--  across the road and gate_up its rest; `g.near` how far along the
+--  rail's axis the nearest train car is; `g.dt` the world's own beat,
+--  never the frame's.
 arc.rules.gate = function (g)
     local rate = g.near < arc.geo.gate_warn and -arc.geo.gate_rate or arc.geo.gate_raise
     local a = g.angle + rate * g.dt
@@ -339,6 +341,10 @@ end
 --  turn, how finely one is cut, how it is drawn, when two of them join,
 --  how near the map's edge one may run, and where a deck's three lanes
 --  sit across it.
+--  What is true of every strip and every junction of one family, and
+--  used all through the build.  The compositions call it for themselves;
+--  the pipeline is PUSHED it below rather than asking, so nothing in a
+--  build reaches up to find out how wide a footway is.
 arc.rules.family = function (f)
     local junction = {inset = arc.geo.junc_inset, far = arc.geo.junc_far}
     local strip = {
@@ -438,6 +444,10 @@ arc.rules.family = function (f)
     }
 end
 
+for _, name in ipairs {"road", "rail", "highway", "power"} do
+    arc.family.rules(name, arc.rules.family {name = name})
+end
+
 --  A power line crossing a road or a railway: no pole on the tile, since
 --  the road owns the ground, and the wire spanning it edge to edge where
 --  the neighbours' wires meet it.
@@ -457,30 +467,28 @@ end
 --  of it varies from one thing to the next, so it is asked once and the
 --  frame loop reads the answer -- a car costs no call of its own.  With
 --  no rule nothing moves at all.
-arc.rules.traffic = function ()
-    return {
-        blink        = arc.geo.blink_duty,
-        train_speed  = arc.geo.train_speed,
-        train_spread = arc.geo.train_spread,
-        train_len    = arc.geo.train_len,
-        trail_step   = arc.geo.trail_step,
-        xing_find    = arc.geo.xing_find,
-        gate_up      = arc.geo.gate_up,
-        gate_watch   = arc.geo.gate_watch,
-        density      = arc.geo.car_density,
-        car_len      = arc.geo.car_len,
-        gap_stop     = arc.geo.car_gap_stop,
-        gap_free     = arc.geo.car_gap_free,
-        stop_junc    = arc.geo.car_stop_junc,
-        stop_hold    = arc.geo.car_stop_hold,
-        creep        = arc.geo.car_creep,
-        probe        = arc.geo.car_probe,
-        step_max     = arc.geo.step_max,
-        slot         = arc.geo.slot_furn,
-        block_back   = arc.geo.rail_block_back,
-        block_ahead  = arc.geo.rail_block_ahead,
-    }
-end
+arc.numbers("traffic", {
+    blink        = arc.geo.blink_duty,
+    train_speed  = arc.geo.train_speed,
+    train_spread = arc.geo.train_spread,
+    train_len    = arc.geo.train_len,
+    trail_step   = arc.geo.trail_step,
+    xing_find    = arc.geo.xing_find,
+    gate_up      = arc.geo.gate_up,
+    gate_watch   = arc.geo.gate_watch,
+    density      = arc.geo.car_density,
+    car_len      = arc.geo.car_len,
+    gap_stop     = arc.geo.car_gap_stop,
+    gap_free     = arc.geo.car_gap_free,
+    stop_junc    = arc.geo.car_stop_junc,
+    stop_hold    = arc.geo.car_stop_hold,
+    creep        = arc.geo.car_creep,
+    probe        = arc.geo.car_probe,
+    step_max     = arc.geo.step_max,
+    slot         = arc.geo.slot_furn,
+    block_back   = arc.geo.rail_block_back,
+    block_ahead  = arc.geo.rail_block_ahead,
+})
 
 --  What to try where two of a fitted path's straight lines meet, and in
 --  what order.  Lines that cross take one arc at the crossing; lines
@@ -649,10 +657,8 @@ end
 --  How fast a car may go for the car ahead of it.
 --
 --  Inside the stopping distance it stops dead; beyond the free distance
---  it ignores the car ahead entirely; between the two it takes the share
---  of its own speed that the gap has closed.  Linear, which is not how a
---  driver behaves but is what reads correctly at this scale -- a queue
---  that packs tight at a light and pulls away in order.
+--  it carries on at its own speed; between the two it keeps the share of
+--  its speed that the gap has of the room between them.
 arc.rules.car_follow = function (c)
     if c.gap < c.stop then return 0.0 end
     if c.gap >= c.free then return c.speed end
@@ -668,7 +674,9 @@ end
 --  gets exactly the speed that reaches the line instead, so it arrives
 --  stopped rather than overshooting and jerking back.
 --
---  Nothing holding it means nothing to slow for.
+--  Nothing holding it means nothing to slow for.  `c.step` is the
+--  world's own beat, not the frame's: how often the picture is drawn has
+--  nothing to do with how a car stops.
 arc.rules.car_hold = function (c)
     if not c.held then return c.speed end
     if c.ahead <= c.line then return 0.0 end

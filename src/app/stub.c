@@ -10,7 +10,7 @@ int game_main(int argc, char **argv)
     fprintf(stderr,
             "arcology was built without SDL3, so the game is not in this "
             "binary.\n"
-            "Install SDL3 and reconfigure, or use -DSC2K_FETCH_SDL3=ON.\n"
+            "Install SDL3 and reconfigure, or use -DARC_FETCH_SDL3=ON.\n"
             "The developer modes still work: try `arcology --modes`.\n");
     return 2;
 }

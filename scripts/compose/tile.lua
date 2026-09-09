@@ -23,8 +23,8 @@
 --  Corners run 1 to 4 -- north-west, north-east, south-east, south-west
 --  -- and edges 1 to 4, north, east, south, west.
 
-local NW, NE, SE, SW = 1, 2, 3, 4
-local E_N, E_E, E_S, E_W = 1, 2, 3, 4
+local NW, NE, SE, SW = 0, 1, 2, 3
+local E_N, E_E, E_S, E_W = 0, 1, 2, 3
 
 --  A tile's kind, as the pipeline settles it: the field cut on the
 --  sprite's diagonal, water flat at the table over a seabed, a flat pad

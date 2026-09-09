@@ -4,7 +4,7 @@
  *  asking it, tier by tier.  This is the phase the city's shape actually
  *  comes out of.  Split out of sim.c; addresses still point into CODE 2. */
 #include "ext80.h"
-#include "sc2k.h"
+#include "sim.h"
 #include "sim_int.h"
 
 #include <stdio.h>

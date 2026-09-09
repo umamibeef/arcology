@@ -19,7 +19,7 @@ sys.path.insert(0, str(HERE))
 import struct
 import zlib
 
-from sc2kpack import write_indexed_png, TRANSPARENT
+from artpack import write_indexed_png, TRANSPARENT
 from render_pixels import render
 
 

@@ -24,7 +24,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from sc2kpack import read_indexed_png
+from artpack import read_indexed_png
 
 ROOT = HERE.parent
 ASSETS = ROOT / "assets"
@@ -115,7 +115,7 @@ def main():
     table = {"corner_bits": list(CORNER), "codes": {}, "zooms": {}}
     for z in atlas["zooms"]:
         sheet_j = json.loads((ASSETS / z["sheet"]).read_text())
-        meta = sheet_j["meta"]["sc2k"]; sheet = sheet_j["frames"]
+        meta = sheet_j["meta"]["arc"]; sheet = sheet_j["frames"]
         tw, th, alt, base = meta.get("tile_w", meta["zoom"]), meta.get("tile_h", meta["zoom"] // 2), meta.get("alt_step", 12), meta.get("id_base", 0)
         transparent = meta.get("transparent", 0)
         W, H, rows, pal = read_indexed_png(ASSETS / z["image"])

@@ -9,12 +9,20 @@ layout(set = 2, binding = 0) uniform sampler2D t_field; /* b: tiles to water / 1
 
 layout(location = 0) out vec4 o_col;
 
+/*  A material a SCRIPT declared is numbered from MAT_SCRIPT_BASE up, and
+ *  is shaded from its parameters rather than from a branch here: the
+ *  shaders are built with the program and cannot grow a branch for
+ *  something declared after it. */
+#define MAT_SCRIPT_BASE 32.0
+#define MAT_SCRIPT_MAX  32
+
 layout(set = 3, binding = 0) uniform Frag
 {
     vec4 sun;    /* direction xyz (toward the sun), ambient            */
     vec4 params; /* diffuse, time, grid half-width in canvas px (0 off),
                   * underground view                                     */
     vec4 flags;  /* x: the road markings on (marking.c), y: the sidewalks on (walk.c) */
+    vec4 mats[MAT_SCRIPT_MAX]; /* a script's own: rgb the colour, w the roughness */
 } fr;
 
 float hash2(vec2 p)
@@ -689,6 +697,18 @@ void main()
         vec3  col  = lamp == 0 ? vec3(0.95, 0.12, 0.10)
                    : lamp == 1 ? vec3(0.98, 0.76, 0.12) : vec3(0.15, 0.90, 0.30);
         o_col = vec4(lamp == lit ? col : col * 0.18, v_col.a);
+        return;
+    }
+    if (v_col.b > MAT_SCRIPT_BASE - 0.5)
+    {
+        /*  A material the script declared: its own colour, and a
+         *  roughness that decides how much of the sun it takes as a
+         *  sheen.  No branch of its own, because it was named after the
+         *  shaders were built. */
+        int   k     = int(v_col.b - MAT_SCRIPT_BASE + 0.5);
+        vec4  m     = fr.mats[clamp(k, 0, MAT_SCRIPT_MAX - 1)];
+        float sheen = (1.0 - m.w) * pow(max(d, 0.0), 8.0) * 0.35;
+        o_col       = vec4(clamp(m.rgb * (fr.sun.w + fr.params.x * d) + sheen, 0.0, 1.0), v_col.a);
         return;
     }
     if (v_col.b > 7.5)

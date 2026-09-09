@@ -48,14 +48,13 @@
  */
 #include "script.h"
 
-#if SC2K_LUA
 
 #include <string.h>
 
 #include "internal.h"
 #include "mesh/internal.h"
 #include "net/internal.h"
-#include "net/model.h"
+#include "geo/model.h"
 
 static const char *const KIND[] = {"box", "arm", "lens", "face", "prism"};
 
@@ -286,4 +285,3 @@ void api_model_open(lua_State *L)
     lua_setfield(L, -2, "model");
 }
 
-#endif

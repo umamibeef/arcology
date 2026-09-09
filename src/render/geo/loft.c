@@ -10,6 +10,8 @@
 #include "dump.h"
 #include "mesh/internal.h"
 #include "net/internal.h"
+
+static int gix_loft_split_probe = -1;
 #include "opt.h"
 
 /*  The numbers this file reads, each remembering where the store
@@ -83,8 +85,8 @@ int net_record(RRoadNet *net, const Sample *smp, int ns, float total, int cls, i
      *  the road's own width, so a change of width carries the lanes with
      *  it instead of leaving the cars off the asphalt. */
     sg->lane_out = sg->lane_in = 0.0f;
-    if (d->fam->traffic_lanes)
-        d->fam->traffic_lanes(d, cls, &sg->lane_in, &sg->lane_out);
+    if (net_family_has(d->fam, NH_TRAFFIC))
+        net_family_traffic(d->fam, d, cls, &sg->lane_in, &sg->lane_out);
     {
     }
     if (rail)
@@ -179,17 +181,6 @@ float profile_at(const Sample *smp, int ns, float at)
     }
 }
 
-/*  The fitted line drawn over the world it made -- centreline, band
- *  edges and piece boundaries -- when the tuning window asks to see
- *  them.  It is the SCRIPT'S (arc.rules.curves), from the same stations
- *  and pieces the strip itself is laid from. */
-static int loft_overlay(Loft *x)
-{
-    if (s_tune.show_curves <= 0.5f || s_pass == 1)
-        return 0;
-    script_rule_object("curves", "strip", x);
-    return 0;
-}
 
 /*  The stations: along every piece, finely on arcs, and one on every tile edge the band crosses. */
 /*  Where the band crosses a line the ground can crease on between two
@@ -372,8 +363,9 @@ static void loft_ground(Loft *x)
         const Sample *sm = &x->smp[i];
         if (sm->split)
         {
-            V2    pm   = {sm->pos.x - sm->dir.x * 0.004f, sm->pos.y - sm->dir.y * 0.004f};
-            V2    pp   = {sm->pos.x + sm->dir.x * 0.004f, sm->pos.y + sm->dir.y * 0.004f};
+            float d0   = net_geo(&gix_loft_split_probe, "loft_split_probe");
+            V2    pm   = {sm->pos.x - sm->dir.x * d0, sm->pos.y - sm->dir.y * d0};
+            V2    pp   = {sm->pos.x + sm->dir.x * d0, sm->pos.y + sm->dir.y * d0};
             float zm   = section_height(c, mask_bit, pm, sm->dir, h);
             float zp   = section_height(c, mask_bit, pp, sm->dir, h);
             x->zraw[i] = zm > zp ? zm : zp;
@@ -437,9 +429,9 @@ void loft_ground_set(GroundFan *g, int i, float z)
         ((Sample *)g->smp)[i].z = z;
 }
 
-/*  The corridor's profile over the ground: arc.rules.ground_profile
+/*  The corridor's profile over the ground, gathered: arc.rules.ground
  *  ramps it between the nodes at its ends. */
-static int loft_profile_ground(Loft *x)
+static void loft_ground_fan(Loft *x, GroundFan *out)
 {
     GroundFan g;
     memset(&g, 0, sizeof g);
@@ -453,11 +445,10 @@ static int loft_profile_ground(Loft *x)
     g.dead1    = s_ld->nkind[1] == 1;
     g.pin_node = s_ld->fam->turnout <= 0.0f;
     g.lift     = net_family_rules(s_ld->fam->f)->lift;
-    script_rule_object("ground_profile", "ground", &g);
-    return 0;
+    *out       = g;
 }
 
-static int loft_profile(Loft *x)
+static int loft_profile_pre(Loft *x)
 {
     const RCity *c        = x->c;
     uint8_t      mask_bit = x->mask_bit;
@@ -516,8 +507,16 @@ static int loft_profile(Loft *x)
      *  deck must never be pinned to them.  A deck's heights are the ground
      *  under it and the lift over that, a ramp's its own straight line
      *  (hiway.c). */
-    if (s_ld->fam->profile ? s_ld->fam->profile(x) != 0 : loft_profile_ground(x) != 0)
-        return -1;
+    return 0;
+}
+
+/*  And what the profile leaves behind it: the ground's own line, so a
+ *  station below it reads as being in a cut. */
+static int loft_profile_post(Loft *x)
+{
+    float *zraw = x->zraw;
+    int    ns   = x->ns;
+    int    i;
     for (i = 0; i < ns; ++i)
         s_zorig[i] = zraw[i] + net_family_rules(s_ld->fam->f)->lift; /* the ground's own line: a station below it is in a cut */
     /*  The deck stands clear (spec 7.2): 5 m under the soffit plus the
@@ -541,29 +540,11 @@ static int loft_profile(Loft *x)
     return 0;
 }
 
-/*  The network record for the traffic, the furniture, the corridor surface and the curve overlay. */
-static int loft_record(Loft *x)
+/*  The corridor surface under the strip, once its record and its
+ *  furniture are laid. */
+static int loft_record_surface(Loft *x)
 {
-    const RCity *c        = x->c;
-    uint8_t      mask_bit = x->mask_bit;
-    Sample      *smp      = x->smp;
-    float        hw       = x->hw;
-    int          ns       = x->ns;
-    if (grade_only(g_dev.grade_loft))
-        return loft_surface(c, mask_bit, smp, ns, hw, s_ld); /* the grading pass: the corridor and nothing else */
-    /*  What the strip records for the traffic and the passes is the
-     *  family's: a road's graph edge and sidewalks, a rail's track, a
-     *  deck's edge under its own class (road.c, rail.c, hiway.c). */
-    if (ns >= 2 && s_ld->fam->record && s_ld->fam->record(x) != 0)
-        return -1;
-    if (loft_furniture(x) != 0)
-        return -1;
-    if (loft_surface(c, mask_bit, smp, ns, hw, s_ld) != 0)
-        return -1;
-    if (!s_ld->records_only && loft_overlay(x) != 0)
-        return -1;
-
-    return 0;
+    return loft_surface(x->c, x->mask_bit, x->smp, x->ns, x->hw, s_ld);
 }
 
 /*  --prof-dump: the finished profile of every segment. */
@@ -582,7 +563,7 @@ static int loft_prof_dump(Loft *x)
     if (g_dev.prof_dump)
     {
         int d;
-        dumpf("PROF f=%d hiway=%d n=%d\n", (int)f, s_ld->fam == &net_hiway, ns);
+        dumpf("PROF f=%d hiway=%d n=%d\n", (int)f, s_ld->fam == net_hiway, ns);
         for (d = 0; d < ns; ++d)
         {
             float g = section_height(c, mask_bit, smp[d].pos, smp[d].dir, hw);
@@ -599,13 +580,28 @@ static int loft_prof_dump(Loft *x)
  *  stations and lays the ribbon between them through the same emitter
  *  every other band goes through.  Nothing here decides how wide the
  *  band is, what it is made of or where it sits in the stack. */
-static int loft_slab(Loft *x)
+/*  The strip the loft finished, held for the composer, and the shape its
+ *  triangles belong to -- left open until the slab is laid. */
+static Loft    s_slab_x;
+static int     s_slab_ready;
+static ShapeId s_slab_sh;
+static double  s_slab_tp;
+static int     s_slab_records_only;
+
+/*  Which rule the furniture stage last asked for, so the answer is read
+ *  in the shape that rule answers in. */
+static const char *s_lx_furn_rule;
+
+const char *net_loft_furniture_rule(void)
 {
-    if (grade_only(g_dev.grade_loft))
-        return 0; /* the grading pass: the slab is triangles and nothing else */
-    script_rule_object("strip", "strip", x);
-    return 0;
+    return s_lx_furn_rule;
 }
+
+/*  And the loft still in hand, between the stages the drive walks. */
+static Loft      s_lx;
+static int       s_lx_live;
+static double    s_lx_tp;
+static GroundFan s_lx_ground;
 
 /*  One pair of stations as the family's own stages want it, which the
  *  script asks for when a family builds beside its quads. */
@@ -784,7 +780,16 @@ int loft_at(const char *where, const char *who, RMesh *m, const RCity *c, uint8_
         break;
     }
     rc = loft_body(m, c, mask_bit, comp, desc, pc, np, total);
-    shape_close(sh);
+    /*  The shape stays OPEN.  The slab is laid outside the loft and its
+     *  triangles belong to the strip like every other stage's, so
+     *  net_loft_compose is what closes it. */
+    s_slab_sh = sh;
+    if (rc != 0)
+    {
+        shape_close(sh);
+        s_slab_sh    = SHAPE_NONE;
+        s_slab_ready = 0;
+    }
     return rc;
 }
 
@@ -838,30 +843,224 @@ static int loft_body(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, const
         for (q = 0; q < x.ns; ++q)
             x.smp[q].wl = x.smp[q].wr = 1.0f;
     }
-    if (s_ldv.fam->taper)
-        s_ldv.fam->taper(&x); /* a ramp's narrowing (hiway.c) */
-    if (loft_profile(&x) != 0)
-        return -1;
-    tq = prof_now(), net_prof_add(NET_PROF_PROFILE, tq - tp), tp = tq;
+    /*  The loft stops here.  What is left of it -- the narrowing, the
+     *  profile, the works, the record and the slab -- is a stage the
+     *  scripts may answer, so the drive walks them one at a time with
+     *  everything the loft has worked out still standing. */
+    s_lx      = x;
+    s_lx_tp   = tp;
+    s_lx_live = 1;
+    return 0;
+}
+
+/*  A primitive that leaves a reading of its own for the rule the drive
+ *  asks next: a deck's profile stage measures the deck's elevation, and
+ *  that is what the rule is handed rather than the strip. */
+static void       *s_stage_obj;
+static const char *s_stage_kind;
+
+void net_stage_hand(void *obj, const char *kind)
+{
+    s_stage_obj = obj, s_stage_kind = kind;
+}
+
+void *net_stage_taken(const char **kind)
+{
+    *kind = s_stage_kind;
+    return s_stage_obj;
+}
+
+/*  The loft in hand, for a stage a rule answers: the same record the
+ *  loft's own stages read. */
+Loft *net_loft_working(void)
+{
+    return s_lx_live ? &s_lx : NULL;
+}
+
+/*  THE TAPER, where a ramp narrows toward the road it meets (hiway.c).
+ *  Answers the rule that settles it, or nothing where the pipeline's own
+ *  primitive already has. */
+const char *net_loft_taper(void)
+{
+    if (!s_lx_live || !net_family_has(s_ldv.fam, NH_TAPER))
+        return NULL;
+    net_family_taper(s_ldv.fam, &s_lx);
+    return net_family_stage_rule(s_ldv.fam, NH_TAPER);
+}
+
+/*  THE PROFILE: where the strip's stations sit.  A family that declares
+ *  one of its own is asked for it; every other corridor ramps between
+ *  the altitudes of the nodes at its ends, which is arc.rules.ground's. */
+const char *net_loft_profile(GroundFan **g)
+{
+    *g = NULL;
+    net_stage_hand(NULL, NULL); /* whatever the last strip's primitive left is not this one's */
+    if (!s_lx_live)
+        return NULL;
+    if (loft_profile_pre(&s_lx) != 0)
+        return NULL;
+    if (net_family_has(s_ldv.fam, NH_PROFILE))
+    {
+        const char *kind;
+        net_family_profile(s_ldv.fam, &s_lx);
+        /*  A primitive that settled the stage on its own -- a deck too
+         *  short to shape -- leaves nothing for a rule to be asked. */
+        if (net_family_stage_primitive(s_ldv.fam, NH_PROFILE) && net_stage_taken(&kind) == NULL)
+            return NULL;
+        return net_family_stage_rule(s_ldv.fam, NH_PROFILE);
+    }
+    loft_ground_fan(&s_lx, &s_lx_ground);
+    *g = &s_lx_ground;
+    return "ground";
+}
+
+/*  WHAT THE PROFILE STAGE LEFT until its own rule had answered: a deck
+ *  reads what its ramps took from it only once its heights are settled. */
+const char *net_loft_dropped(void)
+{
+    net_stage_hand(NULL, NULL);
+    if (!s_lx_live || !net_family_has(s_ldv.fam, NH_PROFILE))
+        return NULL;
+    if (net_family_profile_done(s_ldv.fam, &s_lx) != 0)
+        return NULL;
+    return net_family_stage_rule_after(s_ldv.fam, NH_PROFILE);
+}
+
+/*  THE WORKS: the piers and the like a deck stands on, before the slab
+ *  (hiway.c).  The profile is settled by the time this runs, so what it
+ *  leaves behind -- the ground's own line -- is taken up here. */
+const char *net_loft_works(void)
+{
+    double tq;
+    if (!s_lx_live)
+        return NULL;
+    if (loft_profile_post(&s_lx) != 0)
+        return NULL;
+    tq = prof_now(), net_prof_add(NET_PROF_PROFILE, tq - s_lx_tp), s_lx_tp = tq;
     if (!s_ldv.records_only)
-        loft_note(&x); /* what it is, for the inspector, before anything of it is drawn */
-    if (s_ldv.fam->works && s_ldv.fam->works(&x) != 0)
-        return -1; /* piers and the like, before the slab (hiway.c) */
-    tq = prof_now(), net_prof_add(NET_PROF_DECK_WORKS, tq - tp), tp = tq;
-    if (loft_record(&x) != 0)
+        loft_note(&s_lx); /* what it is, for the inspector, before anything of it is drawn */
+    if (!net_family_has(s_ldv.fam, NH_WORKS))
+        return NULL;
+    net_family_works(s_ldv.fam, &s_lx);
+    return net_family_stage_rule(s_ldv.fam, NH_WORKS);
+}
+
+/*  THE RECORD: what the strip leaves for the traffic and the passes that
+ *  read it, the furniture beside it and the corridor surface under it.
+ *  The slab follows, and it is the only stage that draws the carriageway
+ *  -- so the loft ends with everything it worked out still standing and
+ *  the strip composed from outside. */
+/*  THE RECORD: what the strip leaves for the traffic and the passes that
+ *  read it -- a road's graph edge and its two footways, a rail's track,
+ *  a deck's edge under its own class (road.c, rail.c, hiway.c).  The
+ *  grading pass records nothing: it lays the corridor and no more. */
+const char *net_loft_record(void)
+{
+    double tq;
+    if (!s_lx_live)
+        return NULL;
+    tq = prof_now(), net_prof_add(NET_PROF_DECK_WORKS, tq - s_lx_tp), s_lx_tp = tq;
+    if (grade_only(g_dev.grade_loft))
+        return NULL;
+    if (s_lx.ns < 2 || !net_family_has(s_ldv.fam, NH_RECORD))
+        return NULL;
+    net_family_record(s_ldv.fam, &s_lx);
+    return net_family_stage_rule(s_ldv.fam, NH_RECORD);
+}
+
+/*  THE FURNITURE beside the strip: a road's lamps, a railway's signs and
+ *  signals.  Where each of them stands along the strip is the rule's;
+ *  the walk that turns a distance into a place on the map is not. */
+const char *net_loft_furniture(void)
+{
+    s_lx_furn_rule = NULL;
+    if (!s_lx_live || grade_only(g_dev.grade_loft))
+        return NULL;
+    net_family_record_done(s_ldv.fam, &s_lx);
+    if (!net_family_has(s_ldv.fam, NH_FURNITURE))
+        return NULL;
+    net_family_furniture(s_ldv.fam, &s_lx);
+    s_lx_furn_rule = net_family_stage_rule(s_ldv.fam, NH_FURNITURE);
+    return s_lx_furn_rule;
+}
+
+int net_loft_recorded(void)
+{
+    double tq;
+    if (!s_lx_live)
+        return 0;
+    s_lx_live = 0;
+    if (grade_only(g_dev.grade_loft))
+    {
+        if (loft_record_surface(&s_lx) != 0) /* the grading pass: the corridor and nothing else */
+            return -1;
+        s_slab_tp = s_lx_tp;
+        return 0;
+    }
+    if (net_family_furniture_done(s_ldv.fam, &s_lx) != 0)
         return -1;
-    tq = prof_now(), net_prof_add(NET_PROF_RECORD, tq - tp), tp = tq;
+    if (loft_record_surface(&s_lx) != 0)
+        return -1;
+    tq = prof_now(), net_prof_add(NET_PROF_RECORD, tq - s_lx_tp), s_lx_tp = tq;
+    /*  The slab's own time runs from the end of the record, not from
+     *  wherever the composer is reached. */
+    s_slab_tp = s_lx_tp;
     if (s_ldv.records_only)
         return 0; /* nothing of it is drawn this build */
-    if (loft_prof_dump(&x) != 0)
+    if (loft_prof_dump(&s_lx) != 0)
         return -1;
-    {
-        int rc = loft_slab(&x);
-        tq     = prof_now(), net_prof_add(NET_PROF_SLAB, tq - tp);
-        if (s_ldv.fam == &net_hiway)
-            net_prof_add(NET_PROF_DECK_SLAB, tq - tp);
-        return rc;
-    }
+    s_slab_ready        = 1;
+    s_slab_x            = s_lx;
+    s_slab_records_only = s_ldv.records_only;
+    return 0;
+}
+
+/*  The strip the loft just worked out, for whoever composes it: the same
+ *  record the loft's own stages read, still standing.  Answers 0 where
+ *  the loft drew nothing worth composing. */
+Loft *net_loft_strip(void)
+{
+    return s_slab_ready && net_loft_draws() ? &s_slab_x : NULL;
+}
+
+/*  And the slab itself, once it is composed: the profile the pass keeps
+ *  is the slab's, so it is closed here rather than by the composer. */
+void net_loft_slab_done(double tp)
+{
+    double tq = prof_now();
+    net_prof_add(NET_PROF_SLAB, tq - tp);
+    if (s_ldv.fam == net_hiway)
+        net_prof_add(NET_PROF_DECK_SLAB, tq - tp);
+    s_slab_ready = 0;
+}
+
+/*  Whether the slab is drawn at all: the grading pass lays no triangles. */
+int net_loft_draws(void)
+{
+    return !grade_only(g_dev.grade_loft);
+}
+
+/*  The strip the loft finished, for the drive to lay the fitted line
+ *  over the world it made -- arc.rules.curves, from the same stations
+ *  and pieces the strip itself is laid from -- when the tuning window
+ *  asks to see it.  Nothing is shown of a strip this build draws no part
+ *  of, and the grading pass draws none of them. */
+Loft *net_loft_curves(void)
+{
+    if (!s_slab_ready || s_slab_records_only || s_tune.show_curves <= 0.5f || s_pass == 1)
+        return NULL;
+    return &s_slab_x;
+}
+
+/*  And the strip's shape closed, once the drive has composed it: the
+ *  profile the pass keeps is the slab's, so it is counted here. */
+int net_loft_close(void)
+{
+    if (s_slab_ready)
+        net_loft_slab_done(s_slab_tp);
+    shape_close(s_slab_sh);
+    s_slab_sh = SHAPE_NONE;
+    return 0;
 }
 
 /*  The strip is one width in the world whatever direction it runs; the

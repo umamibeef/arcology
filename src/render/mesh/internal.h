@@ -9,6 +9,7 @@
 #ifndef R_MESH_INT_H
 #define R_MESH_INT_H
 
+#include "materials.h" /* GENERATED from mesh/materials.def: the material numbers */
 #include "mesh/mesh.h"
 
 #include <math.h>
@@ -54,32 +55,9 @@ enum
 #define GRID (R_MAP + 1)
 /* touches water, the ground elsewhere    */
 
-#define MAT_GROUND   0.0f
-#define MAT_ENG_WALL 1.0f    /* a retaining wall of coursed blocks          */
-#define MAT_SEDIMENT 2.0f    /* the map edge's cut, layers of sediment      */
-#define MAT_WATER    3.0f    /* the water column in that cut, an aquarium   */
-#define MAT_SEABED   4.0f    /* the floor under the water, seen through it  */
-#define MAT_EARTH    5.0f    /* a natural bank                              */
-#define MAT_SURFACE  6.0f    /* the water's surface; vertical, a cascade    */
-#define MAT_ROAD     7.0f    /* a road strip on the surface: col.r across,  */
                              /* -1..1, col.g along, in tiles                 */
-#define MAT_PROP  8.0f       /* street furniture: a traffic light's pole     */
-#define MAT_LAMP  9.0f       /* its lamp: col.r the junction's phase         */
-#define MAT_ZEBRA 10.0f      /* a crosswalk across a junction's arm           */
-#define MAT_RAIL  11.0f      /* a railway: two rails on ties, col.r across    */
-#define MAT_WALK  13.0f      /* the sidewalk: a road tile paved to its edges  */
-#define MAT_SKIRT 12.0f      /* a raised road's works: its embankment, and a  */
                              /* viaduct's fascia, parapet and bents; blocks   */
-#define MAT_RAIL_X     14.0f /* a rail across a road: the rails alone, flush in the crossing surface */
-#define MAT_VEHICLE    15.0f /* a train car or a road car: col.r the paint, col.g the shade  */
-#define MAT_XPANEL     16.0f /* a level crossing's surface: rubber panels across both tracks     */
-#define MAT_ZONE       20.0f /* the map view's zone tint, drawn only looking down */
-#define MAT_HILITE     20.5f /* a show-curves ground highlight: col.r the tint, blended, any view */
-#define MAT_HIWAY      19.0f
-#define MAT_HIWAY_LANE 19.3f /* a ramp lane: drawn as the deck's outer lane, pulled a hair nearer, so it wins over the road it forks from */ /* a freeway deck: two carriageways either side of a barrier */
-#define MAT_PIER       18.0f                                                                                                                 /* a viaduct's bent: behind the deck it carries, in */
                                                                                                                                              /* front of the ground it stands on                 */
-#define MAT_XAPPROACH 17.0f                                                                                                                  /* the road approaching a crossing: solid lines and the RXR stencil */
                                                                                                                                              /* depth, and no part of the surface              */
 
 /*  The tables and the field, defined in mesh/tile.c. */
@@ -119,6 +97,30 @@ typedef struct
     } nbr[4];
 } TileFan;
 
+/*  THE WHOLE BUILD, as the script that drives it sees one.  The order the
+ *  world is composed in is the script's -- which tiles, in what order,
+ *  and which of the network passes run at all -- and these are the
+ *  primitives it composes from.  There is no C loop behind it. */
+typedef struct
+{
+    RMesh             *m;
+    const RCity       *c;
+    const RAtlas      *a;
+    const RAtlasLevel *l;
+    uint8_t            mask_bit;
+    int                pass;                    /* 1 the grading pass, 2 the building pass, 0 neither */
+    int                roads, underground;
+    int                rotated;
+    int                rc;      /* what a primitive that failed left behind */
+    ShapeId            shape;   /* the one the script has open, closed when it opens the next */
+} WorldFan;
+/*  One tile's ground and one tile's zone, GATHERED for the script that
+ *  composes them; 0 where this build wants no such tile.  Neither draws
+ *  anything and neither opens a shape: both are the script's. */
+int mesh_ground_fan(int32_t col, int32_t row, TileFan *out);
+int mesh_tint_fan(int32_t col, int32_t row, TileFan *out);
+int mesh_world_nets(WorldFan *w, int what);     /* 0 the lane model, 1 the networks, 2 the highways */
+
 extern const int     EDGE_A[4];
 extern const int     EDGE_B[4];
 extern const int     NBR_A[4];
@@ -142,6 +144,9 @@ typedef enum
 /*  The functions that cross a seam. */
 int     is_water(uint8_t xter);
 int32_t slope_code(uint8_t xter);
+int     structure_tint(uint8_t xbld); /* the map view's tint for a placed structure, or 0 for the zone under it (mesh/tile.c) */
+int     building_tile(uint8_t xbld);  /* a building proper: a footprint with an anchor (mesh/tile.c) */
+int     elevated_tile(uint8_t xbld);  /* a raised piece, ordered by the neighbour that owns the span */
 int32_t corner_gi(int32_t col, int32_t row, int k);
 int     saddle_lift(const RCity *c, int32_t idx);
 Kind    tile_top(const RCity *c, int32_t col, int32_t row, uint8_t mask_bit, float z[4]);

@@ -11,7 +11,6 @@
  *  `arc.settings()` answers a plain snapshot of both for printing. */
 #include "script.h"
 
-#if SC2K_LUA
 
 #include <string.h>
 
@@ -100,4 +99,3 @@ void api_tune_open(lua_State *L)
     lua_setfield(L, -2, "settings");
 }
 
-#endif

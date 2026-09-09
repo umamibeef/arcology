@@ -176,6 +176,15 @@ typedef struct
     int  want_theme;
     /*  the music: on or off, and the request to flip it */
     int music_on, want_music;
+    /*  LOADING.  Empty when nothing is.  The scripts are read in a few
+     *  milliseconds and the world they describe takes a second and a
+     *  half to build, so what this announces is the BUILD: the frame
+     *  carrying it is the last one drawn before the build blocks, and it
+     *  is what the window shows for as long as that takes. */
+    char loading[64];   /* what is happening, written ON the bar */
+    char loading_note[64]; /* the detail under it */
+    int  loading_step;  /* how far through the load, and how many steps it has */
+    int  loading_steps;
 } RUiState;
 
 /*  The thirty-four buttons of the tool palette, in the order the

@@ -37,7 +37,7 @@ import struct
 import sys
 import zlib
 
-GAME = os.environ.get("SC2K_CITIES") or os.path.expanduser(
+GAME = os.environ.get("ARC_CITIES") or os.path.expanduser(
     "~/Downloads/SimCity 2000® Collection")
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 

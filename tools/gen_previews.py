@@ -33,7 +33,7 @@ OUT = ROOT / "docs/img/preview"
 MANIFEST = OUT / "manifest.json"
 DOCS = ROOT / "docs"
 GAME = Path(os.environ.get(
-    "SC2K_CITIES",
+    "ARC_CITIES",
     Path.home() / "Downloads" / "SimCity 2000\u00ae Collection"))
 
 
@@ -254,7 +254,7 @@ def find_differences(city, crop, top=6, gap=24):
     from render_pixels import render as _render
     cx, cy, cw, ch = crop
     import tempfile
-    tmp = Path(tempfile.mkdtemp(prefix="sc2kdiff-"))
+    tmp = Path(tempfile.mkdtemp(prefix="arcdiff-"))
     run([str(city), "--zoom", "32",
          "--crop", "%d,%d,%d,%d" % crop], out=tmp / "mine.png")
     _w, _h, mine = read_rgb_png(tmp / "mine.png")
@@ -409,7 +409,7 @@ def main(reuse=False):
             png = OUT / (f["key"] + ".gif")
             cmd = ([sys.executable, str(HERE / "gen_anim.py"),
                     str(f["city"]), str(png), "--frames", str(f["anim"]),
-                    "--sc2k"] + [a for a in f["args"] if a != "--zoom"
+                    "--arcology"] + [a for a in f["args"] if a != "--zoom"
                                  and a != "32"])
             r = subprocess.run(cmd, capture_output=True, text=True)
             if r.returncode != 0 or not png.exists():

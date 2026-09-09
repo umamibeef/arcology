@@ -1,6 +1,8 @@
 /*  gpu/frame.c -- drawing one frame with the device gpu.c made.  Culling
  *  and ordering the instances, the camera uniforms, the passes, and the two
  *  ways out: to the window, and to a readback buffer. */
+#include "materials.h" /* GENERATED: the material numbers a script may add to */
+#include "script.h"
 #include "dump.h"
 #include "gpu/internal.h"
 #include "log.h"
@@ -84,6 +86,11 @@ typedef struct
     float sun[4];
     float params[4];
     float flags[4]; /* x: the pass (0 base, 1 sidewalks, 2 markings); y: the sidewalks on; the rest spare */
+    /*  The materials a script declared: a colour and a roughness each, in
+     *  the order arc.mat.define gave them, so material MAT_SCRIPT_BASE + k
+     *  is shaded from mats[k].  A built-in material has a branch of its
+     *  own instead and reads none of this. */
+    float mats[MAT_SCRIPT_MAX][4];
 } LightU;
 
 typedef struct
@@ -388,6 +395,16 @@ static void draw_mesh(RGpu *g, SDL_GPUCommandBuffer *cmd, SDL_GPURenderPass *rp,
         lu.flags[0]  = 0.0f;                                             /* the pass: 0 the base draw, 1 sidewalks, 2 markings */
         lu.flags[1]  = v->sidewalks ? 1.0f : 0.0f;
         lu.flags[2] = lu.flags[3] = 0.0f;
+        /*  The script's own materials, as it declared them.  Anything it
+         *  did not declare is left black and matt, which is what a
+         *  material nobody defined should look like. */
+        {
+            const float *m = NULL;
+            int          n = script_materials(&m);
+            memset(lu.mats, 0, sizeof lu.mats);
+            if (m && n > 0)
+                memcpy(lu.mats, m, sizeof lu.mats[0] * (size_t)(n < MAT_SCRIPT_MAX ? n : MAT_SCRIPT_MAX));
+        }
         SDL_GPUTextureSamplerBinding fb;
         fb.texture = g->shore;
         fb.sampler = g->linear;

@@ -194,7 +194,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--city", default="Bayview")
     ap.add_argument("--cities-dir", default=None,
-                    help="where the city files are (default: $SC2K_CITIES)")
+                    help="where the city files are (default: $ARC_CITIES)")
     ap.add_argument("--out", default=str(ROOT / "media" / "bayview.gif"))
     ap.add_argument("--frames", type=int, default=24)
     ap.add_argument("--step", type=int, default=45,
@@ -223,12 +223,12 @@ def main():
     cities = a.cities_dir
     if cities is None:
         import os
-        cities = os.environ.get("SC2K_CITIES")
+        cities = os.environ.get("ARC_CITIES")
         if cities:
             cities = str(Path(cities) / "Cities")
     if not cities:
         raise SystemExit("say where the cities are: --cities-dir, or set "
-                         "SC2K_CITIES to the game folder")
+                         "ARC_CITIES to the game folder")
     city = Path(cities) / a.city
     if not city.exists():
         raise SystemExit("no such city: %s" % city)

@@ -6,7 +6,7 @@
 
 #include "mesh/internal.h"
 #include "net/internal.h"
-#include "net/model.h"
+#include "geo/model.h"
 #include "script.h"
 #include "dump.h"
 #include "opt.h"
@@ -29,7 +29,7 @@ int marking_near_crossing(const RCity *c, V2 pos)
             if (cc < 0 || rr < 0 || cc >= R_MAP || rr >= R_MAP)
                 continue;
             b = c->xbld[rr * R_MAP + cc];
-            if (b >= 0x45u && b <= 0x48u)
+            if (net_rail_crossing(b))
                 return 1;
         }
     return 0;
@@ -113,7 +113,7 @@ static int rail_loft(JBox *jb, const Piece *pc, int np, float raise)
     d.node[1][0] = (int32_t)floorf(p.x), d.node[1][1] = (int32_t)floorf(p.y);
     d.raise        = raise;
     d.records_only = jb->records_only;
-    return loft(jb->m, jb->c, jb->mask_bit, jb->comp, &d, pc, np, total);
+    return net_box_loft_add(jb, &d, pc, np, total);
 }
 
 /*  An arm's two rails at its port: a rail's one lane has its in-port on
@@ -246,7 +246,7 @@ int on_crossing_panel(const RCity *c, int32_t tc, int32_t tr, float x, float y)
     const RCross *xr;
     uint8_t       b = c->xbld[tr * R_MAP + tc];
     float         dx, dy, across;
-    if (b != 0x45u && b != 0x46u)
+    if (!net_road_over_rail(b))
         return 0;
     xr = &s_cross[FAMX(F_ROAD)][tr * R_MAP + tc];
     if (!xr->have)
@@ -279,7 +279,8 @@ typedef struct
     float              cx, cy;                 /* the middle of the panel */
     float              ox, oy, lx, ly, rx, ry; /* the road's way through, the rail's, and across the road */
     float              rh, hb, h;              /* the panel's reach along the road, the road's half width, the mast's offset */
-    ScriptXing         fr;                     /* the crossing's own measurements, arc.rules.crossing_frame's */
+    float              sine;                   /* of the angle the road and the line cross at */
+    ScriptXing         fr;                     /* the crossing's own measurements, the script's */
 } Xing;
 
 /*  The crossing's frame: the road's way through and the rail's, from
@@ -329,8 +330,8 @@ static void xing_frame(Xing *x)
      *  panel's own lift and slot. */
     sinang = fabsf(ox * ly - oy * lx);
     memset(&x->fr, 0, sizeof x->fr);
-    script_rule_crossing_frame(col, row, sinang, ROAD_W, RAIL_W, &x->fr);
-    x->ns = ns;
+    x->sine = sinang;
+    x->ns   = ns;
     x->cx = cx;
     x->cy = cy;
     x->ox = ox;
@@ -339,9 +340,7 @@ static void xing_frame(Xing *x)
     x->ly = ly;
     x->rx = rx;
     x->ry = ry;
-    x->rh = x->fr.reach;
     x->hb = hb;
-    x->h  = x->fr.mast;
 }
 
 /*  The crossing in the mesh's list, for its gates. */
@@ -372,6 +371,16 @@ static int xing_record(Xing *x)
  *  frame covers too much at an angle: it buries the ballast either side of
  *  the road, when the gravel should run up to the asphalt and stop.  Four
  *  corners, each where a road edge meets a rail edge. */
+/*  The crossing being measured: gathered by the ask, finished by the
+ *  draw, with the script's own answers set between them. */
+static Xing    s_xing;
+static ShapeId s_xing_sh;
+
+/*  The panel's four corners, once they are worked out: the script lays
+ *  the panel over them. */
+static XingFan s_xing_fan;
+static int     s_xing_has_fan;
+
 static int xing_panel(Xing *x)
 {
     RMesh             *m        = x->m;
@@ -410,19 +419,19 @@ static int xing_panel(Xing *x)
     }
     if (ok)
     {
-        /*  The panel is the SCRIPT'S (arc.rules.crossing): the two
-         *  paths' own lines settle where its four corners are, and what
-         *  is laid over them is not the solver's. */
-        XingFan f;
-        int     k2;
-        f.m = m, f.c = c, f.mask_bit = mask_bit;
+        /*  The two paths' own lines settle where the panel's four
+         *  corners are.  What is LAID over them is the script's, so the
+         *  corners are handed over rather than drawn on. */
+        XingFan *f = &s_xing_fan;
+        int      k2;
+        f->m = m, f->c = c, f->mask_bit = mask_bit;
         for (k2 = 0; k2 < 4; ++k2)
         {
-            f.q[k2][0] = q[k2].x, f.q[k2][1] = q[k2].y;
-            f.ground[k2] = surface_at_world(c, mask_bit, q[k2].x, q[k2].y);
+            f->q[k2][0] = q[k2].x, f->q[k2][1] = q[k2].y;
+            f->ground[k2] = surface_at_world(c, mask_bit, q[k2].x, q[k2].y);
         }
-        f.order = order, f.lift = x->fr.lift, f.slot = x->fr.slot;
-        script_rule_object("crossing_panel", "panel", &f);
+        f->order = order, f->lift = x->fr.lift, f->slot = x->fr.slot;
+        s_xing_has_fan = 1;
     }
     return 0;
 }
@@ -459,7 +468,7 @@ static float xing_road_limit(const Xing *x, float fx, float fy)
          *  out from the junction's middle, and past that the junction
          *  may have laid a crossing on the road as well; the carriageway
          *  a marking may be painted on starts beyond both. */
-        d -= *net_road.width * 0.5f + s_trim[FAMX(F_ROAD)][(nr * R_MAP + nc) * 4 + e] + net_cross_depth(F_ROAD, nc, nr, e);
+        d -= *net_road->width * 0.5f + s_trim[FAMX(F_ROAD)][(nr * R_MAP + nc) * 4 + e] + net_cross_depth(F_ROAD, nc, nr, e);
         return d < 0.0f ? 0.0f : d;
     }
     return lim;
@@ -470,52 +479,65 @@ static float xing_road_limit(const Xing *x, float fx, float fy)
  *  and where each stands is arc.rules.crossing_marks's; what is left
  *  here is the frame it is placed in, and the register a gate joins so
  *  the traffic can swing its arm. */
-static int xing_approaches(Xing *x)
+/*  ONE APPROACH of a crossing, gathered: where its middle is, which way
+ *  the road runs and which way across it, how far the bed reaches, how
+ *  far out the masts stand, and how far the road runs before a junction
+ *  owns it.  Answers 0 past the second approach.
+ *
+ *  The mesh is opened for the marks the script decides on; net_crossing_
+ *  place puts each of them where it said. */
+static int s_ap;
+
+int net_crossing_approach(int i, ScriptApproachAsk *out)
 {
-    RMesh       *m        = x->m;
-    const RCity *c        = x->c;
-    uint8_t      mask_bit = x->mask_bit;
-    float        order    = x->order;
-    int          ns       = x->ns;
-    float        cx       = x->cx;
-    float        cy       = x->cy;
-    float        ox       = x->ox;
-    float        oy       = x->oy;
-    int          ap, k;
-    for (ap = 0; ap < 2; ++ap)
-    {
-        /* the two road approaches, along the road's own line */
-        float          fx = ap ? -ox : ox, fy = ap ? -oy : oy;
-        /*  The driver's right on this approach.  East is DECREASING
-         *  column here, so the right hand of a direction d is
-         *  (d.y, -d.x) -- the other turn puts the gate and the stop line
-         *  across the oncoming lane. */
-        float          gx = fy, gy = -fx;
-        float          lim = xing_road_limit(x, fx, fy);
-        ScriptApproach mk[16];
-        int            n;
-        m->strip_class = 0.0f;
-        script_emit_open(m, c, mask_bit, order);
-        n = script_rule_crossing_marks(x->rh, x->h, lim, ROAD_W, cx, cy, fx, fy, gx, gy, mk, 16);
-        script_emit_close();
-        for (k = 0; k < n; ++k)
-        {
-            float px = cx - fx * mk[k].out + gx * mk[k].across;
-            float py = cy - fy * mk[k].out + gy * mk[k].across;
-            if (strcmp(mk[k].model, "gate") == 0)
-            {
-                /*  A gate is the traffic's as well as the mesh's: its
-                 *  standing parts are laid here and its arm swings from
-                 *  the crossing's own register. */
-                if (put_gate(m, c, mask_bit, order, px, py, fx, fy, ns) != 0)
-                    return -1;
-            }
-            else if (put_second_train_sign(m, c, mask_bit, order, px, py, -fx, -fy) != 0)
-                return -1;
-        }
-    }
-    return 0;
+    Xing        *x  = &s_xing;
+    const RCity *c  = x->c;
+    float        cx = x->cx, cy = x->cy;
+    float        fx, fy, gx, gy;
+    if (i < 0 || i > 1)
+        return 0;
+    fx = i ? -x->ox : x->ox;
+    fy = i ? -x->oy : x->oy;
+    /*  The driver's right on this approach.  East is DECREASING column
+     *  here, so the right hand of a direction d is (d.y, -d.x) -- the
+     *  other turn puts the gate and the stop line across the oncoming
+     *  lane. */
+    gx = fy, gy = -fx;
+    out->reach = x->rh, out->mast = x->h;
+    out->limit = xing_road_limit(x, fx, fy);
+    out->road  = ROAD_W;
+    out->x = cx, out->y = cy;
+    out->fx = fx, out->fy = fy;
+    out->gx = gx, out->gy = gy;
+    s_ap = i;
+    (void)c;
+    return 1;
 }
+
+/*  Where in the stack a crossing's marks stand, for the drive to open
+ *  the mesh at before it asks for them. */
+float net_crossing_order(void)
+{
+    return s_xing.order;
+}
+
+/*  One mark where the script put it: a gate arm across the road, or a
+ *  second-train sign facing the footway. */
+int net_crossing_place(const ScriptApproach *mk)
+{
+    Xing *x  = &s_xing;
+    float fx = s_ap ? -x->ox : x->ox;
+    float fy = s_ap ? -x->oy : x->oy;
+    float gx = fy, gy = -fx;
+    float px = x->cx - fx * mk->out + gx * mk->across;
+    float py = x->cy - fy * mk->out + gy * mk->across;
+    if (strcmp(mk->model, "gate") == 0)
+        return put_gate(x->m, x->c, x->mask_bit, x->order, px, py, fx, fy, x->ns);
+    return put_second_train_sign(x->m, x->c, x->mask_bit, x->order, px, py, -fx, -fy);
+}
+
+
+
 
 int build_crossing(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit, int32_t col, int32_t row, int second)
 {
@@ -536,19 +558,58 @@ int build_crossing(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_
      *  stands within three tiles along the line. */
     Xing    x;
     ShapeId sh;
-    int     rc;
     memset(&x, 0, sizeof x);
     x.m = m, x.c = c, x.l = l, x.mask_bit = mask_bit, x.col = col, x.row = row, x.second = second;
     x.idx   = row * R_MAP + col;
     x.order = tile_order(c, col, row, mask_bit);
     x.xr    = &s_cross[FAMX(F_ROAD)][x.idx];
     x.xl    = &s_cross[FAMX(F_RAIL)][x.idx];
-    /* the stages: the frame, the record, the panel, the approaches */
+    /*  The stages: the frame, then the record, the panel and the
+     *  approaches.  The frame is the SCRIPT'S and sits between them, so
+     *  this is where the crossing is handed over and taken back. */
     sh = shape_open("level crossing at %d,%d", (int)col, (int)row);
     xing_frame(&x);
-    rc = (xing_record(&x) != 0 || xing_panel(&x) != 0) ? -1 : xing_approaches(&x);
-    shape_close(sh);
-    return rc;
+    s_xing    = x;
+    s_xing_sh = sh;
+    return 0;
+}
+
+/*  What the script is told about the crossing it is being asked to
+ *  measure: the angle the two cross at, and the two widths. */
+void net_crossing_ask(int32_t *col, int32_t *row, float *sine, float *road, float *rail)
+{
+    *col = s_xing.col, *row = s_xing.row;
+    *sine = s_xing.sine, *road = ROAD_W, *rail = RAIL_W;
+}
+
+/*  And what it answered: how far the bed reaches, how far out the masts
+ *  stand, and the panel's width, lift and slot. */
+void net_crossing_frame(const ScriptXing *fr)
+{
+    s_xing.fr = *fr;
+    s_xing.rh = fr->reach;
+    s_xing.h  = fr->mast;
+}
+
+/*  The record, and the panel's four corners worked out from the two
+ *  paths: answers the corners for the script to lay the panel over, or 0
+ *  where the lines do not meet and there is no panel to lay. */
+const XingFan *net_crossing_panel(void)
+{
+    s_xing_has_fan = 0;
+    if (xing_record(&s_xing) != 0 || xing_panel(&s_xing) != 0)
+        return NULL;
+    return s_xing_has_fan ? &s_xing_fan : NULL;
+}
+
+/*  And the approaches: the masts, the stop lines and the signs, once the
+ *  panel they stand off is laid. */
+int net_crossing_approaches(void)
+{
+    script_emit_close();
+    shape_close(s_xing_sh);
+    s_xing_sh = SHAPE_NONE;
+    return 0;
 }
 
 /* ---- the rail as a family ------------------------------------------------ */
@@ -579,6 +640,13 @@ static void rail_traffic_lanes(const RLoft *d, int cls, float *lane_in, float *l
  *  distance along the strip into a place on the map, and the register a
  *  signal joins so its block can light it.  The signals show their
  *  block's occupancy and nothing more: the trains do not obey them. */
+static float      s_cross_at[64];
+static int        s_n_cross;
+static ScriptMark s_mark[192];
+static int        s_n_mark;
+
+/*  Where along the strip a road crosses it: the rule places the whistle
+ *  posts against these, and nothing is placed until it answers. */
 static int rail_furniture(Loft *x)
 {
     RMesh       *m        = x->m;
@@ -586,9 +654,9 @@ static int rail_furniture(Loft *x)
     uint8_t      mask_bit = x->mask_bit;
     Sample      *smp      = x->smp;
     int          ns       = x->ns;
-    float        cross[64];
-    ScriptMark   mk[192];
-    int          i, k, n, ncross = 0;
+    int          i, ncross = 0;
+    (void)m, (void)mask_bit;
+    s_n_mark = s_n_cross = 0;
     if (ns <= 2)
         return 0;
     /*  Where along the strip a road crosses it: the rule places the
@@ -601,10 +669,42 @@ static int rail_furniture(Loft *x)
         if (col < 0 || row < 0 || col >= R_MAP || row >= R_MAP || (col == pc2 && row == pr2))
             continue;
         b = c->xbld[row * R_MAP + col];
-        if (b == 0x45u || b == 0x46u)
-            cross[ncross++] = smp[i].s;
+        if (net_road_over_rail(b))
+            s_cross_at[ncross++] = smp[i].s;
     }
-    n = script_rule_rail_marks(x->total, x->pin1, x->pin0, cross, ncross, mk, 192);
+    s_n_cross = ncross;
+    return 0;
+}
+
+/*  Where along the strip a road crosses it, for the rule to place the
+ *  whistle posts against. */
+void net_rail_cross_ask(const float **cross, int *n)
+{
+    *cross = s_cross_at;
+    *n     = s_n_cross;
+}
+
+void net_rail_marks_are(const ScriptMark *mk, int n)
+{
+    s_n_mark = n < (int)(sizeof s_mark / sizeof s_mark[0]) ? n : (int)(sizeof s_mark / sizeof s_mark[0]);
+    if (s_n_mark > 0)
+        memcpy(s_mark, mk, sizeof s_mark[0] * (size_t)s_n_mark);
+}
+
+/*  And the walk that turns each mark's distance along the strip into a
+ *  place on the map, and the register a signal joins so its block can
+ *  light it. */
+static int rail_furniture_done(Loft *x)
+{
+    RMesh       *m        = x->m;
+    const RCity *c        = x->c;
+    uint8_t      mask_bit = x->mask_bit;
+    Sample      *smp      = x->smp;
+    int          ns       = x->ns;
+    ScriptMark  *mk       = s_mark;
+    int          k, n = s_n_mark;
+    if (ns <= 2)
+        return 0;
     for (k = 0; k < n; ++k)
     {
         float   sgn = mk[k].side, rx, ry;
@@ -639,48 +739,13 @@ static int rail_furniture(Loft *x)
     return 0;
 }
 
-/*  A line's one track each way, to the right of travel. */
-static int rail_lanes(int cls, float *off)
+/*  What this file lends the declarations: the rail's stages, under the
+ *  names scripts/families/rail.lua reaches them by. */
+void rail_primitives(void)
 {
-    (void)cls;
-    off[0] = 0.133f;
-    return 1;
+    net_hook_add(NH_BOX, "rail_box", (NetHookFn)rail_box);
+    net_hook_add(NH_RECORD, "rail_record", (NetHookFn)rail_record);
+    net_hook_add(NH_CROSSING, "level_crossing", (NetHookFn)build_crossing);
+    net_hook_add(NH_TRAFFIC, "rail_traffic", (NetHookFn)rail_traffic_lanes);
+    net_hook_add_split(NH_FURNITURE, "rail_signals", (NetHookFn)rail_furniture, (NetHookFn)rail_furniture_done, "rail_marks");
 }
-
-const NetFamily net_rail = {
-    "rail",
-    F_RAIL,
-    &s_tune.rail_w,
-    &s_tune.rail_rmin,
-    &s_tune.rail_rmax,
-    0.62f, /* the width the junction outline was tuned at */
-    MAT_RAIL,
-    LOFT_RAIL,
-    1,     /* the fit's family code */
-    0.05f, /* a rail box a hair over a road's */
-    0.12f, /* the shelf's grade ceiling: a line climbs gently */
-    0,     /* no curbs */
-    0,     /* no ramps */
-    0,     /* a building does not end a line */
-    0,     /* no caps */
-    0,     /* unclassed */
-    NULL,
-    rail_box,
-    rail_record,
-    build_crossing,
-    NULL,
-    NULL,
-    NULL,
-    NULL,
-    NULL,
-    rail_traffic_lanes,
-    rail_furniture,
-    NULL,
-    rail_lanes,
-    1.0f, /* track wires in white */
-    NET_LANE_ENDS_REVERSE,
-    2,    /* free ground beside the line the fit may use, tiles: a railway sweeps its corners across the field */
-    2.5f, /* the turnout: a junction reaches two tiles and a half along each straight arm, its branch along its own path */
-    "slot_rail", /* the ballast and ties lie UNDER the road works the line crosses */
-    0,           /* not a deck */
-};

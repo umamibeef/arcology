@@ -8,6 +8,20 @@ Scripting
 The road works are drawn from numbers and from rules. A script holds both,
 so a change to either is a file save and not a compile.
 
+.. important::
+
+   **The scripts are where the world is imagined.** Lua reads the
+   simulation, decides what the world contains, and asks C to draw it in
+   3D with primitives. C offers the simulation to be read, fits curves,
+   lofts profiles and puts geometry; it decides nothing about the look.
+
+   A decision that lives in C is a decision nobody can iterate on. This
+   page describes how much of that division holds today, which is less
+   than the whole: the network walk, the corridor fit and the loft are
+   still entered from C rather than called from a script. The purpose at
+   the top of ``CLAUDE.md`` states the division that is being built
+   toward, and the goals under it say in what order.
+
 The scripts in ``scripts/`` are read at startup, with no flag, before the
 first mesh is built, and every folder under it is read too. They are not
 decoration and not a fallback: they are the only copy. ``geo.lua`` holds
@@ -22,6 +36,9 @@ at all.
 
    scripts/geo.lua              the numbers the road works share
    scripts/rules.lua            every decision
+   scripts/families/road.lua    one family: how a road is drawn
+   scripts/families/highway.lua
+   scripts/families/...
    scripts/models/signal.lua    one prop, its numbers and its shape
    scripts/models/gate.lua
    scripts/models/...
@@ -63,6 +80,9 @@ Everything is under one global, ``arc``.
        return's radius and smoothness.
    * - ``arc.rules``
      - Every decision the road works make. See below.
+   * - ``arc.family``
+     - ``define{...}`` declares a family -- one kind of line, and how it is
+       drawn. ``list()`` names the ones declared. See below.
    * - ``arc.city``
      - ``size``, ``tile(col, row)``, ``road_class(col, row)``.
    * - ``arc.mesh``
@@ -119,10 +139,11 @@ all. That is what keeps one path through the pipeline rather than two.
    another, the gates they wait at and the signals that blink. Asked once,
    so a car costs no call of its own.
 
-``control(col, row, arms, busy)``
-   A junction's control, one code an arm: 0 none, 1 stop, 2 signal.
-   ``arms[e + 1]`` is ``{class=, traffic=}`` for an arm that is there and
-   ``nil`` for one that is not.
+``control(at)``
+   A junction's control, one code an arm: 0 none, 1 stop, 2 signal. ``at``
+   carries ``col``, ``row``, ``links``, ``busy``, and ``arms`` where the
+   family measured its own: ``at.arms[e + 1]`` is ``{class=, traffic=}``
+   for an arm that is there and ``nil`` for one that is not.
 
 ``crossing_at(mouth)``
    Whether one arm's mouth carries a crosswalk and how deep a band it asks
@@ -186,14 +207,108 @@ all. That is what keeps one path through the pipeline rather than two.
    through the same emitter, the shape layer and the checks included, and
    they draw only while a prop rule is running.
 
+``piece_tiles()``
+   What the city's save FILE means. Answers a table keyed by the building
+   byte: ``{family=, piece=}`` names the network a byte carries and its
+   place in the shared fifteen-piece layout, and ``second`` names the
+   other family a crossing carries on the other axis. Asked once a
+   reading and kept, since every tile is looked up in it twice.
+
+   .. caution::
+
+      A byte no family claims falls through to the BUILDING path and is
+      given a levelled pad. So a rail id left out here does not merely go
+      undrawn: it becomes a raised slab with the track on top of it and
+      the ground either side untouched.
+
+   Its neighbours are the same shape and answer the same kind of
+   question: ``road_tiles`` (which bytes a ramp or a lane may join),
+   ``hiway_tiles`` (which are deck, ramp, on-ramp, curve, interchange or
+   crossing, and which way each runs), ``open_tiles`` (ground a fit may
+   sweep across), ``standing_tiles`` (what is in a viaduct's way),
+   ``carrier_tiles`` and ``rail_crossing_tiles``.
+
+``water_tiles()``, ``slope_codes()``, ``built_tiles()``, ``sloped_tiles()``, ``building_tiles()``, ``elevated_tiles()``, ``levelling_tiles()``, ``saddle_tiles()``, ``structure_tints()``
+   What a tile's own two bytes mean to the GROUND
+   (``scripts/ground_tiles.lua``), each keyed by the byte and each looked
+   up at every tile of the map: whether the terrain byte is water, what
+   slope it carries, whether anything stands on the tile, whether the
+   piece on it follows the slope, whether it is a building with a
+   footprint and an anchor, whether it is a raised piece ordered by its
+   neighbour, whether a corridor may level it, whether the saddle lift
+   applies, and what the map view tints a placed structure.
+
+   ``slope_codes`` and ``structure_tints`` answer a NUMBER for each byte;
+   the rest answer yes or no.
+
+   .. note::
+
+      There is no ladder in C behind any of them. With no rule nothing is
+      water, nothing is built and nothing slopes, which is what a run
+      that cannot find the scripts draws.
+
+``world(w)``
+   **The drive.** The renderer runs a pass and hands it here, and what
+   happens in that pass is decided in Lua: which tiles are composed, in
+   what order, and which of the network passes run at all. There is no
+   loop in C behind it.
+
+   ``w:info()`` gives ``size``, ``pass`` (1 lays the networks out and
+   records the surface their corridors want, 2 builds the world with
+   those corridors notched in), ``roads`` and ``underground``. The
+   primitives are ``w:wanted(col, row)`` -- whether this build wants the
+   tile at all, which an edit's build answers false for most of the map
+   -- then ``w:ground(col, row)``, ``w:tint(col, row)``, and the three
+   network passes ``w:lanes()``, ``w:networks()`` and ``w:highways()``.
+
+   Answer true when you composed the world. A build whose ``world`` rule
+   is missing, or answers false, is abandoned and says so: there is
+   nothing behind it to fall back to, and an empty city reported as a
+   success would be worse than no city at all.
+
+``incr_reach()``
+   How far an EDIT reaches, in tiles (``scripts/incr.lua``). The mesh is
+   kept in chunks, so a rebuild after an edit replaces only the chunks
+   whose geometry changed, and which those are is a closure over what
+   depends on what: ``band_fit``, ``ramp``, ``band_ground``,
+   ``band_ramp``, ``band_margin`` and ``segment``. Asked once a build.
+
+   .. caution::
+
+      These are a floor, not a fit. Too far costs build time and draws
+      the same thing twice. Too NEAR leaves the last build's triangles
+      standing in a chunk that should have been redrawn, and nothing in
+      the build says so -- the mesh is sound, the counts are plausible,
+      and the city is simply wrong where the edit reached and the closure
+      did not. ``ctest -R incremental_rebuild`` is what catches it.
+
+   With no rule at all every chunk is built again: slow and correct,
+   rather than fast and wrong.
+
 ``gate(g)``
    Where a level crossing's gate arm stands after ``g.dt`` seconds:
    ``g.angle`` is where it is now, 0 flat across the road, and ``g.near``
    how far along the rail's axis the nearest train car is.
 
-Every rule but ``gate`` and ``gate_arm`` is called while the mesh is
-built, a few thousand times a build. Those two run once a frame for each
-crossing, which is a few dozen.
+``car_follow(c)``, ``car_hold(c)``
+   How fast a car may go. ``car_follow`` answers for the ``gap`` to the
+   car ahead of it; ``car_hold`` for whatever holds it -- a signal, a
+   stop sign or a crossing's gates -- ``c.ahead`` away, with ``c.line``
+   the distance short of it that a car stops at.
+
+.. caution::
+
+   **Nothing a rule answers may depend on a frame.** ``g.dt`` and
+   ``c.step`` are the world's own beat, a sixtieth of a second. A frame
+   adds the real time it took to what the world owes and runs whole beats
+   for it, at most eight after a stall, so how often the picture is drawn
+   changes nothing a car or a gate does.
+
+Every rule but ``gate``, ``car_follow``, ``car_hold`` and ``gate_arm`` is
+called while the mesh is built, a few thousand times a build. The first
+three are asked on the world's beat, one for each crossing and one for
+each car; ``gate_arm`` draws the arm where the beat has left it, once a
+frame for each crossing, which is a few dozen.
 
 A rule that cannot end is stopped after two hundred thousand steps and
 reported like any other fault, so a loop saved by mistake costs a message
@@ -203,9 +318,9 @@ rather than the program.
 
    arc.geo.cross_deep = 0.30
 
-   arc.rules.control = function (col, row, arms, busy)
+   arc.rules.control = function (at)
        local c = {0, 0, 0, 0}
-       for e = 1, 4 do if arms[e] then c[e] = 2 end end
+       for e = 1, 4 do if at.arms[e] then c[e] = 2 end end
        return c
    end
 
@@ -386,6 +501,81 @@ which is exactly what the renderer walks.
 The linter reads every model file, runs every build function, and reports
 a piece whose measurement is not a number.
 
+Families
+--------
+
+A **family** is one kind of line and everything about how it is drawn: how
+wide it is, which material it wears, which radii the fit may use, what it
+builds where two of its lines meet, and which of the loft's stages it
+supplies. The road, the railway, the freeway deck and the power line are
+four of them, and there is no table of them in C. Each is a file:
+
+.. code-block:: lua
+
+   arc.family.define{
+       name    = "road",
+       tiles   = "road",       -- the tile family it answers for
+       answers = true,         -- and it is what a road tile means
+       walk    = 0,            -- the walk visits it first
+
+       width = "road_w",       -- the live knobs, BY NAME, so a strip
+       rmin  = "road_rmin",    -- reads the value the window is showing
+       rmax  = "road_rmax",
+
+       material = arc.mat.road,
+       loft     = "road",      -- road, rail, deck or ramp
+       slot     = "slot_strip",
+
+       curbs = true, ramps = true, caps = true, classed = true,
+       lane_paint = 5.0, lane_ends = "cap",
+
+       stages = {
+           control   = "road_control",
+           box       = "road_box",
+           record    = "road_record",
+           traffic   = "road_lanes",
+           furniture = "road_lamps",
+       },
+   }
+
+Every stage is **named**, not pointed at. A name the pipeline has registered
+as a primitive binds to that C function; any other name binds to
+``arc.rules.<name>``, which is handed the thing the stage works on. So a
+stage can be moved into Lua one at a time, and the road's ``traffic`` stage
+already is:
+
+.. code-block:: lua
+
+   function arc.rules.road_lanes(cls)
+       local off = arc.rules.lanes("road", cls)
+       local inner = off and off[1] or 0.0
+       return inner, off and off[2] or inner
+   end
+
+The eleven stages are ``control``, ``box``, ``record``, ``crossing``,
+``flies``, ``taper``, ``profile``, ``works``, ``traffic``, ``furniture``
+and ``tile``.
+
+.. note::
+
+   Four of them must name a primitive. ``box``, ``crossing`` and ``tile``
+   work on a mesh a rule has no handle on; ``flies`` is asked at every
+   station of every strip, in the middle of the grading, where the drive
+   cannot stand between. A declaration that names anything else there is
+   refused and says so.
+
+Another way of drawing a highway is therefore another file in
+``scripts/families``: give it a name of its own, name your own rules for the
+stages you want to answer yourself, and leave the rest naming the
+primitives. Nothing is compiled.
+
+.. caution::
+
+   A name nothing answers to is a **fault**, not a default. A knob, a loft
+   kind, a tile family or a lane ending the C has never heard of stops the
+   declaration and the family never appears. A family half declared would
+   draw a city half wrong and say nothing about it.
+
 The linter
 ----------
 
@@ -419,9 +609,11 @@ reads every script the repository ships.
 The house comment rules hold for a script as they do for the code it drives,
 and ``tools/comment_lint.py`` reads ``.lua`` along with the rest.
 
-Building without it
--------------------
+There is no building without it
+-------------------------------
 
-``-DSC2K_LUA=OFF`` leaves Lua out. Every rule then answers "the C decides",
-which is what an unset rule answers anyway, so the two builds draw the same
-city. Lua 5.4 is fetched by CMake, as SDL3, spdlog and Dear ImGui are.
+Lua 5.4 is fetched by CMake, as SDL3, spdlog and Dear ImGui are, and
+there is no switch to leave it out. The geometry, the decisions, the
+families and the drive are all in the scripts: a build without them would
+not be a smaller city, it would be no city. Nothing calls into the layer
+through a stub any more, and `script.h` is the whole of its face.

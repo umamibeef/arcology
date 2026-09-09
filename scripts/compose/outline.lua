@@ -39,28 +39,28 @@ arc.rules.outline = function (o)
 
     --  The arms, in the order the tile's edges gave them.
     local arm = {}
-    for i = 1, n do
+    for i = 0, n - 1 do
         local ox, oy, dx, dy, ang, e = o:arm(i)
         arm[i] = {ox = ox, oy = oy, dx = dx, dy = dy, ang = ang, e = e}
     end
 
     --  By angle, so "the next arm round" means what it says.  An
     --  insertion sort: there are never more than four.
-    for i = 2, n do
+    for i = 1, n - 1 do
         local j, t = i, arm[i]
-        while j > 1 and arm[j - 1].ang > t.ang do
+        while j > 0 and arm[j - 1].ang > t.ang do
             arm[j] = arm[j - 1]
             j = j - 1
         end
         arm[j] = t
     end
-    o:order(arm)
+    o:order(arm, n)
 
     --  The corner between each arm and the next: where one's left edge
     --  meets the other's right, held within the tile.
     local corner, met = {}, {}
-    for i = 1, n do
-        local a, b = arm[i], arm[i % n + 1]
+    for i = 0, n - 1 do
+        local a, b = arm[i], arm[(i + 1) % n]
         --  arm i's left edge, and arm j's right
         local a0x = f32(a.ox + f32(-a.dy * d.half))
         local a0y = f32(a.oy + f32(a.dx * d.half))
@@ -98,9 +98,9 @@ arc.rules.outline = function (o)
     local trim = {}
     for e = 0, 3 do trim[e] = d.half end
     local cap = f32(d.cap * d.grow)
-    for i = 1, n do
+    for i = 0, n - 1 do
         local a = arm[i]
-        local ca, cb = corner[(i - 2) % n + 1], corner[i]
+        local ca, cb = corner[(i - 1) % n], corner[i]
         local ta = f32(f32(ca.x - a.ox) * a.dx + f32(ca.y - a.oy) * a.dy)
         local tb = f32(f32(cb.x - a.ox) * a.dx + f32(cb.y - a.oy) * a.dy)
         local t = math.max(0, math.min(cap, math.max(ta, tb)))
@@ -114,8 +114,8 @@ arc.rules.outline = function (o)
     --  along each edge.  Each arm's mouth moves out to its corner's
     --  tangent point, under the same cap, and the ring below rounds the
     --  corner with the arc between them.
-    for i = 1, n do
-        local a, b = arm[i], arm[i % n + 1]
+    for i = 0, n - 1 do
+        local a, b = arm[i], arm[(i + 1) % n]
         local x = corner[i]
         if d.curbs and n >= 2 and met[i] then
             local phi = arc.corner_angle(a.dx, a.dy, b.dx, b.dy)
@@ -149,8 +149,8 @@ arc.rules.outline = function (o)
 
     --  The ring: each arm's mouth, right hand first, then whatever the
     --  boundary does at the corner beyond it.
-    for i = 1, n do
-        local a, b = arm[i], arm[i % n + 1]
+    for i = 0, n - 1 do
+        local a, b = arm[i], arm[(i + 1) % n]
         local t = trim[a.e]
         local pix, piy = -a.dy, a.dx
         local mrx = f32(a.ox + f32(a.dx * t) - f32(pix * d.half))

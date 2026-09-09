@@ -23,7 +23,7 @@ arc.rules.walk_curves = function (b)
     local wide = arc.rules.family({name = "road"}).strip.line_wide
     local n = b:count()
     if n >= 2 and d.band ~= "crossing" then
-        for k = 1, n - 1 do
+        for k = 0, n - 2 do
             local a0x, a0y, a1x, a1y, za = b:at(k)
             local b0x, b0y, b1x, b1y, zb = b:at(k + 1)
             b:wire(0.5 * (a0x + a1x), 0.5 * (a0y + a1y),

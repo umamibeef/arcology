@@ -7,12 +7,12 @@
 #
 #  One executable comes out: `arcology`.  It is the game, and it is also
 #  the verification driver, the atlas dumper and the software rasteriser
-#  -- see sc2k/render/a_main.c for how it decides which.
+#  -- see src/render/a_main.c for how it decides which.
 #
 #  To run the verification suite, point the build at your own copy of the
 #  game (nothing in this repository can stand in for it):
 #
-#      cmake -B build -DSC2K_CITIES="/path/to/SimCity 2000 Collection"
+#      cmake -B build -DARC_CITIES="/path/to/SimCity 2000 Collection"
 #      ctest --test-dir build
 # ====================================================================
 cmake_minimum_required(VERSION 3.16)
@@ -21,7 +21,7 @@ project(arcology_all
         DESCRIPTION "Arcology -- the SimCity 2000 simulation, reconstructed"
         LANGUAGES C CXX)
 
-#  Put the binary at build/arcology rather than build/sc2k/render/arcology.
+#  Put the binary at build/arcology rather than build/src/render/arcology.
 #  Two dozen checkers in tools/ look for it there.
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
@@ -57,13 +57,13 @@ endif()
 #  There is no CI that can regenerate them -- rendering needs the game's
 #  own art, which cannot be published -- so it is a target you run.
 find_package(Python3 COMPONENTS Interpreter QUIET)
-if(Python3_FOUND AND SC2K_CITIES)
+if(Python3_FOUND AND ARC_CITIES)
     add_custom_target(showcase
-        COMMAND ${CMAKE_COMMAND} -E env "SC2K_CITIES=${SC2K_CITIES}"
+        COMMAND ${CMAKE_COMMAND} -E env "ARC_CITIES=${ARC_CITIES}"
                 ${Python3_EXECUTABLE}
                 ${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_showcase.py
                 --frames 16 --out ${CMAKE_CURRENT_SOURCE_DIR}/media/bayview.gif
-        COMMAND ${CMAKE_COMMAND} -E env "SC2K_CITIES=${SC2K_CITIES}"
+        COMMAND ${CMAKE_COMMAND} -E env "ARC_CITIES=${ARC_CITIES}"
                 ${Python3_EXECUTABLE}
                 ${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_showcase.py
                 --frames 12 --compare
@@ -74,7 +74,7 @@ if(Python3_FOUND AND SC2K_CITIES)
 endif()
 
 # ---- verification ---------------------------------------------------
-#  The format check lives in sc2k/CMakeLists.txt because it is about the
+#  The format check lives in src/CMakeLists.txt because it is about the
 #  sources; `verify` lives here because it needs the executable.
 #  No printf in the renderer or the app: a message goes through the log
 #  (R_ERR/R_WARN/R_NOTE/R_DBG) and a dump or a report line through dumpf,
@@ -83,12 +83,20 @@ endif()
 enable_testing()
 add_test(NAME no_printf COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tools/no_printf.sh)
 add_test(NAME comment_style COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tools/comment_style.py)
+add_test(NAME script_api COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tools/script_api.py)
+add_test(NAME materials_fresh COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_materials.py --check)
 
-set(SC2K_CITIES "" CACHE PATH "Folder holding the shipped city files")
-if(SC2K_CITIES)
+#  The simulation is checked against the original's own code by the
+#  tools under `tools/`, and those checks are slow: they run a 68k
+#  interpreter over a corpus of cities.  Nothing in the renderer can
+#  move a simulation layer, so they are off unless asked for.
+option(ARC_SIM_TESTS "Run the simulation's checks against the original" OFF)
+
+set(ARC_CITIES "" CACHE PATH "Folder holding the shipped city files")
+if(ARC_CITIES AND ARC_SIM_TESTS)
     enable_testing()
     add_test(NAME verify
-             COMMAND arcology --verify "${SC2K_CITIES}" "${SC2K_CITIES}/Cities")
+             COMMAND arcology --verify "${ARC_CITIES}" "${ARC_CITIES}/Cities")
     set_tests_properties(verify PROPERTIES
         PASS_REGULAR_EXPRESSION "codec round-trip, lossless[^\n]*100\\.00%")
 endif()
@@ -96,11 +104,11 @@ endif()
 #  .arco has to carry a city without losing anything.  This needs no game
 #  folder -- the repository's own cities are the corpus.
 find_package(Python3 COMPONENTS Interpreter QUIET)
-if(Python3_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/cities")
+if(Python3_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/cities" AND ARC_SIM_TESTS)
     enable_testing()
     #  The year-end microsim pass, against $101AC.  Needs the oracle, so
     #  it only runs where the game folder is.
-    if(SC2K_CITIES)
+    if(ARC_CITIES)
         add_test(NAME microsim
                  COMMAND ${Python3_EXECUTABLE}
                          ${CMAKE_CURRENT_SOURCE_DIR}/tools/micro_check.py)

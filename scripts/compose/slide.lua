@@ -38,7 +38,7 @@ local MARGIN = 1.02
 --  the limit is walked.
 local SLACK = f32(1e-4)
 
-arc.rules.ramp_slide = function (sl)
+arc.rules.slide = function (sl)
     local d = sl:info()
 
     --  How far along the deck the descent may start.

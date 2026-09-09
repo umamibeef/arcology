@@ -17,14 +17,14 @@
 
 local geo = arc.geo
 
-arc.rules.lane_cross = function (x)
-    local n = x:info()
+arc.rules.cross = function (x)
+    local d = x:info()
 
-    for la = 1, n do
+    for la = 0, d.n - 1 do
         if x:open(la) then
             local best, bd
 
-            for lb = 1, n do
+            for lb = 0, d.n - 1 do
                 local off, dot, ahead, aside, dist = x:measure(la, lb)
                 if off and off <= geo.lane_cross_off and dot >= geo.lane_cross_dot then
                     --  Behind the end, off to one side, or further than

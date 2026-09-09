@@ -1,7 +1,7 @@
 /*  dev.c -- the verification driver and every developer mode.  It was
  *  called main.c and holds no main: `arcology` has one entry point in
  *  src/app, which dispatches here by mode name.  The file is the library
- *  the CMake target sc2kdev is named for.  The point of the reconstruction
+ *  the CMake target arc_dev is named for.  The point of the reconstruction
  *  is that it can be checked, so this runs every check there is and prints
  *  one table.  Three kinds of evidence, in increasing order of strength:
  *  format     re-serialise a city and compare the bytes aggregate
@@ -13,7 +13,7 @@
  *  already changed. */
 #include "advisor.h"
 #include "arco.h"
-#include "sc2k.h"
+#include "sim.h"
 #include <dirent.h>
 #include <math.h>
 #include <stdio.h>
@@ -353,7 +353,7 @@ static void roundtrip(const char *dir, int *files, int *lossless, int *exact)
     struct dirent *e;
     static City    a, b;
     char           path[1024];
-    const char    *tmp = "/tmp/sc2k_roundtrip.tmp";
+    const char    *tmp = "/tmp/arc_roundtrip.tmp";
 
     *files = *lossless = *exact = 0;
     if (!d)
@@ -423,7 +423,7 @@ static void pct_err(const char *label, long ok, long total, long err, long cells
 
 /*  The developer modes of `arcology`.  app/main.c dispatches here when
  *  argv[1] names one of them; see ARC_DEV_MODES there. */
-int sc2k_dev_main(int argc, char **argv)
+int arc_dev_main(int argc, char **argv)
 {
     static Tally t;
     int          files = 0, lossless = 0, exact = 0, n;

@@ -16,6 +16,12 @@ arc.geo.car_gap_stop       = 0.42
 arc.geo.car_len            = 0.556
 arc.geo.car_probe          = 0.075
 arc.geo.car_stop_hold      = 0.45
+--  The braking curve: a car a twentieth of a tile from the line it must
+--  stop at may still be doing three tiles a second, and nought at the
+--  line itself.  Distance and speed, with no time in them: how often the
+--  picture is drawn has nothing to do with how a car stops.
+arc.geo.hold_over          = 0.05
+arc.geo.hold_speed         = 3.0
 arc.geo.car_stop_junc      = 0.47
 arc.geo.cross_deep         = 0.2
 arc.geo.cross_par          = 0.985
@@ -169,10 +175,41 @@ arc.geo.lane_lift          = 0.08
 arc.geo.lane_reach         = 1.2
 arc.geo.lane_rmin          = 0.25
 arc.geo.lane_road          = 0.2
+--  A connector's two inner vertices are limited by their tangent alone,
+--  so the cap is only there to keep an all but straight one finite.
+--  Lowering it holds every connector to a tighter arc than the tangent
+--  would allow, which reads as a squarer junction.
+arc.geo.lane_route_rmax    = 1000000.0
+--  The tightest an arc may become once it is offset across to a lane.
+--  The inner lane of a sharp turn offsets toward the centre, and without
+--  a floor it would pass through it and turn inside out.
+arc.geo.lane_arc_min       = 0.02
 arc.geo.lane_step_arc      = 0.08
 arc.geo.lane_step_ramp     = 0.1
 arc.geo.lane_step_run      = 0.25
 arc.geo.lane_wire          = 0.08
+--  THE FIT'S OWN TOLERANCES.  These do not shape a curve directly; they
+--  decide whether one is accepted, so they show up as shape all the
+--  same.
+--
+--  How far inside the band's edge the corridor is sampled: a band is
+--  refused where its edge lands on a tile it may not have, and sampling
+--  the edge itself refuses it wherever it merely touches one.
+arc.geo.fit_edge           = 0.002
+--  And the same for a deck, whose corridor is the air beside it rather
+--  than its own tiles, so it may sample further in.
+arc.geo.fit_edge_deck      = 0.05
+--  How closely the corridor is sampled along a straight and round an
+--  arc.  Coarser is faster and lets a band cut a corner it should not.
+arc.geo.fit_probe_run      = 0.25
+arc.geo.fit_probe_arc      = 0.05
+--  How nearly two runs must line up before the corner between them is
+--  no corner at all.  A vertex under this gets no arc and no straight of
+--  its own: the path runs through it.
+arc.geo.fit_straight_dot   = 0.9999
+--  The straight reserved at an end that meets no junction.  A junction's
+--  own approach is arc.tune.approach; this is what a free end keeps.
+arc.geo.fit_free_end       = 0.05
 arc.geo.lift_xpanel        = 0.045
 arc.geo.loft_cut           = 0.015
 arc.geo.loft_dip           = 0.005
@@ -180,10 +217,54 @@ arc.geo.loft_lift          = 0.03
 arc.geo.loft_lift_min      = 0.02
 arc.geo.loft_step_arc      = 0.04
 arc.geo.loft_step_run      = 0.0625
+--  THE DECK'S OWN PARTS.
+--  The parapet's thickness, and how far beyond its edges a deck reads
+--  the ground it stands over.
+arc.geo.deck_parapet       = 0.035
+arc.geo.deck_ground_margin = 0.06
+--  How far back from a tile's middle a head-on ramp starts its climb,
+--  and how closely a ramp's lane is sampled along its own pieces.
+arc.geo.ramp_head_back     = 0.47
+arc.geo.ramp_probe_step    = 0.05
+--  THE JUNCTION AND ITS PAVEMENT.
+--  The turn past which a ring's corner is reported a spur rather than a
+--  kerb return.  It decides what counts as a fault, not what is drawn.
+arc.geo.junc_spur_angle    = 150.0
+--  How much wider than the box an avenue's mouth may be before the
+--  pavement stops treating the two as the same edge.
+arc.geo.walk_mouth_eps     = 0.12
+--  The pavement carried across a strip's own end, as a share of the
+--  road's half width.  A junction's is arc.geo.junc_walk; this is the
+--  cap at an end with no junction, which is a different question.
+arc.geo.walk_cap_w         = 0.2
 arc.geo.node_high          = 0.04
 arc.geo.node_lift          = 0.08
 arc.geo.node_over          = 0.1
 arc.geo.node_wide          = 0.05
+--  THE MESH'S OWN WELD.
+--  The grid two vertices must land on together to be welded into one: a
+--  four-thousandth of a tile.  Coarser welds seams that should stay
+--  apart; finer leaves a crack the eye catches as a dark line.
+arc.geo.weld_grid          = 4096.0
+--  And the coarser grid a simplified edge's ends are welded on, since a
+--  cut piece's end is an interpolation rather than a vertex it stands
+--  for, with the tolerance the edge itself is simplified to.  The
+--  tolerance is what turns a thousand stations along a band into the few
+--  edges the eye can tell apart.
+arc.geo.thin_grid          = 1024.0
+arc.geo.thin_tol           = 0.02
+--  How near an edge's own end a T-junction split is refused, as a share
+--  of the edge.  A split at the very end is the end.
+arc.geo.weld_split_end     = 0.002
+--  How far a round foot sinks into the ground it stands on, so its rim
+--  is never left hanging over a slope.
+arc.geo.foot_sink          = 0.01
+--  A wire's half width across.
+arc.geo.wire_w             = 0.02
+--  How far either side of a split station the ground is read.  The two
+--  readings are what let a strip stand on the higher of two surfaces
+--  that meet under it.
+arc.geo.loft_split_probe   = 0.004
 arc.geo.rail_gauge         = 0.005
 arc.geo.rail_lane          = 0.133
 arc.geo.rail_thru          = 0.02

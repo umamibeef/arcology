@@ -1,4 +1,4 @@
-/*  atlas.c -- load the PNG atlases and JSON sidecars sc2kpack.py emits.
+/*  atlas.c -- load the PNG atlases and JSON sidecars artpack.py emits.
  *  See atlas.h for the portability rules.  The short version: fixed-width
  *  types, binary-mode I/O, no POSIX, and nothing that assumes a byte order. */
 #include "atlas/atlas.h"
@@ -216,7 +216,7 @@ static int load_level(RAtlas *a, const char *dir, const char *sheet_name,
     char           path[1024];
     char          *js = NULL;
     jsmntok_t     *t  = NULL;
-    int            nt = 0, root, meta, sc2k, frames, tiles, size, i, n, rc = -1;
+    int            nt = 0, root, meta, arc, frames, tiles, size, i, n, rc = -1;
     unsigned char *png = NULL;
     unsigned       pw = 0, ph = 0;
     LodePNGState   st;
@@ -245,21 +245,21 @@ static int load_level(RAtlas *a, const char *dir, const char *sheet_name,
     root   = 0;
     meta   = obj_get(js, t, root, "meta");
     frames = obj_get(js, t, root, "frames");
-    sc2k   = obj_get(js, t, meta, "sc2k");
+    arc   = obj_get(js, t, meta, "arc");
     size   = obj_get(js, t, meta, "size");
-    tiles  = obj_get(js, t, sc2k, "tiles");
-    if (meta < 0 || frames < 0 || sc2k < 0 || size < 0 || tiles < 0)
+    tiles  = obj_get(js, t, arc, "tiles");
+    if (meta < 0 || frames < 0 || arc < 0 || size < 0 || tiles < 0)
     {
-        fail(a, "%s: not an sc2kpack sheet", path);
+        fail(a, "%s: not an artpack sheet", path);
         goto done;
     }
 
-    l->zoom        = (int32_t) obj_long(js, t, sc2k, "zoom", 32);
-    l->id_base     = (int32_t) obj_long(js, t, sc2k, "id_base", 0);
-    l->tile_w      = (int32_t) obj_long(js, t, sc2k, "tile_w", l->zoom);
-    l->tile_h      = (int32_t) obj_long(js, t, sc2k, "tile_h", l->zoom / 2);
-    l->alt_step    = (int32_t) obj_long(js, t, sc2k, "alt_step", 12);
-    l->transparent = (int32_t) obj_long(js, t, sc2k, "transparent", 0);
+    l->zoom        = (int32_t) obj_long(js, t, arc, "zoom", 32);
+    l->id_base     = (int32_t) obj_long(js, t, arc, "id_base", 0);
+    l->tile_w      = (int32_t) obj_long(js, t, arc, "tile_w", l->zoom);
+    l->tile_h      = (int32_t) obj_long(js, t, arc, "tile_h", l->zoom / 2);
+    l->alt_step    = (int32_t) obj_long(js, t, arc, "alt_step", 12);
+    l->transparent = (int32_t) obj_long(js, t, arc, "transparent", 0);
     l->w           = (int32_t) obj_long(js, t, size, "w", 0);
     l->h           = (int32_t) obj_long(js, t, size, "h", 0);
 
@@ -393,7 +393,7 @@ static int load_level(RAtlas *a, const char *dir, const char *sheet_name,
     }
 
     /*  Pass two: the game's own semantics, which Aseprite knows nothing
-     *  about, from meta.sc2k.tiles.  Anything absent keeps the derived
+     *  about, from meta.arc.tiles.  Anything absent keeps the derived
      *  value from pass one. */
     n = t[tiles].size;
     i = tiles + 1;
@@ -443,7 +443,7 @@ int atlas_load(RAtlas *a, const char *dir)
     js = read_text(path, NULL);
     if (!js)
     {
-        fail(a, "cannot read %s -- run tools/sc2kpack.py extract first", path);
+        fail(a, "cannot read %s -- run tools/artpack.py extract first", path);
         return -1;
     }
     t = json_parse(js, strlen(js), &nt);

@@ -23,7 +23,7 @@ arc.rules.curves = function (s)
     local fam = arc.rules.family({name = d.family, width = d.half * 2})
     local wide = fam.strip.line_wide
 
-    for i = 2, n do
+    for i = 1, n - 1 do
         local ax, ay, _, _, _ = s:at(i - 1)
         local bx, by = s:at(i)
         local _, _, za = s:at(i - 1)
@@ -55,19 +55,19 @@ arc.rules.curves = function (s)
     --  the spline fit the boundaries mean nothing -- every sample is its
     --  own straight -- so the marks are left off there.
     local np = s:pieces()
-    for k = 1, np + 1 do
+    for k = 0, np do
         local x, y
-        if k <= np then
+        if k < np then
             x, y = s:piece_at(k, 0.0)
         else
-            local len = s:piece(np)
-            x, y = s:piece_at(np, len)
+            local len = s:piece(np - 1)
+            x, y = s:piece_at(np - 1, len)
         end
         local order = s:order(x, y)
         if order then
             --  An arc, or a straight.
             local paint = 5.0
-            if k <= np then
+            if k < np then
                 local _, turns = s:piece(k)
                 if turns then paint = 6.0 end
             end

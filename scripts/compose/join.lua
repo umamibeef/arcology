@@ -34,7 +34,7 @@ local KINK = 0.30
 local RUN_SLACK  = 0.75
 local FREE_SLACK = 0.5
 
-arc.rules.join_at = function (j)
+arc.rules.meet = function (j)
     local d = j:info()
 
     if d.free then
@@ -65,7 +65,11 @@ arc.rules.join_at = function (j)
         bout = f32(d.share * d.len_out)
     end
 
-    local r = j:arc(bin < bout and bin or bout)
+    --  The radius the corridor allows there: the sampling is the
+    --  pipeline's, the search over it arc.rules.sweep's.
+    local s = j:arc(bin < bout and bin or bout)
+    if s then arc.rules.sweep(s) end
+    local r = j:swept()
     if r < KINK then return true end
     if not j:legs(r) then return true end
 

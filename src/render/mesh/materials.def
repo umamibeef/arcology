@@ -1,0 +1,41 @@
+#  The materials, in one place.
+#
+#  A material is a NUMBER carried in a vertex colour's third component.
+#  The mesh writes it, the shaders read it, and a script names it -- three
+#  readers that used to keep three hand-written copies of the same list
+#  and could drift apart without anything saying so.  This file is the
+#  only copy: tools/gen_materials.py turns it into the C constants, the
+#  GLSL constants, and the names arc.mat answers to.
+#
+#      <number>  <NAME>  <lua name>  <what it is>
+#
+#  The numbers are not arbitrary.  A shader tests a material by range --
+#  `v_col.b > 6.5 && v_col.b < 7.5` is the road -- so a number is a slot,
+#  and a fractional one is a variant shaded by its whole neighbour.
+#
+#  Numbers at MAT_SCRIPT_BASE and above belong to materials a SCRIPT
+#  declares at run time.  Nothing here may use them.
+
+0.0    GROUND      ground      the terrain's own surface
+1.0    ENG_WALL    eng_wall    an engineered wall: a retaining face
+2.0    SEDIMENT    sediment    a river bed's layers
+3.0    WATER       water       standing or flowing water
+4.0    SEABED      seabed      the floor under water
+5.0    EARTH       earth       a cut face through soil
+6.0    SURFACE     surface     a levelled pad
+7.0    ROAD        road        a road strip on the surface
+8.0    PROP        prop        street furniture: a pole, a sign, a box
+9.0    LAMP        lamp        a lamp's or a signal's lit face
+10.0   ZEBRA       zebra       a crossing's painted bands
+11.0   RAIL        rail        a railway's track bed
+12.0   SKIRT       skirt       a vehicle's clipped skirt
+13.0   WALK        walk        a footway
+14.0   RAIL_X      rail_x      a level crossing's panel bed
+15.0   VEHICLE     vehicle     a car's body
+16.0   XPANEL      xpanel      a crossing panel
+17.0   XAPPROACH   xapproach   a crossing's approach markings
+18.0   PIER        pier        a viaduct's bent and its cast concrete
+19.0   HIWAY       hiway       a freeway deck
+19.3   HIWAY_LANE  hiway_lane  a ramp lane, drawn as the deck's outer lane
+20.0   ZONE        zone        a zone tint over the ground
+20.5   HILITE      hilite      the pointer's highlight

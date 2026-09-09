@@ -150,7 +150,7 @@ Prose about a simulation is cheap. The reconstruction is now a C program that lo
    :caption: cc -std=c99 -O2 -Wall -Wextra · builds clean
 
 
-   sc2k.h     the A5 globals as a struct, layer accessors, flag bits
+   sim.h     the A5 globals as a struct, layer accessors, flag bits
    city.c     IFF load/save + the RLE codec ported from $293EC
    tables.c   GENERATED from the DATA 0 global image
    rng.c      both generators -- the Toolbox LCG and the $20F30 LFSR
@@ -1422,7 +1422,7 @@ Everything above is reproducible from the files in the working directory, none o
      - a5image.bin → tables.c, so no constant is hand-typed
    * - sim/
      - the C reconstruction; ``cmake --build build && ctest``
-   * - tools/sc2kpack.py
+   * - tools/artpack.py
      - TSET/SPRT art → indexed PNG atlases + JSON
    * - render/
      - city → PNG, isometric; checked against the game itself

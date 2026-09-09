@@ -7,7 +7,7 @@
  *  sc2_rle_encode for the exact rules, which matter because we want to
  *  reproduce Maxis's byte stream and not merely an equivalent one. */
 #include "arco.h"
-#include "sc2k.h"
+#include "sim.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

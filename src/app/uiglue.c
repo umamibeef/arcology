@@ -12,7 +12,7 @@
 #include "net/report.h"
 #include "opt.h"
 #include "project.h"
-#include "sc2k.h"
+#include "sim.h"
 
 #include <SDL3/SDL.h>
 
@@ -759,8 +759,8 @@ void ui_apply(App *a, SDL_Window *win, int pw, int ph)
         a->quit = 1;
     if (s->want_screenshot)
     {
-        check_frame(a, win, "sc2kgpu-check.png");
-        ui_log(s, "Wrote sc2kgpu-check.png");
+        check_frame(a, win, "arcology-check.png");
+        ui_log(s, "Wrote arcology-check.png");
     }
     if (s->want_load && s->load_path[0])
     {

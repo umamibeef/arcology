@@ -9,8 +9,9 @@
 
 #include "dump.h"
 #include "mesh/internal.h"
+#include "log.h"
 #include "net/internal.h"
-#include "net/model.h"
+#include "geo/model.h"
 #include "opt.h"
 #include "script.h"
 
@@ -21,6 +22,7 @@
 static int s_measure; /* 1: the measuring walk -- fit the paths, record the arms, draw nothing */
 
 /*  Where a building pass's time goes, stage by stage (--times). */
+static int gix_walk_cap_w = -1;
 static double s_prof[NET_PROF_N];
 void          net_prof_add(int stage, double amount)
 {
@@ -74,22 +76,6 @@ void net_prof_print(void)
  *  From a node to the next node: the tiles a run covers, the fit, the
  *  trims its junctions ask for, and the geometry.
  *  ================================================================== */
-/*  A family drawn tile by tile rather than walked -- the power lines --
- *  as a thing of its own: what asked for it is in force while it runs,
- *  and it says what it is, so the inspector names the line rather than
- *  the primitive that drew a pole. */
-static int build_tile_family(RMesh *m, const RCity *c, uint8_t mask_bit, Family f, int32_t col, int32_t row, int links, float order, int second)
-{
-    const NetFamily *fam = net_family(f);
-    ShapeId          sh;
-    int              rc;
-    sh = shape_open("%s line at %d,%d%s", fam->name, (int)col, (int)row, second ? ", sharing the tile" : "");
-    shape_note("links\t%s%s%s%s", links & L_N ? "north " : "", links & L_E ? "east " : "", links & L_S ? "south " : "", links & L_W ? "west " : "");
-    rc = fam->tile(m, c, col, row, mask_bit, links, order, second);
-    shape_close(sh);
-    return rc;
-}
-
 /*  A lone piece no neighbour joins: a band across its own tile along the
  *  axis its art links, both ends capped, as the original's lone sprite. */
 int build_island(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit, int comp, Family f, int32_t col, int32_t row)
@@ -102,12 +88,12 @@ int build_island(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bi
     ns     = (links & (L_N | L_S)) ? 1 : 0;
     pc.arc = 0;
     {
-        const float in = net_family_rules(F_ROAD)->tile_inset; /* a hair inside the tile, so the end stations read its surface */
+        const float in = net_family_rules(f)->tile_inset; /* a hair inside the tile, so the end stations read its surface */
         pc.a           = (V2){ns ? cx : cx - in, ns ? cy - in : cy};
         pc.b           = (V2){ns ? cx : cx + in, ns ? cy + in : cy};
     }
     pc.c   = pc.a;
-    pc.len = 2.0f * net_family_rules(F_ROAD)->tile_inset;
+    pc.len = 2.0f * net_family_rules(f)->tile_inset;
     pc.r   = 0.0f;
     pc.t0 = pc.t1 = 0.0f;
     {
@@ -121,7 +107,7 @@ int build_island(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bi
         d.cls                = -1.0f;
         d.node[0][0] = d.node[1][0] = col; /* both ends on the island's own tile */
         d.node[0][1] = d.node[1][1] = row;
-        return loft(m, c, mask_bit, comp, &d, &pc, 1, 2.0f * net_family_rules(F_ROAD)->tile_inset);
+        return loft(m, c, mask_bit, comp, &d, &pc, 1, 2.0f * net_family_rules(f)->tile_inset);
     }
 }
 
@@ -164,8 +150,8 @@ static int end_point(const RCity *c, const RAtlasLevel *l, Family f, int32_t col
         b = c->xbld[nr * R_MAP + nc];
         if (b >= 0x3Bu && b <= 0x69u) /* a tunnel end, a bridge, a crossing, a highway: a carrier the road runs on into */
         {
-            pt->x += ROAD_DU[e] * net_family_rules(F_ROAD)->tile_inset;
-            pt->y += ROAD_DV[e] * net_family_rules(F_ROAD)->tile_inset;
+            pt->x += ROAD_DU[e] * net_family_rules(f)->tile_inset;
+            pt->y += ROAD_DV[e] * net_family_rules(f)->tile_inset;
             return 1;
         }
         if (b >= 0x6Au && net_family(f)->ends_at_buildings)
@@ -183,8 +169,8 @@ static int end_point(const RCity *c, const RAtlasLevel *l, Family f, int32_t col
                 pt->y += ROAD_DV[e] * (0.5f - ROAD_W * 0.5f - 0.02f);
                 return 0;
             }
-            pt->x += ROAD_DU[e] * net_family_rules(F_ROAD)->tile_inset;
-            pt->y += ROAD_DV[e] * net_family_rules(F_ROAD)->tile_inset;
+            pt->x += ROAD_DU[e] * net_family_rules(f)->tile_inset;
+            pt->y += ROAD_DV[e] * net_family_rules(f)->tile_inset;
             return 1;
         }
     }
@@ -353,48 +339,6 @@ static int seg_walk(Seg *x)
     return 0;
 }
 
-/*  A line allowed the free ground beside its tiles is fitted two ways,
- *  on its own tiles and with that ground, and the better kept: fewer
- *  hard corners, then fewer arcs under the minimum radius, then the
- *  straighter of equals -- so no line fits worse for the freedom (the
- *  highway's own rule, hiway.c hw_fit_best).  The fit's tallies are
- *  saved and restored around the discarded fit. */
-static int seg_fit_best(const RCity *c, const NetFamily *fam, const int32_t *tcol, const int32_t *trow, int nt, float hw, V2 start, V2 goal, int32_t ex0, int32_t ex1, V2 *q, float *rad, float *tlim)
-{
-    static V2    q2[MAX_PTS];
-    static float rad2[MAX_PTS], tlim2[MAX_PTS];
-    static char  tally[2][512], before[512];
-    int          nk[2], corners[2] = {0, 0}, tight[2] = {0, 0}, w, k, keep;
-    path_fit_tally_get(fam->fit_fam, before, sizeof before);
-    for (w = 0; w < 2; ++w)
-    {
-        V2    *qq = w ? q : q2;
-        float *rr = w ? rad : rad2, *tt = w ? tlim : tlim2;
-        path_fit_tally_set(fam->fit_fam, before, sizeof before);
-        nk[w] = path_fit(c, tcol, trow, nt, hw, start, goal, *fam->rmax, *fam->rmin, hw / (fam->ref_width * 0.5f), fam->turnout > 0.0f ? fam->turnout - hw + 0.05f : 0.0f, ex0, ex1, w ? fam->free_reach : 0, qq, rr, tt, MAX_PTS);
-        for (k = 1; k + 1 < nk[w]; ++k)
-            if (rr[k] < 0.01f)
-                ++corners[w];
-            else if (rr[k] < *fam->rmin)
-                ++tight[w];
-        path_fit_tally_get(fam->fit_fam, tally[w], sizeof tally[w]);
-    }
-    {
-        const int free_[3] = {corners[1], tight[1], nk[1]}, held[3] = {corners[0], tight[0], nk[0]};
-        keep               = script_rule_fit_choice(fam->name, free_, held);
-    }
-    if (g_dev.path_dump)
-        dumpf("FIT %s %s kept: free %d corners %d tight %d nodes, own %d corners %d tight %d nodes\n", fam->name, keep ? "free" : "own", corners[1], tight[1], nk[1], corners[0], tight[0], nk[0]);
-    path_fit_tally_set(fam->fit_fam, tally[keep], sizeof tally[keep]);
-    if (!keep)
-    {
-        memcpy(q, q2, sizeof(V2) * (size_t)nk[0]);
-        memcpy(rad, rad2, sizeof(float) * (size_t)nk[0]);
-        memcpy(tlim, tlim2, sizeof(float) * (size_t)nk[0]);
-    }
-    return nk[keep];
-}
-
 /*  The tiles a drawn segment serves: every tile of a segment whose strip
  *  was lofted, whether or not the strip runs over that tile -- a railway
  *  fitted across the free ground beside its tiles leaves some bare, by
@@ -450,11 +394,8 @@ static int seg_fit(Seg *x)
      *  road's own half width, not a fraction of it: what has to fit inside
      *  the corridor is the road. */
     const NetFamily *fam = net_family(f);
-    fit_family(fam->fit_fam);
-    if (fam->free_reach > 0)
-        nk = seg_fit_best(c, fam, tcol, trow, nt, hw, pts[0], pts[n - 1], kind0 == 2 ? (int32_t)(row * R_MAP + col) : -1, kind1 == 2 ? (int32_t)(cr * R_MAP + cc) : -1, q, rad, tlim);
-    else
-        nk = path_fit(c, tcol, trow, nt, hw, pts[0], pts[n - 1], *fam->rmax, *fam->rmin, hw / (fam->ref_width * 0.5f), fam->turnout > 0.0f ? fam->turnout - hw + 0.05f : 0.0f, kind0 == 2 ? (int32_t)(row * R_MAP + col) : -1, kind1 == 2 ? (int32_t)(cr * R_MAP + cc) : -1, 0, q, rad, tlim, MAX_PTS);
+    (void)fam, (void)kind0, (void)kind1, (void)cc, (void)cr, (void)nt, (void)hw;
+    nk = net_seg_fit_of(f, col, row, e, q, rad, tlim, MAX_PTS);
     /*  The corridor under the curve overlay: the segment's own tiles, in
      *  tan, which for a road is all the fit may use. */
     if (s_tune.show_curves > 0.5f && s_pass != 1)
@@ -742,7 +683,7 @@ static int seg_caps(Seg *x)
                 if (!records_only && strip_fan_z(m, c, mask_bit, tile_order(c, tc, tr, mask_bit), pos.x, pos.y, ang - 1.5707963f, ang + 1.5707963f, h, h, 0.0f, MAT_ROAD, 8, 0.03f) != 0)
                     return -1;
                 /* the sidewalk round the cap, from the strip's one side to its other */
-                const float ck = net_family_rules(F_ROAD)->cap_kerb;
+                const float ck = net_family_rules(f)->cap_kerb;
                 V2          c0 = {pos.x + dir.y * h * ck, pos.y - dir.x * h * ck};
                 V2          c1 = {pos.x - dir.y * h * ck, pos.y + dir.x * h * ck};
                 sidewalk_add(SIDEWALK_CAP, c0, c1, (V2){0.0f, 0.0f}, (V2){0.0f, 0.0f});
@@ -758,7 +699,7 @@ static int seg_caps(Seg *x)
                     w.col     = nc;
                     w.row     = nr;
                     w.e       = ne;
-                    w.w       = hw * 0.2f;
+                    w.w       = hw * net_geo(&gix_walk_cap_w, "walk_cap_w");
                     w.end[0]  = c0;
                     w.end[1]  = c1;
                     w.port[0] = walk_port(nc, nr, ne, 0);
@@ -777,6 +718,11 @@ static int seg_caps(Seg *x)
     x->square1 = square1;
     return 0;
 }
+
+/*  The segment the walk finished, held for the drive: it composes the
+ *  strip, and walk_segment_done takes up what follows it. */
+static Seg s_seg_hold;
+static int s_seg_live;
 
 int walk_segment(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit, int comp, Family f, int32_t col, int32_t row, int e, uint8_t *visited)
 {
@@ -862,8 +808,8 @@ trims:
         d.arm[1]     = x.back;
         d.nkind[0]   = x.kind0;
         d.nkind[1]   = x.kind1;
-        d.ctrl[0]    = (fam->control && x.kind0 == 2) ? (s_junc_ctrl[row * R_MAP + col] >> (2 * e)) & 3 : 0;
-        d.ctrl[1]    = (fam->control && x.kind1 == 2) ? (s_junc_ctrl[x.cr * R_MAP + x.cc] >> (2 * x.back)) & 3 : 0;
+        d.ctrl[0]    = (net_family_has(fam, NH_CONTROL) && x.kind0 == 2) ? (s_junc_ctrl[row * R_MAP + col] >> (2 * e)) & 3 : 0;
+        d.ctrl[1]    = (net_family_has(fam, NH_CONTROL) && x.kind1 == 2) ? (s_junc_ctrl[x.cr * R_MAP + x.cc] >> (2 * x.back)) & 3 : 0;
         /*  The band each junction takes from this strip's end for its
          *  crossing: the junction lays it (net/sidewalk.c), square to
          *  its own mouth, and the slab leaves that much of its
@@ -888,14 +834,29 @@ trims:
                 d.hot = 1;
         if (loft(m, c, mask_bit, comp, &d, pieces, x.np, x.total) != 0)
             return -1;
-        net_serve_tiles(x.tcol, x.trow, x.nt); /* its tiles have a line, wherever the line runs */
+        s_seg_hold = x;
+        s_seg_live = 1;
     }
-    {
-        double t3 = prof_now();
-        int    rc = seg_caps(&x);
-        net_prof_add(NET_PROF_CAPS, prof_now() - t3);
-        return rc;
-    }
+    return 0;
+}
+
+/*  What follows the strip: the tiles it serves, wherever the line runs,
+ *  and the caps at its dead ends.  The strip itself is composed between
+ *  the two, so this is where the loft's shape is closed. */
+int build_draw_done(void)
+{
+    double t3;
+    int    rc;
+    if (net_loft_close() != 0)
+        return -1;
+    if (!s_seg_live)
+        return 0;
+    s_seg_live = 0;
+    net_serve_tiles(s_seg_hold.tcol, s_seg_hold.trow, s_seg_hold.nt);
+    t3 = prof_now();
+    rc = seg_caps(&s_seg_hold);
+    net_prof_add(NET_PROF_CAPS, prof_now() - t3);
+    return rc;
 }
 
 /*  Bucket the opaque list by chunk, and within a chunk terrain first,
@@ -952,6 +913,40 @@ static float arm_straight(Family f, int32_t col, int32_t row, int e, float want)
  *  were working the same numbers.  Doing it twice was also how the passes
  *  came to disagree about a rail arm's cut and left a raw slope under a
  *  junction's strip (Atlanta 51,50). */
+/*  Stage three's reading: which junctions there are, so the drive can
+ *  have each one's control answered before anything that turns on it is
+ *  measured.  The outline is worked out here only to know that there IS
+ *  a junction -- it reads the arm table the fit left and nothing stage
+ *  three writes, so the walk below arrives at the same outlines. */
+static void net_stage_three_ask(const RCity *c, const RAtlasLevel *l)
+{
+    Family  fam;
+    int     fk;
+    int32_t row, col;
+    for (fk = 0; fk < net_n_walked; ++fk)
+    {
+        if (!net_walked[fk]->curbs)
+            continue;
+        fam = net_walked[fk]->f;
+        if (!net_family_has(net_family(fam), NH_CONTROL))
+            continue;
+        for (row = 0; row < R_MAP; ++row)
+            for (col = 0; col < R_MAP; ++col)
+            {
+                V2      poly[JUNC_MAX];
+                JuncArm arms[4];
+                float   trm[4];
+                int     links = eff_links(c, l, col, row, fam);
+                if (!tile_links(c, l, col, row, fam) ||
+                    node_kind(c, l, fam, col, row) != 2)
+                    continue;
+                if (junction_poly(c, fam, col, row, links, poly, NULL, JUNC_MAX, trm, arms) < 3)
+                    continue;
+                net_family_control_ask(net_family(fam), c, col, row, links);
+            }
+    }
+}
+
 static void net_stage_three(const RCity *c, const RAtlasLevel *l)
 {
     Family  fam;
@@ -968,7 +963,7 @@ static void net_stage_three(const RCity *c, const RAtlasLevel *l)
      *  two passes came to disagree about a rail arm's cut and left a raw
      *  slope under a junction's strip (Atlanta 51,50).  The crossings below
      *  are a drawing and stay in the building pass. */
-    for (fk = 0; fk < NET_WALKED; ++fk)
+    for (fk = 0; fk < net_n_walked; ++fk)
     {
         if (!net_walked[fk]->curbs)
             continue;
@@ -988,11 +983,9 @@ static void net_stage_three(const RCity *c, const RAtlasLevel *l)
                     continue;
                 for (k = 0; k < 4; ++k)
                     s_trim[FAMX(fam)][(row * R_MAP + col) * 4 + k] = trm[k];
-                /*  Which arms want a crossing.  The control is decided
-                 *  here too: it is a computation, the junction's box only
-                 *  reads it, and the crossings turn on it. */
-                if (net_family(fam)->control)
-                    s_junc_ctrl[row * R_MAP + col] = (uint8_t)net_family(fam)->control(c, col, row, links);
+                /*  Which arms want a crossing.  The control each mouth
+                 *  reads is already on the tile: the drive had it
+                 *  answered from the reading the walk above took. */
                 sidewalk_junction_wants(c, fam, col, row, poly, arms, np, *net_family(fam)->width * 0.5f * (1.0f - net_family_rules(fam)->inner), want);
                 for (k = 0; k < 4; ++k)
                     s_xwalk[FAMX(fam)][(row * R_MAP + col) * 4 + k] = want[k];
@@ -1003,7 +996,7 @@ static void net_stage_three(const RCity *c, const RAtlasLevel *l)
      *  of them must still leave a road between the junctions they belong
      *  to.  A band too shallow to read as a crossing is dropped, and the
      *  arm keeps the road. */
-    for (fk = 0; fk < NET_WALKED; ++fk)
+    for (fk = 0; fk < net_n_walked; ++fk)
     {
         if (!net_walked[fk]->curbs)
             continue;
@@ -1014,26 +1007,20 @@ static void net_stage_three(const RCity *c, const RAtlasLevel *l)
                 {
                     int         ix = (row * R_MAP + col) * 4 + e, fx = FAMX(fam);
                     const RArm *a  = &s_arm[fx][ix];
-                    float       room, straight, v, want = s_xwalk[fx][ix], d;
+                    float       room, straight, want = s_xwalk[fx][ix];
                     if (!(want > 0.0f))
                         continue;
                     room     = a->have ? a->len - s_trim[fx][ix] - (a->fkind == 2 ? s_trim[fx][(a->frow * R_MAP + a->fcol) * 4 + a->fe] : 0.0f) : 0.0f;
                     straight = arm_straight(fam, col, row, e, want);
                     /*  How deep the band runs is the SCRIPT'S
-                     *  (scripts/rules.lua), from the three measurements
+                     *  (arc.rules.crossing), from the three measurements
                      *  this makes for it: what the outline asked for,
                      *  the road there is to give up, and how much of it
-                     *  runs straight from the mouth.  No rule is no
-                     *  crossing; the answer is held to the road so one
-                     *  can never eat the segment. */
-                    d = 0.0f;
-                    if (script_rule_crossing(col, row, e, (s_junc_ctrl[row * R_MAP + col] >> (2 * e)) & 3,
-                                             want, room, straight, &v))
-                    {
-                        const float cap = net_family_rules(fam)->cross_share * room;
-                        d               = v < 0.0f ? 0.0f : v > cap ? cap : v;
-                    }
-                    s_xwalk[fx][ix] = d;
+                     *  runs straight from the mouth.  The mouth keeps no
+                     *  band until the drive answers it. */
+                    s_xwalk[fx][ix] = 0.0f;
+                    net_xwalk_ask(col, row, e, fx, (s_junc_ctrl[row * R_MAP + col] >> (2 * e)) & 3,
+                                  want, room, straight, net_family_rules(fam)->cross_share * room);
                 }
     }
     /*  A family whose junction is a turnout hands each arm the reach
@@ -1041,7 +1028,7 @@ static void net_stage_three(const RCity *c, const RAtlasLevel *l)
      *  branch's rails curving at its radius (rail.c rail_box), so the arm's
      *  strip starts there.  A short arm scales its cut back with its far
      *  end's (lane.c arm_cut). */
-    for (fk = 0; fk < NET_WALKED; ++fk)
+    for (fk = 0; fk < net_n_walked; ++fk)
     {
         const NetFamily *tf = net_walked[fk];
         fam                 = tf->f;
@@ -1105,7 +1092,7 @@ int build_networks(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel 
             return -1;
     }
     else
-        for (fk = 0; fk < NET_WALKED; ++fk)
+        for (fk = 0; fk < net_n_walked; ++fk)
         {
             fam = net_walked[fk]->f;
             memset(visited, 0, sizeof visited);
@@ -1135,78 +1122,414 @@ int build_networks(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel 
         }
     s_measure = 0;
     tnote("measure: fit every segment", tt);
-    tt = tms();
-    /*  Stage three, once (net_stage_three above); the crossings below
-     *  are a drawing and belong to the pass that draws. */
+    /*  What follows this -- the rings, the trims, the level crossings and
+     *  the power lines -- is the composing script's own sequence
+     *  (scripts/compose/world.lua), and the order it puts them in is the
+     *  order they depend on each other: a ring is walked from the arms
+     *  this pass filled, the trims are read off the rings, and a crossing
+     *  is built from the two paths this pass fitted. */
+    return 0;
+}
+
+/*  Stage three: the trims every junction hands its arms, from the rings
+ *  the script walked between this pass and the one before.  The building
+ *  pass reads what the grading pass left. */
+/*  The reading stage three is made from, taken before it runs so the
+ *  drive can settle every junction's control first. */
+int build_networks_controls(const RCity *c, const RAtlasLevel *l)
+{
+    net_control_asks_reset();
+    if (s_pass != 2)
+        net_stage_three_ask(c, l);
+    return 0;
+}
+
+int build_networks_trims(const RCity *c, const RAtlasLevel *l)
+{
+    net_xwalk_asks_reset();
     if (s_pass != 2)
         net_stage_three(c, l);
-    for (row = 0; row < R_MAP; ++row)
-        for (col = 0; col < R_MAP; ++col)
-        {
-            int32_t idx   = row * R_MAP + col;
-            uint8_t b     = c->xbld[idx];
-            float   order = tile_order(c, col, row, mask_bit);
-            Family  f, f2;
-            int     piece = piece_family(b, &f), second = piece_second(b, &f2);
-            /* a family drawn tile by tile, not walked: the power lines, on their own or over a road */
-            if (piece >= 0 && net_family(f)->tile)
-            {
-                int links = piece_links(l, piece, c->xter[idx]);
-                if (links && build_tile_family(m, c, mask_bit, f, col, row, links, order, 0) != 0)
-                    return -1;
-            }
-            if (second >= 0 && net_family(f2)->tile)
-            {
-                if (build_tile_family(m, c, mask_bit, f2, col, row, piece_links(l, second, c->xter[idx]), order, 1) != 0)
-                    return -1;
-            }
-            if (second >= 0 && net_family(f2)->crossing)
-            {
-                if (net_family(f2)->crossing(m, c, l, mask_bit, col, row, second) != 0)
-                    return -1;
-            }
-        }
-    /*  And the drawing pass: the junctions first, so a leg knows whether
-     *  it is signalled before it draws its crosswalk, then the segments,
-     *  each cut back to the outline its junctions gave it. */
-    tnote("stage three: junction shapes", tt);
-    tt = tms();
-    for (fk = 0; fk < NET_WALKED; ++fk)
+    return 0;
+}
+
+/*  Every junction on the map, in the order the walk visits them, so the
+ *  script can be asked for each one's ring. */
+int build_junction_count(const RCity *c, const RAtlasLevel *l)
+{
+    int32_t col, row;
+    int     fk, n = 0;
+    for (fk = 0; fk < net_n_walked; ++fk)
     {
-        fam = net_walked[fk]->f;
+        Family fam = net_walked[fk]->f;
+        for (row = 0; row < R_MAP; ++row)
+            for (col = 0; col < R_MAP; ++col)
+                if (tile_links(c, l, col, row, fam) && node_kind(c, l, fam, col, row) == 2)
+                    ++n;
+    }
+    return n;
+}
+
+int build_junction_nth(const RCity *c, const RAtlasLevel *l, int i, Family *f, int32_t *ocol, int32_t *orow, int *olinks)
+{
+    int32_t col, row;
+    int     fk, n = 0;
+    for (fk = 0; fk < net_n_walked; ++fk)
+    {
+        Family fam = net_walked[fk]->f;
+        for (row = 0; row < R_MAP; ++row)
+            for (col = 0; col < R_MAP; ++col)
+            {
+                if (!tile_links(c, l, col, row, fam) || node_kind(c, l, fam, col, row) != 2)
+                    continue;
+                if (n++ != i)
+                    continue;
+                *f = fam, *ocol = col, *orow = row, *olinks = eff_links(c, l, col, row, fam);
+                return 1;
+            }
+    }
+    return 0;
+}
+/*  ------------------------------------------------------------------
+ *  The classes, read before anything is fitted
+ *
+ *  One class for a whole segment settles how wide it is, where its lanes
+ *  run and what is painted on it, so it has to be known before the fit.
+ *  The walk here does nothing but step the tiles of every segment and
+ *  count how many of them read as each class; the drive settles each one
+ *  and hands it back, and the walks that follow look the answer up.
+ *
+ *  It reaches the same segments in the same order as the pass that
+ *  follows it, because seg_walk reads the map and its own visited marks
+ *  and nothing either walk writes.
+ *  ------------------------------------------------------------------ */
+#define CLASSES_MAX 16384
+
+static struct
+{
+    int32_t col, row;
+    int     e, cnt[3];
+} s_cls_ask[CLASSES_MAX];
+static int   s_n_cls_ask;
+static float s_seg_cls[R_MAP * R_MAP * 4];
+
+int net_seg_class_of(int32_t col, int32_t row, int e)
+{
+    if (col < 0 || row < 0 || col >= R_MAP || row >= R_MAP || e < 0 || e > 3)
+        return 0;
+    return (int)s_seg_cls[(row * R_MAP + col) * 4 + e];
+}
+
+/*  ------------------------------------------------------------------
+ *  And the fitted path of every segment, read at the same time
+ *
+ *  The fit is a pure function of the tiles a segment covers and the
+ *  nodes at its ends -- nothing it needs comes from anything the walk
+ *  does afterwards -- so it is worked out here, once, and the walk looks
+ *  the answer up.  The points of every path lie end to end in one
+ *  arena, since a path is a few points and a city is thousands of them.
+ *  ------------------------------------------------------------------ */
+#define FITS_MAX  16384
+#define FIT_ARENA 262144
+
+static struct
+{
+    int32_t col, row;
+    int     e, fx, at, nk;
+} s_fit_ask[FITS_MAX];
+static int   s_n_fit_ask;
+static V2    s_fits_q[FIT_ARENA];
+static float s_fits_rad[FIT_ARENA], s_fits_tlim[FIT_ARENA];
+static int   s_fit_n;
+static int   s_fit_at[2][R_MAP * R_MAP * 4];
+
+static void fit_keep(Family f, int32_t col, int32_t row, int e, const V2 *q, const float *rad, const float *tlim, int nk)
+{
+    int k, fx = FAMX(f);
+    if (s_n_fit_ask >= FITS_MAX || s_fit_n + nk > FIT_ARENA)
+    {
+        R_ERR("net", "no room for the fit at %d,%d: %d paths of %d points is the most held",
+              (int)col, (int)row, FITS_MAX, FIT_ARENA);
+        return;
+    }
+    k                   = s_n_fit_ask++;
+    s_fit_ask[k].col    = col;
+    s_fit_ask[k].row    = row;
+    s_fit_ask[k].e      = e;
+    s_fit_ask[k].fx     = fx;
+    s_fit_ask[k].at     = s_fit_n;
+    s_fit_ask[k].nk     = nk;
+    s_fit_at[fx][(row * R_MAP + col) * 4 + e] = k;
+    for (int i = 0; i < nk; ++i)
+    {
+        s_fits_q[s_fit_n + i]    = q[i];
+        s_fits_rad[s_fit_n + i]  = rad[i];
+        s_fits_tlim[s_fit_n + i] = tlim[i];
+    }
+    s_fit_n += nk;
+}
+
+/*  The path the fit settled for this segment, into the walk's own
+ *  arrays.  Answers 0 where none was kept, which is a segment with
+ *  nothing to draw. */
+int net_seg_fit_of(Family f, int32_t col, int32_t row, int e, V2 *q, float *rad, float *tlim, int cap)
+{
+    int i, k = s_fit_at[FAMX(f)][(row * R_MAP + col) * 4 + e], nk;
+    if (k < 0 || k >= s_n_fit_ask)
+        return 0;
+    nk = s_fit_ask[k].nk < cap ? s_fit_ask[k].nk : cap;
+    for (i = 0; i < nk; ++i)
+    {
+        q[i]    = s_fits_q[s_fit_ask[k].at + i];
+        rad[i]  = s_fits_rad[s_fit_ask[k].at + i];
+        tlim[i] = s_fits_tlim[s_fit_ask[k].at + i];
+    }
+    return nk;
+}
+
+/*  ------------------------------------------------------------------
+ *  The fits, run by the drive
+ *
+ *  Every segment's path is a pure function of the tiles it covers and
+ *  the nodes at its ends, so the walk asks for none of them: the pass
+ *  above reads what each fit needs, the drive runs each in turn, and the
+ *  walk looks the answer up.
+ *
+ *  A family whose runs may leave its own cells -- a railway sweeping
+ *  across the field -- is fitted TWICE, once held to its tiles and once
+ *  free, and which of the two to keep is arc.rules.fit_choice's.
+ *  ------------------------------------------------------------------ */
+#define FIT_TILES 262144
+
+static struct
+{
+    int32_t col, row;
+    int     e, fit_fam, cand, free_reach; /* cand: 0 the only one, 1 held, 2 free */
+    int     at, nt;
+    float   hw, rmax, rmin, gro, reserve;
+    V2      start, goal;
+    int32_t ex0, ex1;
+    Family  f;
+} s_fitq[FITS_MAX];
+static int     s_n_fitq;
+static int32_t s_fitq_tc[FIT_TILES], s_fitq_tr[FIT_TILES];
+static int     s_fitq_nt;
+
+/*  The path the fit in hand is writing, and the held candidate kept
+ *  aside while the free one is fitted. */
+static V2    s_fit_q[MAX_PTS];
+static float s_fit_rad[MAX_PTS], s_fit_tlim[MAX_PTS];
+static V2    s_fit_held_q[MAX_PTS];
+static float s_fit_held_rad[MAX_PTS], s_fit_held_tlim[MAX_PTS];
+static V2    s_fit_free_q[MAX_PTS];
+static float s_fit_free_rad[MAX_PTS], s_fit_free_tlim[MAX_PTS];
+static int   s_fit_held_nk, s_fit_free_nk;
+static char  s_fit_tally[2][512], s_fit_before[512];
+static int   s_fit_held_sc[3], s_fit_free_sc[3]; /* corners, tight, nodes */
+static int   s_fit_at_choice = -1;
+
+static void fitq_add(const NetFamily *fam, Family f, int32_t col, int32_t row, int e,
+                     const Seg *x, int cand, int free_reach)
+{
+    int k, i;
+    if (s_n_fitq >= FITS_MAX || s_fitq_nt + x->nt > FIT_TILES)
+    {
+        R_ERR("net", "no room for the fit at %d,%d: %d fits of %d tiles is the most read",
+              (int)col, (int)row, FITS_MAX, FIT_TILES);
+        return;
+    }
+    k                    = s_n_fitq++;
+    s_fitq[k].col        = col;
+    s_fitq[k].row        = row;
+    s_fitq[k].e          = e;
+    s_fitq[k].f          = f;
+    s_fitq[k].fit_fam    = fam->fit_fam;
+    s_fitq[k].cand       = cand;
+    s_fitq[k].free_reach = free_reach;
+    s_fitq[k].at         = s_fitq_nt;
+    s_fitq[k].nt         = x->nt;
+    s_fitq[k].hw         = x->hw;
+    s_fitq[k].rmax       = *fam->rmax;
+    s_fitq[k].rmin       = *fam->rmin;
+    s_fitq[k].gro        = x->hw / (fam->ref_width * 0.5f);
+    s_fitq[k].reserve    = fam->turnout > 0.0f ? fam->turnout - x->hw + 0.05f : 0.0f;
+    s_fitq[k].start      = x->pts[0];
+    s_fitq[k].goal       = x->pts[x->n - 1];
+    s_fitq[k].ex0        = x->kind0 == 2 ? (int32_t)(row * R_MAP + col) : -1;
+    s_fitq[k].ex1        = x->kind1 == 2 ? (int32_t)(x->cr * R_MAP + x->cc) : -1;
+    for (i = 0; i < x->nt && i < MAX_PTS; ++i)
+        s_fitq_tc[s_fitq_nt + i] = x->tcol[i], s_fitq_tr[s_fitq_nt + i] = x->trow[i];
+    s_fitq_nt += x->nt;
+}
+
+int net_fits(void)
+{
+    return s_n_fitq;
+}
+
+void net_fits_reset(void)
+{
+    s_n_fitq = s_fitq_nt = 0;
+}
+
+/*  One of them set up and its lines found, ready for the drive to walk
+ *  its boundaries.  Answers how many boundaries there are. */
+int net_fit_begin(const RCity *c, int i)
+{
+    if (i < 0 || i >= s_n_fitq)
+        return 0;
+    fit_family(s_fitq[i].fit_fam);
+    if (s_fitq[i].cand == 1)
+        path_fit_tally_get(s_fitq[i].fit_fam, s_fit_before, sizeof s_fit_before);
+    if (s_fitq[i].cand)
+        path_fit_tally_set(s_fitq[i].fit_fam, s_fit_before, sizeof s_fit_before);
+    return path_fit_begin(c, s_fitq_tc + s_fitq[i].at, s_fitq_tr + s_fitq[i].at, s_fitq[i].nt,
+                          s_fitq[i].hw, s_fitq[i].start, s_fitq[i].goal, s_fitq[i].rmax, s_fitq[i].rmin,
+                          s_fitq[i].gro, s_fitq[i].reserve, s_fitq[i].ex0, s_fitq[i].ex1,
+                          s_fitq[i].cand == 2 ? s_fitq[i].free_reach : 0,
+                          s_fit_q, s_fit_rad, s_fit_tlim, MAX_PTS);
+}
+
+static void fit_score(const float *rad, int nk, float rmin, int *out)
+{
+    int k;
+    out[0] = out[1] = 0;
+    out[2] = nk;
+    for (k = 1; k + 1 < nk; ++k)
+        if (rad[k] < 0.01f)
+            ++out[0];
+        else if (rad[k] < rmin)
+            ++out[1];
+}
+
+/*  And the path it settled, kept -- or held aside where the segment is
+ *  fitted twice, until the script says which of the two to keep.
+ *  Answers 1 when a choice is now waiting on that. */
+int net_fit_done(int i)
+{
+    int nk, k;
+    s_fit_at_choice = -1;
+    if (i < 0 || i >= s_n_fitq)
+        return 0;
+    nk = path_fit_end();
+    if (s_fitq[i].cand == 0)
+    {
+        fit_keep(s_fitq[i].f, s_fitq[i].col, s_fitq[i].row, s_fitq[i].e, s_fit_q, s_fit_rad, s_fit_tlim, nk);
+        return 0;
+    }
+    path_fit_tally_get(s_fitq[i].fit_fam, s_fit_tally[s_fitq[i].cand - 1], sizeof s_fit_tally[0]);
+    if (s_fitq[i].cand == 1)
+    {
+        for (k = 0; k < nk; ++k)
+            s_fit_held_q[k] = s_fit_q[k], s_fit_held_rad[k] = s_fit_rad[k], s_fit_held_tlim[k] = s_fit_tlim[k];
+        s_fit_held_nk = nk;
+        fit_score(s_fit_rad, nk, s_fitq[i].rmin, s_fit_held_sc);
+        return 0;
+    }
+    for (k = 0; k < nk; ++k)
+        s_fit_free_q[k] = s_fit_q[k], s_fit_free_rad[k] = s_fit_rad[k], s_fit_free_tlim[k] = s_fit_tlim[k];
+    s_fit_free_nk = nk;
+    fit_score(s_fit_rad, nk, s_fitq[i].rmin, s_fit_free_sc);
+    s_fit_at_choice = i;
+    return 1;
+}
+
+const char *net_fit_choice(const int **free_, const int **held)
+{
+    if (s_fit_at_choice < 0)
+        return NULL;
+    *free_ = s_fit_free_sc;
+    *held  = s_fit_held_sc;
+    return net_family(s_fitq[s_fit_at_choice].f)->name;
+}
+
+/*  The one the script kept, and the tally that goes with it. */
+void net_fit_choice_is(int keep_free)
+{
+    int i = s_fit_at_choice;
+    if (i < 0)
+        return;
+    s_fit_at_choice = -1;
+    if (g_dev.path_dump)
+        dumpf("FIT %s %s kept: free %d corners %d tight %d nodes, own %d corners %d tight %d nodes\n",
+              net_family(s_fitq[i].f)->name, keep_free ? "free" : "own",
+              s_fit_free_sc[0], s_fit_free_sc[1], s_fit_free_sc[2],
+              s_fit_held_sc[0], s_fit_held_sc[1], s_fit_held_sc[2]);
+    path_fit_tally_set(s_fitq[i].fit_fam, s_fit_tally[keep_free ? 1 : 0], sizeof s_fit_tally[0]);
+    if (keep_free)
+        fit_keep(s_fitq[i].f, s_fitq[i].col, s_fitq[i].row, s_fitq[i].e, s_fit_free_q, s_fit_free_rad, s_fit_free_tlim, s_fit_free_nk);
+    else
+        fit_keep(s_fitq[i].f, s_fitq[i].col, s_fitq[i].row, s_fitq[i].e, s_fit_held_q, s_fit_held_rad, s_fit_held_tlim, s_fit_held_nk);
+}
+
+static void seg_class_ask(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit, int comp, Family f, int32_t col, int32_t row, int e, uint8_t *visited)
+{
+    Seg              x;
+    const NetFamily *fam = net_family(f);
+    if (visited[(row * R_MAP + col) * 4 + e])
+        return;
+    visited[(row * R_MAP + col) * 4 + e] = 1;
+    memset(&x, 0, sizeof x);
+    x.m = m, x.c = c, x.l = l, x.mask_bit = mask_bit, x.comp = comp, x.f = f, x.col = col, x.row = row, x.e = e, x.visited = visited;
+    x.pts = s_wk_pts, x.q = s_wk_q, x.rad = s_wk_rad, x.tlim = s_wk_tlim;
+    x.tcol = s_wk_tcol, x.trow = s_wk_trow, x.pieces = s_wk_pieces, x.marks = s_wk_marks;
+    x.hw    = *fam->width * 0.5f;
+    x.kind0 = node_kind(c, l, f, col, row);
+    x.cc = col, x.cr = row, x.back = (e + 2) & 3, x.ee = e;
+    if (seg_walk(&x) != 0 || x.n < 2)
+        return;
+    if (fam->classed)
+    {
+        if (s_n_cls_ask >= CLASSES_MAX)
+        {
+            R_ERR("net", "no room for the class at %d,%d: %d segments is the most read", (int)col, (int)row, CLASSES_MAX);
+            return;
+        }
+        s_cls_ask[s_n_cls_ask].col = col;
+        s_cls_ask[s_n_cls_ask].row = row;
+        s_cls_ask[s_n_cls_ask].e   = e;
+        seg_class_counts(&x, s_cls_ask[s_n_cls_ask].cnt);
+        ++s_n_cls_ask;
+    }
+    /*  The corridor is the segment's own tiles, its gates the crossable
+     *  part of each shared edge, and the path is the taut string through
+     *  them -- which cuts every corner of a staircase into one diagonal
+     *  by itself -- with each corner then swept as wide as the corridor
+     *  allows.  The corridor is tested against the road's own half
+     *  width, not a fraction of it: what has to fit inside the corridor
+     *  is the road. */
+    if (fam->free_reach > 0)
+    {
+        fitq_add(fam, f, col, row, e, &x, 1, fam->free_reach);
+        fitq_add(fam, f, col, row, e, &x, 2, fam->free_reach);
+    }
+    else
+        fitq_add(fam, f, col, row, e, &x, 0, 0);
+}
+
+int build_networks_classes(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit, int comp)
+{
+    static uint8_t visited[R_MAP * R_MAP * 4];
+    int32_t        col, row;
+    int            fk;
+    s_n_cls_ask = 0;
+    s_n_fitq = s_fitq_nt = 0;
+    s_n_fit_ask = s_fit_n = 0;
+    memset(s_seg_cls, 0, sizeof s_seg_cls);
+    memset(s_fit_at, -1, sizeof s_fit_at);
+    for (fk = 0; fk < net_n_walked; ++fk)
+    {
+        Family fam = net_walked[fk]->f;
         memset(visited, 0, sizeof visited);
         for (row = 0; row < R_MAP; ++row)
             for (col = 0; col < R_MAP; ++col)
             {
-                int links = eff_links(c, l, col, row, fam);
-                if (!tile_links(c, l, col, row, fam) ||
-                    node_kind(c, l, fam, col, row) != 2)
-                    continue;
-                if (build_junction(m, c, mask_bit, fam, col, row, links, tile_order(c, col, row, mask_bit) + net_family(fam)->junc_lift) != 0)
-                    return -1;
-            }
-        for (row = 0; row < R_MAP; ++row)
-            for (col = 0; col < R_MAP; ++col)
-            {
                 int links = eff_links(c, l, col, row, fam), e;
-                int kind;
-                if (!tile_links(c, l, col, row, fam))
+                if (!tile_links(c, l, col, row, fam) || node_kind(c, l, fam, col, row) == 0)
                     continue;
-                kind = node_kind(c, l, fam, col, row);
-                if (kind == 0)
-                {
-                    /*  A piece none of whose links a neighbour returns:
-                     *  an island, drawn as its own short band. */
-                    if (links == 0 && build_island(m, c, l, mask_bit, comp, fam, col, row) != 0)
-                        return -1;
-                    continue;
-                }
                 for (e = 0; e < 4; ++e)
-                    if ((links & (1 << e)) &&
-                        walk_segment(m, c, l, mask_bit, comp, fam, col, row, e, visited) != 0)
-                        return -1;
+                    if (links & (1 << e))
+                        seg_class_ask(m, c, l, mask_bit, comp, fam, col, row, e, visited);
             }
-        /* the loops with no node at all: start anywhere still unvisited */
         for (row = 0; row < R_MAP; ++row)
             for (col = 0; col < R_MAP; ++col)
             {
@@ -1214,45 +1537,246 @@ int build_networks(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel 
                 if (link_count(links) != 2)
                     continue;
                 for (e = 0; e < 4; ++e)
-                    if ((links & (1 << e)) && !visited[(row * R_MAP + col) * 4 + e] &&
-                        walk_segment(m, c, l, mask_bit, comp, fam, col, row, e, visited) != 0)
-                        return -1;
-            }
-        /*  A piece whose every link leaves the map, drawn as its own
-         *  short band.  The island rule above asks for a piece whose links
-         *  all VANISH; this one keeps a link, so it is walked -- but the
-         *  walk steps straight off the map, comes back with one tile, and
-         *  nothing is drawn (Venice 0,84, a road in the corner between a
-         *  building and the edge; Washington 77,0).  The test is deliberately
-         *  narrow: a tile with a link to a real neighbour may be covered by
-         *  that neighbour's band, and drawing an island there would lay a
-         *  second road over the first. */
-        for (row = 0; row < R_MAP; ++row)
-            for (col = 0; col < R_MAP; ++col)
-            {
-                int links = eff_links(c, l, col, row, fam), e, off = 1;
-                if (!tile_links(c, l, col, row, fam) || !links || node_kind(c, l, fam, col, row) == 2)
-                    continue;
-                for (e = 0; e < 4; ++e)
-                    if (links & (1 << e))
-                    {
-                        int32_t nc = col + (int32_t)ROAD_DU[e], nr = row + (int32_t)ROAD_DV[e];
-                        if (nc >= 0 && nr >= 0 && nc < R_MAP && nr < R_MAP)
-                            off = 0;
-                    }
-                if (!off || net_tile_served(row * R_MAP + col))
-                    continue;
-                if (build_island(m, c, l, mask_bit, comp, fam, col, row) != 0)
-                    return -1;
+                    if ((links & (1 << e)) && !visited[(row * R_MAP + col) * 4 + e])
+                        seg_class_ask(m, c, l, mask_bit, comp, fam, col, row, e, visited);
             }
     }
-    tnote("junctions and segments drawn", tt);
-    /*  The footways last, drawn from the network the pass above
-     *  built: every junction has registered its corners by now, so
-     *  the bands are laid in one place instead of inside whichever
-     *  box happened to make them. */
-    if (sidewalk_draw(m, c, mask_bit) != 0)
-        return -1;
+    return s_n_cls_ask;
+}
+
+int net_seg_class_at(int i, int cnt[3])
+{
+    if (i < 0 || i >= s_n_cls_ask)
+        return 0;
+    cnt[0] = s_cls_ask[i].cnt[0], cnt[1] = s_cls_ask[i].cnt[1], cnt[2] = s_cls_ask[i].cnt[2];
+    return 1;
+}
+
+/*  The class the rule settled, on to every link of the segment's start:
+ *  the walks that follow read it there. */
+void net_seg_class_is(int i, int cls)
+{
+    if (i < 0 || i >= s_n_cls_ask)
+        return;
+    s_seg_cls[(s_cls_ask[i].row * R_MAP + s_cls_ask[i].col) * 4 + s_cls_ask[i].e] = (float)cls;
+}
+
+/*  ------------------------------------------------------------------
+ *  The drawing pass, walked by the drive
+ *
+ *  The pass is a cursor, not a loop: the drive asks a family for its
+ *  junctions, then for one thing at a time until there is nothing left.
+ *  The order is the pass's own -- the junctions first, so a leg knows
+ *  whether it is signalled before it draws its crosswalk, then the
+ *  segments each cut back to the outline its junctions gave it, then the
+ *  loops with no node at all, then the pieces standing on the map's own
+ *  edge -- so the mesh comes out in the order it always did.
+ *  ------------------------------------------------------------------ */
+static struct
+{
+    RMesh             *m;
+    const RCity       *c;
+    const RAtlasLevel *l;
+    uint8_t            mask_bit;
+    int                comp;
+    Family             fam;
+    int                phase; /* 0 the segments and islands, 1 the loops, 2 the map's edge, 3 nothing left */
+    int32_t            row, col;
+    int                e;
+} s_draw;
+static uint8_t s_draw_visited[R_MAP * R_MAP * 4];
+static double  s_draw_t;
+
+int build_networks_draw(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit, int comp)
+{
+    double tt = tms();
+    (void)m, (void)c, (void)l, (void)mask_bit, (void)comp;
+    tnote("stage three: junction shapes", tt);
+    s_draw_t = tms();
+    return 0;
+}
+
+int build_draw_families(void)
+{
+    return net_n_walked;
+}
+
+/*  One family's junctions, all of them, before any of its segments: a
+ *  cursor like the one below, since the drive lays the asphalt on each
+ *  outline between the two halves of its box. */
+static struct
+{
+    RMesh             *m;
+    const RCity       *c;
+    const RAtlasLevel *l;
+    uint8_t            mask_bit;
+    Family             fam;
+    int32_t            row, col;
+} s_box;
+
+void build_draw_boxes_begin(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit, int fk)
+{
+    memset(&s_box, 0, sizeof s_box);
+    s_box.m = m, s_box.c = c, s_box.l = l, s_box.mask_bit = mask_bit;
+    s_box.fam = net_walked[fk]->f;
+}
+
+int build_draw_box_next(void)
+{
+    while (s_box.row < R_MAP)
+    {
+        const int32_t col   = s_box.col, row = s_box.row;
+        const int     links = eff_links(s_box.c, s_box.l, col, row, s_box.fam);
+        const int     here  = tile_links(s_box.c, s_box.l, col, row, s_box.fam) &&
+                         node_kind(s_box.c, s_box.l, s_box.fam, col, row) == 2;
+        if (++s_box.col >= R_MAP)
+            s_box.col = 0, ++s_box.row;
+        if (!here)
+            continue;
+        if (build_junction(s_box.m, s_box.c, s_box.mask_bit, s_box.fam, col, row, links,
+                           tile_order(s_box.c, col, row, s_box.mask_bit) + net_family(s_box.fam)->junc_lift) != 0)
+            return -1;
+        return 1;
+    }
+    return 0;
+}
+
+/*  And the cursor over what it draws after them, set to the first. */
+void build_draw_begin(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit, int comp, int fk)
+{
+    memset(&s_draw, 0, sizeof s_draw);
+    s_draw.m = m, s_draw.c = c, s_draw.l = l;
+    s_draw.mask_bit = mask_bit, s_draw.comp = comp;
+    s_draw.fam = net_walked[fk]->f;
+    memset(s_draw_visited, 0, sizeof s_draw_visited);
+}
+
+static void draw_step_e(void)
+{
+    if (++s_draw.e < 4)
+        return;
+    s_draw.e = 0;
+    if (++s_draw.col < R_MAP)
+        return;
+    s_draw.col = 0;
+    if (++s_draw.row < R_MAP)
+        return;
+    s_draw.row = 0;
+    ++s_draw.phase;
+}
+
+static void draw_step_tile(void)
+{
+    s_draw.e = 3;
+    draw_step_e();
+}
+
+/*  Whether this tile's every link leaves the map: a piece drawn as its
+ *  own short band.  The island rule in the first phase asks for a piece
+ *  whose links all VANISH; this one keeps a link, so it is walked -- but
+ *  the walk steps straight off the map, comes back with one tile, and
+ *  nothing is drawn.  The test is deliberately narrow: a tile with a
+ *  link to a real neighbour may be covered by that neighbour's band, and
+ *  drawing an island there would lay a second road over the first. */
+static int draw_edge_island(const RCity *c, const RAtlasLevel *l, Family fam, int32_t col, int32_t row, int links)
+{
+    int e, off = 1;
+    if (!tile_links(c, l, col, row, fam) || !links || node_kind(c, l, fam, col, row) == 2)
+        return 0;
+    for (e = 0; e < 4; ++e)
+        if (links & (1 << e))
+        {
+            int32_t nc = col + (int32_t)ROAD_DU[e], nr = row + (int32_t)ROAD_DV[e];
+            if (nc >= 0 && nr >= 0 && nc < R_MAP && nr < R_MAP)
+                off = 0;
+        }
+    return off && !net_tile_served(row * R_MAP + col);
+}
+
+/*  The next thing this family draws.  Answers 1 for one drawn, 0 when
+ *  the family has none left, -1 with the reason already reported. */
+int build_draw_next(void)
+{
+    RMesh             *m        = s_draw.m;
+    const RCity       *c        = s_draw.c;
+    const RAtlasLevel *l        = s_draw.l;
+    const uint8_t      mask_bit = s_draw.mask_bit;
+    const int          comp     = s_draw.comp;
+    const Family       fam      = s_draw.fam;
+    while (s_draw.phase < 3)
+    {
+        const int32_t col   = s_draw.col, row = s_draw.row;
+        const int     e     = s_draw.e;
+        const int     links = eff_links(c, l, col, row, fam);
+        if (s_draw.phase == 0)
+        {
+            int kind;
+            if (!tile_links(c, l, col, row, fam))
+            {
+                draw_step_tile();
+                continue;
+            }
+            kind = node_kind(c, l, fam, col, row);
+            if (kind == 0)
+            {
+                /*  A piece none of whose links a neighbour returns: an
+                 *  island, drawn as its own short band. */
+                int lone = links == 0;
+                draw_step_tile();
+                if (lone && build_island(m, c, l, mask_bit, comp, fam, col, row) != 0)
+                    return -1;
+                if (lone)
+                    return 1;
+                continue;
+            }
+            if (!(links & (1 << e)))
+            {
+                draw_step_e();
+                continue;
+            }
+            draw_step_e();
+            if (walk_segment(m, c, l, mask_bit, comp, fam, col, row, e, s_draw_visited) != 0)
+                return -1;
+            return 1;
+        }
+        if (s_draw.phase == 1)
+        {
+            /* the loops with no node at all: start anywhere still unvisited */
+            if (link_count(links) != 2)
+            {
+                draw_step_tile();
+                continue;
+            }
+            if (!(links & (1 << e)) || s_draw_visited[(row * R_MAP + col) * 4 + e])
+            {
+                draw_step_e();
+                continue;
+            }
+            draw_step_e();
+            if (walk_segment(m, c, l, mask_bit, comp, fam, col, row, e, s_draw_visited) != 0)
+                return -1;
+            return 1;
+        }
+        {
+            int want = e == 0 && draw_edge_island(c, l, fam, col, row, links);
+            draw_step_tile();
+            if (want && build_island(m, c, l, mask_bit, comp, fam, col, row) != 0)
+                return -1;
+            if (want)
+                return 1;
+        }
+    }
+    return 0;
+}
+
+/*  The footways are the composing script's own pass, run after this one
+ *  (scripts/compose/world.lua): it asks for each path the network holds
+ *  and lays the band over it.  They come last because every junction has
+ *  registered its corners by then, so the bands are laid in one place
+ *  instead of inside whichever box happened to make them. */
+int build_networks_drawn(void)
+{
+    tnote("junctions and segments drawn", s_draw_t);
     return 0;
 }
 
@@ -1273,12 +1797,4 @@ int grade_only(int allowed)
     return s_pass == 1 && !g_dev.grade_all && !allowed;
 }
 
-/*  The family answering for a tile family: the road's, the rail's, the
- *  power line's.  A deck's or a ramp's is set on its RLoft by hiway.c. */
-const NetFamily *net_family(Family f)
-{
-    return f == F_RAIL ? &net_rail : f == F_POWER ? &net_power
-                                                  : &net_road;
-}
 
-const NetFamily *const net_walked[NET_WALKED] = {&net_road, &net_rail};

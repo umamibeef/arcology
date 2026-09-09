@@ -13,9 +13,9 @@ stopped being true when the program was split up: they apply to `src/app`,
 | Rule | How | Why |
 |---|---|---|
 | C99, no compiler extensions | `CMAKE_C_EXTENSIONS OFF` gives `-std=c99`, not `-std=gnu99` | A POSIX-only call (`strdup`, `strcasecmp`, `<unistd.h>`) fails here rather than on someone else's platform. |
-| Strict warnings on our code only | `sc2k_warnings` interface target | `-Wconversion` catches a silent narrowing that becomes an off-by-one on screen. |
+| Strict warnings on our code only | `arc_warnings` interface target | `-Wconversion` catches a silent narrowing that becomes an off-by-one on screen. |
 | Vendored headers are `SYSTEM` | `target_include_directories(... SYSTEM ...)` | jsmn is compiled into our translation unit; without this its warnings arrive wearing our flags. |
-| No hardcoded paths | `SC2K_ASSETS` cache variable, `CMakePresets.json` | The presets configure on macOS, Linux and Windows with no edits. |
+| No hardcoded paths | `ARC_ASSETS` cache variable, `CMakePresets.json` | The presets configure on macOS, Linux and Windows with no edits. |
 
 ## The code follows these
 
@@ -38,7 +38,7 @@ stopped being true when the program was split up: they apply to `src/app`,
 
 ## The asset pipeline follows these
 
-`tools/sc2kpack.py` runs wherever the game builds, so:
+`tools/artpack.py` runs wherever the game builds, so:
 
 - **Standard library only.** No Pillow, no numpy. The PNG codec is written
   out in the tool, both directions.
@@ -50,8 +50,8 @@ stopped being true when the program was split up: they apply to `src/app`,
 ## The tests that hold it together
 
 ```
-python3 tools/sc2kpack.py verify        # shapes round-trip through our codec
-ctest --test-dir sc2k/render/build/...  # atlas loads; blit_check; invariants
+python3 tools/artpack.py verify        # shapes round-trip through our codec
+ctest --test-dir build/...  # atlas loads; blit_check; invariants
 python3 tools/blit_check.py             # our blit() vs $18E96, both mirrors
 python3 tools/render_diff.py  CITY      # our blit list vs the game's
 python3 tools/pixel_diff.py   CITY --crop x,y,w,h    # PIXELS vs the game's

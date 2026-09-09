@@ -45,6 +45,7 @@ ShapeId shape_open_under_at(ShapeId parent, const char *where, const char *who, 
 #define shape_open_under(p, ...) shape_open_under_at((p), __FILE__ ":" R_STR(__LINE__), __func__, __VA_ARGS__)
 /*  Close it.  The id is passed back so a mismatch is caught rather than
  *  silently unbalancing the stack. */
+void shape_use(ShapeId id);
 void shape_close(ShapeId id);
 /*  A line of the open shape's own account of itself: key, TAB, value.
  *  The inspector shows these as rows. */

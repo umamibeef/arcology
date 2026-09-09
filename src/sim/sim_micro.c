@@ -5,7 +5,7 @@
  *  Allocating a record when a building goes up is here too, since it is the
  *  same table.  Split out of sim.c; addresses still point into CODE 2. */
 #include "ext80.h"
-#include "sc2k.h"
+#include "sim.h"
 #include "sim_int.h"
 
 #include <stdio.h>

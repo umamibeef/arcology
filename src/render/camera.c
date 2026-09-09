@@ -8,6 +8,7 @@
 #include "../app/internal.h"
 #include "log.h"
 #include "opt.h"
+#include "mesh/internal.h"
 #include "project.h"
 #include <math.h>
 #include <stdlib.h>
@@ -182,7 +183,7 @@ int screen_to_grid(App *a, float mx, float my, SDL_Window *win, float *ofc, floa
         idx  = row * R_MAP + col;
         altv = (float)(a->opts.underground
                            ? (a->view->altm[idx] & 0x1Fu)
-                           : (a->view->xter[idx] >= 0x10u
+                           : (is_water(a->view->xter[idx])
                                   ? ((a->view->altm[idx] >> 5) & 0x1Fu)
                                   : (a->view->altm[idx] & 0x1Fu)));
     }

@@ -1,6 +1,6 @@
-/*  sc2ksoft -- draw a city with the reference rasteriser.
+/*  --soft -- draw a city with the reference rasteriser.
  *
- *      sc2ksoft <assets dir> <city file> [out.png] [--zoom N] [--n N]
+ *      arcology --soft <assets dir> <city file> [out.png] [--zoom N] [--n N]
  *
  *  Prints the CRC32 of the raw RGB buffer.  That number, not the PNG's
  *  bytes, is what the Python check compares: two deflate implementations

@@ -21,7 +21,7 @@ arc.rules.walks = function (s)
 
     for side = 0, 1 do
         local sgn = side == 0 and 1 or -1
-        for k = 1, n do
+        for k = 0, n - 1 do
             local x, y, z, dx, dy, _, wl, wr = s:at(k)
             local w = side == 0 and wr or wl
             local wf = s:width(dx, dy)
@@ -33,8 +33,8 @@ arc.rules.walks = function (s)
         --  The band's two ends reach the strip's own, and stand out at
         --  the footway's outer edge rather than the carriageway's: that
         --  is the point the network joins to what comes next.
-        local x0, y0, _, dx0, dy0, _, wl0, wr0 = s:at(1)
-        local x1, y1, _, dx1, dy1, _, wl1, wr1 = s:at(n)
+        local x0, y0, _, dx0, dy0, _, wl0, wr0 = s:at(0)
+        local x1, y1, _, dx1, dy1, _, wl1, wr1 = s:at(n - 1)
         local h0 = arc.band_half(d.half, s:width(dx0, dy0), fam.footway.edge)
         local h1 = arc.band_half(d.half, s:width(dx1, dy1), fam.footway.edge)
         local ax, ay = arc.band_edge(x0, y0, dx0, dy0, h0, side == 0 and wr0 or wl0, sgn)

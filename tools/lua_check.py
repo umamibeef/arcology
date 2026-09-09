@@ -16,6 +16,11 @@ layer to be wrong:
     the counts too, or the hooks are dead.
   * the build with that rule still passes its own checks.  A rule may
     change what is drawn; it may not make the mesh unsound.
+  * a rule that RAISES fails the build.  This is the one that is not
+    about what is drawn but about what is SAID.  A rule that raised
+    answered nothing, so whatever it was to draw is missing; a build that
+    carried on past it would report success over a city with a hole in
+    it.  It must abandon the mesh instead, and say which rule.
 
     tools/lua_check.py [--binary build/arcology] [--city atlanta]
 """
@@ -33,10 +38,19 @@ NONE = "arc.rules.control = nil\n"
 
 CONST = "arc.geo.cross_deep = 0.36\n"
 
+#  A rule that raises before it draws anything, in the busiest place
+#  there is: every road surface in the city comes through arc.rules.strip.
+RAISES = """
+arc.rules.strip = function (s)
+    local bad
+    return bad.x
+end
+"""
+
 RULES = """
-arc.rules.control = function (col, row, arms, busy)
+arc.rules.control = function (at)
     local c = {0, 0, 0, 0}
-    for e = 1, 4 do if arms[e] then c[e] = 2 end end
+    for e = 1, 4 do if at.arms[e] then c[e] = 2 end end
     return c
 end
 arc.rules.crossing = function (m)
@@ -120,6 +134,23 @@ def main():
             print("lua:", what, "changed nothing;", why)
             return 1
 
+    #  A rule that raises: the build must be abandoned, not reported.
+    with tempfile.NamedTemporaryFile("w", suffix=".lua", delete=False) as f:
+        f.write(RAISES)
+        path = f.name
+    try:
+        rc, out = run(a.binary, a.city, path)
+    finally:
+        os.unlink(path)
+    if rc == 0:
+        print("lua: a rule that raises did not fail the build -- a city with a")
+        print("     hole in it was reported as sound")
+        return 1
+    if "mesh check:" in out:
+        print("lua: a mesh the build abandoned was checked anyway; the checks")
+        print("     report on the hole rather than on the city")
+        return 1
+
     p = subprocess.run([a.binary, os.path.join(ROOT, "cities", a.city + ".sc2"), "--mute",
                         "--lua-eval", "arc.mesh.faults()"],
                        capture_output=True, text=True, cwd=ROOT)
@@ -128,7 +159,8 @@ def main():
         return 1
 
     print("lua: taking a rule away takes the thing away, a constant and a rule "
-          "each change the build and it still checks out, and --lua-eval answers")
+          "each change the build and it still checks out, a rule that raises "
+          "abandons it, and --lua-eval answers")
     return 0
 
 

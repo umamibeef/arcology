@@ -1,4 +1,4 @@
-/*  atlas.h -- the tile art, as the renderer wants it. sc2kpack.py turns the
+/*  atlas.h -- the tile art, as the renderer wants it. artpack.py turns the
  *  game's MIFF/SC2K art into one palette-indexed PNG per zoom level plus a
  *  JSON sidecar.  This reads those back.  Nothing here knows about the
  *  resource fork, the 68k binary, or the simulation: it is a loader for

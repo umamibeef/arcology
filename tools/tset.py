@@ -11,7 +11,7 @@ import struct
 
 from rezfork import load as rez_load
 
-GAME = os.environ.get("SC2K_CITIES") or os.path.expanduser(
+GAME = os.environ.get("ARC_CITIES") or os.path.expanduser(
     "~/Downloads/SimCity 2000® Collection")
 _CACHE = None
 

@@ -2,7 +2,7 @@
  *  calls both: the Toolbox trap _Random ($A861) at 329 sites, and its own
  *  generator at $20F30 at 34 sites.  Reproducing the game's behaviour needs
  *  both, and they are not equally trustworthy -- see the comments. */
-#include "sc2k.h"
+#include "sim.h"
 
 /*  An optional log of every draw, in order, so the C's dice can be
  *  compared with the original's under the interpreter.  A reconstruction

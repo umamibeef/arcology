@@ -1,10 +1,10 @@
-/*  sc2k.h -- SimCity 2000 simulation, reconstructed from the 68k Macintosh
+/*  sim.h -- SimCity 2000 simulation, reconstructed from the 68k Macintosh
  *  binary (SimCity 2000(R) 1.2, 22 Jun 1995).  Every address in a comment
  *  like $3170E is a byte offset into the CODE 2 resource, which is where
  *  the whole game lives.  A5+0x1FC2 style comments give the original
  *  global's offset from the A5 world pointer. */
-#ifndef SC2K_H
-#define SC2K_H
+#ifndef ARC_SIM_H
+#define ARC_SIM_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -736,4 +736,4 @@ typedef struct
 extern const OrdinanceCost ORDINANCE_COST[20];
 int32_t                    sim_ordinance_cost(const City *c, int which); /* ordinanceCost $41368 */
 
-#endif /* SC2K_H */
+#endif /* ARC_SIM_H */

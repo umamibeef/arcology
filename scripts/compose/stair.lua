@@ -28,16 +28,16 @@ arc.rules.stair = function (s)
     local n = d.n
 
     local block = {}
-    for i = 1, n do block[i] = s:block(i) end
+    for i = 0, n - 1 do block[i] = s:block(i) end
 
     --  Which cells belong to which staircase.
     local stair, count = {}, 0
-    local i = 1
-    while i <= n do
+    local i = 0
+    while i < n do
         local last = i
         if block[i] then
             local j, nb, prev = i, 0, 0
-            while j <= n and block[j] do
+            while j < n and block[j] do
                 local turn = s:turn(j)
                 --  The same way again, or an end: not a stair.
                 if nb > 0 and (turn == 0 or turn == prev) then break end
@@ -46,11 +46,11 @@ arc.rules.stair = function (s)
                 --  How far to the next block, over straight cells only,
                 --  and none of them pinned.
                 local k = j + 1
-                while k <= n and not block[k] and k - j <= d.gap + 1 and not s:pinned(k) do
+                while k < n and not block[k] and k - j <= d.gap + 1 and not s:pinned(k) do
                     k = k + 1
                 end
                 --  A long straight, a pinned one, or the end.
-                if k <= n and block[k] and k - j - 1 <= d.gap then j = k else break end
+                if k < n and block[k] and k - j - 1 <= d.gap then j = k else break end
             end
             if nb >= 2 then
                 count = count + 1
@@ -62,12 +62,12 @@ arc.rules.stair = function (s)
     end
 
     --  The chain: every loose cell, and one point for each staircase.
-    for k = 1, n do
+    for k = 0, n - 1 do
         if not stair[k] then
             s:point(k)
-        elseif k == 1 or stair[k - 1] ~= stair[k] then
+        elseif k == 0 or stair[k - 1] ~= stair[k] then
             local j = k
-            while j <= n and stair[j] == stair[k] do j = j + 1 end
+            while j < n and stair[j] == stair[k] do j = j + 1 end
             s:centre(k, j - 1)
         end
     end

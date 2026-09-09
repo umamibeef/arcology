@@ -23,7 +23,7 @@
       <text x="32" y="230" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" style="fill:var(--gold)" opacity=".8">tiles.png + .json</text>
 
       <rect x="258" y="52" width="176" height="98" fill="none" stroke="currentColor" stroke-width="1.5"/>
-      <text x="272" y="76" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="13.5" font-weight="700" fill="currentColor">sc2kpack</text>
+      <text x="272" y="76" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="13.5" font-weight="700" fill="currentColor">artpack</text>
       <text x="272" y="96" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10.5" fill="currentColor" opacity=".65">extract · pack</text>
       <text x="272" y="113" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10.5" fill="currentColor" opacity=".65">import-scurk</text>
       <text x="272" y="130" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10.5" fill="currentColor" opacity=".65">rect packer</text>

@@ -1595,6 +1595,67 @@ extern "C" int ui_wants_keyboard(const RUi *u)
     return u && ImGui::GetIO().WantTextInput ? 1 : 0;
 }
 
+/*  LOADING.  A reading of the scripts is followed by a whole build, and
+ *  the build blocks: the window stops repainting for about a second and
+ *  a half.  This is the frame drawn just before it, so what the panel
+ *  says is what the window will be showing for as long as the build
+ *  takes -- which is the whole point of it.
+ *
+ *  It sits in the middle of the screen and takes no input: there is
+ *  nothing to press, and the frame after it is the build. */
+/*  LOADING.  The scripts are read in a few milliseconds and the world
+ *  they describe takes about a second and a half to build, so what this
+ *  announces is the BUILD.  The bar carries the words: a caption beside
+ *  it would leave the bar itself saying nothing, and the bar is the part
+ *  the eye goes to.
+ *
+ *  The words are drawn TWICE, clipped either side of the fill: white
+ *  over the black that is done, black over the white that is not.  That
+ *  is how the machine this interface comes from drew one, and it is also
+ *  the only way to read a label on a bar whose fill and text are both
+ *  black. */
+static void loading_window(RUiState *s)
+{
+    const ImGuiViewport *vp = ImGui::GetMainViewport();
+    const float          w  = 340.0f;
+    const float          f  = s->loading_steps > 0
+                                  ? (float)s->loading_step / (float)s->loading_steps
+                                  : 0.0f;
+    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + (vp->WorkSize.x - w) * 0.5f,
+                                   vp->WorkPos.y + vp->WorkSize.y * 0.4f));
+    ImGui::SetNextWindowSize(ImVec2(w, 0.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 2.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(14.0f, 12.0f));
+    if (ImGui::Begin("Loading", NULL,
+                     ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                         ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+                         ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoInputs))
+    {
+        ImGui::ProgressBar(f, ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() + 8.0f), NULL);
+        {
+            ImVec2      mn = ImGui::GetItemRectMin(), mx = ImGui::GetItemRectMax();
+            ImVec2      ts = ImGui::CalcTextSize(s->loading);
+            ImVec2      at = ImVec2(mn.x + (mx.x - mn.x - ts.x) * 0.5f,
+                                    mn.y + (mx.y - mn.y - ts.y) * 0.5f);
+            float       cut = mn.x + (mx.x - mn.x) * f;
+            ImDrawList *dl  = ImGui::GetWindowDrawList();
+            dl->PushClipRect(mn, ImVec2(cut, mx.y), true);
+            dl->AddText(at, ImGui::GetColorU32(ImGuiCol_FrameBg), s->loading);
+            dl->PopClipRect();
+            dl->PushClipRect(ImVec2(cut, mn.y), mx, true);
+            dl->AddText(at, ImGui::GetColorU32(ImGuiCol_Text), s->loading);
+            dl->PopClipRect();
+        }
+        if (s->loading_note[0])
+        {
+            ImGui::Spacing();
+            ImGui::TextUnformatted(s->loading_note);
+        }
+    }
+    ImGui::End();
+    ImGui::PopStyleVar(2);
+}
+
 extern "C" void ui_frame(RUi *u, RUiState *s)
 {
     if (!u)
@@ -1605,6 +1666,8 @@ extern "C" void ui_frame(RUi *u, RUiState *s)
 
     g_ui_for_title = u;
     menu_bar(u, s);
+    if (s->loading[0])
+        loading_window(s);
     palette(u, s);
     demand(u, s);
     if (s->show_city)

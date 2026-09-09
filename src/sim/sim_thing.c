@@ -6,7 +6,7 @@
  *  lives; the same rules apply here as there, and the addresses in the
  *  comments still point into CODE 2. */
 #include "ext80.h"
-#include "sc2k.h"
+#include "sim.h"
 #include "sim_int.h"
 
 #include <stdio.h>

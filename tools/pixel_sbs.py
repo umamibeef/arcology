@@ -18,7 +18,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from pixel_diff import read_rgb_png
 from render_pixels import render
-from sc2kpack import write_indexed_png, TRANSPARENT
+from artpack import write_indexed_png, TRANSPARENT
 from gif import write_gif_anim
 
 EXE = HERE.parent / "build/arcology"
@@ -109,7 +109,7 @@ def main():
                             "32", "--indexed", "--phase", str(k), "--crop",
                             "%d,%d,32,32" % (cx, cy)],
                            capture_output=True, check=True)
-            from sc2kpack import read_indexed_png
+            from artpack import read_indexed_png
             q = [tuple(c) for c in read_indexed_png(f)[3]]
             while len(q) < 256:
                 q.append((0, 0, 0))

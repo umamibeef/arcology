@@ -35,7 +35,7 @@ arc.rules.footway = function (b)
     if cross then
         ac0, al0, al1, mat = -fw.inner, 0.0, d.asked, arc.mat.zebra
     end
-    for k = 1, n - 1 do
+    for k = 0, n - 2 do
         local a0x, a0y, a1x, a1y, za = b:at(k)
         local b0x, b0y, b1x, b1y, zb = b:at(k + 1)
         --  A band that lies on the ground takes the drawn surface at

@@ -1,5 +1,5 @@
 /*  model.c -- the walk that draws a model, and the cache behind it.
- *  See net/model.h.  Each model is its own file under scripts/models. */
+ *  See geo/model.h.  Each model is its own file under scripts/models. */
 #include <math.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -7,7 +7,7 @@
 
 #include "mesh/internal.h"
 #include "net/internal.h"
-#include "net/model.h"
+#include "geo/model.h"
 #include "script.h"
 
 /*  Every model is a SCRIPT'S.  Nothing here ships a prop's shape: a name

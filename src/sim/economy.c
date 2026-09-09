@@ -9,7 +9,7 @@
  *  watching all 186 _FP68K sites under the interpreter
  *  (tools/trace_economy.py), which is what the comments cite. */
 #include "ext80.h"
-#include "sc2k.h"
+#include "sim.h"
 #include <stdio.h>
 #include <stdlib.h>
 

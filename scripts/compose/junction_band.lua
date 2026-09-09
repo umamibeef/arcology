@@ -23,14 +23,14 @@ local function line_meet(ax, ay, ux, uy, bx, by, vx, vy)
     return f32(ax + ux * t), f32(ay + uy * t)
 end
 
-arc.rules.junction_band = function (b)
+arc.rules.band = function (b)
     local d = b:info()
     local n = d.n
     if n < 3 then return true end
     local mouth = arc.rules.family({name = "road"}).footway.mouth
 
     local p = {}
-    for i = 1, n do
+    for i = 0, n - 1 do
         local x, y = b:at(i)
         p[i] = {x = x, y = y}
     end
@@ -42,8 +42,8 @@ arc.rules.junction_band = function (b)
     --  boundary and out of the junction, which leaves the corner paved
     --  with asphalt and the footway lying on the grass outside it.
     local area2 = 0.0
-    for i = 1, n do
-        local q = p[i % n + 1]
+    for i = 0, n - 1 do
+        local q = p[(i + 1) % n]
         area2 = area2 + p[i].x * q.y - q.x * p[i].y
     end
     local ccw = area2 > 0.0
@@ -55,13 +55,13 @@ arc.rules.junction_band = function (b)
     --  at every road rather than running over the ones whose tags did not
     --  survive.
     local edge_arm = {}
-    for i = 1, n do edge_arm[i] = -1 end
+    for i = 0, n - 1 do edge_arm[i] = -1 end
     for e = 0, 3 do
         local have, ax, ay, bx, by = b:arm(e)
         if have then
             local best, bd = -1, mouth
-            for i = 1, n do
-                local q = p[i % n + 1]
+            for i = 0, n - 1 do
+                local q = p[(i + 1) % n]
                 local s1 = arc.dist(p[i].x, p[i].y, ax, ay) + arc.dist(q.x, q.y, bx, by)
                 local s2 = arc.dist(p[i].x, p[i].y, bx, by) + arc.dist(q.x, q.y, ax, ay)
                 local sc = math.min(s1, s2)
@@ -75,8 +75,8 @@ arc.rules.junction_band = function (b)
     --  mouth keeps its normal -- that is the way a crossing laid there
     --  runs into the junction -- but carries no pavement.
     local nrm, has = {}, {}
-    for i = 1, n do
-        local q = p[i % n + 1]
+    for i = 0, n - 1 do
+        local q = p[(i + 1) % n]
         local ex, ey = q.x - p[i].x, q.y - p[i].y
         local el = math.sqrt(ex * ex + ey * ey)
         if el < 1e-4 then
@@ -106,8 +106,8 @@ arc.rules.junction_band = function (b)
         return f32(bx / dt), f32(by / dt)
     end
 
-    for i = 1, n do
-        local ip, j = (i - 2) % n + 1, i % n + 1
+    for i = 0, n - 1 do
+        local ip, j = (i - 1) % n, (i + 1) % n
         local m0x, m0y = mitre(i, ip)
         local m1x, m1y = mitre(i, j)
         b:edge(i, has[i], nrm[i].x, nrm[i].y, edge_arm[i], m0x, m0y, m1x, m1y)
@@ -115,14 +115,14 @@ arc.rules.junction_band = function (b)
 
     --  And the ring moved in, where one was asked for.
     local org, dir = {}, {}
-    for i = 1, n do
-        local q = p[i % n + 1]
+    for i = 0, n - 1 do
+        local q = p[(i + 1) % n]
         local inw = edge_arm[i] < 0 and d.width or 0.0
         org[i] = {x = f32(p[i].x + f32(nrm[i].x * inw)), y = f32(p[i].y + f32(nrm[i].y * inw))}
         dir[i] = {x = q.x - p[i].x, y = q.y - p[i].y}
     end
-    for i = 1, n do
-        local ip = (i - 2) % n + 1
+    for i = 0, n - 1 do
+        local ip = (i - 1) % n
         local x, y = line_meet(org[ip].x, org[ip].y, dir[ip].x, dir[ip].y,
                                org[i].x, org[i].y, dir[i].x, dir[i].y)
         --  Two edges in a line: the moved point serves.

@@ -120,7 +120,7 @@ one is what makes a line read as a stray fragment rather than a label.
      - What it holds
      - Written as
    * - eyebrow
-     - A bare label: what kind of thing this is. ``sc2k-re · renderer ·
+     - A bare label: what kind of thing this is. ``arcology · renderer ·
        design brief``, ``D1 · container format``.
      - ``.. container:: eyebrow``
    * - lede

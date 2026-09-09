@@ -7,7 +7,7 @@
       "hidden": true,
       "binaryDir": "${sourceDir}/build/${presetName}",
       "cacheVariables": {
-        "SC2K_ASSETS": "${sourceDir}/../../assets"
+        "ARC_ASSETS": "${sourceDir}/../../assets"
       }
     },
     {

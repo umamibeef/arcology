@@ -7,7 +7,7 @@
 #include "log.h"
 #include "opt.h"
 #include "project.h"
-#include "sc2k.h"
+#include "sim.h"
 
 #include <SDL3/SDL.h>
 

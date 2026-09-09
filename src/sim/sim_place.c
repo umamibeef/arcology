@@ -4,7 +4,7 @@
  *  stations and marinas a zone gets automatically when it grows next to the
  *  right thing.  Split out of sim.c; addresses still point into CODE 2. */
 #include "ext80.h"
-#include "sc2k.h"
+#include "sim.h"
 #include "sim_int.h"
 
 #include <stdio.h>

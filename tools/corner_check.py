@@ -26,7 +26,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 BASELINE = os.path.join(HERE, "corner_baseline.json")
-COLLECTION = os.environ.get("SC2K_CITIES") or os.path.expanduser(
+COLLECTION = os.environ.get("ARC_CITIES") or os.path.expanduser(
     "~/Downloads/SimCity 2000® Collection")
 
 

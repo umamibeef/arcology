@@ -57,17 +57,56 @@ const char *script_error(void);
 /*  How many times the script has been read, and how many rules it sets:
  *  what the console shows so a reload is visible. */
 int script_generation(void);
+
+/*  The materials a script declared with arc.mat.define, as a run of four
+ *  floats each -- the colour, and roughness in the fourth.  The frame
+ *  hands them to the shaders, which shade anything numbered from
+ *  MAT_SCRIPT_BASE from them rather than from a branch of its own. */
+int  script_materials(const float **out);
+void script_material_reset(void);
+
+/*  The families, as the scripts declare them (arc.family.define): each
+ *  reading of the scripts starts from none, so what stands is exactly
+ *  what this reading declared. */
+void script_family_reset(void);
+
+/*  The byte tables a script pushed with arc.bytes: what a byte of the
+ *  save means, read straight out of 256 rather than asked for.  An
+ *  unknown name answers a table of noughts, and a reading of the scripts
+ *  clears the lot. */
+const unsigned char *script_bytes(const char *name);
+/*  And the named numbers it pushed with arc.numbers: `keys` and `out`
+ *  are n long and line up, and a key the table does not name keeps
+ *  whatever `out` held.  Answers 0 where no table of that name was
+ *  pushed at all -- which is not an answer, and a caller that cannot go
+ *  on without them must say so. */
+int                  script_numbers(const char *name, const char *const *keys, float *out, int n);
+/*  And the two whose entries have a SHAPE: which network a byte carries
+ *  and where in the shared layout it sits, and what part of a highway it
+ *  is and which way that runs.  Arrays of 256, pushed whole. */
+void                 script_pieces(const unsigned char **fam, const signed char **piece,
+                                   const unsigned char **fam2, const signed char **piece2);
+void                 script_highways(const unsigned char **kind, const unsigned char **ew);
+void                 script_data_reset(void);
+
+/*  A rule that RAISED, or a script that would not load -- as against a
+ *  rule the scripts never set.  An unset rule answers "the C decides",
+ *  which is an answer; a rule that raised answered nothing, and a build
+ *  that carried on past one would draw a city with pieces missing and
+ *  report success.  script_fault names the first, script_fault_count
+ *  says how many followed it, and the fault stands until the scripts are
+ *  read again -- a broken rule cannot be got past by building twice. */
+const char *script_fault(void);
+int         script_fault_count(void);
 int script_rules(void);
+/*  How many script files the last reading read, and through `total` how
+ *  many it found.  The two are equal after a reading that finished. */
+int script_files(int *total);
 
 /*  ---- the rules ------------------------------------------------------
  *
  *  Each answers 1 when the script decided and *out holds the answer, 0
  *  when it did not and the caller keeps its own. */
-
-/*  A junction's control, two bits an arm: 0 none, 1 stop, 2 signal.
- *  `cls` is each arm's road class and -1 for an arm that is not there,
- *  `traf` the traffic on it, `busy` the traffic on the junction. */
-int script_rule_control(int col, int row, const int cls[4], const int traf[4], int busy, int *out);
 
 /*  Whether one arm's mouth carries a crossing, and how deep a band it
  *  asks for before the road it has to give up is known.  `pavement` says
@@ -77,10 +116,12 @@ int script_rule_control(int col, int row, const int cls[4], const int traf[4], i
  *  widths.  Answers 1 with *out the depth in tiles, 0 for no crossing. */
 int script_rule_crossing_at(int col, int row, int arm, int ctrl, int pavement, float cos, float span, float *out);
 
-/*  How deep a crossing runs at one arm's mouth, in tiles, 0 for none.
- *  `want` is what the C would give it, `room` the road it has to give
- *  up, `straight` how far that road runs straight from the mouth. */
-int script_rule_crossing(int col, int row, int arm, int ctrl, float want, float room, float straight, float *out);
+/*  The world that MOVES asks these on its own beat, never on a frame:
+ *  where a level crossing's gate arm has swung to, and the speed a car
+ *  keeps for the car ahead of it and for the line it must stop at. */
+float script_rule_gate(float angle, float near, float dt);
+float script_rule_car_follow(float gap, float v, float stop, float free);
+float script_rule_car_hold(float to_end, int hold, float line, float v, float dt);
 
 /*  ---- the models ----------------------------------------------------
  *
@@ -179,34 +220,10 @@ typedef struct
     float side; /* 1 one hand of it, -1 the other */
     float in;   /* in from the kerb, as a part of the half width */
 } ScriptLamp;
-int script_rule_lamps(float cls, float len, ScriptLamp *out, int max);
 
-/*  What to try where two of a fitted path's lines meet, and in what
- *  order.  `cross` says whether the two lines meet at all and `free`
- *  whether either is a free line, which a corridor let be straight
- *  wherever it liked.  Answers how many ways were named; each is "arc",
- *  "biarc" or "walk", and the first that holds is the join. */
-int script_rule_join(int cross, int free_line, char how[][12], int max);
 
-/*  What lies after a line, for the budget the far end of a join is given:
- *  its crossing with the line after that, or its own far end.  `met` says
- *  the two lines cross at all, `free_line` that one of them is a free
- *  line, `ahead` how far along the line the crossing lies and `reach` how
- *  far its own end does.  1 for the crossing, 0 for the end. */
-int script_rule_after(int met, int free_line, float ahead, float reach);
 
-/*  Which of a segment's two fits to keep: the one whose corridor lets its
- *  runs leave its own cells, or the one held to them.  Each is described
- *  by how many of its corners got no arc at all, how many got one under
- *  the minimum radius, and how many vertices it has.  1 keeps the free
- *  fit, 0 the held one. */
-int script_rule_fit_choice(const char *fam, const int free_[3], const int held[3]);
 
-/*  How a ramp's foot meets the road it lands on.  `straight` says a road
- *  carries on through the far side of the road tile, `along` and
- *  `against` that one runs each way across it.  0 neither, 1 a stub,
- *  2 a through road, 3 straight on. */
-int script_rule_ramp_fork(int straight, int along, int against);
 
 /*  Which way an on-ramp's taper lies along the deck.  `free_side` says
  *  both ways are open -- a road along the deck's axis blocks its own
@@ -218,9 +235,6 @@ int script_rule_ramp_fork(int straight, int along, int against);
  *  between them: `gap` tiles lie between the two deck tiles and `cap` is
  *  the longest taper either may have.  The answer is what each is cut
  *  to, or -1 to leave them alone. */
-/*  One class for a whole segment, from how many of its tiles read as
- *  each: local, avenue, boulevard. */
-int script_rule_seg_class(const int counts[3]);
 
 /*  Where a ramp's descent runs along the deck: `at` is its station's
  *  distance along the band, `len` its taper in tiles, `leaves` whether it
@@ -232,24 +246,9 @@ int script_rule_seg_class(const int counts[3]);
  *  band carries on the two ways along it from this cell.  1 walks forward
  *  from here, -1 backward, 0 leaves the cell to the sweep that walks a
  *  band with no end at all. */
-/*  How fast a car may go for the car ahead of it: `gap` is the distance
- *  between them along the lane, `v` the speed it wants, and `stop` and
- *  `free` the distances at which it must stop dead and may run free. */
-float script_rule_car_follow(float gap, float v, float stop, float free);
 
-/*  How fast a car may go for what holds it at the end of its segment: a
- *  junction's control, or a level crossing's gates.  `to_end` is how far
- *  it has to go, `hold` says the thing ahead is holding it, `line` how
- *  far short of the thing the car stops, and `dt` the step.  A car with
- *  no room to stop in gets the speed that just reaches the line. */
-float script_rule_car_hold(float to_end, int hold, float line, float v, float dt);
 
-int script_rule_band_start(int back, int on);
 
-int script_rule_ramp_span(float at, int len, int leaves, int sgn,
-                          float *top, float *foot, float *total, float *ds);
-int script_rule_ramp_side(int free_side, int room, int room_back);
-int script_rule_ramp_share(float gap, int cap);
 
 /*  How the world that moves behaves: the trains, the cars that follow
  *  one another, the gates they wait at and the signals that blink.  None
@@ -282,7 +281,7 @@ int script_rule_traffic(ScriptTraffic *out);
  *  the length of a build, since none of it varies from strip to strip.
  *  With no rule a family has no footway, no junction box and no tracks:
  *  nothing in C carries a second copy. */
-typedef struct
+typedef struct ScriptFamily
 {
     int   walks; /* the family has a footway at all */
     /*  The footway, as fractions of the carriageway's half width. */
@@ -362,7 +361,9 @@ typedef struct
     float band_abreast, band_outer, band_taper_far, band_taper_near;
     float band_taper_gap, band_taper_room, band_road_dot;
 } ScriptFamily;
-int script_rule_family(const char *fam, float width, ScriptFamily *out);
+/*  The numbers a family is drawn by, as the script pushed them with
+ *  arc.family.rules.  A family nobody pushed answers a table of noughts. */
+const ScriptFamily *script_family_rules(const char *name);
 
 /*  Which of the city's building bytes are a highway, and which way each
  *  runs.  `kind` answers 0 for a byte that is no highway, 1 for a deck
@@ -372,6 +373,15 @@ int script_rule_family(const char *fam, float width, ScriptFamily *out);
  *  Read once a generation and kept, since every tile of the map is
  *  looked up in it. */
 int script_rule_hiway_tiles(unsigned char *kind, unsigned char *ew, int n);
+
+/*  Which of the city's building bytes carry a NETWORK piece: the family
+ *  it belongs to and its place in the shared fifteen-piece layout, and
+ *  the same again for the second family a crossing carries on the other
+ *  axis.  `piece` and `piece2` take -1 for a byte no family claims, and
+ *  `fam`/`fam2` the family code beside it.  Read once a generation and
+ *  kept, since every tile of the map is looked up in it. */
+int script_rule_piece_tiles(unsigned char *fam, signed char *piece,
+                            unsigned char *fam2, signed char *piece2, int n);
 
 /*  Which of the city's building bytes carry a road, and how: 1 a road
  *  piece, 2 a road crossing something, 3 a road running under a deck
@@ -383,6 +393,16 @@ int script_rule_road_tiles(unsigned char *carries, int n);
  *  table it returns is keyed by the byte and any true value puts it in.
  *  Read once a generation and kept. */
 int script_rule_byte_set(const char *rule, unsigned char *set, int n);
+/*  The same, where each byte answers a NUMBER rather than yes or no: a
+ *  byte the rule does not name takes 0. */
+int script_rule_byte_map(const char *rule, unsigned char *map, int n);
+
+/*  A rule that answers a table of NAMED numbers, asked with nothing.
+ *  `names` and `out` are n long and line up.  Answers 1 when the rule
+ *  answered, 0 when there is no such rule -- and 0 is not an answer: a
+ *  caller that cannot go on without the numbers must say so rather than
+ *  carry on with whatever `out` held. */
+int script_rule_numbers(const char *rule, const char *const *names, float *out, int n);
 
 /*  How big a level crossing is, from the angle the road and the railway
  *  cross at.  `sin` is the sine of that angle, `road` and `rail` their
@@ -411,15 +431,20 @@ typedef struct
     float out, across;
     char  model[24]; /* the model that stands there */
 } ScriptApproach;
+
+/*  What the script is told about one approach before it decides what
+ *  stands on it: the crossing's own reach and mast, how far the road
+ *  runs before a junction owns it, its width, the middle of the panel,
+ *  and the two directions -- along the approach and across it. */
+typedef struct
+{
+    float reach, mast, limit, road;
+    float x, y, fx, fy, gx, gy;
+} ScriptApproachAsk;
 int script_rule_crossing_marks(float reach, float mast, float limit, float road,
                                float cx, float cy, float fx, float fy, float gx, float gy,
                                ScriptApproach *out, int max);
 
-/*  Where a level crossing's gate arm stands after `dt` seconds: `angle`
- *  is where it is now, 0 flat across the road, and `near` how far along
- *  the rail's axis the nearest train car is, in tiles.  Answers the new
- *  angle; with no rule the arm does not move at all. */
-float script_rule_gate(float angle, float near, float dt);
 
 /*  What stands beside a railway, and where: the signals along it and the
  *  whistle posts before its level crossings.  `len` is how long the
@@ -437,14 +462,8 @@ typedef struct
     int   to_map;  /* faces along the map's own axis rather than back along the track */
     int   clear;   /* dropped where a level crossing owns the tile     */
 } ScriptMark;
-int script_rule_rail_marks(float len, int ahead, int behind, const float *cross, int ncross,
-                           ScriptMark *out, int max);
 
-/*  Where a family's lanes run, as distances from the centreline, inner
- *  first.  `fam` is "road", "rail" or "deck" and `cls` the class the
- *  strip carries.  Answers how many were written, or -1 when no rule
- *  set them and the caller keeps its own. */
-int script_rule_lanes(const char *fam, int cls, float *off, int max);
+
 
 /*  What a junction's outline does where two arms meet: rounds the corner
  *  off with a kerb return, leaves it square, or runs straight past it.

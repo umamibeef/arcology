@@ -3,20 +3,20 @@
 
     python3 tools/seam_check.py
 
-city.h says it "deliberately does NOT include the simulation's sc2k.h",
+city.h says it "deliberately does NOT include the simulation's sim.h",
 and adapt.h calls itself "the one file that includes both sides": the
 adapter copies what the renderer reads into an RCity, and the renderer
 cannot reach the City it came from.
 
 That is the design boundary of this codebase and it was enforced by
 nothing.  It broke twice in one day -- a save generator under src/render
-that included sc2k.h to author a City, and then app_int.h, which included
+that included sim.h to author a City, and then app_int.h, which included
 adapt.h and so handed every field of City to camera.c, paths.c and
 prefs.c while claiming in its own comment that it did not.
 
 The second one is why this follows includes instead of grepping each file
 in isolation: a direct include is the easy case, and it was not the one
-that happened.  Every simulation header counts, not just sc2k.h, and the
+that happened.  Every simulation header counts, not just sim.h, and the
 allow-list is keyed on path so a file cannot be exempted by being named
 after one that is.
 

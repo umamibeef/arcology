@@ -5,6 +5,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 #include <dirent.h>
 #include <stdlib.h>
 #include <sys/stat.h>
@@ -12,7 +13,6 @@
 #include "dump.h"
 #include "log.h"
 
-#if SC2K_LUA
 
 #include "internal.h"
 
@@ -25,6 +25,10 @@ static int         s_is_dir;
 static struct stat s_stat;
 static int         s_have_stat;
 static char       s_err[1024];
+/*  How many files the last reading read.  A reading is one step -- a
+ *  file half read is no reading at all -- so this is a count for a
+ *  report rather than a progress to watch while it happens. */
+static int        s_files;
 static int        s_gen;
 static int        s_reloading;
 
@@ -137,6 +141,8 @@ static void arc_open(lua_State *L)
     api_put_open(L);
     api_object_open(L);
     api_model_open(L);
+    api_family_open(L);
+    api_data_open(L);
     lua_setglobal(L, "arc");
 }
 
@@ -146,6 +152,72 @@ static void fail(const char *what, const char *msg)
 {
     snprintf(s_err, sizeof s_err, "%s: %s", what, msg ? msg : "?");
     R_ERR("lua", "%s", s_err);
+}
+
+/*  A FAULT: a rule that raised, or a file that would not load.  It is
+ *  not the same thing as a rule the scripts never set -- an unset rule
+ *  answers "the C decides", which is an answer, and a rule that raised
+ *  answered nothing at all.  A build that carries on past one draws a
+ *  city with pieces missing and reports success, so the build asks after
+ *  the fact and abandons itself.
+ *
+ *  The fault stands until the scripts are read again, which is what
+ *  clears it: a broken rule cannot be got past by building twice.  Only
+ *  the FIRST is logged, because a rule that raises in the strip pass
+ *  raises once a strip and a thousand identical lines say nothing the
+ *  first one did not. */
+static char s_fault[1024];
+static int  s_n_fault;
+
+static void fault(const char *what, const char *msg)
+{
+    snprintf(s_err, sizeof s_err, "%s: %s", what, msg ? msg : "?");
+    if (s_n_fault++ == 0)
+    {
+        snprintf(s_fault, sizeof s_fault, "%s: %s", what, msg ? msg : "?");
+        R_ERR("lua", "%s", s_fault);
+    }
+}
+
+/*  A rule that raised is left alone until the scripts are read again.
+ *  Asking it once a strip after it has already failed buys nothing: the
+ *  answer is the same, the report is the same, and where the failure was
+ *  a runaway the build spends the whole budget again at every call. */
+#define RULE_DEAD_MAX 32
+static char s_dead[RULE_DEAD_MAX][64];
+static int  s_n_dead;
+
+static int rule_dead(const char *name)
+{
+    int i;
+    for (i = 0; name && i < s_n_dead; ++i)
+        if (strcmp(s_dead[i], name) == 0)
+            return 1;
+    return 0;
+}
+
+static void rule_kill(const char *name)
+{
+    if (!name || rule_dead(name) || s_n_dead >= RULE_DEAD_MAX)
+        return;
+    snprintf(s_dead[s_n_dead++], sizeof s_dead[0], "%s", name);
+}
+
+static void fault_reset(void)
+{
+    s_fault[0] = 0;
+    s_n_fault  = 0;
+    s_n_dead   = 0;
+}
+
+const char *script_fault(void)
+{
+    return s_fault[0] ? s_fault : NULL;
+}
+
+int script_fault_count(void)
+{
+    return s_n_fault;
 }
 
 /*  Every .lua under a directory and its folders, as paths relative to
@@ -158,7 +230,31 @@ static int name_cmp(const void *a, const void *b)
     return strcmp((const char *)a, (const char *)b);
 }
 
-static int dir_walk(const char *root, const char *rel, char names[][256], int max, int n)
+/*  The .lua files under a place, in one order, however many there are.
+ *  A fixed cap here is silent at both ends: past it a script is never
+ *  read, and an edit to it is never noticed. */
+typedef struct
+{
+    char (*name)[256];
+    int n, cap;
+} ScriptList;
+
+static int list_add(ScriptList *l, const char *s)
+{
+    if (l->n == l->cap)
+    {
+        int   cap = l->cap ? l->cap * 2 : 64;
+        void *p   = realloc(l->name, (size_t)cap * 256);
+        if (!p)
+            return 0;
+        l->name = p;
+        l->cap  = cap;
+    }
+    snprintf(l->name[l->n++], 256, "%s", s);
+    return 1;
+}
+
+static void dir_walk(const char *root, const char *rel, ScriptList *out)
 {
     char           here[1300];
     DIR           *d;
@@ -166,8 +262,8 @@ static int dir_walk(const char *root, const char *rel, char names[][256], int ma
     snprintf(here, sizeof here, "%s%s%s", root, rel[0] ? "/" : "", rel);
     d = opendir(here);
     if (!d)
-        return n;
-    while ((e = readdir(d)) != NULL && n < max)
+        return;
+    while ((e = readdir(d)) != NULL)
     {
         char        sub[256];
         struct stat st;
@@ -179,28 +275,29 @@ static int dir_walk(const char *root, const char *rel, char names[][256], int ma
         snprintf(full, sizeof full, "%s/%s", root, sub);
         if (stat(full, &st) == 0 && S_ISDIR(st.st_mode))
         {
-            n = dir_walk(root, sub, names, max, n);
+            dir_walk(root, sub, out);
             continue;
         }
         if (l > 4 && strcmp(e->d_name + l - 4, ".lua") == 0)
-            snprintf(names[n++], 256, "%s", sub);
+            list_add(out, sub);
     }
     closedir(d);
-    return n;
 }
 
-static int dir_files(const char *dir, char names[][256], int max)
+static int dir_files(const char *dir, ScriptList *out)
 {
-    int n = dir_walk(dir, "", names, max, 0);
-    qsort(names, (size_t)n, 256, name_cmp);
-    return n;
+    out->n = 0;
+    dir_walk(dir, "", out);
+    qsort(out->name, (size_t)out->n, 256, name_cmp);
+    return out->n;
 }
 
 /*  The newest thing in the watched place, so a change to any file in a
  *  directory is a change to the script. */
+static ScriptList s_watched; /* reused, so watching costs a frame nothing */
+
 static void watched_stamp(struct stat *out)
 {
-    char        names[128][256];
     struct stat st;
     int         i, n;
     memset(out, 0, sizeof *out);
@@ -210,11 +307,11 @@ static void watched_stamp(struct stat *out)
             memset(out, 0, sizeof *out);
         return;
     }
-    n = dir_files(s_path, names, 128);
+    n = dir_files(s_path, &s_watched);
     for (i = 0; i < n; ++i)
     {
         char full[1300];
-        snprintf(full, sizeof full, "%s/%s", s_path, names[i]);
+        snprintf(full, sizeof full, "%s/%s", s_path, s_watched.name[i]);
         if (stat(full, &st) != 0)
             continue;
         if (st.st_mtime > out->st_mtime)
@@ -229,12 +326,13 @@ static int run_file(const char *path)
 {
     if (luaL_loadfile(s_L, path) != LUA_OK || lua_pcall(s_L, 0, 0, 0) != LUA_OK)
     {
-        fail("script", lua_tostring(s_L, -1));
+        fault("script", lua_tostring(s_L, -1));
         lua_pop(s_L, 1);
         return -1;
     }
     s_err[0] = 0;
     ++s_gen;
+    ++s_files;
     return 0;
 }
 
@@ -250,6 +348,10 @@ int script_open(const char *dir, const char *path)
     }
     luaL_openlibs(s_L);
     arc_open(s_L);
+    script_family_reset();
+    script_data_reset();
+    fault_reset();
+    s_files = 0;
     s_path[0]   = 0;
     s_dir[0]    = 0;
     s_have_stat = 0;
@@ -283,37 +385,40 @@ int script_open(const char *dir, const char *path)
  *  or folder over it. */
 static int run_dir(const char *dir)
 {
-    char names[128][256];
-    int  i, n = dir_files(dir, names, 128), rc = 0;
+    ScriptList list = {NULL, 0, 0};
+    int        i, n = dir_files(dir, &list), rc = 0;
     for (i = 0; i < n; ++i)
     {
         char full[1300];
-        snprintf(full, sizeof full, "%s/%s", dir, names[i]);
+        snprintf(full, sizeof full, "%s/%s", dir, list.name[i]);
         if (run_file(full) != 0)
             rc = -1;
     }
     if (n > 0)
         s_gen -= n - 1;
+    free(list.name);
     return rc;
 }
 
 static int run_watched(void)
 {
-    char names[128][256];
-    int  i, n, rc = 0;
+    int rc = 0;
     if (s_dir[0] && run_dir(s_dir) != 0)
         rc = -1;
     if (!s_is_dir)
         return run_file(s_path) != 0 ? -1 : rc;
     if (run_dir(s_path) != 0)
         rc = -1;
-    (void)names, (void)i, (void)n;
     return rc;
 }
 
 void script_close(void)
 {
+    free(s_watched.name);
+    s_watched.name = NULL;
+    s_watched.n = s_watched.cap = 0;
     script_model_reset();
+    script_family_reset();
     if (s_L)
         lua_close(s_L);
     s_L         = NULL;
@@ -424,6 +529,11 @@ int script_reload(void)
      *  what stands is exactly what this reading sets and nothing a
      *  reading of an older one left. */
     script_model_reset();
+    script_material_reset();
+    script_family_reset();
+    script_data_reset();
+    fault_reset();
+    s_files = 0;
     lua_getglobal(s_L, "arc");
     lua_newtable(s_L);
     lua_setfield(s_L, -2, "rules");
@@ -444,6 +554,8 @@ lua_State *script_state(void)
 
 int api_rule_begin(lua_State *L, const char *name)
 {
+    if (rule_dead(name))
+        return 0;
     lua_getglobal(L, "arc");
     lua_getfield(L, -1, "rules");
     lua_getfield(L, -1, name);
@@ -457,10 +569,27 @@ int api_rule_begin(lua_State *L, const char *name)
     return 1;
 }
 
+/*  When the rule being watched started.  Process time rather than the
+ *  wall's: a rule is not to be failed for the machine being busy. */
+static clock_t s_rule_clock;
+
+void api_rule_watch(lua_State *L, int on)
+{
+    if (on)
+    {
+        s_rule_clock = clock();
+        lua_sethook(L, api_rule_runaway, LUA_MASKCOUNT, RULE_STEPS);
+    }
+    else
+        lua_sethook(L, NULL, 0, 0);
+}
+
 void api_rule_runaway(lua_State *L, lua_Debug *ar)
 {
     (void)ar;
-    luaL_error(L, "runs away: no answer in %d steps", RULE_STEPS);
+    if ((double)(clock() - s_rule_clock) / (double)CLOCKS_PER_SEC < RULE_SECONDS)
+        return;
+    luaL_error(L, "runs away: no answer in %d seconds", RULE_SECONDS);
 }
 
 /*  A rule may ask for another rule -- the fit asks for the sweep at each
@@ -473,13 +602,14 @@ int api_rule_call(lua_State *L, const char *name, int nargs, int nres)
 {
     int ok;
     if (s_rule_depth++ == 0)
-        lua_sethook(L, api_rule_runaway, LUA_MASKCOUNT, RULE_STEPS);
+        api_rule_watch(L, 1);
     ok = lua_pcall(L, nargs, nres, 0) == LUA_OK;
     if (--s_rule_depth == 0)
-        lua_sethook(L, NULL, 0, 0);
+        api_rule_watch(L, 0);
     if (ok)
         return 1;
-    fail(name, lua_tostring(L, -1));
+    fault(name, lua_tostring(L, -1));
+    rule_kill(name);
     lua_pop(L, 1);
     return 0;
 }
@@ -492,44 +622,6 @@ float api_field_num(lua_State *L, const char *key, float def)
         v = (float)lua_tonumber(L, -1);
     lua_pop(L, 1);
     return v;
-}
-
-int script_rule_control(int col, int row, const int cls[4], const int traf[4], int busy, int *out)
-{
-    int e, ok = 0;
-    if (!s_L || !api_rule_begin(s_L, "control"))
-        return 0;
-    lua_pushinteger(s_L, col);
-    lua_pushinteger(s_L, row);
-    lua_newtable(s_L); /* the arms: class and traffic, or nothing where there is no arm */
-    for (e = 0; e < 4; ++e)
-    {
-        if (cls[e] < 0)
-            continue;
-        lua_newtable(s_L);
-        lua_pushinteger(s_L, cls[e]);
-        lua_setfield(s_L, -2, "class");
-        lua_pushinteger(s_L, traf[e]);
-        lua_setfield(s_L, -2, "traffic");
-        lua_rawseti(s_L, -2, e + 1);
-    }
-    lua_pushboolean(s_L, busy);
-    if (!api_rule_call(s_L, "control", 4, 1))
-        return 0;
-    if (lua_istable(s_L, -1))
-    {
-        int v = 0;
-        for (e = 0; e < 4; ++e)
-        {
-            lua_rawgeti(s_L, -1, e + 1);
-            v |= (lua_tointeger(s_L, -1) & 3) << (2 * e);
-            lua_pop(s_L, 1);
-        }
-        *out = v;
-        ok   = 1;
-    }
-    lua_pop(s_L, 1);
-    return ok;
 }
 
 int script_rule_crossing_at(int col, int row, int arm, int ctrl, int pavement, float cs, float span, float *out)
@@ -553,51 +645,93 @@ int script_rule_crossing_at(int col, int row, int arm, int ctrl, int pavement, f
     return ok;
 }
 
-int script_rule_crossing(int col, int row, int arm, int ctrl, float want, float room, float straight, float *out)
+/*  A level crossing's gate arm after one beat of the world: the angle it
+ *  has swung to.  `dt` is the world's own beat, never a frame. */
+float script_rule_gate(float angle, float near, float dt)
 {
-    int ok = 0;
-    if (!s_L || !api_rule_begin(s_L, "crossing"))
-        return 0;
+    float v = angle;
+    if (!s_L || !api_rule_begin(s_L, "gate"))
+        return angle;
     lua_newtable(s_L);
-    lua_pushinteger(s_L, col), lua_setfield(s_L, -2, "col");
-    lua_pushinteger(s_L, row), lua_setfield(s_L, -2, "row");
-    lua_pushinteger(s_L, arm), lua_setfield(s_L, -2, "arm");
-    lua_pushinteger(s_L, ctrl), lua_setfield(s_L, -2, "control");
-    lua_pushnumber(s_L, want), lua_setfield(s_L, -2, "want");
-    lua_pushnumber(s_L, room), lua_setfield(s_L, -2, "room");
-    lua_pushnumber(s_L, straight), lua_setfield(s_L, -2, "straight");
-    if (!api_rule_call(s_L, "crossing", 1, 1))
-        return 0;
+    lua_pushnumber(s_L, angle), lua_setfield(s_L, -2, "angle");
+    lua_pushnumber(s_L, near), lua_setfield(s_L, -2, "near");
+    lua_pushnumber(s_L, dt), lua_setfield(s_L, -2, "dt");
+    if (!api_rule_call(s_L, "gate", 1, 1))
+        return angle;
     if (lua_isnumber(s_L, -1))
-        *out = (float)lua_tonumber(s_L, -1), ok = 1;
-    else if (lua_isboolean(s_L, -1))
-        *out = lua_toboolean(s_L, -1) ? want : 0.0f, ok = 1;
+        v = (float)lua_tonumber(s_L, -1);
     lua_pop(s_L, 1);
-    return ok;
+    return v;
+}
+
+/*  The speed a car keeps for the car ahead of it, and the speed it keeps
+ *  for the line it must stop at.  `dt` is the world's own beat. */
+float script_rule_car_follow(float gap, float v, float stop, float free)
+{
+    float out;
+    if (!s_L || !api_rule_begin(s_L, "car_follow"))
+        return v;
+    lua_newtable(s_L);
+    lua_pushnumber(s_L, gap), lua_setfield(s_L, -2, "gap");
+    lua_pushnumber(s_L, v), lua_setfield(s_L, -2, "speed");
+    lua_pushnumber(s_L, stop), lua_setfield(s_L, -2, "stop");
+    lua_pushnumber(s_L, free), lua_setfield(s_L, -2, "free");
+    if (!api_rule_call(s_L, "car_follow", 1, 1))
+        return v;
+    out = (float)lua_tonumber(s_L, -1);
+    lua_pop(s_L, 1);
+    return out;
+}
+
+float script_rule_car_hold(float to_end, int hold, float line, float v, float dt)
+{
+    float out;
+    if (!s_L || !api_rule_begin(s_L, "car_hold"))
+        return v;
+    lua_newtable(s_L);
+    lua_pushnumber(s_L, to_end), lua_setfield(s_L, -2, "ahead");
+    lua_pushboolean(s_L, hold), lua_setfield(s_L, -2, "held");
+    lua_pushnumber(s_L, line), lua_setfield(s_L, -2, "line");
+    lua_pushnumber(s_L, v), lua_setfield(s_L, -2, "speed");
+    lua_pushnumber(s_L, dt), lua_setfield(s_L, -2, "step");
+    if (!api_rule_call(s_L, "car_hold", 1, 1))
+        return v;
+    out = (float)lua_tonumber(s_L, -1);
+    lua_pop(s_L, 1);
+    return out;
 }
 
 /*  A prop the script builds itself.  Its place goes in as one table and
  *  the answer is whether it drew: a rule that draws nothing, or none at
  *  all, leaves the C to build its own. */
+/*  A prop's own place, as a table: where it stands, which way it faces,
+ *  the ground under it, its tile and the edges that tile joins.  One
+ *  expression, so a rule that is ASKED and a script that asks for the
+ *  prop itself read the same fields. */
+void api_prop_push(lua_State *L, const ScriptProp *at)
+{
+    lua_newtable(L);
+    lua_pushnumber(L, at->x), lua_setfield(L, -2, "x");
+    lua_pushnumber(L, at->y), lua_setfield(L, -2, "y");
+    lua_pushnumber(L, at->z), lua_setfield(L, -2, "z");
+    lua_pushnumber(L, at->fx), lua_setfield(L, -2, "fx");
+    lua_pushnumber(L, at->fy), lua_setfield(L, -2, "fy");
+    lua_pushnumber(L, at->size), lua_setfield(L, -2, "size");
+    lua_pushinteger(L, at->col), lua_setfield(L, -2, "col");
+    lua_pushinteger(L, at->row), lua_setfield(L, -2, "row");
+    lua_pushinteger(L, at->arm), lua_setfield(L, -2, "arm");
+    lua_pushinteger(L, at->links), lua_setfield(L, -2, "links");
+    lua_pushnumber(L, at->phase), lua_setfield(L, -2, "phase");
+    lua_pushnumber(L, at->angle), lua_setfield(L, -2, "angle");
+    lua_pushnumber(L, at->len), lua_setfield(L, -2, "len");
+}
+
 int script_rule_prop(const char *name, const ScriptProp *at)
 {
     int drew = 0;
     if (!s_L || !at || !api_rule_begin(s_L, name))
         return 0;
-    lua_newtable(s_L);
-    lua_pushnumber(s_L, at->x), lua_setfield(s_L, -2, "x");
-    lua_pushnumber(s_L, at->y), lua_setfield(s_L, -2, "y");
-    lua_pushnumber(s_L, at->z), lua_setfield(s_L, -2, "z");
-    lua_pushnumber(s_L, at->fx), lua_setfield(s_L, -2, "fx");
-    lua_pushnumber(s_L, at->fy), lua_setfield(s_L, -2, "fy");
-    lua_pushnumber(s_L, at->size), lua_setfield(s_L, -2, "size");
-    lua_pushinteger(s_L, at->col), lua_setfield(s_L, -2, "col");
-    lua_pushinteger(s_L, at->row), lua_setfield(s_L, -2, "row");
-    lua_pushinteger(s_L, at->arm), lua_setfield(s_L, -2, "arm");
-    lua_pushinteger(s_L, at->links), lua_setfield(s_L, -2, "links");
-    lua_pushnumber(s_L, at->phase), lua_setfield(s_L, -2, "phase");
-    lua_pushnumber(s_L, at->angle), lua_setfield(s_L, -2, "angle");
-    lua_pushnumber(s_L, at->len), lua_setfield(s_L, -2, "len");
+    api_prop_push(s_L, at);
     if (!api_rule_call(s_L, name, 1, 1))
         return 0;
     drew = !lua_isnil(s_L, -1) && lua_toboolean(s_L, -1);
@@ -632,34 +766,6 @@ int script_rule_strip(void)
     return drew;
 }
 
-/*  What to try where two lines meet.  Asked once for each boundary of a
- *  fitted path -- a few thousand a build. */
-int script_rule_join(int cross, int free_line, char how[][12], int max)
-{
-    int n = 0, i;
-    if (!s_L || !api_rule_begin(s_L, "join"))
-        return 0;
-    lua_newtable(s_L);
-    lua_pushboolean(s_L, cross), lua_setfield(s_L, -2, "cross");
-    lua_pushboolean(s_L, free_line), lua_setfield(s_L, -2, "free");
-    if (!api_rule_call(s_L, "join", 1, 1))
-        return 0;
-    if (lua_istable(s_L, -1))
-    {
-        int have = (int)lua_rawlen(s_L, -1);
-        n = have < max ? have : max;
-        for (i = 0; i < n; ++i)
-        {
-            const char *w;
-            lua_rawgeti(s_L, -1, i + 1);
-            w = lua_tostring(s_L, -1);
-            snprintf(how[i], 12, "%s", w ? w : "");
-            lua_pop(s_L, 1);
-        }
-    }
-    lua_pop(s_L, 1);
-    return n;
-}
 
 int script_rule_traffic(ScriptTraffic *out)
 {
@@ -698,6 +804,60 @@ int script_rule_traffic(ScriptTraffic *out)
 
 /*  The highway tiles, by the byte the city stores.  The script answers a
  *  table keyed by that byte; anything it does not name is no highway. */
+/*  A family by the name a script calls it: the same three names a family
+ *  declaration uses, in the Family enum's own order. */
+static int family_code(const char *name)
+{
+    return !name ? -1 : strcmp(name, "power") == 0 ? 0 : strcmp(name, "road") == 0 ? 1 : strcmp(name, "rail") == 0 ? 2 : -1;
+}
+
+/*  One {family = , piece = } off the table on the stack top. */
+static void piece_of(lua_State *L, unsigned char *fam, signed char *piece)
+{
+    int code;
+    lua_getfield(L, -1, "family");
+    code = family_code(lua_tostring(L, -1));
+    lua_pop(L, 1);
+    lua_getfield(L, -1, "piece");
+    if (code >= 0 && lua_isnumber(L, -1))
+    {
+        *fam   = (unsigned char)code;
+        *piece = (signed char)lua_tointeger(L, -1);
+    }
+    lua_pop(L, 1);
+}
+
+int script_rule_piece_tiles(unsigned char *fam, signed char *piece,
+                            unsigned char *fam2, signed char *piece2, int n)
+{
+    int i;
+    if (!s_L || !api_rule_begin(s_L, "piece_tiles"))
+        return 0;
+    if (!api_rule_call(s_L, "piece_tiles", 0, 1))
+        return 0;
+    if (!lua_istable(s_L, -1))
+    {
+        lua_pop(s_L, 1);
+        return 0;
+    }
+    for (i = 0; i < n; ++i)
+    {
+        lua_pushinteger(s_L, i);
+        lua_gettable(s_L, -2);
+        if (lua_istable(s_L, -1))
+        {
+            piece_of(s_L, &fam[i], &piece[i]);
+            lua_getfield(s_L, -1, "second");
+            if (lua_istable(s_L, -1))
+                piece_of(s_L, &fam2[i], &piece2[i]);
+            lua_pop(s_L, 1);
+        }
+        lua_pop(s_L, 1);
+    }
+    lua_pop(s_L, 1);
+    return 1;
+}
+
 int script_rule_hiway_tiles(unsigned char *kind, unsigned char *ew, int n)
 {
     int i;
@@ -738,201 +898,58 @@ int script_rule_hiway_tiles(unsigned char *kind, unsigned char *ew, int n)
     return 1;
 }
 
-/*  What lies after a line, for the far end of a join's budget. */
-int script_rule_after(int met, int free_line, float ahead, float reach)
-{
-    const char *k;
-    int         crossing;
-    if (!s_L || !api_rule_begin(s_L, "after"))
-        return met;
-    lua_newtable(s_L);
-    lua_pushboolean(s_L, met), lua_setfield(s_L, -2, "met");
-    lua_pushboolean(s_L, free_line), lua_setfield(s_L, -2, "free");
-    lua_pushnumber(s_L, ahead), lua_setfield(s_L, -2, "ahead");
-    lua_pushnumber(s_L, reach), lua_setfield(s_L, -2, "reach");
-    if (!api_rule_call(s_L, "after", 1, 1))
-        return met;
-    k        = lua_tostring(s_L, -1);
-    crossing = k && strcmp(k, "crossing") == 0;
-    lua_pop(s_L, 1);
-    return crossing;
-}
 
-/*  Which of a segment's two fits to keep. */
-int script_rule_fit_choice(const char *fam, const int free_[3], const int held[3])
-{
-    static const char *const KEY[3] = {"corners", "tight", "nodes"};
-    const char              *k;
-    int                      i, keep;
-    if (!s_L || !api_rule_begin(s_L, "fit_choice"))
-        return 1;
-    lua_newtable(s_L);
-    lua_pushstring(s_L, fam), lua_setfield(s_L, -2, "family");
-    lua_newtable(s_L);
-    for (i = 0; i < 3; ++i)
-        lua_pushinteger(s_L, free_[i]), lua_setfield(s_L, -2, KEY[i]);
-    lua_setfield(s_L, -2, "free");
-    lua_newtable(s_L);
-    for (i = 0; i < 3; ++i)
-        lua_pushinteger(s_L, held[i]), lua_setfield(s_L, -2, KEY[i]);
-    lua_setfield(s_L, -2, "held");
-    if (!api_rule_call(s_L, "fit_choice", 1, 1))
-        return 1;
-    k    = lua_tostring(s_L, -1);
-    keep = !k || strcmp(k, "free") == 0;
-    lua_pop(s_L, 1);
-    return keep;
-}
 
-/*  How a ramp's foot meets the road it lands on. */
-int script_rule_ramp_fork(int straight, int along, int against)
+
+
+
+
+
+
+
+
+/*  A rule that answers a plain set of the city's building bytes. */
+int script_rule_numbers(const char *rule, const char *const *names, float *out, int n)
 {
-    int fork;
-    if (!s_L || !api_rule_begin(s_L, "ramp_fork"))
+    int i;
+    if (!s_L || !api_rule_begin(s_L, rule))
         return 0;
-    lua_newtable(s_L);
-    lua_pushboolean(s_L, straight), lua_setfield(s_L, -2, "straight");
-    lua_pushboolean(s_L, along), lua_setfield(s_L, -2, "along");
-    lua_pushboolean(s_L, against), lua_setfield(s_L, -2, "against");
-    if (!api_rule_call(s_L, "ramp_fork", 1, 1))
-        return 0;
-    fork = (int)lua_tointeger(s_L, -1);
-    lua_pop(s_L, 1);
-    return fork;
-}
-
-/*  How fast a car may go for the car ahead of it. */
-float script_rule_car_follow(float gap, float v, float stop, float free)
-{
-    float out;
-    if (!s_L || !api_rule_begin(s_L, "car_follow"))
-        return v;
-    lua_newtable(s_L);
-    lua_pushnumber(s_L, gap), lua_setfield(s_L, -2, "gap");
-    lua_pushnumber(s_L, v), lua_setfield(s_L, -2, "speed");
-    lua_pushnumber(s_L, stop), lua_setfield(s_L, -2, "stop");
-    lua_pushnumber(s_L, free), lua_setfield(s_L, -2, "free");
-    if (!api_rule_call(s_L, "car_follow", 1, 1))
-        return v;
-    out = (float)lua_tonumber(s_L, -1);
-    lua_pop(s_L, 1);
-    return out;
-}
-
-/*  How fast a car may go for what holds it ahead. */
-float script_rule_car_hold(float to_end, int hold, float line, float v, float dt)
-{
-    float out;
-    if (!s_L || !api_rule_begin(s_L, "car_hold"))
-        return v;
-    lua_newtable(s_L);
-    lua_pushnumber(s_L, to_end), lua_setfield(s_L, -2, "ahead");
-    lua_pushboolean(s_L, hold), lua_setfield(s_L, -2, "held");
-    lua_pushnumber(s_L, line), lua_setfield(s_L, -2, "line");
-    lua_pushnumber(s_L, v), lua_setfield(s_L, -2, "speed");
-    lua_pushnumber(s_L, dt), lua_setfield(s_L, -2, "step");
-    if (!api_rule_call(s_L, "car_hold", 1, 1))
-        return v;
-    out = (float)lua_tonumber(s_L, -1);
-    lua_pop(s_L, 1);
-    return out;
-}
-
-/*  Where a highway band's walk begins. */
-int script_rule_band_start(int back, int on)
-{
-    const char *k;
-    int         way;
-    if (!s_L || !api_rule_begin(s_L, "band_start"))
-        return 0;
-    lua_newtable(s_L);
-    lua_pushboolean(s_L, back), lua_setfield(s_L, -2, "back");
-    lua_pushboolean(s_L, on), lua_setfield(s_L, -2, "on");
-    if (!api_rule_call(s_L, "band_start", 1, 1))
-        return 0;
-    k   = lua_tostring(s_L, -1);
-    way = !k ? 0 : strcmp(k, "forward") == 0 ? 1
-                   : strcmp(k, "backward") == 0 ? -1
-                                                : 0;
-    lua_pop(s_L, 1);
-    return way;
-}
-
-/*  Where a ramp's descent runs along the deck. */
-int script_rule_ramp_span(float at, int len, int leaves, int sgn,
-                          float *top, float *foot, float *total, float *ds)
-{
-    if (!s_L || !api_rule_begin(s_L, "ramp_span"))
-        return 0;
-    lua_newtable(s_L);
-    lua_pushnumber(s_L, at), lua_setfield(s_L, -2, "at");
-    lua_pushinteger(s_L, len), lua_setfield(s_L, -2, "len");
-    lua_pushboolean(s_L, leaves), lua_setfield(s_L, -2, "leaves");
-    lua_pushinteger(s_L, sgn), lua_setfield(s_L, -2, "sgn");
-    if (!api_rule_call(s_L, "ramp_span", 1, 1))
+    if (!api_rule_call(s_L, rule, 0, 1))
         return 0;
     if (!lua_istable(s_L, -1))
     {
         lua_pop(s_L, 1);
         return 0;
     }
-    *top   = api_field_num(s_L, "top", 0.0f);
-    *foot  = api_field_num(s_L, "foot", 0.0f);
-    *total = api_field_num(s_L, "total", 0.0f);
-    *ds    = api_field_num(s_L, "along", 0.0f);
+    for (i = 0; i < n; ++i)
+        out[i] = api_field_num(s_L, names[i], out[i]);
     lua_pop(s_L, 1);
     return 1;
 }
 
-/*  One class for a whole segment. */
-int script_rule_seg_class(const int counts[3])
+int script_rule_byte_map(const char *rule, unsigned char *map, int n)
 {
-    int cls, i;
-    if (!s_L || !api_rule_begin(s_L, "seg_class"))
+    int i;
+    if (!s_L || !api_rule_begin(s_L, rule))
         return 0;
-    lua_createtable(s_L, 3, 0);
-    for (i = 0; i < 3; ++i)
-        lua_pushinteger(s_L, counts[i]), lua_rawseti(s_L, -2, i + 1);
-    if (!api_rule_call(s_L, "seg_class", 1, 1))
+    if (!api_rule_call(s_L, rule, 0, 1))
         return 0;
-    cls = (int)lua_tointeger(s_L, -1);
+    if (!lua_istable(s_L, -1))
+    {
+        lua_pop(s_L, 1);
+        return 0;
+    }
+    for (i = 0; i < n; ++i)
+    {
+        lua_pushinteger(s_L, i);
+        lua_gettable(s_L, -2);
+        map[i] = (unsigned char)lua_tointeger(s_L, -1);
+        lua_pop(s_L, 1);
+    }
     lua_pop(s_L, 1);
-    return cls < 0 ? 0 : cls > 2 ? 2 : cls;
+    return 1;
 }
 
-/*  Which way an on-ramp's taper lies, and how a facing pair share. */
-int script_rule_ramp_side(int free_side, int room, int room_back)
-{
-    int keep;
-    if (!s_L || !api_rule_begin(s_L, "ramp_side"))
-        return 1;
-    lua_newtable(s_L);
-    lua_pushboolean(s_L, free_side), lua_setfield(s_L, -2, "free");
-    lua_pushinteger(s_L, room), lua_setfield(s_L, -2, "room");
-    lua_pushinteger(s_L, room_back), lua_setfield(s_L, -2, "room_back");
-    if (!api_rule_call(s_L, "ramp_side", 1, 1))
-        return 1;
-    keep = lua_isnil(s_L, -1) || lua_toboolean(s_L, -1);
-    lua_pop(s_L, 1);
-    return keep;
-}
-
-int script_rule_ramp_share(float gap, int cap)
-{
-    int len;
-    if (!s_L || !api_rule_begin(s_L, "ramp_share"))
-        return -1;
-    lua_newtable(s_L);
-    lua_pushnumber(s_L, gap), lua_setfield(s_L, -2, "gap");
-    lua_pushinteger(s_L, cap), lua_setfield(s_L, -2, "cap");
-    if (!api_rule_call(s_L, "ramp_share", 1, 1))
-        return -1;
-    len = lua_isnumber(s_L, -1) ? (int)lua_tointeger(s_L, -1) : -1;
-    lua_pop(s_L, 1);
-    return len;
-}
-
-/*  A rule that answers a plain set of the city's building bytes. */
 int script_rule_byte_set(const char *rule, unsigned char *set, int n)
 {
     int i;
@@ -983,6 +1000,131 @@ int script_rule_road_tiles(unsigned char *carries, int n)
     }
     lua_pop(s_L, 1);
     return 1;
+}
+
+/*  The family's numbers off the table on the stack top: the reading
+ *  itself, so the same expression serves whoever starts it. */
+void script_family_read(lua_State *L, ScriptFamily *out)
+{
+    int t = lua_gettop(L);
+    if (!lua_istable(L, t))
+    return;
+    lua_getfield(L, t, "footway");
+    if (lua_istable(L, -1))
+    {
+        out->walks         = 1;
+        out->inner         = api_field_num(L, "inner", 1.0f);
+        out->edge          = api_field_num(L, "edge", 1.0f);
+        out->at_junction   = api_field_num(L, "at_junction", 0.0f);
+        out->parallel      = api_field_num(L, "parallel", 1.0f);
+        out->look          = api_field_num(L, "look", 0.0f);
+        out->mouth         = api_field_num(L, "mouth", 0.0f);
+        out->slot_strip    = api_field_num(L, "slot_strip", 0.0f);
+        out->slot_junction = api_field_num(L, "slot_junction", 0.0f);
+        out->slot_cross    = api_field_num(L, "slot_cross", 0.0f);
+    }
+    lua_pop(L, 1);
+    lua_getfield(L, t, "junction");
+    if (lua_istable(L, -1))
+    {
+        out->junc_inset = api_field_num(L, "inset", 0.0f);
+        out->junc_far   = api_field_num(L, "far", 0.0f);
+    }
+    lua_pop(L, 1);
+    lua_getfield(L, t, "track");
+    if (lua_istable(L, -1))
+    {
+        out->gauge   = api_field_num(L, "gauge", 0.0f);
+        out->through = api_field_num(L, "through", 0.0f);
+        out->second  = api_field_num(L, "second", 0.0f);
+    }
+    lua_pop(L, 1);
+    lua_getfield(L, t, "approach");
+    if (lua_istable(L, -1))
+    {
+        out->app_near = api_field_num(L, "near", 0.0f);
+        out->app_far  = api_field_num(L, "far", 0.0f);
+    }
+    lua_pop(L, 1);
+    lua_getfield(L, t, "strip");
+    if (lua_istable(L, -1))
+    {
+        out->step_run  = api_field_num(L, "step_run", 1.0f);
+        out->step_arc  = api_field_num(L, "step_arc", 1.0f);
+        out->lift      = api_field_num(L, "lift", 0.0f);
+        out->lift_min  = api_field_num(L, "lift_min", 0.0f);
+        out->cut       = api_field_num(L, "cut", 0.0f);
+        out->dip       = api_field_num(L, "dip", 0.0f);
+        out->mark_wide = api_field_num(L, "mark_wide", 0.0f);
+        out->mark_lift = api_field_num(L, "mark_lift", 0.0f);
+        out->mark_high = api_field_num(L, "mark_high", 0.0f);
+        out->mark_slot = api_field_num(L, "mark_slot", 0.0f);
+        out->line_wide = api_field_num(L, "line_wide", 0.0f);
+    }
+    lua_pop(L, 1);
+    lua_getfield(L, t, "lane");
+    if (lua_istable(L, -1))
+    {
+        int k;
+        out->lane_rmin      = api_field_num(L, "rmin", 0.0f);
+        out->lane_step_run  = api_field_num(L, "step_run", 1.0f);
+        out->lane_step_arc  = api_field_num(L, "step_arc", 1.0f);
+        out->lane_step_ramp = api_field_num(L, "step_ramp", 1.0f);
+        out->lane_slot      = api_field_num(L, "slot", 0.0f);
+        out->lane_wire      = api_field_num(L, "wire", 0.0f);
+        out->lane_lift      = api_field_num(L, "lift", 0.0f);
+        out->lane_join      = api_field_num(L, "join", 0.0f);
+        out->lane_aim       = api_field_num(L, "aim", 0.0f);
+        out->lane_edge      = api_field_num(L, "edge", 0.0f);
+        out->lane_reach     = api_field_num(L, "reach", 0.0f);
+        out->crossing_centre  = api_field_num(L, "crossing_centre", 0.0f);
+        out->arm_own          = api_field_num(L, "arm_own", 0.0f);
+        out->arm_base         = api_field_num(L, "arm_base", 0.0f);
+        out->shelf_along      = api_field_num(L, "shelf_along", 0.0f);
+        out->shelf_reach      = api_field_num(L, "shelf_reach", 0.0f);
+        out->shelf_batter     = api_field_num(L, "shelf_batter", 0.0f);
+        out->class_avenue     = api_field_num(L, "class_avenue", 0.0f);
+        out->class_boulevard  = api_field_num(L, "class_boulevard", 0.0f);
+        out->tile_inset       = api_field_num(L, "tile_inset", 0.0f);
+        out->cap_kerb         = api_field_num(L, "cap_kerb", 0.0f);
+        out->cross_share      = api_field_num(L, "cross_share", 0.0f);
+        out->lane_pick_dot    = api_field_num(L, "pick_dot", 0.0f);
+        out->lane_cross_reach = api_field_num(L, "cross_reach", 0.0f);
+        out->lane_cross_ahead = api_field_num(L, "cross_ahead", 0.0f);
+        out->lane_cross_aside = api_field_num(L, "cross_aside", 0.0f);
+        out->lane_cross_dot   = api_field_num(L, "cross_dot", 0.0f);
+        out->lane_cross_spot  = api_field_num(L, "cross_spot", 0.0f);
+        out->lane_cross_off   = api_field_num(L, "cross_off", 0.0f);
+        out->ramp_outer       = api_field_num(L, "ramp_outer", 0.0f);
+        out->ramp_snap        = api_field_num(L, "ramp_snap", 0.0f);
+        out->ramp_meet_cos    = api_field_num(L, "ramp_meet_cos", 0.0f);
+        out->ramp_meet_sin    = api_field_num(L, "ramp_meet_sin", 0.0f);
+        out->ramp_lane_off    = api_field_num(L, "ramp_lane_off", 0.0f);
+        out->ramp_merge_along = api_field_num(L, "ramp_merge_along", 0.0f);
+        out->ramp_taper       = api_field_num(L, "ramp_taper", 0.0f);
+        out->band_reach       = api_field_num(L, "band_reach", 0.0f);
+        out->band_off         = api_field_num(L, "band_off", 0.0f);
+        out->band_dot         = api_field_num(L, "band_dot", 0.0f);
+        out->band_ahead       = api_field_num(L, "band_ahead", 0.0f);
+        out->band_aside       = api_field_num(L, "band_aside", 0.0f);
+        out->band_apart       = api_field_num(L, "band_apart", 0.0f);
+        out->band_abreast     = api_field_num(L, "band_abreast", 0.0f);
+        out->band_outer       = api_field_num(L, "band_outer", 0.0f);
+        out->band_taper_far   = api_field_num(L, "band_taper_far", 0.0f);
+        out->band_taper_near  = api_field_num(L, "band_taper_near", 0.0f);
+        out->band_taper_gap   = api_field_num(L, "band_taper_gap", 0.0f);
+        out->band_taper_room  = api_field_num(L, "band_taper_room", 0.0f);
+        out->band_road_dot    = api_field_num(L, "band_road_dot", 0.0f);
+        lua_getfield(L, -1, "deck");
+        for (k = 0; k < 3; ++k)
+        {
+            lua_rawgeti(L, -1, k + 1);
+            out->deck_lane[k] = (float)lua_tonumber(L, -1);
+            lua_pop(L, 1);
+        }
+        lua_pop(L, 1);
+    }
+    lua_pop(L, 1);
 }
 
 int script_rule_family(const char *fam, float width, ScriptFamily *out)
@@ -1189,117 +1331,62 @@ int script_rule_crossing_marks(float reach, float mast, float limit, float road,
     return n;
 }
 
-float script_rule_gate(float angle, float near, float dt)
-{
-    float v = angle;
-    if (!s_L || !api_rule_begin(s_L, "gate"))
-        return angle;
-    lua_newtable(s_L);
-    lua_pushnumber(s_L, angle), lua_setfield(s_L, -2, "angle");
-    lua_pushnumber(s_L, near), lua_setfield(s_L, -2, "near");
-    lua_pushnumber(s_L, dt), lua_setfield(s_L, -2, "dt");
-    if (!api_rule_call(s_L, "gate", 1, 1))
-        return angle;
-    if (lua_isnumber(s_L, -1))
-        v = (float)lua_tonumber(s_L, -1);
-    lua_pop(s_L, 1);
-    return v;
-}
 
-int script_rule_rail_marks(float len, int ahead, int behind, const float *cross, int ncross,
-                           ScriptMark *out, int max)
+/*  A rail mark list as the rule answered it: where along the strip each
+ *  stands, which side and how far out, and what stands there -- a signal
+ *  by its aspect, or a model by its name. */
+int api_take_marks(lua_State *L, int idx, ScriptMark *out, int max)
 {
-    int n = 0, i;
-    if (!s_L || !api_rule_begin(s_L, "rail_marks"))
+    int i, n;
+    if (!lua_istable(L, idx))
         return 0;
-    lua_newtable(s_L);
-    lua_pushnumber(s_L, len), lua_setfield(s_L, -2, "len");
-    lua_pushboolean(s_L, ahead), lua_setfield(s_L, -2, "ahead");
-    lua_pushboolean(s_L, behind), lua_setfield(s_L, -2, "behind");
-    lua_newtable(s_L);
-    for (i = 0; i < ncross; ++i)
-        lua_pushnumber(s_L, cross[i]), lua_rawseti(s_L, -2, i + 1);
-    lua_setfield(s_L, -2, "crossings");
-    if (!api_rule_call(s_L, "rail_marks", 1, 1))
-        return 0;
-    if (lua_istable(s_L, -1))
+    n = (int)lua_rawlen(L, idx);
+    if (n > max)
+        n = max;
+    for (i = 0; i < n; ++i)
     {
-        int have = (int)lua_rawlen(s_L, -1);
-        n = have < max ? have : max;
-        for (i = 0; i < n; ++i)
-        {
-            const char *nm;
-            lua_rawgeti(s_L, -1, i + 1);
-            out[i].at = api_field_num(s_L, "at", 0.0f);
-            out[i].side = api_field_num(s_L, "side", 1.0f);
-            out[i].out = api_field_num(s_L, "out", 0.0f);
-            out[i].signal = (int)api_field_num(s_L, "signal", -1.0f);
-            lua_getfield(s_L, -1, "face");
-            nm = lua_tostring(s_L, -1);
-            out[i].to_map = nm && strcmp(nm, "map") == 0;
-            lua_pop(s_L, 1);
-            lua_getfield(s_L, -1, "clear");
-            out[i].clear = lua_toboolean(s_L, -1);
-            lua_pop(s_L, 1);
-            lua_getfield(s_L, -1, "model");
-            nm = lua_tostring(s_L, -1);
-            snprintf(out[i].model, sizeof out[i].model, "%s", nm ? nm : "");
-            lua_pop(s_L, 2);
-        }
+        const char *nm;
+        lua_rawgeti(L, idx, i + 1);
+        out[i].at     = api_field_num(L, "at", 0.0f);
+        out[i].side   = api_field_num(L, "side", 1.0f);
+        out[i].out    = api_field_num(L, "out", 0.0f);
+        out[i].signal = (int)api_field_num(L, "signal", -1.0f);
+        lua_getfield(L, -1, "face");
+        nm            = lua_tostring(L, -1);
+        out[i].to_map = nm && strcmp(nm, "map") == 0;
+        lua_pop(L, 1);
+        lua_getfield(L, -1, "clear");
+        out[i].clear = lua_toboolean(L, -1);
+        lua_pop(L, 1);
+        lua_getfield(L, -1, "model");
+        nm = lua_tostring(L, -1);
+        snprintf(out[i].model, sizeof out[i].model, "%s", nm ? nm : "");
+        lua_pop(L, 2);
     }
-    lua_pop(s_L, 1);
     return n;
 }
 
-int script_rule_lamps(float cls, float len, ScriptLamp *out, int max)
+/*  A lamp list as the rule answered it: where along the strip each
+ *  stands, which side it is on and how far in it sits. */
+int api_take_lamps(lua_State *L, int idx, ScriptLamp *out, int max)
 {
-    int n = 0;
-    if (!s_L || !api_rule_begin(s_L, "lamps"))
+    int i, n;
+    if (!lua_istable(L, idx))
         return 0;
-    lua_pushnumber(s_L, cls);
-    lua_pushnumber(s_L, len);
-    if (!api_rule_call(s_L, "lamps", 2, 1))
-        return 0;
-    if (lua_istable(s_L, -1))
+    n = (int)lua_rawlen(L, idx);
+    if (n > max)
+        n = max;
+    for (i = 0; i < n; ++i)
     {
-        int i, len2 = (int)lua_rawlen(s_L, -1);
-        n = len2 < max ? len2 : max;
-        for (i = 0; i < n; ++i)
-        {
-            lua_rawgeti(s_L, -1, i + 1);
-            lua_getfield(s_L, -1, "at"), out[i].at = (float)lua_tonumber(s_L, -1), lua_pop(s_L, 1);
-            lua_getfield(s_L, -1, "side"), out[i].side = (float)lua_tonumber(s_L, -1), lua_pop(s_L, 1);
-            lua_getfield(s_L, -1, "in"), out[i].in = (float)lua_tonumber(s_L, -1), lua_pop(s_L, 1);
-            lua_pop(s_L, 1);
-        }
+        lua_rawgeti(L, idx, i + 1);
+        lua_getfield(L, -1, "at"), out[i].at = (float)lua_tonumber(L, -1), lua_pop(L, 1);
+        lua_getfield(L, -1, "side"), out[i].side = (float)lua_tonumber(L, -1), lua_pop(L, 1);
+        lua_getfield(L, -1, "in"), out[i].in = (float)lua_tonumber(L, -1), lua_pop(L, 1);
+        lua_pop(L, 1);
     }
-    lua_pop(s_L, 1);
     return n;
 }
 
-int script_rule_lanes(const char *fam, int cls, float *off, int max)
-{
-    int n = -1;
-    if (!s_L || !api_rule_begin(s_L, "lanes"))
-        return -1;
-    lua_pushstring(s_L, fam);
-    lua_pushinteger(s_L, cls);
-    if (!api_rule_call(s_L, "lanes", 2, 1))
-        return -1;
-    if (lua_istable(s_L, -1))
-    {
-        int i, len = (int)lua_rawlen(s_L, -1);
-        n = len < max ? len : max;
-        for (i = 0; i < n; ++i)
-        {
-            lua_rawgeti(s_L, -1, i + 1);
-            off[i] = (float)lua_tonumber(s_L, -1);
-            lua_pop(s_L, 1);
-        }
-    }
-    lua_pop(s_L, 1);
-    return n;
-}
 
 /*  One corner of a junction's outline.  What is known about it goes in
  *  as one table -- the numbers that are not yet known are simply absent
@@ -1338,6 +1425,13 @@ int script_rule_corner(int col, int row, float phi, float grow, float width,
     return what;
 }
 
+int script_files(int *total)
+{
+    if (total)
+        *total = s_files;
+    return s_files;
+}
+
 int script_rules(void)
 {
     int n = 0;
@@ -1356,214 +1450,3 @@ int script_rules(void)
     return n;
 }
 
-#else /* no Lua in this build: every answer is "the C decides" */
-
-int         script_open(const char *path) { (void)path; return -1; }
-void        script_close(void) {}
-int         script_on(void) { return 0; }
-const char *script_path(void) { return NULL; }
-int         script_eval(const char *src) { (void)src; return -1; }
-int         script_stale(void) { return 0; }
-int         script_reload(void) { return 0; }
-const char *script_error(void) { return NULL; }
-int         script_generation(void) { return 0; }
-int         script_take_dirty(void) { return 0; }
-int         script_rules(void) { return 0; }
-int         script_rule_control(int col, int row, const int cls[4], const int traf[4], int busy, int *out)
-{
-    (void)col, (void)row, (void)cls, (void)traf, (void)busy, (void)out;
-    return 0;
-}
-int script_rule_crossing_at(int col, int row, int arm, int ctrl, int pavement, float cs, float span, float *out)
-{
-    int ok = 0;
-    if (!s_L || !api_rule_begin(s_L, "crossing_at"))
-        return 0;
-    lua_newtable(s_L);
-    lua_pushinteger(s_L, col), lua_setfield(s_L, -2, "col");
-    lua_pushinteger(s_L, row), lua_setfield(s_L, -2, "row");
-    lua_pushinteger(s_L, arm), lua_setfield(s_L, -2, "arm");
-    lua_pushinteger(s_L, ctrl), lua_setfield(s_L, -2, "control");
-    lua_pushboolean(s_L, pavement), lua_setfield(s_L, -2, "pavement");
-    lua_pushnumber(s_L, cs), lua_setfield(s_L, -2, "cos");
-    lua_pushnumber(s_L, span), lua_setfield(s_L, -2, "span");
-    if (!api_rule_call(s_L, "crossing_at", 1, 1))
-        return 0;
-    if (lua_isnumber(s_L, -1))
-        *out = (float)lua_tonumber(s_L, -1), ok = *out > 0.0f;
-    lua_pop(s_L, 1);
-    return ok;
-}
-
-int script_rule_crossing(int col, int row, int arm, int ctrl, float want, float room, float straight, float *out)
-{
-    (void)col, (void)row, (void)arm, (void)ctrl, (void)want, (void)room, (void)straight, (void)out;
-    return 0;
-}
-/*  A prop the script builds itself.  Its place goes in as one table and
- *  the answer is whether it drew: a rule that draws nothing, or none at
- *  all, leaves the C to build its own. */
-int script_rule_prop(const char *name, const ScriptProp *at)
-{
-    int drew = 0;
-    if (!s_L || !at || !api_rule_begin(s_L, name))
-        return 0;
-    lua_newtable(s_L);
-    lua_pushnumber(s_L, at->x), lua_setfield(s_L, -2, "x");
-    lua_pushnumber(s_L, at->y), lua_setfield(s_L, -2, "y");
-    lua_pushnumber(s_L, at->z), lua_setfield(s_L, -2, "z");
-    lua_pushnumber(s_L, at->fx), lua_setfield(s_L, -2, "fx");
-    lua_pushnumber(s_L, at->fy), lua_setfield(s_L, -2, "fy");
-    lua_pushnumber(s_L, at->size), lua_setfield(s_L, -2, "size");
-    lua_pushinteger(s_L, at->col), lua_setfield(s_L, -2, "col");
-    lua_pushinteger(s_L, at->row), lua_setfield(s_L, -2, "row");
-    lua_pushinteger(s_L, at->arm), lua_setfield(s_L, -2, "arm");
-    lua_pushinteger(s_L, at->links), lua_setfield(s_L, -2, "links");
-    lua_pushnumber(s_L, at->phase), lua_setfield(s_L, -2, "phase");
-    lua_pushnumber(s_L, at->angle), lua_setfield(s_L, -2, "angle");
-    lua_pushnumber(s_L, at->len), lua_setfield(s_L, -2, "len");
-    if (!api_rule_call(s_L, name, 1, 1))
-        return 0;
-    drew = !lua_isnil(s_L, -1) && lua_toboolean(s_L, -1);
-    lua_pop(s_L, 1);
-    return drew;
-}
-
-int script_rule_corner(int col, int row, float phi, float grow, float width,
-                       const float *room, const float *back, const float *fwd, ScriptCorner *out)
-{
-    (void)col, (void)row, (void)phi, (void)grow, (void)width, (void)room, (void)back, (void)fwd, (void)out;
-    return CORNER_SQUARE;
-}
-int script_rule_strip(void)
-{
-    return 0;
-}
-int script_rule_join(int cross, int free_line, char how[][12], int max)
-{
-    (void)cross, (void)free_line, (void)how, (void)max;
-    return 0;
-}
-int script_rule_traffic(ScriptTraffic *out)
-{
-    (void)out;
-    return 0;
-}
-int script_rule_family(const char *fam, float width, ScriptFamily *out)
-{
-    (void)fam, (void)width, (void)out;
-    return 0;
-}
-int script_rule_hiway_tiles(unsigned char *kind, unsigned char *ew, int n)
-{
-    (void)kind, (void)ew, (void)n;
-    return 0;
-}
-int script_rule_road_tiles(unsigned char *carries, int n)
-{
-    (void)carries, (void)n;
-    return 0;
-}
-int script_rule_byte_set(const char *rule, unsigned char *set, int n)
-{
-    (void)rule, (void)set, (void)n;
-    return 0;
-}
-int script_rule_after(int met, int free_line, float ahead, float reach)
-{
-    (void)free_line, (void)ahead, (void)reach;
-    return met;
-}
-int script_rule_fit_choice(const char *fam, const int free_[3], const int held[3])
-{
-    (void)fam, (void)free_, (void)held;
-    return 1;
-}
-int script_rule_ramp_fork(int straight, int along, int against)
-{
-    (void)straight, (void)along, (void)against;
-    return 0;
-}
-int script_rule_ramp_side(int free_side, int room, int room_back)
-{
-    (void)free_side, (void)room, (void)room_back;
-    return 1;
-}
-int script_rule_seg_class(const int counts[3])
-{
-    (void)counts;
-    return 0;
-}
-int script_rule_ramp_span(float at, int len, int leaves, int sgn,
-                          float *top, float *foot, float *total, float *ds)
-{
-    (void)at, (void)len, (void)leaves, (void)sgn;
-    (void)top, (void)foot, (void)total, (void)ds;
-    return 0;
-}
-int script_rule_band_start(int back, int on)
-{
-    (void)back, (void)on;
-    return 0;
-}
-float script_rule_car_follow(float gap, float v, float stop, float free)
-{
-    (void)gap, (void)stop, (void)free;
-    return v;
-}
-float script_rule_car_hold(float to_end, int hold, float line, float v, float dt)
-{
-    (void)to_end, (void)hold, (void)line, (void)dt;
-    return v;
-}
-int script_rule_ramp_share(float gap, int cap)
-{
-    (void)gap, (void)cap;
-    return -1;
-}
-int script_rule_crossing_frame(int col, int row, float sn, float road, float rail, ScriptXing *out)
-{
-    (void)col, (void)row, (void)sn, (void)road, (void)rail, (void)out;
-    return 0;
-}
-int script_rule_crossing_marks(float reach, float mast, float limit, float road,
-                               float cx, float cy, float fx, float fy, float gx, float gy,
-                               ScriptApproach *out, int max)
-{
-    (void)reach, (void)mast, (void)limit, (void)road, (void)cx, (void)cy;
-    (void)fx, (void)fy, (void)gx, (void)gy, (void)out, (void)max;
-    return 0;
-}
-float script_rule_gate(float angle, float near, float dt)
-{
-    (void)near, (void)dt;
-    return angle;
-}
-int script_rule_rail_marks(float len, int ahead, int behind, const float *cross, int ncross,
-                           ScriptMark *out, int max)
-{
-    (void)len, (void)ahead, (void)behind, (void)cross, (void)ncross, (void)out, (void)max;
-    return 0;
-}
-int script_rule_lamps(float cls, float len, ScriptLamp *out, int max)
-{
-    (void)cls, (void)len, (void)out, (void)max;
-    return 0;
-}
-int script_rule_lanes(const char *fam, int cls, float *off, int max)
-{
-    (void)fam, (void)cls, (void)off, (void)max;
-    return -1;
-}
-void script_emit_open(void *mesh, const void *city, uint8_t mask_bit, float order)
-{
-    (void)mesh, (void)city, (void)mask_bit, (void)order;
-}
-void script_emit_close(void) {}
-int  script_rule_prop(const char *name, const ScriptProp *at)
-{
-    (void)name, (void)at;
-    return 0;
-}
-
-#endif

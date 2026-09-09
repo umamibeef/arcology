@@ -92,7 +92,7 @@ struct RMusic
     Song     cur;
     Voice   *v;       /* the voice pool, grown to the song's peak demand */
     int      n_voices;
-    int      grow;    /* grow the pool on demand (off when SC2K_MUSIC_VOICES pins it) */
+    int      grow;    /* grow the pool on demand (off when ARC_MUSIC_VOICES pins it) */
     int      cur_id;
     Ev      *ev;
     int      n_ev, next_ev, ended;
@@ -484,9 +484,9 @@ static int load_midi(RMusic *m, const char *path)
          *  to a song's measured peak (GenSong.c: maxSongVoices = MAX_VOICES
          *  - maxEffectVoices).  So the count is the song's own peak demand,
          *  never below its stated 6 and never above the sixteen-voice pool;
-         *  SC2K_MUSIC_VOICES pins it for comparison.  A fixed six dropped a
+         *  ARC_MUSIC_VOICES pins it for comparison.  A fixed six dropped a
          *  third of the Theme's notes. */
-        const char *pin = getenv("SC2K_MUSIC_VOICES");
+        const char *pin = getenv("ARC_MUSIC_VOICES");
         int         cur = 0, peak = 0, ev;
         for (ev = 0; ev < m->n_ev; ev++)
         {
@@ -540,7 +540,7 @@ static void song_reset(RMusic *m)
 /*  A voice for a new note.  A free one; else one already releasing (past
  *  its note-off -- reusing it drops nothing); else, since every actively
  *  held note must keep sounding, GROW the pool by one.  Only a pinned
- *  count (SC2K_MUSIC_VOICES, the faithful mode) refuses to grow and
+ *  count (ARC_MUSIC_VOICES, the faithful mode) refuses to grow and
  *  steals the quietest held note instead, as the six-voice hardware did. */
 static Voice *find_voice(RMusic *m)
 {

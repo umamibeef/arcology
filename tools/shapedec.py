@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Decode the tileset by running the GAME'S OWN blitter.
 
-`sc2kpack.decode_shape` splits the span stream into scanlines using a
+`artpack.decode_shape` splits the span stream into scanlines using a
 per-row length byte.  That is close enough to read most sprites, but a
 strict comparison against $18E96 shows 295 of 498 sprites at the 32 px set
 picking up pixels the game leaves transparent -- always in that direction,
@@ -33,7 +33,7 @@ BLIT = 0x18E96
 FILL_A, FILL_B = 0x00, 0xFF
 #  Your own copy of the game.  Nothing here can ship it.
 GAME = Path(os.environ.get(
-    "SC2K_CITIES",
+    "ARC_CITIES",
     Path.home() / "Downloads" / "SimCity 2000\u00ae Collection"))
 CITY = GAME / "Cities/Bayview"
 

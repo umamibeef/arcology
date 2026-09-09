@@ -207,8 +207,8 @@ end
 
 arc.rules.chain = function (c)
     local d = c:info()
-    local head = d.nr > 0 and c:run(1) or nil
-    local tail = d.nr > 0 and c:run(d.nr) or nil
+    local head = d.nr > 0 and c:run(0) or nil
+    local tail = d.nr > 0 and c:run(d.nr - 1) or nil
 
     if head and d.ex0 and head.kind == 1 and head.first then c:aim("start") end
     if tail and d.ex1 and tail.kind == 1 and tail.last  then c:aim("goal")  end
@@ -217,7 +217,7 @@ arc.rules.chain = function (c)
     local same1 = tail ~= nil and tail.last  and c:on_line("goal")
 
     if not same0 then c:add_end("start") end
-    for i = 1, d.nr do c:add(i) end
+    for i = 0, d.nr - 1 do c:add(i) end
     if not same1 then c:add_end("goal") end
     return true
 end

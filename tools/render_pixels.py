@@ -32,7 +32,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from runsim import Sim, A5
-from sc2kpack import write_indexed_png, TRANSPARENT
+from artpack import write_indexed_png, TRANSPARENT
 
 TILE, UGND, VIEWT = 0x016FF8, 0x0161DC, 0x0167CC
 #  The surface has a SEPARATE renderer per zoom, picked at $15490; the
@@ -65,7 +65,7 @@ G_CLIP_T, G_CLIP_B = 0x122C, 0x1230
 G_CLIP_L, G_CLIP_R = 0x122E, 0x1232
 G_CORNER, ROT_TABLE = 0x122A, -0x7DD4
 GAME = Path(os.environ.get(
-    "SC2K_CITIES",
+    "ARC_CITIES",
     Path.home() / "Downloads" / "SimCity 2000\u00ae Collection"))
 OX, OY, TW, TH = 2048, 200, 32, 16
 

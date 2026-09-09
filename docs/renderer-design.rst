@@ -6,11 +6,11 @@ Renderer brief
 
 .. container:: eyebrow
 
-   sc2k-re · renderer · design brief
+   arcology · renderer · design brief
 
 .. container:: lede
 
-   A plan for a modern C renderer for the SimCity 2000 reconstruction — **standard PNG tile atlases**, continuous zoom, the whole map on screen at once, and a hard read-only boundary against the simulation.
+   A plan for a modern C renderer for the SimCity 2000 reconstruction — **standard PNG tile atlases**, continuous zoom, the whole map on screen at once, and a hard read-only boundary against the simulation. What the renderer makes of that data is a script's: see :ref:`scripting`.
 
 .. grid:: 1 1 5 5
    :gutter: 2
@@ -74,7 +74,7 @@ The terrain mapping, the altitude rule and the zoom geometry are read out of the
 
 Separately, the rotation question is settled: rotation *rewrites every layer* rather than remapping at draw time. Turning all 103 cities four times under ``tools/rotate.py`` returns all fifteen map layers to their original bytes. See :ref:`Crossfade the four rotations; do not promise smooth rotation <d10>`.
 
-New files, none of them shared with the simulation: ``tools/sc2kpack.py``, the oracle set (``render_oracle``, ``render_diff``, ``render_pixels``, ``pixel_diff``, ``pixel_scan``, ``pixel_sbs``, ``blit_check``, ``shapedec``), and ``render/`` with its own ``CMakeLists.txt`` so the simulation’s build file needs no edit.
+New files, none of them shared with the simulation: ``tools/artpack.py``, the oracle set (``render_oracle``, ``render_diff``, ``render_pixels``, ``pixel_diff``, ``pixel_scan``, ``pixel_sbs``, ``blit_check``, ``shapedec``), and ``render/`` with its own ``CMakeLists.txt`` so the simulation’s build file needs no edit.
 
 1. Where it stands
 ------------------
@@ -463,7 +463,7 @@ Module layout
        soft.c     reference rasteriser; must match render.py exactly
        overlay.c  data-layer textures and ramps
    tools/
-       sc2kpack.py  extract / pack / import-scurk — builds on miff.py
+       artpack.py  extract / pack / import-scurk — builds on miff.py
 
 Extraction stays in Python. ``miff.py`` already decodes the format correctly, including the odd-run padding rule that took real effort to find, and it runs once at build time. The C runtime only needs to read PNG — plus ``miff.c`` for the live SCURK import, which is the one place the format has to exist in both languages.
 
@@ -483,7 +483,7 @@ A portability rule that is only written down is a rule that drifts. Each one bel
      - CMAKE_C_EXTENSIONS OFF
      - Gives ``-std=c99`` rather than ``-std=gnu99``, so a POSIX-only call — ``strdup``, ``strcasecmp``, ``<unistd.h>`` — fails to compile on the developer’s own machine.
    * - Strict warnings on our code only
-     - sc2k_warnings
+     - arc_warnings
      - An interface target carrying ``-Wconversion`` and friends. A silent narrowing in a renderer is an off-by-one on someone’s screen.
    * - Vendored headers are invisible
      - SYSTEM include dir
@@ -503,14 +503,14 @@ Rules the code keeps
 And rules the asset pipeline keeps
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-``sc2kpack.py`` has to run wherever the game builds, so it uses the standard library and nothing else — no Pillow, no numpy. The PNG codec is written out in the tool in both directions, which is 120 lines and removes a dependency that would otherwise have to exist on three platforms. Every text write names its encoding and its newline explicitly, so a sidecar written on Windows is byte-identical to one written on Linux. It targets Python 3.9, which is what the system Python here is.
+``artpack.py`` has to run wherever the game builds, so it uses the standard library and nothing else — no Pillow, no numpy. The PNG codec is written out in the tool in both directions, which is 120 lines and removes a dependency that would otherwise have to exist on three platforms. Every text write names its encoding and its newline explicitly, so a sidecar written on Windows is byte-identical to one written on Linux. It targets Python 3.9, which is what the system Python here is.
 
 The tests that hold it together
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: console
 
-   python3 tools/sc2kpack.py verify         shapes round-trip through our own codec
+   python3 tools/artpack.py verify         shapes round-trip through our own codec
    ctest --test-dir render/build/...  atlas loads; blit_check; invariants
    python3 tools/blit_check.py             our blit() vs $18E96, both mirrors
    python3 tools/render_diff.py  CITY      our blit list vs the game's
@@ -558,7 +558,7 @@ Extractor and round-trip
 
    Step 1 · done
 
-``sc2kpack.py`` emits the three indexed atlases plus sidecars, reads them back, and re-encodes to MIFF. All 1,448 shapes round-trip pixel for pixel — the same standard the RLE codec is already held to. It also imports SCURK packs and can write one, so art edited as a PNG here can be loaded by the 1995 game.
+``artpack.py`` emits the three indexed atlases plus sidecars, reads them back, and re-encodes to MIFF. All 1,448 shapes round-trip pixel for pixel — the same standard the RLE codec is already held to. It also imports SCURK packs and can write one, so art edited as a PNG here can be loaded by the 1995 game.
 
 Software rasteriser
 ~~~~~~~~~~~~~~~~~~~

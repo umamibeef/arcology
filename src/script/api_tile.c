@@ -14,7 +14,6 @@
  */
 #include "script.h"
 
-#if SC2K_LUA
 
 #include <string.h>
 
@@ -53,7 +52,7 @@ static int t_info(lua_State *L)
 static int t_at(lua_State *L)
 {
     TileFan *t = api_tile_of(L);
-    int      k = (int)luaL_checkinteger(L, 2) - 1;
+    int      k = (int)luaL_checkinteger(L, 2);
     if (!t || k < 0 || k > 3)
         return 0;
     lua_pushnumber(L, t->p[k][0]);
@@ -97,7 +96,7 @@ static int t_colour(lua_State *L)
 static int t_edge(lua_State *L)
 {
     TileFan *t = api_tile_of(L);
-    int      e = (int)luaL_checkinteger(L, 2) - 1;
+    int      e = (int)luaL_checkinteger(L, 2);
     if (!t || e < 0 || e > 3)
         return 0;
     lua_pushboolean(L, t->nbr[e].there);
@@ -106,8 +105,8 @@ static int t_edge(lua_State *L)
     lua_pushboolean(L, t->nbr[e].water);
     lua_pushinteger(L, t->nbr[e].xbld);
     lua_pushboolean(L, t->nbr[e].corridor);
-    lua_pushinteger(L, t->nbr[e].ia + 1);
-    lua_pushinteger(L, t->nbr[e].ib + 1);
+    lua_pushinteger(L, t->nbr[e].ia);
+    lua_pushinteger(L, t->nbr[e].ib);
     lua_pushboolean(L, t->nbr[e].rim);
     lua_pushboolean(L, t->nbr[e].sea);
     return 10;
@@ -118,7 +117,7 @@ static int t_edge(lua_State *L)
 static int t_normal(lua_State *L)
 {
     TileFan *t = api_tile_of(L);
-    int      e = (int)luaL_checkinteger(L, 2) - 1;
+    int      e = (int)luaL_checkinteger(L, 2);
     if (!t || e < 0 || e > 3)
         return 0;
     lua_pushnumber(L, t->nbr[e].nx);
@@ -163,8 +162,8 @@ static int t_wall(lua_State *L)
         lua_pushboolean(L, 0);
         return 1;
     }
-    ia  = (int)luaL_checkinteger(L, 2) - 1;
-    ib  = (int)luaL_checkinteger(L, 3) - 1;
+    ia  = (int)luaL_checkinteger(L, 2);
+    ib  = (int)luaL_checkinteger(L, 3);
     bed = lua_toboolean(L, 4);
     if (ia < 0 || ia > 3 || ib < 0 || ib > 3)
     {
@@ -201,8 +200,8 @@ static int t_wall_r(lua_State *L)
         lua_pushboolean(L, 0);
         return 1;
     }
-    ia = (int)luaL_checkinteger(L, 2) - 1;
-    ib = (int)luaL_checkinteger(L, 3) - 1;
+    ia = (int)luaL_checkinteger(L, 2);
+    ib = (int)luaL_checkinteger(L, 3);
     if (ia < 0 || ia > 3 || ib < 0 || ib > 3)
     {
         lua_pushboolean(L, 0);
@@ -234,8 +233,8 @@ static int t_glass(lua_State *L)
         lua_pushboolean(L, 0);
         return 1;
     }
-    ia = (int)luaL_checkinteger(L, 2) - 1;
-    ib = (int)luaL_checkinteger(L, 3) - 1;
+    ia = (int)luaL_checkinteger(L, 2);
+    ib = (int)luaL_checkinteger(L, 3);
     if (ia < 0 || ia > 3 || ib < 0 || ib > 3)
     {
         lua_pushboolean(L, 0);
@@ -315,4 +314,3 @@ const luaL_Reg *api_tile_methods(int *n)
     return TILE;
 }
 
-#endif

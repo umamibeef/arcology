@@ -36,7 +36,7 @@ endif()
 
 # The simulation is a library so the game and the verification driver run
 # exactly the same code.
-add_library(sc2kcore STATIC
+add_library(arc_core STATIC
     city.c          # .SC2 reader/writer, RLE codec from $293EC
 
     #  sim.c was 8,438 lines and every phase of the game.  The phases now
@@ -61,34 +61,34 @@ add_library(sc2kcore STATIC
     advisor.c
     arco.c          # .arco, the native world format
 )
-target_include_directories(sc2kcore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(arc_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 # arco.c needs deflate and a CRC.  lodepng already carries both for the
 # renderer's PNGs, so the save format borrows them rather than vendoring
 # a second compressor.  The target is defined here, and render/ uses this
 # one, so there is exactly one copy in any link.
-if(NOT TARGET sc2k_vendor)
-    add_library(sc2k_vendor STATIC ../vendor/lodepng.c)
-    target_include_directories(sc2k_vendor SYSTEM PUBLIC
+if(NOT TARGET arc_vendor)
+    add_library(arc_vendor STATIC ../vendor/lodepng.c)
+    target_include_directories(arc_vendor SYSTEM PUBLIC
                                "${CMAKE_CURRENT_SOURCE_DIR}/../vendor")
     if(MSVC)
-        target_compile_options(sc2k_vendor PRIVATE /w)
-        target_compile_definitions(sc2k_vendor PRIVATE _CRT_SECURE_NO_WARNINGS)
+        target_compile_options(arc_vendor PRIVATE /w)
+        target_compile_definitions(arc_vendor PRIVATE _CRT_SECURE_NO_WARNINGS)
     else()
-        target_compile_options(sc2k_vendor PRIVATE -w)
+        target_compile_options(arc_vendor PRIVATE -w)
     endif()
 endif()
-target_link_libraries(sc2kcore PUBLIC sc2k_vendor)
+target_link_libraries(arc_core PUBLIC arc_vendor)
 
 # dev.c holds the developer modes -- --verify, --clock, --growth and the
 # rest.  It is a library rather than an executable because app/main.c
 # dispatches into it: one binary, `arcology`, answers to all of them.
-add_library(sc2kdev STATIC dev.c testcity.c)
-target_link_libraries(sc2kdev PUBLIC sc2kcore)
+add_library(arc_dev STATIC dev.c testcity.c)
+target_link_libraries(arc_dev PUBLIC arc_core)
 
 # The reconstruction is held to a strict standard on purpose: a silent
 # integer conversion here is a behavioural difference from the original.
-foreach(tgt sc2kcore sc2kdev)
+foreach(tgt arc_core arc_dev)
     target_compile_options(${tgt} PRIVATE
         $<$<C_COMPILER_ID:GNU,Clang,AppleClang>:
             -Wall -Wextra -Wshadow -Wconversion -Wsign-compare -Wpointer-arith>
@@ -97,7 +97,7 @@ endforeach()
 
 find_library(M_LIB m)
 if(M_LIB)
-    target_link_libraries(sc2kcore PUBLIC ${M_LIB})
+    target_link_libraries(arc_core PUBLIC ${M_LIB})
 endif()
 
 # ---- house style ----------------------------------------------------
@@ -109,16 +109,16 @@ find_program(CLANG_FORMAT NAMES clang-format
 #  The hand-written sources only.  generated/tables.c is machine output --
 #  its layout is gen_tables.py's business, and holding it to a style meant
 #  for people just made the generator and the checker argue.
-set(SC2K_SOURCES dev.c city.c sim.c sim_thing.c sim_disaster.c sim_queue.c sim_scan.c sim_map.c sim_place.c sim_growth.c sim_micro.c rng.c ext80.c sane.c arco.c testcity.c
-                 sc2k.h ext80.h arco.h rotate.c)
+set(ARC_SOURCES dev.c city.c sim.c sim_thing.c sim_disaster.c sim_queue.c sim_scan.c sim_map.c sim_place.c sim_growth.c sim_micro.c rng.c ext80.c sane.c arco.c testcity.c
+                 sim.h ext80.h arco.h rotate.c)
 if(CLANG_FORMAT)
     add_custom_target(format
-        COMMAND ${CLANG_FORMAT} -i ${SC2K_SOURCES}
+        COMMAND ${CLANG_FORMAT} -i ${ARC_SOURCES}
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
         COMMENT "Formatting the C sources"
         VERBATIM)
     add_custom_target(format-check
-        COMMAND ${CLANG_FORMAT} --dry-run --Werror ${SC2K_SOURCES}
+        COMMAND ${CLANG_FORMAT} --dry-run --Werror ${ARC_SOURCES}
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
         COMMENT "Checking the C sources against .clang-format"
         VERBATIM)
@@ -126,14 +126,14 @@ endif()
 
 # ---- verification ---------------------------------------------------
 # The game folder is not redistributable, so point at your own copy:
-#   cmake -B build -DSC2K_CITIES="/path/to/SimCity 2000® Collection"
-set(SC2K_CITIES "" CACHE PATH "Folder holding the shipped city files")
-if(SC2K_CITIES OR CLANG_FORMAT)
+#   cmake -B build -DARC_CITIES="/path/to/SimCity 2000® Collection"
+set(ARC_CITIES "" CACHE PATH "Folder holding the shipped city files")
+if(ARC_CITIES OR CLANG_FORMAT)
     enable_testing()
 endif()
 if(CLANG_FORMAT)
     add_test(NAME format
-             COMMAND ${CLANG_FORMAT} --dry-run --Werror ${SC2K_SOURCES}
+             COMMAND ${CLANG_FORMAT} --dry-run --Werror ${ARC_SOURCES}
              WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 endif()
 #  The `verify` test needs the executable, which lives one level up, so

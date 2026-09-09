@@ -13,7 +13,7 @@
  *  the A5 image (tools/rotate.py reads them the same way, and turning all
  *  shipped cities four times returns every map layer to its original
  *  bytes).  Anticlockwise ($3A7BA) is three turns clockwise here. */
-#include "sc2k.h"
+#include "sim.h"
 
 #include <string.h>
 

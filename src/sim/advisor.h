@@ -1,5 +1,5 @@
 /*  advisor.h -- the board of advisors.  This is NOT part of the
- *  reconstruction.  Everything else in sc2k/ is answerable to the
+ *  reconstruction.  Everything else in src/sim/ is answerable to the
  *  original's own code; this file is a layer on top that reads the model
  *  and says something about it.  It writes nothing back, so the simulation
  *  stays exactly as verified.  What is faithful here is WHEN an advisor
@@ -9,7 +9,7 @@
  *  words are ours. */
 #ifndef ADVISOR_H
 #define ADVISOR_H
-#include "sc2k.h"
+#include "sim.h"
 
 enum
 {

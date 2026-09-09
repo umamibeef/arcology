@@ -13,7 +13,7 @@
 #include "dump.h"
 #include "mesh/internal.h"
 #include "net/internal.h"
-#include "net/model.h"
+#include "geo/model.h"
 #include "script.h"
 #include "opt.h"
 #include "project.h"
@@ -197,7 +197,7 @@ int loft_furniture(Loft *x)
 {
     if (!furniture_on())
         return 0;
-    return x->d->fam->furniture ? x->d->fam->furniture(x) : 0;
+    return net_family_has(x->d->fam, NH_FURNITURE) ? net_family_furniture(x->d->fam, x) : 0;
 }
 
 int put_stop_sign(RMesh *m, const RCity *c, int32_t col, int32_t row, uint8_t mask_bit, float order, int e, float h)

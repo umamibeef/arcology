@@ -1,6 +1,6 @@
-/*  sc2kgpu -- the game: the reconstruction simulated and drawn on the GPU.
+/*  arcology -- the game: the reconstruction simulated and drawn on the GPU.
  *
- *      sc2kgpu <assets dir> <city file> [--zoom 8|16|32] [--scale N]
+ *      arcology <assets dir> <city file> [--zoom 8|16|32] [--scale N]
  *              [--check out.png]
  *
  *  The simulation is the verified reconstruction, run as the original's
@@ -50,7 +50,7 @@
 #define JSMN_STATIC
 #include "adapt.h"
 #include "internal.h"
-#include "net/model.h"
+#include "geo/model.h"
 #include "script.h"
 #include "atlas/atlas.h"
 #include "city.h"
@@ -69,7 +69,7 @@
 #ifndef _WIN32
     #include <sys/utsname.h>
 #endif
-#include "sc2k.h"
+#include "sim.h"
 
 /*  The key every letter shortcut needs: the Mac's command key, and
  *  Ctrl everywhere else.  The bare keys that remain -- the digits for
@@ -235,7 +235,7 @@ RGpuView frame_view(const App *a)
 
 /*  ---- the UI ------------------------------------------------------ */
 
-/*  The budget block's departments as sc2k.h names them; the first three
+/*  The budget block's departments as sim.h names them; the first three
  *  slots the reconstruction has not named. */
 
 /*  The camera moves rather than cuts.  One move carries both of the
@@ -277,6 +277,27 @@ RGpuView frame_view(const App *a)
  *  when dirty, the traffic, then the camera's move by `dt` seconds (none
  *  when negative) and a quarter turn come to rest settled.  -1 when the
  *  sweep fails. */
+/*  The mesh build was abandoned.  A rule that raised has already named
+ *  itself; this says what became of the frame.  In the per-frame path the
+ *  state holds for as long as the script stays broken, so the line is
+ *  said when it CHANGES rather than once a frame, and the build coming
+ *  back says so too. */
+static int s_build_bad;
+
+static void build_failed(void)
+{
+    if (!s_build_bad)
+        R_ERR("mesh", "the build was abandoned; the mesh it would have replaced still stands");
+    s_build_bad = 1;
+}
+
+static void build_ok(void)
+{
+    if (s_build_bad)
+        R_NOTE("mesh", "the build is whole again");
+    s_build_bad = 0;
+}
+
 int app_advance(App *a, SDL_Window *win, float dt, float time)
 {
     step_clock(a);
@@ -289,8 +310,13 @@ int app_advance(App *a, SDL_Window *win, float dt, float time)
         a->dirty = 1;
     if (a->dirty && resweep(a) != 0)
         return -1;
-    if (a->mesh_dirty && remesh(a) != 0)
-        fprintf(stderr, "mesh build failed\n");
+    if (a->mesh_dirty)
+    {
+        if (remesh(a) != 0)
+            build_failed();
+        else
+            build_ok();
+    }
     a->gv.time = time;
     music_update(a->mus); /* the original's scheduler, once a pass */
     if (traffic_frame(a, a->gv.time) != 0)
@@ -337,8 +363,33 @@ int app_frame(App *a, SDL_Window *win, float dt, float time, RImage *out)
      *  a rule a file save rather than a compile. */
     if (script_stale() && script_reload())
     {
-        a->mesh_dirty = 1;
         R_NOTE("lua", "read again: %d rules", script_rules());
+        /*  The rebuild waits a frame where there is a window to say so
+         *  on, and the frame in between carries the panel.  Headless
+         *  there is nobody to tell, so it goes straight on. */
+        if (a->live && a->ui)
+        {
+            /*  Two steps to a reading: the scripts, then the world
+             *  they describe.  The first is done by the time this is
+             *  drawn -- it takes a few milliseconds -- and the second is
+             *  what the frame after this one spends a second and a half
+             *  on, so that is what the bar names. */
+            int files = script_files(NULL);
+            snprintf(a->us.loading, sizeof a->us.loading, "Building the world");
+            snprintf(a->us.loading_note, sizeof a->us.loading_note,
+                     "%d script%s read", files, files == 1 ? "" : "s");
+            a->us.loading_step  = 1;
+            a->us.loading_steps = 2;
+            a->reload_pending   = 1;
+        }
+        else
+            a->mesh_dirty = 1;
+    }
+    else if (a->reload_pending)
+    {
+        a->reload_pending  = 0;
+        a->us.loading[0]   = 0;
+        a->mesh_dirty      = 1;
     }
     if (script_take_dirty())
         a->mesh_dirty = 1;
@@ -773,6 +824,7 @@ int game_main(int argc, char **argv)
      *  an icon bouncing up and gone.  The hint has to precede SDL_Init; the
      *  system then lists the process as BackgroundOnly. */
     headless = check || run_frames || shot_out || want_mesh_check || have_pick || g_dev.area != NULL;
+    a.live   = !headless;
     if (headless)
         SDL_SetHint(SDL_HINT_MAC_BACKGROUND_APP, "1");
     if (!SDL_Init(SDL_INIT_VIDEO))
@@ -1068,7 +1120,7 @@ int game_main(int argc, char **argv)
         const char *s = g_dev.edit;
         int         col, row, n;
         if (remesh(&a) != 0)
-            fprintf(stderr, "mesh build failed\n");
+            build_failed();
         while (sscanf(s, "%d,%d%n", &col, &row, &n) == 2)
         {
             sim_demolish_tile(a.city, row, col, 0, 0);
@@ -1138,7 +1190,7 @@ int game_main(int argc, char **argv)
     {
         float px, py;
         if (remesh(&a) != 0)
-            fprintf(stderr, "mesh build failed\n");
+            build_failed();
         if (sscanf(g_dev.probe, "%f,%f", &px, &py) == 2)
             mesh_probe(&a.mesh, px, py);
         else
@@ -1150,7 +1202,7 @@ int game_main(int argc, char **argv)
         /*  One chunk, against a world that has been built, so a script
          *  may ask what its own rules produced. */
         if (remesh(&a) != 0)
-            fprintf(stderr, "mesh build failed\n");
+            build_failed();
         int rc_eval = script_eval(g_dev.lua_eval);
         rc = rc_eval != 0;
         goto done;
@@ -1159,7 +1211,7 @@ int game_main(int argc, char **argv)
     {
 
         if (remesh(&a) != 0)
-            fprintf(stderr, "mesh build failed\n");
+            build_failed();
         rc = area_report_cli(&a, g_dev.area);
         rc = rc ? 1 : 0;
         goto done;
@@ -1171,8 +1223,15 @@ int game_main(int argc, char **argv)
          *  --check-open set the plain build is checked instead, whose
          *  two uncut edges are open by design: the checker's own test. */
         a.angle = g_dev.check_open ? 0.0f : 1.0f;
+        /*  A mesh the build abandoned is not a mesh to check: it is
+         *  missing whatever the rule that raised was to draw, and the
+         *  checks would report on the hole rather than on the city. */
         if (remesh(&a) != 0)
-            fprintf(stderr, "mesh build failed\n");
+        {
+            build_failed();
+            rc = 1;
+            goto done;
+        }
         bad = mesh_check(&a.mesh, 1);
         if (geometry_on(&a))
         {
@@ -1237,7 +1296,7 @@ int game_main(int argc, char **argv)
     {
 
         if (remesh(&a) != 0)
-            fprintf(stderr, "mesh build failed\n");
+            build_failed();
         rc = check_frame(&a, win, check_out);
         rc = rc ? 1 : 0;
         goto done;

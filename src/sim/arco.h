@@ -49,7 +49,7 @@
 #ifndef ARCO_H
 #define ARCO_H
 
-#include "sc2k.h"
+#include "sim.h"
 
 /*  The version in world.json.  Bump only for a change a reader from the
  *  previous version could not survive; adding a file or a manifest key

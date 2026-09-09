@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""sc2kpack -- turn SimCity 2000's tile art into standard, editable files.
+"""artpack -- turn SimCity 2000's tile art into standard, editable files.
 
-    python3 tools/sc2kpack.py extract  [--rsrc R] [--out DIR] [--split]
-    python3 tools/sc2kpack.py verify   [--rsrc R] [--assets DIR]
-    python3 tools/sc2kpack.py miff     --atlas DIR --zoom 32 --out FILE [--ids ...]
-    python3 tools/sc2kpack.py scurk    PACK... [--out DIR]
+    python3 tools/artpack.py extract  [--rsrc R] [--out DIR] [--split]
+    python3 tools/artpack.py verify   [--rsrc R] [--assets DIR]
+    python3 tools/artpack.py miff     --atlas DIR --zoom 32 --out FILE [--ids ...]
+    python3 tools/artpack.py scurk    PACK... [--out DIR]
 
 The game keeps 500 logical tiles at three sizes, stored interleaved as SHAP
 ids N, N+500 and N+1000 inside a MIFF/SC2K container.  `extract` writes each
@@ -483,13 +483,13 @@ def cmd_extract(args):
         sheet = {
             "frames": frames,
             "meta": {
-                "app": "sc2kpack",
+                "app": "artpack",
                 "version": "1",
                 "image": png.name,
                 "format": "RGBA8888" if args.rgba else "I8",
                 "size": {"w": aw, "h": ah},
                 "scale": "1",
-                "sc2k": {
+                "arc": {
                     "zoom": int(name),
                     "id_base": base,
                     "tile_w": tw,
@@ -684,7 +684,7 @@ def cmd_scurk(args):
 
 def main(argv=None):
     here = Path(__file__).resolve().parent.parent
-    ap = argparse.ArgumentParser(prog="sc2kpack", description=__doc__.splitlines()[0])
+    ap = argparse.ArgumentParser(prog="artpack", description=__doc__.splitlines()[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     e = sub.add_parser("extract", help="art -> indexed PNG atlases + JSON")

@@ -156,6 +156,20 @@ static ShapeId shape_open_v(ShapeId parent, const char *where, const char *who, 
     return s_n++;
 }
 
+/*  A shape ENTERED again: what is drawn now belongs to it, as though it
+ *  had never been closed.  A producer that gathers its work and lays it
+ *  later says which shape each piece was gathered for, so the inspector
+ *  still names the thing that made it rather than whatever the composer
+ *  happened to have open. */
+void shape_use(ShapeId id)
+{
+    if (!s_on || id == SHAPE_NONE || id >= s_n)
+        return;
+    if (s_sp < SHAPE_STACK)
+        s_stack[s_sp] = id;
+    ++s_sp;
+}
+
 void shape_close(ShapeId id)
 {
     if (!s_on || s_sp <= 0 || id == SHAPE_NONE)

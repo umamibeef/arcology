@@ -17,6 +17,7 @@
  *  at (d.y, -d.x) times half the band's half width. */
 #include "dump.h"
 #include "mesh/internal.h"
+#include "log.h"
 #include "net/internal.h"
 #include "script.h"
 #include "opt.h"
@@ -85,6 +86,7 @@ static struct
 
 void lane_reset(void)
 {
+    net_wires_reset();
     s_nl = s_nlp = 0;
     memset(&s_ls, 0, sizeof s_ls);
     s_nlx = s_lx_stamp = 0;
@@ -93,20 +95,79 @@ void lane_reset(void)
 }
 
 /*  The lane centres by class, from the centreline, inner first.  Where
- *  they run is the SCRIPT'S (scripts/rules.lua): no rule is no lanes,
- *  which is what a run that cannot find the scripts draws.  Every part
- *  of the pipeline that wants a lane comes through here -- the
- *  connectors, the paint and the traffic -- so the three cannot part
- *  company. */
+ *  they run is the SCRIPT'S (arc.rules.lanes), settled for every family
+ *  and class the pipeline can present before any of it is built: no
+ *  answer is no lanes, which is what a run that cannot find the scripts
+ *  draws.  Every part of the pipeline that wants a lane comes through
+ *  here -- the connectors, the paint and the traffic -- so the three
+ *  cannot part company.
+ *
+ *  A class runs from LANE_CLS_LO, which is the family that has none, up
+ *  to the widest road there is. */
+#define LANE_CLS_LO (-1)
+#define LANE_CLS_HI 2
+#define LANE_RUNS   (2 * (LANE_CLS_HI - LANE_CLS_LO + 1))
+
+static struct
+{
+    float off[4];
+    int   n, have;
+} s_lane_run[LANE_RUNS];
+
+static int lane_run_ix(Family f, int cls)
+{
+    if (cls < LANE_CLS_LO || cls > LANE_CLS_HI)
+        return -1;
+    return (f == F_RAIL ? 1 : 0) * (LANE_CLS_HI - LANE_CLS_LO + 1) + (cls - LANE_CLS_LO);
+}
+
+void net_lane_runs_reset(void)
+{
+    memset(s_lane_run, 0, sizeof s_lane_run);
+}
+
+int net_lane_runs(void)
+{
+    return LANE_RUNS;
+}
+
+/*  Which family and class one of them is: the drive asks the rule about
+ *  each in turn and hands the answer straight back. */
+void net_lane_run_at(int i, const char **fam, int *cls)
+{
+    *fam = i >= LANE_CLS_HI - LANE_CLS_LO + 1 ? "rail" : "road";
+    *cls = LANE_CLS_LO + i % (LANE_CLS_HI - LANE_CLS_LO + 1);
+}
+
+void net_lane_run_is(int i, const float *off, int n)
+{
+    int k;
+    if (i < 0 || i >= LANE_RUNS)
+        return;
+    if (n > (int)(sizeof s_lane_run[0].off / sizeof s_lane_run[0].off[0]))
+        n = (int)(sizeof s_lane_run[0].off / sizeof s_lane_run[0].off[0]);
+    for (k = 0; k < n; ++k)
+        s_lane_run[i].off[k] = off[k];
+    s_lane_run[i].n    = n;
+    s_lane_run[i].have = 1;
+}
+
 int net_lane_offsets(Family f, int cls, float *off, int max)
 {
-    int n = script_rule_lanes(f == F_RAIL ? "rail" : "road", cls, off, max);
-    return n < 0 ? 0 : n;
+    int i = lane_run_ix(f, cls), k, n;
+    if (i < 0 || !s_lane_run[i].have)
+        return 0;
+    n = s_lane_run[i].n < max ? s_lane_run[i].n : max;
+    for (k = 0; k < n; ++k)
+        off[k] = s_lane_run[i].off[k];
+    return n;
 }
 
 static int lane_offsets(Family f, int cls, float *off)
 {
-    /*  Two each way is what every caller has room for. */
+    /*  Two each way is what every caller has room for, and a class that
+     *  runs only one leaves the second at nought. */
+    off[0] = off[1] = 0.0f;
     return net_lane_offsets(f, cls, off, 2);
 }
 
@@ -165,10 +226,12 @@ static void piece_offset(const Piece *p, float off, Piece *o)
     }
     else
     {
-        float s  = p->t1 > p->t0 ? 1.0f : -1.0f;
-        float r2 = p->r + off * s;
-        if (r2 < 0.02f)
-            r2 = 0.02f;
+        static int gix_lane_arc_min = -1;
+        float      s   = p->t1 > p->t0 ? 1.0f : -1.0f;
+        float      lo  = net_geo(&gix_lane_arc_min, "lane_arc_min");
+        float      r2  = p->r + off * s;
+        if (r2 < lo)
+            r2 = lo;
         o->r   = r2;
         o->a   = (V2){p->c.x + r2 * cosf(p->t0), p->c.y + r2 * sinf(p->t0)};
         o->b   = (V2){p->c.x + r2 * cosf(p->t1), p->c.y + r2 * sinf(p->t1)};
@@ -227,8 +290,10 @@ int lane_route(V2 A, V2 tA, V2 B, V2 tB, Piece *out, int *np, float *rmin)
     {
         V2    s = {tA.x + tB.x, tA.y + tB.y};
         float c = dt, vs = v.x * s.x + v.y * s.y, kk = 2.0f * (1.0f - c), d;
-        V2    q[4];
-        float rad[4] = {0.0f, 1e6f, 1e6f, 0.0f}, tl[4];
+        static int gix_lane_route_rmax = -1;
+        float      cap = net_geo(&gix_lane_route_rmax, "lane_route_rmax");
+        V2         q[4];
+        float      rad[4] = {0.0f, cap, cap, 0.0f}, tl[4];
         if (kk < 1e-5f)
         {
             if (vs <= 1e-6f)
@@ -422,6 +487,91 @@ float deck_z_near(const RCity *c, uint8_t mask_bit, int band, V2 p)
     return have ? z : surface_at_world(c, mask_bit, p.x, p.y);
 }
 
+/*  ------------------------------------------------------------------
+ *  The lane overlay's wires, gathered
+ *
+ *  The hairline over a lane is drawn only while the tuning window asks
+ *  to see the curves, and it is drawn from four different passes.  Each
+ *  of them gathers what it wants drawn, with the shape it belongs to, and
+ *  the drive lays them all at the end -- entering each shape again, so
+ *  the inspector still names the lane a wire runs over. */
+#define WIRES_MAX 65536
+
+static struct
+{
+    LaneFan f;
+    ShapeId sh;
+    int     at;
+} *s_wire;
+static int    s_n_wire, s_wire_cap;
+static Piece *s_wire_pc;
+static int    s_wire_pc_n, s_wire_pc_cap;
+
+void net_wires_reset(void)
+{
+    s_n_wire = s_wire_pc_n = 0;
+}
+
+static int wire_add(const LaneFan *f)
+{
+    int i;
+    if (s_n_wire >= s_wire_cap)
+    {
+        int   cap = s_wire_cap ? s_wire_cap * 2 : 4096;
+        void *p;
+        if (cap > WIRES_MAX)
+            cap = WIRES_MAX;
+        if (s_n_wire >= cap || (p = realloc(s_wire, (size_t)cap * sizeof *s_wire)) == NULL)
+        {
+            R_ERR("net", "no room for the lane overlay: %d wires is the most held", WIRES_MAX);
+            return -1;
+        }
+        s_wire = p, s_wire_cap = cap;
+    }
+    if (s_wire_pc_n + f->np > s_wire_pc_cap)
+    {
+        int   cap = s_wire_pc_cap ? s_wire_pc_cap * 2 : 65536;
+        void *p;
+        while (cap < s_wire_pc_n + f->np)
+            cap *= 2;
+        if ((p = realloc(s_wire_pc, (size_t)cap * sizeof *s_wire_pc)) == NULL)
+        {
+            R_ERR("net", "no room for the lane overlay's pieces");
+            return -1;
+        }
+        s_wire_pc = p, s_wire_pc_cap = cap;
+    }
+    i             = s_n_wire++;
+    s_wire[i].f   = *f;
+    s_wire[i].sh  = shape_current();
+    s_wire[i].at  = s_wire_pc_n;
+    for (int k = 0; k < f->np; ++k)
+        s_wire_pc[s_wire_pc_n + k] = f->pc[k];
+    s_wire_pc_n += f->np;
+    return 0;
+}
+
+int net_wires(void)
+{
+    return s_n_wire;
+}
+
+/*  One of them, with its own shape entered again. */
+LaneFan *net_wire_at(int i)
+{
+    if (i < 0 || i >= s_n_wire)
+        return NULL;
+    s_wire[i].f.pc = s_wire_pc + s_wire[i].at;
+    shape_use(s_wire[i].sh);
+    return &s_wire[i].f;
+}
+
+void net_wire_done(int i)
+{
+    if (i >= 0 && i < s_n_wire)
+        shape_close(s_wire[i].sh);
+}
+
 static int lane_wires(RMesh *m, const RCity *c, uint8_t mask_bit, const Piece *pc, int np, float lift, float paint, int band)
 {
     LaneFan f;
@@ -432,8 +582,7 @@ static int lane_wires(RMesh *m, const RCity *c, uint8_t mask_bit, const Piece *p
     f.lift = lift, f.paint = paint, f.band = band;
     f.ramp = 0, f.off = 0;
     f.step = 0.0f;
-    script_rule_object("lane", "lane", &f);
-    return 0;
+    return wire_add(&f);
 }
 
 /*  The trim an arm's segment will actually be cut at: walk_segment scales
@@ -1076,9 +1225,9 @@ int lane_deck(RMesh *m, const RCity *c, uint8_t mask_bit, const Piece *pc, int n
             for (q = 0; q < np; ++q)
                 if (tmp[q].arc && tmp[q].r < rmin)
                     rmin = tmp[q].r;
-            if (lane_add(LC_DECK, net_hiway.f, tmp, np, hw, rmin, rmin < LANE_RMIN, LE_OPEN, -1, LE_OPEN, -1, band, off) != 0)
+            if (lane_add(LC_DECK, net_hiway->f, tmp, np, hw, rmin, rmin < LANE_RMIN, LE_OPEN, -1, LE_OPEN, -1, band, off) != 0)
                 return -1;
-            if (lane_wires(m, c, mask_bit, tmp, np, net_family_rules(F_ROAD)->lane_wire, net_hiway.lane_paint, band) != 0)
+            if (lane_wires(m, c, mask_bit, tmp, np, net_family_rules(F_ROAD)->lane_wire, net_hiway->lane_paint, band) != 0)
                 return -1;
         }
     return 0;
@@ -1177,8 +1326,7 @@ static int ramp_wires(RMesh *m, const RCity *c, uint8_t mask_bit, const Piece *p
     f.pc = pc, f.np = np;
     f.lift = net_family_rules(F_ROAD)->lane_lift, f.paint = paint, f.band = 0;
     f.ramp = 1, f.off = off, f.step = net_family_rules(F_ROAD)->lane_step_ramp;
-    script_rule_object("lane", "lane", &f);
-    return 0;
+    return wire_add(&f);
 }
 
 int lane_ramp(RMesh *m, const RCity *c, uint8_t mask_bit, const Piece *pc, int np, float hw, int deck_lane, int road_lane, int road_port, int off)
@@ -1202,7 +1350,7 @@ int lane_ramp(RMesh *m, const RCity *c, uint8_t mask_bit, const Piece *pc, int n
                                                            : LE_OPEN,
             rv = road_port >= 0 ? road_port : road_lane;
         int dk = deck_lane >= 0 ? LE_LANE : LE_OPEN;
-        if (lane_add(LC_RAMP, net_hiway.f, pc, np, hw, rmin, rmin < LANE_RMIN, off ? dk : rk, off ? deck_lane : rv, off ? rk : dk, off ? rv : deck_lane, 0, 0.0f) != 0)
+        if (lane_add(LC_RAMP, net_hiway->f, pc, np, hw, rmin, rmin < LANE_RMIN, off ? dk : rk, off ? deck_lane : rv, off ? rk : dk, off ? rv : deck_lane, 0, 0.0f) != 0)
             return -1;
     }
     return ramp_wires(m, c, mask_bit, pc, np, off, 5.0f); /* a ramp is a lane: red like a road's */
@@ -1256,7 +1404,7 @@ static int link_add(RMesh *m, const RCity *c, uint8_t mask_bit, V2 A, V2 tA, V2 
         return 0;
     }
     ++s_ls.links;
-    if (lane_add(LC_LINK, net_road.f, tmp, np, w, rmin, rmin < LANE_RMIN, LE_LANE, from, LE_LANE, to, 0, 0.0f) != 0)
+    if (lane_add(LC_LINK, net_road->f, tmp, np, w, rmin, rmin < LANE_RMIN, LE_LANE, from, LE_LANE, to, 0, 0.0f) != 0)
         return -1;
     return lane_wires(m, c, mask_bit, tmp, np, net_family_rules(F_ROAD)->lane_wire, 5.0f, band);
 }
@@ -1389,23 +1537,29 @@ int xlane_link(XLaneFan *x, int la, int lb)
     return 1;
 }
 
+/*  ACROSS A CROSSING: the open ends as they stand, for arc.rules.cross
+ *  to carry each of them on into the lane facing it.  The drive composes
+ *  it between the two halves of the transitions. */
+static XLaneFan s_xlane;
+
+XLaneFan *lane_cross_ask(RMesh *m, const RCity *c, uint8_t mask_bit)
+{
+    memset(&s_xlane, 0, sizeof s_xlane);
+    if (s_pass == 1)
+        return NULL; /* the grading pass: lanes are the building pass's */
+    s_xlane.m        = m;
+    s_xlane.c        = c;
+    s_xlane.mask_bit = mask_bit;
+    s_xlane.n        = s_nl;
+    return &s_xlane;
+}
+
 int lane_transitions(RMesh *m, const RCity *c, uint8_t mask_bit)
 {
     if (s_pass == 1)
         return 0; /* the grading pass: lanes are the building pass's */
-    /*  ACROSS A CROSSING: arc.rules.lane_cross carries each open end on
-     *  into the lane facing it. */
-    {
-        XLaneFan x;
-        memset(&x, 0, sizeof x);
-        x.m        = m;
-        x.c        = c;
-        x.mask_bit = mask_bit;
-        x.n        = s_nl;
-        script_rule_object("lane_cross", "xlane", &x);
-        if (x.fail)
-            return -1;
-    }
+    if (s_xlane.fail)
+        return -1;
     int li, nl = s_nl; /* the lanes as they stand; links are appended */
     for (li = 0; li < nl; ++li)
     {
@@ -1485,7 +1639,7 @@ int lane_transitions(RMesh *m, const RCity *c, uint8_t mask_bit)
                 const Lane *r = &s_lane[lj];
                 V2          p2, d2;
                 float       d;
-                if (r->cls != LC_ROAD || r->fam != net_road.f)
+                if (r->cls != LC_ROAD || r->fam != net_road->f)
                     continue;
                 if (which ? r->kind0 != LE_OPEN : r->kind1 != LE_OPEN)
                     continue;

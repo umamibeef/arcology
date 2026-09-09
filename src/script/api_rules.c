@@ -36,7 +36,6 @@
  *  what is on it. */
 #include "script.h"
 
-#if SC2K_LUA
 
 #include "internal.h"
 
@@ -46,4 +45,3 @@ void api_rules_open(lua_State *L)
     lua_setfield(L, -2, "rules");
 }
 
-#endif

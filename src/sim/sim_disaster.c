@@ -5,7 +5,7 @@
  *  out of sim.c; the addresses in the comments still point into CODE 2, and
  *  the arithmetic is still the original's widths. */
 #include "ext80.h"
-#include "sc2k.h"
+#include "sim.h"
 #include "sim_int.h"
 
 #include <stdio.h>

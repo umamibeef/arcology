@@ -6,6 +6,8 @@
 #include "mesh/internal.h"
 #include "net/internal.h"
 
+static int gix_foot_sink = -1, gix_wire_w = -1;
+
 /*  One quad of a strip between two cross-sections, each given by its
  *  two end points in world tile coordinates, with the across and along
  *  values of the material; `za`/`zb` are the sections' heights, or
@@ -177,7 +179,7 @@ static int road_tri(const char *where, const char *who, RMesh *m, const RCity *c
         {
             uint8_t b = c->xbld[tr * R_MAP + tc];
             order     = tile_order(c, tc, tr, mask_bit) + frac;
-            if (col[2] > 10.5f && col[2] < 11.5f && (b == 0x45u || b == 0x46u) &&
+            if (col[2] > 10.5f && col[2] < 11.5f && net_road_over_rail(b) &&
                 on_crossing_panel(c, tc, tr, (tri[0][0] + tri[1][0] + tri[2][0]) / 3.0f, (tri[0][1] + tri[1][1] + tri[2][1]) / 3.0f))
                 pcol = xcol;
         }
@@ -401,7 +403,7 @@ int put_cyl(RMesh *m, const RCity *c, uint8_t mask_bit, float order, float cx, f
         float a = -6.2831853f * ((float)k + 0.5f) / (float)N;
         px[k]   = cx + r * cosf(a);
         py[k]   = cy + r * sinf(a);
-        pz[k]   = surface_at_world(c, mask_bit, px[k], py[k]) - 0.01f;
+        pz[k]   = surface_at_world(c, mask_bit, px[k], py[k]) - net_geo(&gix_foot_sink, "foot_sink");
         if (pz[k] > hi - 0.02f)
             pz[k] = hi - 0.02f;
     }
@@ -566,7 +568,7 @@ int put_wire_paint(RMesh *m, const RCity *c, uint8_t mask_bit, float order, floa
         return 0; /* the grading pass draws nothing */
     const float col3[3] = {paint < 0.0f ? 0.0f : paint, 0.0f, paint < 0.0f ? MAT_PROP : MAT_VEHICLE};
     const int   n       = 4;
-    float       w       = 0.02f;
+    float       w       = net_geo(&gix_wire_w, "wire_w");
     float       dx = x1 - x0, dy = y1 - y0, len = sqrtf(dx * dx + dy * dy);
     float       nx = -dy / len * w, ny = dx / len * w;
     float       ga = surface_at_world(c, mask_bit, x0, y0);

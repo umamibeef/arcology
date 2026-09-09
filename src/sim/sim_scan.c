@@ -6,7 +6,7 @@
  *  overlays, and between them they are most of what the city knows about
  *  itself.  Split out of sim.c; addresses still point into CODE 2. */
 #include "ext80.h"
-#include "sc2k.h"
+#include "sim.h"
 #include "sim_int.h"
 
 #include <stdio.h>

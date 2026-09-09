@@ -6,7 +6,7 @@
 
 #include "mesh/internal.h"
 #include "net/internal.h"
-#include "net/model.h"
+#include "geo/model.h"
 #include "script.h"
 
 /*  The numbers this file reads, each remembering where the store
@@ -86,6 +86,18 @@ int net_tune_set(const char *name, float v)
     return 0;
 }
 
+/*  A knob's own float, to keep: a family holds pointers at its width and
+ *  its radii, so a strip drawn a year later reads the value the window
+ *  is showing rather than the one the declaration was read at. */
+const float *net_tune_at(const char *name)
+{
+    size_t i;
+    for (i = 0; name && i < sizeof TUNE / sizeof TUNE[0]; ++i)
+        if (strcmp(name, TUNE[i].name) == 0)
+            return (const float *)((const char *)&s_tune + TUNE[i].at);
+    return NULL;
+}
+
 const char *net_tune_name(int i, float *v)
 {
     if (i < 0 || (size_t)i >= sizeof TUNE / sizeof TUNE[0])
@@ -100,31 +112,31 @@ float *mesh_tune(void)
     return &s_tune.road_w; /* nineteen floats, in the struct's own order */
 }
 
-/*  One class for the whole segment, the median of its tiles'. */
-int seg_class(Seg *x)
+/*  How many of a segment's tiles read as each class.  One class for the
+ *  whole segment follows from it, and settling that is the SCRIPT'S
+ *  (arc.rules.seg_class): the counting is a reading of the map and the
+ *  median drawn from it is not. */
+void seg_class_counts(const Seg *x, int cnt[3])
 {
     const RCity *c   = x->c;
-    Family       f   = x->f;
-    V2          *pts = x->pts;
-    int          n   = x->n;
-    int          k   = x->k;
-    /*  One class for the whole segment, from how many of its tiles read
-     *  as each: arc.rules.seg_class settles it. */
-    if (f == F_ROAD)
+    const V2    *pts = x->pts;
+    int          k;
+    cnt[0] = cnt[1] = cnt[2] = 0;
+    for (k = 0; k < x->n; ++k)
     {
-        int cnt[3] = {0, 0, 0}, cls;
-        for (k = 0; k < n; ++k)
-        {
-            int32_t tc = (int32_t)floorf(pts[k].x), tr = (int32_t)floorf(pts[k].y);
-            if (tc < 0 || tr < 0 || tc >= R_MAP || tr >= R_MAP)
-                continue;
-            ++cnt[(int)road_class(c, tc, tr)];
-        }
-        cls    = script_rule_seg_class(cnt);
-        x->cls = (float)cls;
+        int32_t tc = (int32_t)floorf(pts[k].x), tr = (int32_t)floorf(pts[k].y);
+        if (tc < 0 || tr < 0 || tc >= R_MAP || tr >= R_MAP)
+            continue;
+        ++cnt[(int)road_class(c, tc, tr)];
     }
-    x->n = n;
-    x->k = k;
+}
+
+/*  And the class the drive settled for this segment, read back.  A
+ *  family that carries no class keeps none. */
+int seg_class(Seg *x)
+{
+    if (x->f == F_ROAD)
+        x->cls = (float)net_seg_class_of(x->col, x->row, x->e);
     return 0;
 }
 
@@ -143,7 +155,7 @@ int seg_class(Seg *x)
  *  signal.  Two bits per arm. */
 static int junction_control(const RCity *c, int32_t col, int32_t row, int links)
 {
-    int cls[4], ctrl[1] = {0}, e, n = 0, maxc = 0, minc = 9, busy;
+    int cls[4], e, busy;
     int traf[4];
     for (e = 0; e < 4; ++e)
     {
@@ -154,93 +166,95 @@ static int junction_control(const RCity *c, int32_t col, int32_t row, int links)
             continue;
         cls[e]  = (int)road_class(c, nc, nr);
         traf[e] = c->xtrf[(nr >> 1) * R_HALF + (nc >> 1)];
-        ++n;
-        if (cls[e] > maxc)
-            maxc = cls[e];
-        if (cls[e] < minc)
-            minc = cls[e];
     }
     busy = c->xtrf[(row >> 1) * R_HALF + (col >> 1)] > 0xAA;
-    /*  The decision is the SCRIPT'S (scripts/rules.lua).  There is no
-     *  ladder here to fall back on: a rule the scripts do not set is a
-     *  junction nothing controls, which is what a run that cannot find
-     *  them draws.  Two copies of one policy, one in C and one in Lua,
-     *  is the thing this layer exists to prevent. */
-    if (!script_rule_control(col, row, cls, traf, busy, ctrl))
-        return 0;
-    (void)n, (void)maxc, (void)minc;
-    return *ctrl;
+    /*  The decision is the SCRIPT'S (arc.rules.control), and this is the
+     *  reading it is made from.  There is no ladder here to fall back
+     *  on: a rule the scripts do not set is a junction nothing controls,
+     *  which is what a run that cannot find them draws.  Two copies of
+     *  one policy, one in C and one in Lua, is the thing this layer
+     *  exists to prevent. */
+    net_control_ask("control", col, row, links, cls, traf, busy);
+    return 0;
 }
 
-/*  The asphalt: the outline the arms cut out, as a fan from the middle, the mouths' returns, and the footway round it. */
-static int jb_asphalt(JBox *jb)
+/*  The asphalt: the outline the arms cut out, as a fan from the middle,
+ *  the mouths' returns, and the footway round it.  It is laid in two
+ *  halves with the drive between them, because what goes on the outline
+ *  is the SCRIPT'S (arc.rules.junction): the outline is a solver's work
+ *  -- arms, corners, trims and kerb returns -- and the asphalt drawn on
+ *  it is not.  No rule is no junction surface at all. */
+static struct
 {
-    const RCity *c        = jb->c;
-    Family       f        = jb->f;
-    int32_t      col      = jb->col;
-    int32_t      row      = jb->row;
-    int          links    = jb->links;
-    float        order    = jb->order;
-    float        mat      = jb->mat;
-    float        cx       = jb->cx;
-    float        cy       = jb->cy;
-    float        h        = jb->h;
-    float        lw       = jb->lw;
-    float       *a0       = jb->a0;
-    float       *a1       = jb->a1;
-    float       *b0       = jb->b0;
-    float       *b1       = jb->b1;
-    float        zj       = jb->zj;
-    /*  The asphalt: the outline the arms cut out, as a fan from the
-     *  middle.  With every arm on a tile axis this is the square it
-     *  has always been. */
+    JuncFan fan;
     V2      poly[JUNC_MAX];
+    V2      apoly[2 * JUNC_MAX];
     uint8_t mouth[JUNC_MAX];
     JuncArm arms[4];
     float   trm[4];
-    int     np    = junction_poly(c, f, col, row, links, poly, mouth, JUNC_MAX, trm, arms);
+    float   mat, cx, cy, h, lw, zj;
+    int     np, live;
+} s_asph;
+
+static int jb_asphalt_ask(JBox *jb)
+{
+    const RCity *c     = jb->c;
+    Family       f     = jb->f;
+    int32_t      col   = jb->col;
+    int32_t      row   = jb->row;
+    int          links = jb->links;
+    int          anp;
+    s_asph.live = 0;
+    s_asph.mat = jb->mat, s_asph.cx = jb->cx, s_asph.cy = jb->cy;
+    s_asph.h = jb->h, s_asph.lw = jb->lw, s_asph.zj = jb->zj;
+    /*  The outline the arms cut out.  With every arm on a tile axis this
+     *  is the square it has always been. */
+    s_asph.np = junction_poly(c, f, col, row, links, s_asph.poly, s_asph.mouth, JUNC_MAX, s_asph.trm, s_asph.arms);
     /*  A box that reaches no chunk this build draws: the sidewalk's
      *  records, made round this outline, and no asphalt. */
     if (jb->records_only)
-        return sidewalk_junction(jb, poly, arms, np);
+        return 0;
     /*  The asphalt is laid INSIDE the footway, not under it: the band
      *  takes the outline's outer `lw` and the fan stops on the band's own
      *  inner edge, so the two meet edge to edge.  A mouth carries no band,
-     *  so there the fan reaches the outline and the arm meets it.
-     *
-     *  What is laid over that polygon is the SCRIPT'S
-     *  (arc.rules.junction): the outline is a solver's work -- arms,
-     *  corners, trims and kerb returns -- and the asphalt drawn on it is
-     *  not.  No rule is no junction surface at all. */
-    V2  apoly[2 * JUNC_MAX];
-    int anp                = sidewalk_junction_inset(jb, poly, arms, np, apoly, (int)(sizeof apoly / sizeof apoly[0]));
-    {
-        JuncFan fan;
-        fan.jb    = jb;
-        fan.poly  = anp >= 3 ? apoly : poly;
-        fan.np    = anp >= 3 ? anp : np;
-        fan.cx    = cx;
-        fan.cy    = cy;
-        fan.zj    = zj;
-        fan.mat   = mat;
-        fan.order = order;
-        fan.square = np < 3;
-        fan.a0 = a0, fan.a1 = a1, fan.b0 = b0, fan.b1 = b1;
-        script_rule_object("junction", "junction", &fan);
-    }
-    /*  The junction's sidewalk is the sidewalk pass's (sidewalk.c): a
-     *  footway band round this outline, mouth to mouth, which leaves the
-     *  pavement open where a road comes in and closed everywhere else, and
-     *  takes the outline's own corners as it goes. */
-    if (sidewalk_junction(jb, poly, arms, np) != 0)
-        return -1;
-    jb->mat = mat;
-    jb->cx  = cx;
-    jb->cy  = cy;
-    jb->h   = h;
-    jb->lw  = lw;
-    jb->zj  = zj;
+     *  so there the fan reaches the outline and the arm meets it. */
+    anp                = sidewalk_junction_inset(jb, s_asph.poly, s_asph.arms, s_asph.np, s_asph.apoly, (int)(sizeof s_asph.apoly / sizeof s_asph.apoly[0]));
+    s_asph.fan.jb      = jb;
+    s_asph.fan.poly    = anp >= 3 ? s_asph.apoly : s_asph.poly;
+    s_asph.fan.np      = anp >= 3 ? anp : s_asph.np;
+    s_asph.fan.cx      = jb->cx;
+    s_asph.fan.cy      = jb->cy;
+    s_asph.fan.zj      = jb->zj;
+    s_asph.fan.mat     = jb->mat;
+    s_asph.fan.order   = jb->order;
+    s_asph.fan.square  = s_asph.np < 3;
+    s_asph.fan.a0 = jb->a0, s_asph.fan.a1 = jb->a1, s_asph.fan.b0 = jb->b0, s_asph.fan.b1 = jb->b1;
+    s_asph.live        = 1;
     return 0;
+}
+
+/*  The outline the drive is to lay the asphalt on, or nothing where this
+ *  box draws none. */
+JuncFan *net_junction_fan(void)
+{
+    return s_asph.live ? &s_asph.fan : NULL;
+}
+
+/*  The junction's sidewalk is the sidewalk pass's (sidewalk.c): a footway
+ *  band round this outline, mouth to mouth, which leaves the pavement
+ *  open where a road comes in and closed everywhere else, and takes the
+ *  outline's own corners as it goes. */
+static int jb_asphalt_done(JBox *jb)
+{
+    int rc      = sidewalk_junction(jb, s_asph.poly, s_asph.arms, s_asph.np);
+    s_asph.live = 0;
+    jb->mat = s_asph.mat;
+    jb->cx  = s_asph.cx;
+    jb->cy  = s_asph.cy;
+    jb->h   = s_asph.h;
+    jb->lw  = s_asph.lw;
+    jb->zj  = s_asph.zj;
+    return rc;
 }
 
 /*  The four sides: a free side carries the sidewalk and its curb, a linked one its signal or stop sign. */
@@ -339,7 +353,12 @@ float road_class(const RCity *c, int32_t col, int32_t row)
 /*  The box on the outline: the asphalt, the sides, the corners. */
 static int road_box(JBox *jb)
 {
-    if (jb_asphalt(jb) != 0)
+    return jb_asphalt_ask(jb);
+}
+
+static int road_box_done(JBox *jb)
+{
+    if (jb_asphalt_done(jb) != 0)
         return -1;
     if (jb->records_only) /* the signs and the corners are drawing only */
         return 0;
@@ -444,22 +463,39 @@ void script_walk_end_pts(int side, float *out)
         memcpy(out, s_wk_end[side], sizeof s_wk_end[0]);
 }
 
+/*  A road strip's record: its edge in the traffic's graph, and then the
+ *  footway either side of it.  The two bands are the SCRIPT'S, composed
+ *  from the same stations and by the same expression as the
+ *  carriageway's own edge, so the two meet along the band's inner line
+ *  exactly.  With no rule a road has no footway at all -- which is why
+ *  the walk below runs only on what the rule answered it drew. */
 static int road_record(Loft *x)
 {
+    const RLoft  *d   = x->d;
+    const Sample *smp = x->smp;
+    road_crossing_distances(x);
+    if (net_record(&x->m->net, smp, x->ns, x->total, d->cls >= 0.0f ? (int)(d->cls + 0.5f) : 0, 0, d) != 0)
+        return -1;
+    script_walk_reset();
+    return 0;
+}
+
+static int s_walks_drew;
+
+void net_road_walks_drew(int drew)
+{
+    s_walks_drew = drew;
+}
+
+static int road_record_done(Loft *x)
+{
+    const int     drew = s_walks_drew;
     const RLoft  *d   = x->d;
     const Sample *smp = x->smp;
     V2            oa  = {-smp[0].dir.x, -smp[0].dir.y}, ob = smp[x->ns - 1].dir;
     V2            ra, rb, la, lb;
     float         e[4];
-    road_crossing_distances(x);
-    if (net_record(&x->m->net, smp, x->ns, x->total, d->cls >= 0.0f ? (int)(d->cls + 0.5f) : 0, 0, d) != 0)
-        return -1;
-    /*  The footway's two bands are the SCRIPT'S, composed from the same
-     *  stations and by the same expression as the carriageway's own
-     *  edge, so the two meet along the band's inner line exactly.  With
-     *  no rule a road has no footway at all. */
-    script_walk_reset();
-    if (!script_rule_object("walks", "strip", x))
+    if (!drew)
         return 0;
     script_walk_end_pts(0, e), ra = (V2){e[0], e[1]}, rb = (V2){e[2], e[3]};
     script_walk_end_pts(1, e), la = (V2){e[0], e[1]}, lb = (V2){e[2], e[3]};
@@ -509,27 +545,6 @@ static int road_record(Loft *x)
     return 0;
 }
 
-/*  A road's pair: its class, and its one marking -- the approach to a
- *  level crossing, whose along is the distance to the crossing.  A
- *  crosswalk is not the strip's: it belongs to the junction's mouth and
- *  is laid there (net/sidewalk.c), square to the arm however the road
- *  curves on its way in. */
-static int road_pair(Loft *x, LoftPair *p)
-{
-    const Sample *pv = p->pv, *cu = p->cu;
-    float        *ma = &p->ma, *al_a = &p->al_a, *al_b = &p->al_b;
-    /* the class: the segment's from its tiles, or an island's from the tile under the pair */
-    p->cls = x->d->cls >= 0.0f ? x->d->cls : road_class(x->c, p->tc, p->tr);
-    if (pv->xd > net_family_rules(F_ROAD)->app_near && 0.5f * (pv->xd + cu->xd) < net_family_rules(F_ROAD)->app_far)
-    {
-        *ma   = MAT_XAPPROACH;
-        *al_a = pv->xd;
-        *al_b = cu->xd;
-        return 0;
-    }
-    return 0;
-}
-
 /*  Where the traffic runs across a road, by class: the innermost lane
  *  and the outermost of arc.rules.lanes's answer, which is where the
  *  paint marks them too. */
@@ -548,7 +563,28 @@ static void road_traffic_lanes(const RLoft *d, int cls, float *lane_in, float *l
  *  distance along the strip into a place on the map.  A lamp that would
  *  stand at a level crossing is dropped: the crossing's own protection
  *  is there. */
+static ScriptLamp s_lamp[64];
+static int        s_n_lamp;
+
+/*  Which strips are lit and how the lamps are spaced along them is the
+ *  rule's; this asks for nothing but leaves the reading it works from. */
 static int road_furniture(Loft *x)
+{
+    (void)x;
+    s_n_lamp = 0;
+    return 0;
+}
+
+void net_road_lamps_are(const ScriptLamp *lamp, int n)
+{
+    s_n_lamp = n < (int)(sizeof s_lamp / sizeof s_lamp[0]) ? n : (int)(sizeof s_lamp / sizeof s_lamp[0]);
+    if (s_n_lamp > 0)
+        memcpy(s_lamp, lamp, sizeof s_lamp[0] * (size_t)s_n_lamp);
+}
+
+/*  And the walk that turns each lamp's distance along the strip into a
+ *  place on the map. */
+static int road_furniture_done(Loft *x)
 {
     RMesh       *m        = x->m;
     const RCity *c        = x->c;
@@ -556,8 +592,8 @@ static int road_furniture(Loft *x)
     Sample      *smp      = x->smp;
     float        hw       = x->hw;
     int          ns       = x->ns;
-    ScriptLamp   lamp[64];
-    int          n = script_rule_lamps(x->d->cls, x->total, lamp, 64), k;
+    ScriptLamp   *lamp    = s_lamp;
+    int          n = s_n_lamp, k;
     for (k = 0; k < n; ++k)
     {
         int   j = 1;
@@ -590,49 +626,13 @@ static int road_furniture(Loft *x)
     return 0;
 }
 
-/*  The lane centres by class, from the centreline: arc.rules.lanes's,
- *  the same answer the connectors are routed along, so a lane the cars
- *  run on and a lane the paint marks cannot part company.  The count
- *  each way; `off` inner first. */
-static int road_lanes(int cls, float *off)
+/*  What this file lends the declarations: the road's stages, under the
+ *  names scripts/families/road.lua reaches them by. */
+void road_primitives(void)
 {
-    return net_lane_offsets(F_ROAD, cls, off, 2);
+    net_hook_add(NH_CONTROL, "road_control", (NetHookFn)junction_control);
+    net_hook_add_split(NH_BOX, "road_box", (NetHookFn)road_box, (NetHookFn)road_box_done, NULL);
+    net_hook_add_split(NH_RECORD, "road_record", (NetHookFn)road_record, (NetHookFn)road_record_done, "walks");
+    net_hook_add(NH_TRAFFIC, "road_traffic", (NetHookFn)road_traffic_lanes);
+    net_hook_add_split(NH_FURNITURE, "road_lamps", (NetHookFn)road_furniture, (NetHookFn)road_furniture_done, "lamps");
 }
-
-const NetFamily net_road = {
-    "road",
-    F_ROAD,
-    &s_tune.road_w,
-    &s_tune.road_rmin,
-    &s_tune.road_rmax,
-    0.50f, /* the width the junction outline was tuned at */
-    MAT_ROAD,
-    LOFT_ROAD,
-    0, /* the fit's family code */
-    0.0f,
-    0.25f, /* the shelf's grade ceiling */
-    1,     /* curbs */
-    1,     /* ramps */
-    1,     /* buildings end it */
-    1,     /* caps */
-    1,     /* classed */
-    junction_control,
-    road_box,
-    road_record,
-    NULL,
-    NULL,
-    NULL,
-    NULL,
-    NULL,
-    road_pair,
-    road_traffic_lanes,
-    road_furniture,
-    NULL,
-    road_lanes,
-    5.0f, /* lane wires in red */
-    NET_LANE_ENDS_CAP,
-    0, /* keeps to its tiles */
-    0.0f, /* no turnout: its junctions hand back curb trims */
-    "slot_strip", /* the carriageway, over the junction it runs into */
-    0,            /* not a deck */
-};

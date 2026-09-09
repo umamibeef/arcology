@@ -1,5 +1,5 @@
 /*  walkway.c -- the sidewalk network: the paths, their ports, and whether
- *  the ends meet.  See net/walkway.h.  Nothing here draws. */
+ *  the ends meet.  See walk/walkway.h.  Nothing here draws. */
 #include <math.h>
 #include <string.h>
 

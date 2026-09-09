@@ -7,7 +7,7 @@
 #include "internal.h"
 #include "project.h"
 #include "adapt.h"
-#include "sc2k.h"
+#include "sim.h"
 #include "arco.h"
 #include "log.h"
 #include "opt.h"

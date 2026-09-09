@@ -29,12 +29,12 @@
 local f32 = arc.put.f32
 
 arc.rules.shelf = function (s)
-    local n, nodes = s:info()
+    local d = s:info()
 
     --  Along the edges: one height per corridor per corner, the nearest
     --  station's.
-    for gy = 0, n do
-        for gx = 0, n do
+    for gy = 0, d.n do
+        for gx = 0, d.n do
             local c = {s:copies(gx, gy)}
             if #c > 3 then
                 --  More than one copy: the lowest distance per corridor.
@@ -51,7 +51,7 @@ arc.rules.shelf = function (s)
     end
 
     --  At the nodes: one level for everything that meets there.
-    for i = 1, nodes do
+    for i = 0, d.nodes - 1 do
         local col, row = s:node(i)
         if col then
             local z = {s:heights(col, row)}

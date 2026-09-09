@@ -56,12 +56,12 @@ cmake --build build
 ./build/arcology
 ```
 
-SDL3 is found if installed, or fetched with `-DSC2K_FETCH_SDL3=ON`. Dear ImGui and spdlog are fetched at configure time.
+SDL3 is found if installed, or fetched with `-DARC_FETCH_SDL3=ON`. Dear ImGui and spdlog are fetched at configure time.
 
 To run the verification suite you need your own copy of the game:
 
 ```
-cmake -B build -DSC2K_CITIES="/path/to/SimCity 2000 Collection"
+cmake -B build -DARC_CITIES="/path/to/SimCity 2000 Collection"
 ctest --test-dir build
 ```
 
@@ -121,13 +121,13 @@ Three extractors run in turn, and each can be run on its own:
 
 | resource | tool | what comes out |
 |---|---|---|
-| `SHAP` | `tools/sc2kpack.py extract` | `tiles8/16/32.png` + JSON -- the map art, 500 tiles at three zooms |
+| `SHAP` | `tools/artpack.py extract` | `tiles8/16/32.png` + JSON -- the map art, 500 tiles at three zooms |
 | `PICT` | `tools/pict.py --atlas` | `ui.png` + `ui.json` -- the interface graphics |
 | `snd ` | `tools/snd.py` | `sounds/*.wav` -- the effects |
 
-The tile art is stored interleaved in a MIFF container as ids *N*, *N*+500 and *N*+1000, one per zoom. `sc2kpack.py`
+The tile art is stored interleaved in a MIFF container as ids *N*, *N*+500 and *N*+1000, one per zoom. `artpack.py`
 unpacks that into ordinary palette-indexed PNGs with JSON sidecars, so you can open the game's art in any image editor,
-change it, and the game will load what you saved. `sc2kpack.py verify` checks that a pack round-trips.
+change it, and the game will load what you saved. `artpack.py verify` checks that a pack round-trips.
 
 Nothing in the import needs anything outside the Python standard library.
 

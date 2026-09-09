@@ -56,12 +56,11 @@
 
 #include "script.h"
 
-#if SC2K_LUA
 
 #include "internal.h"
 #include "mesh/internal.h"
 #include "net/internal.h"
-#include "net/model.h"
+#include "geo/model.h"
 
 /*  The mesh a prop is being drawn into, and what it is drawn with.  Set
  *  for the length of one rule call and cleared after it. */
@@ -362,6 +361,74 @@ static int l_ground(lua_State *L)
     return 1;
 }
 
+/*  A SCRIPT'S OWN MATERIALS.
+ *
+ *  A built-in material has a branch of its own in the shaders: water
+ *  ripples, sediment is layered, a zebra is striped.  One a script
+ *  declares cannot have that -- the shaders are built with the program --
+ *  so it is shaded from PARAMETERS instead, which the frame hands the
+ *  shader every pass.  A colour and a roughness is enough for a surface
+ *  that is simply a surface, and that is most of what a new
+ *  representation wants before it wants anything else. */
+static struct
+{
+    char  name[32];
+    float rgba[4]; /* the colour, and roughness in the fourth */
+} s_script_mat[MAT_SCRIPT_MAX];
+static int s_n_script_mat;
+
+void script_material_reset(void)
+{
+    s_n_script_mat = 0;
+}
+
+int script_materials(const float **out)
+{
+    *out = s_n_script_mat ? s_script_mat[0].rgba : NULL;
+    return s_n_script_mat;
+}
+
+/*  arc.mat.define{name = "...", colour = {r, g, b}, rough = 0..1}.
+ *  Answers the number the material is known by, so a script can hold it
+ *  and hand it to arc.put; declaring the same name twice answers the
+ *  same number and rewrites its parameters, which is what a reload of
+ *  the scripts does. */
+static int l_mat_define(lua_State *L)
+{
+    const char *name;
+    int         i, at = -1;
+    luaL_checktype(L, 1, LUA_TTABLE);
+    lua_getfield(L, 1, "name");
+    name = lua_tostring(L, -1);
+    if (!name || !name[0])
+        return luaL_error(L, "arc.mat.define wants a name");
+    for (i = 0; i < s_n_script_mat; ++i)
+        if (strcmp(s_script_mat[i].name, name) == 0)
+            at = i;
+    if (at < 0)
+    {
+        if (s_n_script_mat >= MAT_SCRIPT_MAX)
+            return luaL_error(L, "arc.mat.define: no room past %d materials", MAT_SCRIPT_MAX);
+        at = s_n_script_mat++;
+        snprintf(s_script_mat[at].name, sizeof s_script_mat[at].name, "%s", name);
+    }
+    lua_pop(L, 1);
+    s_script_mat[at].rgba[0] = s_script_mat[at].rgba[1] = s_script_mat[at].rgba[2] = 0.5f;
+    s_script_mat[at].rgba[3] = 0.5f;
+    lua_getfield(L, 1, "colour");
+    if (lua_istable(L, -1))
+        for (i = 0; i < 3; ++i)
+        {
+            lua_rawgeti(L, -1, i + 1);
+            s_script_mat[at].rgba[i] = (float)lua_tonumber(L, -1);
+            lua_pop(L, 1);
+        }
+    lua_pop(L, 1);
+    s_script_mat[at].rgba[3] = api_field_num(L, "rough", 0.5f);
+    lua_pushnumber(L, (lua_Number)(MAT_SCRIPT_BASE + (float)at));
+    return 1;
+}
+
 void api_put_open(lua_State *L)
 {
     lua_newtable(L);
@@ -385,28 +452,17 @@ void api_put_open(lua_State *L)
     lua_pushcfunction(L, l_atan2f), lua_setfield(L, -2, "atan2");
     lua_setfield(L, -2, "put");
 
+    /*  arc.mat: every material by name, from the generated table, so the
+     *  list a script sees and the list the mesh writes are one list.
+     *  arc.mat.define adds one of the script's own. */
     lua_newtable(L);
-    lua_pushnumber(L, (lua_Number)MAT_PROP), lua_setfield(L, -2, "prop");
-    lua_pushnumber(L, (lua_Number)MAT_LAMP), lua_setfield(L, -2, "lamp");
-    lua_pushnumber(L, (lua_Number)MAT_ROAD), lua_setfield(L, -2, "road");
-    lua_pushnumber(L, (lua_Number)MAT_ZEBRA), lua_setfield(L, -2, "zebra");
-    lua_pushnumber(L, (lua_Number)MAT_RAIL), lua_setfield(L, -2, "rail");
-    lua_pushnumber(L, (lua_Number)MAT_WALK), lua_setfield(L, -2, "walk");
-    lua_pushnumber(L, (lua_Number)MAT_VEHICLE), lua_setfield(L, -2, "vehicle");
-    lua_pushnumber(L, (lua_Number)MAT_GROUND), lua_setfield(L, -2, "ground");
-    lua_pushnumber(L, (lua_Number)MAT_HIWAY), lua_setfield(L, -2, "hiway");
-    lua_pushnumber(L, (lua_Number)MAT_RAIL_X), lua_setfield(L, -2, "rail_x");
-    lua_pushnumber(L, (lua_Number)MAT_XPANEL), lua_setfield(L, -2, "xpanel");
-    lua_pushnumber(L, (lua_Number)MAT_XAPPROACH), lua_setfield(L, -2, "xapproach");
-    lua_pushnumber(L, (lua_Number)MAT_SURFACE), lua_setfield(L, -2, "surface");
-    lua_pushnumber(L, (lua_Number)MAT_SEABED), lua_setfield(L, -2, "seabed");
-    lua_pushnumber(L, (lua_Number)MAT_EARTH), lua_setfield(L, -2, "earth");
-    lua_pushnumber(L, (lua_Number)MAT_SEDIMENT), lua_setfield(L, -2, "sediment");
-    lua_pushnumber(L, (lua_Number)MAT_ENG_WALL), lua_setfield(L, -2, "eng_wall");
-    lua_pushnumber(L, (lua_Number)MAT_WATER), lua_setfield(L, -2, "water");
-    lua_pushnumber(L, (lua_Number)MAT_PIER), lua_setfield(L, -2, "pier");
-    lua_pushnumber(L, (lua_Number)MAT_ZONE), lua_setfield(L, -2, "zone");
+    {
+        int i;
+        for (i = 0; i < r_materials_n; ++i)
+            lua_pushnumber(L, (lua_Number)r_materials[i].value),
+                lua_setfield(L, -2, r_materials[i].name);
+    }
+    lua_pushcfunction(L, l_mat_define), lua_setfield(L, -2, "define");
     lua_setfield(L, -2, "mat");
 }
 
-#endif

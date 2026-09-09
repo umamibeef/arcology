@@ -664,7 +664,8 @@ void mesh_emit_free(void)
 }
 static int      s_coe_n, s_coe_cap, s_coe_hn;
 
-#define CO_GRID 4096.0f /* the weld's grid: a four-thousandth of a tile */
+static int gix_weld_grid = -1, gix_thin_grid = -1, gix_thin_tol = -1, gix_weld_split_end = -1;
+#define CO_GRID net_geo(&gix_weld_grid, "weld_grid") /* the weld's grid, in parts of a tile */
 
 static uint32_t co_mix(uint32_t h, uint32_t v)
 {
@@ -795,7 +796,7 @@ static int co_tables(int want)
  *  the line and clear of both ends. */
 static float co_on_edge(const float a[3], const float b[3], const float p[3])
 {
-    float d[3], w[3], len2 = 0.0f, t = 0.0f, off = 0.0f;
+    float d[3], w[3], len2 = 0.0f, t = 0.0f, off = 0.0f, end;
     int   k;
     for (k = 0; k < 3; ++k)
     {
@@ -808,7 +809,8 @@ static float co_on_edge(const float a[3], const float b[3], const float p[3])
     for (k = 0; k < 3; ++k)
         t += w[k] * d[k];
     t /= len2;
-    if (t <= 0.002f || t >= 0.998f)
+    end = net_geo(&gix_weld_split_end, "weld_split_end");
+    if (t <= end || t >= 1.0f - end)
         return -1.0f;
     for (k = 0; k < 3; ++k)
     {
@@ -827,8 +829,8 @@ static float co_on_edge(const float a[3], const float b[3], const float p[3])
  *  edge come out as the few edges the eye can tell apart.  The ends are
  *  welded on a coarser grid than the triangles were, since a cut piece's
  *  end is an interpolation and not the vertex it stands for. */
-#define THIN_GRID 1024.0f
-#define THIN_TOL  0.02f
+#define THIN_GRID net_geo(&gix_thin_grid, "thin_grid")
+#define THIN_TOL  net_geo(&gix_thin_tol, "thin_tol")
 typedef struct
 {
     int32_t a, b;

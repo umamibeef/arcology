@@ -1,5 +1,5 @@
 /*  city.h -- a city, as the renderer is allowed to see it.  This
- *  deliberately does NOT include the simulation's sc2k.h.  The design
+ *  deliberately does NOT include the simulation's sim.h.  The design
  *  boundary is that the renderer reads and never writes, and the cheapest
  *  way to guarantee that is for the renderer to have its own read-only view
  *  type.  When the two are linked together, an adapter fills an RCity from

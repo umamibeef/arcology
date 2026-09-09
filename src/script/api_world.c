@@ -12,7 +12,6 @@
  *  ask what its own rules produced. */
 #include "script.h"
 
-#if SC2K_LUA
 
 #include "internal.h"
 #include "mesh/mesh.h"
@@ -108,4 +107,3 @@ void api_world_open(lua_State *L)
     lua_setfield(L, -2, "mesh");
 }
 
-#endif

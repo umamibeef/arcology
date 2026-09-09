@@ -28,7 +28,7 @@ local SLIDE    = 0.4
 --  passes lies 0.354 off it.
 local STEPPABLE = 0.36
 
-arc.rules.walk = function (w)
+arc.rules.step = function (w)
     local d = w:info()
     local keep_head, keep_tail = d.head, d.tail
 
@@ -42,7 +42,7 @@ arc.rules.walk = function (w)
     end
 
     if keep_head then w:place("behind") end
-    for t = 1, d.gap do w:point(t) end
+    for t = 0, d.gap - 1 do w:point(t) end
     if keep_tail then w:place("ahead") end
     return true
 end

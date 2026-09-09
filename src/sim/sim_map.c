@@ -5,7 +5,7 @@
  *  down.  Every path that writes XBLD other than growth and placement comes
  *  through here.  Split out of sim.c; addresses still point into CODE 2. */
 #include "ext80.h"
-#include "sc2k.h"
+#include "sim.h"
 #include "sim_int.h"
 
 #include <stdio.h>

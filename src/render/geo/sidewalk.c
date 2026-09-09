@@ -1,5 +1,5 @@
 /*  sidewalk.c -- the footways, DRAWN.  Where they run and what they join
- *  is the network's (net/walkway.c); this lays the bands that network
+ *  is the network's (walk/walkway.c); this lays the bands that network
  *  holds, and works out the two things a junction can only decide from
  *  its own outline: where the asphalt must stop so the footway is not
  *  paved over, and which of its mouths carry a crossing.
@@ -38,7 +38,8 @@
 
 
 #define WALK_MAX 65536
-#define WALK_EPS 0.12f /* an avenue's mouth is wider than the box's: 0.9 of the difference */
+static int gix_walk_mouth_eps = -1;
+#define WALK_EPS net_geo(&gix_walk_mouth_eps, "walk_mouth_eps") /* how much wider an avenue's mouth may be than the box's */
 
 typedef struct
 {
@@ -63,31 +64,12 @@ int sidewalk_on(void)
 }
 
 /*  What is true of every strip of one family, asked of the script once
- *  and kept until the scripts are read again: the answer does not vary
- *  from strip to strip, and the places that want it are inside the walk
- *  along one. */
+ *  The script PUSHED these when it was read (arc.family.rules), so this
+ *  is a lookup by the family's name and nothing is asked of a script
+ *  from inside the walk. */
 const ScriptFamily *net_family_rules(Family f)
 {
-    static ScriptFamily s_fam[3];
-    static int          s_have[3];
-    static int          s_gen = -1;
-    int                 i = (int)f;
-    if (i < 0 || i > 2)
-        i = 0;
-    if (s_gen != script_generation())
-    {
-        memset(s_have, 0, sizeof s_have);
-        s_gen = script_generation();
-    }
-    if (!s_have[i])
-    {
-        memset(&s_fam[i], 0, sizeof s_fam[0]);
-        s_fam[i].inner = s_fam[i].edge = 1.0f;
-        s_fam[i].parallel = 1.0f;
-        script_rule_family(net_family(f)->name, *net_family(f)->width, &s_fam[i]);
-        s_have[i] = 1;
-    }
-    return &s_fam[i];
+    return script_family_rules(net_family(f)->name);
 }
 
 void sidewalk_reset(const RCity *c)
@@ -268,7 +250,7 @@ void sidewalk_stats_print(void)
  *  hillside; the pavement simply stops there, as it does at any kerb. */
 /*  Which edges of a junction's ring carry a footway, which way each
  *  faces into the junction, and which arm's mouth each is: the SCRIPT'S
- *  (arc.rules.junction_band).  The same call answers the ring moved in
+ *  (arc.rules.band).  The same call answers the ring moved in
  *  by the footway's width, since the two are one reading of the ring.
  *
  *  `inset` may be NULL where only the band is wanted. */
@@ -290,7 +272,7 @@ static int junc_band_at(const JBox *jb, const V2 *poly, const JuncArm *arms, int
         nrm[i]      = (V2){0.0f, 0.0f};
         edge_arm[i] = -1;
     }
-    script_rule_object("junction_band", "band", &b);
+    script_rule_object("band", "band", &b);
     if (g_dev.sidewalk_dump)
         for (i = 0; i < np; ++i)
             dumpf("BAND %d,%d edge %2d %.3f,%.3f-%.3f,%.3f len %.3f band %d arm %d\n", (int)jb->col, (int)jb->row, i,
@@ -307,7 +289,7 @@ static void junc_band(const JBox *jb, const V2 *poly, const JuncArm *arms, int n
 
 /*  The footways, drawn from the NETWORK: every path's band, quad by quad
  *  between its cross-sections.  The network decided where they run and
- *  what they join (net/walkway.c); this knows only the two edges of a
+ *  what they join (walk/walkway.c); this knows only the two edges of a
  *  band and the height it lies at.
  *
  *  One quad in the sidewalk material, the road's across in it (1.0 at the
@@ -319,74 +301,65 @@ static void junc_band(const JBox *jb, const V2 *poly, const JuncArm *arms, int n
 /*  The network's own outline, drawn as the fitted curves are, so what
  *  the network holds can be seen rather than inferred from the bands.
  *  It is the SCRIPT'S (arc.rules.walk_curves), one band at a time. */
-static int walk_outline(RMesh *m, const RCity *c, uint8_t mask_bit)
+/*  ONE FOOTWAY, gathered and handed over: which path it is, where its
+ *  stations are and what it joins.  Answers 0 where there is nothing at
+ *  that place to draw.
+ *
+ *  The shape is opened here because only this knows what to call the
+ *  path -- beside a road, round a junction, round a terminus, or a
+ *  crossing -- and what to note about it.  Nothing is drawn: the band is
+ *  the script's, and with no rule there is no pavement.
+ *
+ *  In outline the bands stand aside with the rest of the road works and
+ *  the network is drawn in their place, which is a different rule over
+ *  the same paths; `outline` says which the script should ask for. */
+int sidewalk_count(void)
 {
-    int i, n = walk_net_count();
-    for (i = 0; i < n; ++i)
-    {
-        const WalkPath *w = walk_net_get(i);
-        WalkFan         fan;
-        fan.m = m, fan.c = c, fan.mask_bit = mask_bit;
-        fan.w = w, fan.st = walk_net_st(w);
-        script_rule_object("walk_curves", "footway", &fan);
-    }
-    return 0;
+    return s_on ? walk_net_count() : 0;
 }
 
-int sidewalk_draw(RMesh *m, const RCity *c, uint8_t mask_bit)
+int sidewalk_outline(void)
 {
-    int i, n = walk_net_count();
-    if (!s_on)
+    return s_tune.show_curves > 0.5f;
+}
+
+int sidewalk_gather(RMesh *m, const RCity *c, uint8_t mask_bit, int i, WalkFan *out, ShapeId *sh)
+{
+    const WalkPath *w  = walk_net_get(i);
+    const WalkSt   *st = walk_net_st(w);
+    char            pn0[48], pn1[48];
+    *sh = SHAPE_NONE;
+    if (!w)
         return 0;
-    /*  In outline the bands stand aside with the rest of the road works
-     *  (curves_hidden), and the network is drawn in their place. */
-    if (s_tune.show_curves > 0.5f)
-        return walk_outline(m, c, mask_bit);
-    for (i = 0; i < n; ++i)
+    out->m = m, out->c = c, out->mask_bit = mask_bit, out->w = w, out->st = st;
+    if (sidewalk_outline())
+        return 1; /* the outline draws every path, stations or not */
+    if (!st || w->nst < 2)
+        return 0; /* which chunks a band reaches is the emitter's to judge: a band crosses tiles */
+    /*  Each footway is a thing of its own, named and asked about: the
+     *  inspector points at a pavement and is told which footway it is,
+     *  which node and arm it belongs to and what it joins. */
+    *sh = shape_open_under(w->owner, "%s at %d,%d%s",
+                           w->kind == WALK_SIDE     ? "footway beside a road"
+                           : w->kind == WALK_CORNER ? "footway round a junction"
+                           : w->kind == WALK_CROSS  ? "crossing"
+                                                    : "footway round a terminus",
+                           (int)w->col, (int)w->row, walk_arm_name(w->e));
+    walk_port_name(w->port[0], pn0, sizeof pn0);
+    walk_port_name(w->port[1], pn1, sizeof pn1);
+    if (g_dev.sidewalk_dump && w->kind == WALK_CORNER)
     {
-        const WalkPath *w  = walk_net_get(i);
-        const WalkSt   *st = walk_net_st(w);
-        ShapeId         sh;
-        char            pn0[48], pn1[48];
-        int             rc = 0;
-        if (!st || w->nst < 2)
-            continue; /* which chunks a band reaches is the emitter's to judge: a band crosses tiles */
-        /*  Each footway is a thing of its own, named and asked about: the
-         *  inspector points at a pavement and is told which footway it is,
-         *  which node and arm it belongs to and what it joins. */
-        sh = shape_open_under(w->owner, "%s at %d,%d%s",
-                        w->kind == WALK_SIDE ? "footway beside a road" : w->kind == WALK_CORNER ? "footway round a junction"
-                                                                    : w->kind == WALK_CROSS   ? "crossing"
-                                                                                              : "footway round a terminus",
-                        (int)w->col, (int)w->row, walk_arm_name(w->e));
-        walk_port_name(w->port[0], pn0, sizeof pn0);
-        walk_port_name(w->port[1], pn1, sizeof pn1);
-        if (g_dev.sidewalk_dump && w->kind == WALK_CORNER)
-        {
-            int q;
-            dumpf("WALKST %d,%d %d stations:", (int)w->col, (int)w->row, w->nst);
-            for (q = 0; q < w->nst; ++q)
-                dumpf(" %.3f,%.3f->%.3f,%.3f", (double)st[q].outer.x, (double)st[q].outer.y, (double)st[q].inner.x, (double)st[q].inner.y);
-            dumpf("\n");
-        }
-        if (w->kind == WALK_CROSS)
-            shape_note("depth\t%.3f tiles of the %.3f it asked for\nfrom\t%s\nto\t%s", (double)w->w, (double)w->ask, pn0, pn1);
-        else
-            shape_note("width\t%.3f tiles\nstations\t%d\nfrom\t%s\nto\t%s", (double)w->w, w->nst, pn0, pn1);
-        /*  The band itself is the SCRIPT'S (arc.rules.footway): the
-         *  network says where the stations are and what the band joins,
-         *  and what is drawn over them is not the network's business.
-         *  With no rule there is no pavement. */
-        {
-            WalkFan fan;
-            fan.m = m, fan.c = c, fan.mask_bit = mask_bit, fan.w = w, fan.st = st;
-            script_rule_object("footway", "footway", &fan);
-        }
-        shape_close(sh);
-        if (rc != 0)
-            return -1;
+        int q;
+        dumpf("WALKST %d,%d %d stations:", (int)w->col, (int)w->row, w->nst);
+        for (q = 0; q < w->nst; ++q)
+            dumpf(" %.3f,%.3f->%.3f,%.3f", (double)st[q].outer.x, (double)st[q].outer.y, (double)st[q].inner.x, (double)st[q].inner.y);
+        dumpf("\n");
     }
-    return 0;
+    if (w->kind == WALK_CROSS)
+        shape_note("depth\t%.3f tiles of the %.3f it asked for\nfrom\t%s\nto\t%s", (double)w->w, (double)w->ask, pn0, pn1);
+    else
+        shape_note("width\t%.3f tiles\nstations\t%d\nfrom\t%s\nto\t%s", (double)w->w, w->nst, pn0, pn1);
+    return 1;
 }
 
 /*  The port a footway names where it stops on an arm's mouth: the arm is
@@ -450,7 +423,7 @@ static int mouth_wants(const RCity *c, Family f, int32_t col, int32_t row, const
          *  to it (scripts/rules.lua): how the two pavements either side
          *  run against one another, and whether the arm is controlled.
          *  No rule is no crossing. */
-        int   ctrl = net_family(f)->control ? (s_junc_ctrl[row * R_MAP + col] >> (2 * edge_arm[i])) & 3 : 0;
+        int   ctrl = net_family_has(net_family(f), NH_CONTROL) ? (s_junc_ctrl[row * R_MAP + col] >> (2 * edge_arm[i])) & 3 : 0;
         int   pave = band[ip] && band[j];
         V2    u    = {poly[i].x - poly[ip].x, poly[i].y - poly[ip].y};
         V2    v    = {poly[j2].x - poly[j].x, poly[j2].y - poly[j].y};

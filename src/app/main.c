@@ -9,7 +9,7 @@
  * ==================================================================== */
 #include "modes.h"
 
-int sc2k_dev_main(int argc, char **argv);
+int arc_dev_main(int argc, char **argv);
 int atlas_main(int argc, char **argv);
 int soft_main(int argc, char **argv);
 int testcity_main(int argc, char **argv);
@@ -29,7 +29,7 @@ int main(int argc, char **argv)
         case ARC_LUALINT:
             return lua_lint_main(argc - 1, argv + 1);
         case ARC_DEV:
-            return sc2k_dev_main(argc, argv);
+            return arc_dev_main(argc, argv);
         case ARC_DONE:
             return 0;
         case ARC_BAD:

@@ -25,18 +25,19 @@ local function len(ax, ay, bx, by)
     return sqrt(f32(f32(dx * dx) + f32(dy * dy)))
 end
 
-arc.rules.fit_finish = function (q)
+arc.rules.fit = function (q)
     local d = q:info()
 
     --  The idle vertices.  Walked from the second: the first and the
-    --  last are the path's own ends and stay whatever they do.
+    --  last are the path's own ends and stay whatever they do.  Vertices
+    --  count from nought, as every index the pipeline hands out does.
     local n = d.n
-    local k = 2
-    while k <= n do
+    local k = 1
+    while k < n do
         local ax, ay = q:at(k - 1)
         local bx, by, fixed = q:at(k)
         local drop = len(ax, ay, bx, by) < 1e-3
-        if not drop and k + 1 <= n and fixed < 0.0 then
+        if not drop and k + 1 < n and fixed < 0.0 then
             local cx, cy = q:at(k + 1)
             local la, lb = len(ax, ay, bx, by), len(bx, by, cx, cy)
             if la > 1e-5 and lb > 1e-5 then
@@ -50,9 +51,9 @@ arc.rules.fit_finish = function (q)
     end
 
     --  Every vertex starts with no arc at all.
-    for i = 1, n do q:corner(i, 0.0, 0.0) end
+    for i = 0, n - 1 do q:corner(i, 0.0, 0.0) end
 
-    for i = 2, n - 1 do
+    for i = 1, n - 2 do
         local ax, ay = q:at(i - 1)
         local bx, by, fixed = q:at(i)
         local cx, cy = q:at(i + 1)
@@ -77,7 +78,7 @@ arc.rules.fit_finish = function (q)
             --  built by one, and otherwise this corner's share of it.
             local _, _, prevf = q:at(i - 1)
             local _, _, nextf = q:at(i + 1)
-            if i - 1 == 1 then
+            if i - 1 == 0 then
                 bin = arc.end_budget(lin, d.reserve0, q:need(ax, ay, bx, by, cx, cy), d.trim_cap)
             elseif prevf >= 0.0 then
                 bin = f32(lin - prevf)
@@ -86,7 +87,7 @@ arc.rules.fit_finish = function (q)
                 local wo = q:demand(px, py, ax, ay, bx, by)
                 bin = f32(wk + wo) > 1e-6 and f32(f32(lin * wk) / f32(wk + wo)) or f32(d.share * lin)
             end
-            if i + 1 == n then
+            if i + 1 == n - 1 then
                 bout = arc.end_budget(lout, d.reserve1, q:need(ax, ay, bx, by, cx, cy), d.trim_cap)
             elseif nextf >= 0.0 then
                 bout = f32(lout - nextf)
@@ -96,7 +97,9 @@ arc.rules.fit_finish = function (q)
                 bout = f32(wk + wo) > 1e-6 and f32(f32(lout * wk) / f32(wk + wo)) or f32(d.share * lout)
             end
             local tl = math.max(0.0, math.min(bin, bout))
-            local r, tight = q:sweep(ax, ay, bx, by, cx, cy, tl)
+            local s = q:sweep(ax, ay, bx, by, cx, cy, tl)
+            if s then arc.rules.sweep(s) end
+            local r, tight = q:swept()
             q:corner(i, r, tl)
             if r <= 0.0 then
                 --  A real turn with no arc is a corner; a straight run

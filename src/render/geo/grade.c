@@ -188,17 +188,18 @@ void shelf_node_set(ShelfFan *s, int32_t col, int32_t row, float z)
         s_tilez[sl[k]] = z;
 }
 
-/*  The corridors are the edges of a graph, and the rules are the graph's:
- *  arc.rules.shelf reconciles the copies. */
-void shelf_reconcile(void)
+/*  The corridors are the edges of a graph, and the rules are the graph's.
+ *  The grading pass leaves each corridor's shelf on its own tiles and
+ *  the copies disagree where two corridors share a corner; what is
+ *  gathered here is what arc.rules.shelf reconciles them from. */
+int shelf_ask(ShelfFan *s)
 {
-    ShelfFan s;
-    int32_t  c, r;
-    memset(&s, 0, sizeof s);
+    int32_t c, r;
+    memset(s, 0, sizeof *s);
     for (r = 0; r < R_MAP; ++r)
         for (c = 0; c < R_MAP; ++c)
-            s.nodes += s_node[r * R_MAP + c] != 0;
-    script_rule_object("shelf", "shelf", &s);
+            s->nodes += s_node[r * R_MAP + c] != 0;
+    return 1;
 }
 
 float s_zdist[GRID * GRID]; /* how far the nearest station that set it was */
@@ -248,7 +249,7 @@ static void surface_tile_shelf(const Sample *smp, int ns, int i, int32_t tc, int
  *  its own station: a local estimate over two close stations can read
  *  far steeper than the road ever goes, and extrapolating on it throws
  *  the corner a level out. */
-static float surface_corner_height(const Sample *smp, int ns, int i, float dx, float dy, float shelf_grade)
+static float surface_corner_height(const Sample *smp, int ns, int i, float dx, float dy, float shelf_grade, Family f)
 {
     float along = dx * smp[i].dir.x + dy * smp[i].dir.y;
     float grade = 0.0f;
@@ -259,7 +260,7 @@ static float surface_corner_height(const Sample *smp, int ns, int i, float dx, f
     if (grade < -shelf_grade)
         grade = -shelf_grade;
     {
-        const float cap = net_family_rules(F_ROAD)->shelf_along;
+        const float cap = net_family_rules(f)->shelf_along;
         if (along > cap)
             along = cap;
         if (along < -cap)
@@ -295,7 +296,7 @@ int loft_surface(const RCity *c, uint8_t mask_bit, Sample *smp, int ns, float hw
              *  either side of it, and where an arc's stations landed on a
              *  surface road that road ended up under the terrain (Lincoln,
              *  column 82 row 43). */
-            if (d->fam->flies && d->fam->flies(d, smp[i].z - section_height(c, mask_bit, smp[i].pos, smp[i].dir, hw)))
+            if (net_family_has(d->fam, NH_FLIES) && net_family_flies(d->fam, d, smp[i].z - section_height(c, mask_bit, smp[i].pos, smp[i].dir, hw)))
                 continue; /* a deck stands clear and notches nothing (hiway.c) */
             /*  The corridor's surface, sampled per corner of every tile
              *  the band passes through: each corner projects onto the
@@ -316,20 +317,20 @@ int loft_surface(const RCity *c, uint8_t mask_bit, Sample *smp, int ns, float hw
                 dx       = (float)gc - smp[i].pos.x;
                 dy       = (float)gr - smp[i].pos.y;
                 float d2 = dx * dx + dy * dy;
-                if (d2 > (hw + net_family_rules(F_ROAD)->shelf_reach) * (hw + net_family_rules(F_ROAD)->shelf_reach))
+                if (d2 > (hw + net_family_rules(d->f)->shelf_reach) * (hw + net_family_rules(d->f)->shelf_reach))
                     continue;
                 /*  The corners under the band itself carry its height; the
                  *  ring beyond them is the batter, half way back to the
                  *  hillside, so the shelf blends out instead of standing
                  *  on one wall of its full depth. */
-                if (d2 > (hw + net_family_rules(F_ROAD)->shelf_batter) * (hw + net_family_rules(F_ROAD)->shelf_batter))
+                if (d2 > (hw + net_family_rules(d->f)->shelf_batter) * (hw + net_family_rules(d->f)->shelf_batter))
                 {
                     if (!s_corr[gr * GRID + gc])
                         s_corr[gr * GRID + gc] = 2;
                     if (d2 < s_zdist[gr * GRID + gc])
                     {
                         s_zdist[gr * GRID + gc] = d2;
-                        s_zcap[gr * GRID + gc]  = surface_corner_height(smp, ns, i, dx, dy, shelf_grade);
+                        s_zcap[gr * GRID + gc]  = surface_corner_height(smp, ns, i, dx, dy, shelf_grade, d->f);
                     }
                     continue;
                 }
@@ -342,7 +343,7 @@ int loft_surface(const RCity *c, uint8_t mask_bit, Sample *smp, int ns, float hw
                  *  station only says WHICH stretch of road owns the corner. */
                 if (d2 < s_zdist[gr * GRID + gc] || s_corr[gr * GRID + gc] != 1)
                 {
-                    float zc                = surface_corner_height(smp, ns, i, dx, dy, shelf_grade);
+                    float zc                = surface_corner_height(smp, ns, i, dx, dy, shelf_grade, d->f);
                     s_zdist[gr * GRID + gc] = d2;
                     s_zcap[gr * GRID + gc]  = zc;
                     if (s_corr[gr * GRID + gc] != 1 || zc < s_zlow[gr * GRID + gc])

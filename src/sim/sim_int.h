@@ -1,6 +1,6 @@
 /*  sim_int.h -- what one file of the simulation asks of another.
  *
- *  sc2k.h is the simulation's face to the rest of the program: the phases
+ *  sim.h is the simulation's face to the rest of the program: the phases
  *  the clock calls, and the City they act on.  This is narrower, and
  *  private to src/sim.  It names only what crosses between the files
  *  sim.c was split into, so that each of them can keep the rest to
@@ -10,7 +10,7 @@
 #ifndef SIM_INT_H
 #define SIM_INT_H
 
-#include "sc2k.h"
+#include "sim.h"
 
 /* THINK C's __sdiv32 ($524) truncates toward zero, which is also what
  * C99 '/' does, so plain division is faithful here.  The 68000 asr used

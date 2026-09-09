@@ -5,7 +5,7 @@
 #include "dump.h"
 #include "mesh/internal.h"
 #include "net/internal.h"
-#include "net/model.h"
+#include "geo/model.h"
 #include "script.h"
 #include "opt.h"
 #include "project.h"
@@ -15,13 +15,21 @@
  *  and none of them is worth a call of its own. */
 static const ScriptTraffic *tr_rules(void)
 {
+    /*  The names are the struct's own order, so the two read as one
+     *  list; a name the script leaves out keeps the default set below. */
+    static const char *const KEYS[] = {
+        "blink",      "train_speed", "train_spread", "train_len",  "trail_step",
+        "xing_find",  "gate_up",     "gate_watch",   "density",    "car_len",
+        "gap_stop",   "gap_free",    "stop_junc",    "stop_hold",  "creep",
+        "probe",      "step_max",    "slot",         "block_back", "block_ahead"};
     static ScriptTraffic s_tr;
     static int           s_gen = -1;
     if (s_gen != script_generation())
     {
         memset(&s_tr, 0, sizeof s_tr);
         s_tr.gap_free = s_tr.step_max = s_tr.trail_step = 1.0f;
-        script_rule_traffic(&s_tr);
+        script_numbers("traffic", KEYS, &s_tr.blink,
+                       (int)(sizeof KEYS / sizeof KEYS[0]));
         s_gen = script_generation();
     }
     return &s_tr;
@@ -924,12 +932,44 @@ static int car_enter_box(const RRoadNet *net, RCar *car, const RNetSeg *sg, int 
     return 0;
 }
 
+/*  ------------------------------------------------------------------
+ *  The heartbeat
+ *
+ *  The world moves on a beat of its own, sixty a second, and the frame
+ *  only looks at it.  A frame that takes longer than a beat runs several
+ *  of them and one that takes less runs none: what a car does between
+ *  two beats is the same however often the picture is drawn, which is
+ *  the whole point -- a stopping distance measured against the frame is
+ *  a stopping distance that changes with the machine.
+ *
+ *  A stall runs at most BEATS_MAX of them and drops the rest.  Trying to
+ *  catch up on a second of lost time would take longer than the second,
+ *  and the world would never catch up at all.
+ *  ------------------------------------------------------------------ */
+#define BEAT      (1.0f / 60.0f)
+#define BEATS_MAX 8
+
+static float s_beat_owed;
+
+static void traffic_beat(RTraffic *t, const RMesh *m, float time);
+
 void traffic_step(RTraffic *t, const RMesh *m, float dt, float time)
 {
-    const RRoadNet *net = &m->net;
-    uint32_t        i;
+    int n = 0;
     if (dt > tr_rules()->step_max)
         dt = tr_rules()->step_max;
+    s_beat_owed += dt;
+    while (s_beat_owed >= BEAT && n < BEATS_MAX)
+        traffic_beat(t, m, time), s_beat_owed -= BEAT, ++n;
+    if (s_beat_owed >= BEAT)
+        s_beat_owed = 0.0f; /* a stall: the rest of it is dropped, not owed */
+}
+
+static void traffic_beat(RTraffic *t, const RMesh *m, float time)
+{
+    const RRoadNet *net = &m->net;
+    const float     dt  = BEAT;
+    uint32_t        i;
     trains_step(t, m, dt);
     gates_step(t, m, dt);
     if (g_dev.xing_debug)

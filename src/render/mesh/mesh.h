@@ -261,7 +261,7 @@ const RMesh *mesh_built(void);
  *  that is not (net/junction.c). */
 int junction_outline_faults(void);
 /*  A crossing must reach a pavement at both of its ends.  Nonzero when
- *  the last build marked one that does not (net/walkway.c). */
+ *  the last build marked one that does not (walk/walkway.c). */
 int walk_net_faults(void);
 
 /*  The road geometry's live knobs, in tiles: the carriageway widths, the

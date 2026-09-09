@@ -40,7 +40,7 @@ local function side_of(st, x, y)
     return f32(f32(f32(x - st.x) * st.dy) - f32(f32(y - st.y) * st.dx)) > 0.0 and 0 or 1
 end
 
-arc.rules.lane_drop = function (dr)
+arc.rules.drop = function (dr)
     local d = dr:info()
     dr:clear()
     if d.n < 1 or d.ramps < 1 then return true end
@@ -49,20 +49,20 @@ arc.rules.lane_drop = function (dr)
     --  again per ramp inside the partner search below was most of a
     --  pass's profile stage.
     local st = {}
-    for i = 1, d.n do st[i] = dr:station(i) end
+    for i = 0, d.n - 1 do st[i] = dr:station(i) end
 
     local rp, iref = {}, {}
-    for r = 1, d.ramps do
+    for r = 0, d.ramps - 1 do
         rp[r] = dr:ramp(r)
         local best = d.reach
-        for i = 1, d.n do
+        for i = 0, d.n - 1 do
             local dx, dy = f32(st[i].x - rp[r].x), f32(st[i].y - rp[r].y)
             local dist = arc.put.sqrt(f32(f32(dx * dx) + f32(dy * dy)))
             if dist < best then best, iref[r] = dist, i end
         end
     end
 
-    for r = 1, d.ramps do
+    for r = 0, d.ramps - 1 do
         local i0 = iref[r]
         if i0 then
             local ramp = rp[r]
@@ -76,7 +76,7 @@ arc.rules.lane_drop = function (dr)
             --  A partner on the road's side: another ramp's point on this
             --  band, the same side, within seven tiles.
             local partner
-            for r2 = 1, d.ramps do
+            for r2 = 0, d.ramps - 1 do
                 local i2 = iref[r2]
                 if r2 ~= r and i2 then
                     local s2 = side_of(st[i2], rp[r2].tx, rp[r2].ty)
@@ -90,7 +90,7 @@ arc.rules.lane_drop = function (dr)
 
             local gore0 = f32(HALF + ramp.len - 1.0)
             local gore1 = f32(HALF + ramp.len)
-            for i = 1, d.n do
+            for i = 0, d.n - 1 do
                 --  Positive into the taper.
                 local at = f32(f32(st[i].at - here.at) * ds)
                 local w  = 1.0

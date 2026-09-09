@@ -24,10 +24,12 @@
 
 #include "city.h"
 #include "dump.h"
+#include "log.h"
 #include "mesh/internal.h"
 #include "mesh/mesh.h"
 #include "net/internal.h"
 #include "opt.h"
+#include "script.h"
 
 /*  The incremental rebuild's own scratch, kept between builds because
  *  every build wants the same three arrays at about the same size.  They
@@ -371,18 +373,47 @@ static void want_all(void)
 
 /*  After the grading pass, with its tables complete: which chunks the
  *  building pass emits into.  `roads` says the tables were filled. */
+/*  How far the closure reaches, in tiles, and every distance in it the
+ *  SCRIPT'S (scripts/incr.lua).  Read once a build: the closure runs
+ *  once, so a rule here costs one call.
+ *
+ *  With no rule there are no distances, and a closure with no distances
+ *  would predict too few chunks and leave the last build's triangles
+ *  standing.  So the answer to a missing rule is every chunk, which is
+ *  slow and correct, rather than a guess, which is fast and wrong. */
+static const char *const REACH[] = {"band_fit", "ramp", "band_ground", "band_ramp", "band_margin", "segment"};
+enum
+{
+    R_BAND_FIT = 0,
+    R_RAMP,
+    R_BAND_GROUND,
+    R_BAND_RAMP,
+    R_BAND_MARGIN,
+    R_SEGMENT,
+    R_N
+};
+
 void mesh_incr_closure(int roads)
 {
     static uint8_t near2[NT], changed[NT], want_t[NT], hot[SEGS_MAX], reemit[SEGS_MAX], hotb[SEGS_MAX];
     const uint8_t *near1 = s_near1;
+    float          reach[R_N];
     int32_t        t;
     int            i, k, ns = 0, nb = 0;
     if (!s_incr_on)
         return;
+    memset(reach, 0, sizeof reach);
+    if (!script_numbers("incr_reach", REACH, reach, R_N))
+    {
+        R_ERR("mesh", "no arc.numbers(\"incr_reach\"): every chunk is built again");
+        want_all();
+        s_stat.chunks = MESH_CHUNKS;
+        return;
+    }
     memset(near2, 0, sizeof near2);
     memset(changed, 0, sizeof changed);
     memset(want_t, 0, sizeof want_t);
-    dilate_into(s_dirty, near2, 2);
+    dilate_into(s_dirty, near2, (int)reach[R_BAND_FIT]);
     memcpy(changed, near1, sizeof changed);
     if (roads)
     {
@@ -429,7 +460,7 @@ void mesh_incr_closure(int roads)
         for (t = 0; t < NT; ++t)
         {
             int32_t col = t % R_MAP, row = t / R_MAP;
-            if (!lane_ramp_tile(col, row) || !any_near(changed, col, row, 2))
+            if (!lane_ramp_tile(col, row) || !any_near(changed, col, row, (int)reach[R_RAMP]))
                 continue;
             for (i = 0; i < nb; ++i)
             {
@@ -463,10 +494,11 @@ void mesh_incr_closure(int roads)
             for (k = 0; k < n; ++k)
             {
                 int32_t bc = bt[k] % R_MAP, br = bt[k] / R_MAP;
-                if (!whole && !any_near(s_dirty, bc, br, 8) && !(hotb[i] == 2 && any_near(changed, bc, br, 6)))
+                if (!whole && !any_near(s_dirty, bc, br, (int)reach[R_BAND_GROUND]) &&
+                    !(hotb[i] == 2 && any_near(changed, bc, br, (int)reach[R_BAND_RAMP])))
                     continue;
-                mark_around(changed, bc, br, 2);
-                mark_around(want_t, bc, br, 2);
+                mark_around(changed, bc, br, (int)reach[R_BAND_MARGIN]);
+                mark_around(want_t, bc, br, (int)reach[R_BAND_MARGIN]);
             }
         }
         /* every segment through a changed tile is drawn again, a tile out */
@@ -486,7 +518,7 @@ void mesh_incr_closure(int roads)
             ++s_stat.reemit;
             for (k = 0; k < nt; ++k)
                 if (tc[k] >= 0 && tr[k] >= 0 && tc[k] < R_MAP && tr[k] < R_MAP)
-                    mark_around(want_t, tc[k], tr[k], 1);
+                    mark_around(want_t, tc[k], tr[k], (int)reach[R_SEGMENT]);
         }
     }
     s_stat.nseg  = ns;

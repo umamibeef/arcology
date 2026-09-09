@@ -4,7 +4,7 @@
  *  zone can grow.  It is one ring, not three, because the original had one
  *  -- see the note below on why its size is part of the reconstruction
  *  rather than a limit to raise. */
-#include "sc2k.h"
+#include "sim.h"
 #include "sim_int.h"
 
 /*  The BFS queue -- and it is not the unbounded queue you would write.

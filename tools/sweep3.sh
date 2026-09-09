@@ -5,14 +5,14 @@
 #
 #      tools/sweep3.sh /path/to/reference/arcology
 #
-#  The shipped cities in cities/ are always swept; set SC2K_CITIES to a
+#  The shipped cities in cities/ are always swept; set ARC_CITIES to a
 #  game folder to sweep its saves too.  The 400-column cut matters: at
 #  160 the tail of the lanes line is lost and a real change hides.
 ROOT=${0:a:h:h}
 cd "$ROOT"
 REF=$1
 if [ -z "$REF" ]; then echo "usage: tools/sweep3.sh <reference binary>" >&2; exit 2; fi
-find cities ${SC2K_CITIES:+"$SC2K_CITIES"} -maxdepth 3 -iname "*.sc2" | sort | tr "\n" "\0" |
+find cities ${ARC_CITIES:+"$ARC_CITIES"} -maxdepth 3 -iname "*.sc2" | sort | tr "\n" "\0" |
 xargs -0 -P $(sysctl -n hw.logicalcpu) -I{} zsh -c '
 f="$1"; REF="$2"; ROOT="$3"; cd "$ROOT"
 L="^mesh build failed\|^mesh check\|^road clip\|^on-ramps\|^tangent fit  highway\|^lanes\|^sidewalks"

@@ -30,7 +30,7 @@ local FLOOR = 0.04
 arc.rules.pieces = function (p)
     local d = p:info()
 
-    for i = 2, d.n - 1 do
+    for i = 1, d.n - 2 do
         local c = p:corner(i)
         --  Nothing for a vertex the path runs straight through.
         if c then

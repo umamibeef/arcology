@@ -29,20 +29,20 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
-set(SC2K_ASSETS "${CMAKE_CURRENT_SOURCE_DIR}/../../assets"
-    CACHE PATH "Where sc2kpack.py wrote the atlases")
+set(ARC_ASSETS "${CMAKE_CURRENT_SOURCE_DIR}/../../assets"
+    CACHE PATH "Where artpack.py wrote the atlases")
 find_package(Python3 COMPONENTS Interpreter QUIET)
 
 # ---- warnings ------------------------------------------------------------
 #  Applied to our code only.  A silent integer conversion in a renderer is a
 #  off-by-one on someone's screen, so the simulation's standard applies here.
-add_library(sc2k_warnings INTERFACE)
-target_compile_options(sc2k_warnings INTERFACE
+add_library(arc_warnings INTERFACE)
+target_compile_options(arc_warnings INTERFACE
     $<$<C_COMPILER_ID:GNU,Clang,AppleClang>:
         -Wall -Wextra -Wshadow -Wconversion -Wsign-compare -Wpointer-arith>
     $<$<C_COMPILER_ID:MSVC>:/W4>)
 if(MSVC)
-    target_compile_definitions(sc2k_warnings INTERFACE _CRT_SECURE_NO_WARNINGS)
+    target_compile_definitions(arc_warnings INTERFACE _CRT_SECURE_NO_WARNINGS)
 endif()
 
 # ---- vendored third party ------------------------------------------------
@@ -50,10 +50,10 @@ endif()
 #  stb_image cannot do -- it expands palettes and hands back RGBA.  jsmn is
 #  header-only and is compiled into atlas.c.  Both are ISO C and both are
 #  built with warnings off: they are not ours to fix.
-#  The simulation comes first: it defines sc2k_vendor (lodepng), which
+#  The simulation comes first: it defines arc_vendor (lodepng), which
 #  arco.c needs for deflate and the renderer needs for PNG.  One
 #  definition, one copy in the link.
-if(NOT TARGET sc2kcore)
+if(NOT TARGET arc_core)
     add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../sim"
                      "${CMAKE_CURRENT_BINARY_DIR}/sim")
 endif()
@@ -62,23 +62,24 @@ endif()
 #  Everything that is not a main: the atlas, the view, the sweep and the
 #  generated tables.  The executable's own sources are listed further
 #  down, with the SDL3 it needs.
-add_library(sc2krender STATIC
+add_library(arc_render STATIC
     atlas/atlas.c     # the sprite atlas and its manifest
     city.c      # a City as the renderer wants to see it
     soft/soft.c        # the sweep: what the original draws, in what order
     soft/paint.c  # putting those ops down as pixels
     image.c       # the finished picture, and the PNG writers
     generated/tables.c  # GENERATED from the A5 image - do not edit
+    generated/materials.c  # GENERATED from mesh/materials.def - do not edit
 )
-target_include_directories(sc2krender PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}"
+target_include_directories(arc_render PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}"
                           "${CMAKE_CURRENT_SOURCE_DIR}/../util"
                           "${CMAKE_CURRENT_SOURCE_DIR}/../audio"
                           "${CMAKE_CURRENT_SOURCE_DIR}/../ui"
                           "${CMAKE_CURRENT_SOURCE_DIR}/../app"
                           "${CMAKE_CURRENT_SOURCE_DIR}/../script"
                           "${CMAKE_CURRENT_SOURCE_DIR}/generated")
-target_link_libraries(sc2krender PUBLIC sc2k_vendor sc2kcore
-                      PRIVATE sc2k_warnings)
+target_link_libraries(arc_render PUBLIC arc_vendor arc_core
+                      PRIVATE arc_warnings)
 
 #  The atlas dumper and the software rasteriser used to be executables of
 #  their own.  They are `arcology --atlas` and `arcology --soft` now, so
@@ -87,10 +88,10 @@ target_link_libraries(sc2krender PUBLIC sc2k_vendor sc2kcore
 # ---- the one executable: arcology -------------------------------------
 #  Needs SDL3.  A system install is found first; failing that, the build
 #  can fetch SDL3 from source (a few minutes the first time).  The
-#  simulation is pulled in as the sc2kcore library from ../CMakeLists.txt.
-option(SC2K_FETCH_SDL3 "Fetch and build SDL3 from source when none is installed" OFF)
+#  simulation is pulled in as the arc_core library from ../CMakeLists.txt.
+option(ARC_FETCH_SDL3 "Fetch and build SDL3 from source when none is installed" OFF)
 find_package(SDL3 CONFIG QUIET)
-if(NOT SDL3_FOUND AND SC2K_FETCH_SDL3)
+if(NOT SDL3_FOUND AND ARC_FETCH_SDL3)
     include(FetchContent)
     FetchContent_Declare(SDL3
         GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
@@ -102,8 +103,8 @@ if(NOT SDL3_FOUND AND SC2K_FETCH_SDL3)
 endif()
 #  The in-game UI is Dear ImGui, fetched from its repository at configure
 #  time (a small download the first time) and built here with its SDL3 and
-#  SDL_GPU backends.  -DSC2K_IMGUI=OFF builds the game without a UI.
-option(SC2K_IMGUI "Build the in-game UI with Dear ImGui" ON)
+#  SDL_GPU backends.  -DARC_IMGUI=OFF builds the game without a UI.
+option(ARC_IMGUI "Build the in-game UI with Dear ImGui" ON)
 if(SDL3_FOUND)
     #  Logging: spdlog does the parts that are tedious to get right --
     #  colour sinks that know about terminals and the Windows console,
@@ -127,13 +128,17 @@ if(SDL3_FOUND)
         ../util/log.cpp ../util/devopts.c ../util/fs.c ../audio/sound.c ../audio/music.c
         mesh/mesh.c mesh/tile.c mesh/emit.c mesh/shapes.c mesh/check.c mesh/incr.c ../util/dump.c
         ../script/script.c ../script/lint.c  # the scripting layer, or its stubs where Lua is off
-        mesh/shape.c net/walk.c net/table.c net/fit.c net/grade.c net/loft.c net/junction.c net/piece.c
-        net/geo.c net/model.c net/road.c net/rail.c net/hiway.c net/power.c net/lane.c net/sidewalk.c net/walkway.c net/furniture.c net/marking.c net/traffic.c net/report.c
+        mesh/shape.c
+        walk/walk.c walk/piece.c walk/walkway.c
+        geo/fit.c geo/grade.c geo/loft.c geo/junction.c geo/lane.c geo/sidewalk.c
+        geo/furniture.c geo/marking.c geo/model.c
+        net/table.c net/geo.c net/family.c net/road.c net/rail.c net/hiway.c net/power.c
+        net/traffic.c net/report.c
         atlas/dump.c soft/main.c)       # --atlas and --soft
-    #  sc2kdev links sc2kcore PUBLIC, so naming both here would put the
+    #  arc_dev links arc_core PUBLIC, so naming both here would put the
     #  archive on the link line twice.
-    target_link_libraries(arcology PRIVATE sc2krender sc2kdev
-        SDL3::SDL3 spdlog::spdlog sc2k_warnings)
+    target_link_libraries(arcology PRIVATE arc_render arc_dev
+        SDL3::SDL3 spdlog::spdlog arc_warnings)
     #  Lua: the scripting layer.  The numbers the geometry is tuned with
     #  and the rules it is drawn by -- which of a junction's mouths carry
     #  a crossing, how its arms are controlled, how tight a kerb return
@@ -143,70 +148,70 @@ if(SDL3_FOUND)
     #  here; lua.c and luac.c carry mains of their own and are left out.
     #  Built without the project's warning flags, as the other vendored
     #  code is: they are other people's sources.
-    option(SC2K_LUA "Build the scripting layer with Lua 5.4" ON)
-    if(SC2K_LUA)
-        include(FetchContent)
-        FetchContent_Declare(lua
-            GIT_REPOSITORY https://github.com/lua/lua.git
-            GIT_TAG        v5.4.7
-            GIT_SHALLOW    TRUE)
-        FetchContent_MakeAvailable(lua)
-        set(SC2K_LUA_SRC lapi lcode lctype ldebug ldo ldump lfunc lgc llex lmem
-            lobject lopcodes lparser lstate lstring ltable ltm lundump lvm lzio
-            lauxlib lbaselib lcorolib ldblib liolib lmathlib loadlib loslib
-            lstrlib ltablib lutf8lib linit)
-        list(TRANSFORM SC2K_LUA_SRC PREPEND "${lua_SOURCE_DIR}/")
-        list(TRANSFORM SC2K_LUA_SRC APPEND ".c")
-        add_library(sc2k_lua STATIC ${SC2K_LUA_SRC})
-        target_include_directories(sc2k_lua SYSTEM PUBLIC ${lua_SOURCE_DIR})
-        if(APPLE)
-            target_compile_definitions(sc2k_lua PRIVATE LUA_USE_MACOSX)
-        elseif(UNIX)
-            target_compile_definitions(sc2k_lua PRIVATE LUA_USE_LINUX)
-        endif()
-        target_sources(arcology PRIVATE
-            ../script/api_tune.c ../script/api_rules.c ../script/api_world.c ../script/api_put.c ../script/api_model.c ../script/api_object.c ../script/api_tile.c)
-        target_link_libraries(arcology PRIVATE sc2k_lua)
-        target_compile_definitions(arcology PRIVATE SC2K_LUA=1)
+    #  There is no switch for it.  The geometry, the decisions, the
+    #  families and the drive are all in the scripts, so a build without
+    #  them would draw the terrain and nothing else -- not a smaller
+    #  city, no city.
+    include(FetchContent)
+    FetchContent_Declare(lua
+        GIT_REPOSITORY https://github.com/lua/lua.git
+        GIT_TAG        v5.4.7
+        GIT_SHALLOW    TRUE)
+    FetchContent_MakeAvailable(lua)
+    set(ARC_LUA_SRC lapi lcode lctype ldebug ldo ldump lfunc lgc llex lmem
+        lobject lopcodes lparser lstate lstring ltable ltm lundump lvm lzio
+        lauxlib lbaselib lcorolib ldblib liolib lmathlib loadlib loslib
+        lstrlib ltablib lutf8lib linit)
+    list(TRANSFORM ARC_LUA_SRC PREPEND "${lua_SOURCE_DIR}/")
+    list(TRANSFORM ARC_LUA_SRC APPEND ".c")
+    add_library(arc_lua STATIC ${ARC_LUA_SRC})
+    target_include_directories(arc_lua SYSTEM PUBLIC ${lua_SOURCE_DIR})
+    if(APPLE)
+        target_compile_definitions(arc_lua PRIVATE LUA_USE_MACOSX)
+    elseif(UNIX)
+        target_compile_definitions(arc_lua PRIVATE LUA_USE_LINUX)
     endif()
-    if(SC2K_IMGUI)
+    target_sources(arcology PRIVATE
+        ../script/api_tune.c ../script/api_rules.c ../script/api_world.c ../script/api_put.c ../script/api_model.c ../script/api_object.c ../script/api_tile.c ../script/api_family.c ../script/api_data.c)
+    target_link_libraries(arcology PRIVATE arc_lua)
+    if(ARC_IMGUI)
         include(FetchContent)
         FetchContent_Declare(imgui
             GIT_REPOSITORY https://github.com/ocornut/imgui.git
             GIT_TAG        v1.92.9b
             GIT_SHALLOW    TRUE)
         FetchContent_MakeAvailable(imgui)
-        add_library(sc2k_imgui STATIC
+        add_library(arc_imgui STATIC
             ${imgui_SOURCE_DIR}/imgui.cpp
             ${imgui_SOURCE_DIR}/imgui_draw.cpp
             ${imgui_SOURCE_DIR}/imgui_tables.cpp
             ${imgui_SOURCE_DIR}/imgui_widgets.cpp
             ${imgui_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp
             ${imgui_SOURCE_DIR}/backends/imgui_impl_sdlgpu3.cpp)
-        target_include_directories(sc2k_imgui SYSTEM PUBLIC
+        target_include_directories(arc_imgui SYSTEM PUBLIC
             ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends)
-        target_link_libraries(sc2k_imgui PUBLIC SDL3::SDL3)
+        target_link_libraries(arc_imgui PUBLIC SDL3::SDL3)
         #  FreeType, when installed, rasterises the interface font monochrome
         #  with mono hinting: Chicago as the bitmap it was.  Without it the
         #  font is anti-aliased by ImGui's own rasteriser.
         find_package(Freetype QUIET)
         if(Freetype_FOUND)
-            target_sources(sc2k_imgui PRIVATE ${imgui_SOURCE_DIR}/misc/freetype/imgui_freetype.cpp)
-            target_include_directories(sc2k_imgui SYSTEM PUBLIC ${imgui_SOURCE_DIR}/misc/freetype)
-            target_link_libraries(sc2k_imgui PUBLIC Freetype::Freetype)
-            target_compile_definitions(sc2k_imgui PUBLIC IMGUI_ENABLE_FREETYPE)
+            target_sources(arc_imgui PRIVATE ${imgui_SOURCE_DIR}/misc/freetype/imgui_freetype.cpp)
+            target_include_directories(arc_imgui SYSTEM PUBLIC ${imgui_SOURCE_DIR}/misc/freetype)
+            target_link_libraries(arc_imgui PUBLIC Freetype::Freetype)
+            target_compile_definitions(arc_imgui PUBLIC IMGUI_ENABLE_FREETYPE)
             message(STATUS "FreeType found: the interface font is rasterised monochrome")
         else()
             message(STATUS "FreeType not found: the interface font is anti-aliased")
         endif()
         if(MSVC)
-            target_compile_options(sc2k_imgui PRIVATE /w)
+            target_compile_options(arc_imgui PRIVATE /w)
         else()
-            target_compile_options(sc2k_imgui PRIVATE -w)
+            target_compile_options(arc_imgui PRIVATE -w)
         endif()
         target_sources(arcology PRIVATE ../ui/ui.cpp)
-        target_link_libraries(arcology PRIVATE sc2k_imgui)
-        target_compile_definitions(arcology PRIVATE SC2K_IMGUI=1)
+        target_link_libraries(arcology PRIVATE arc_imgui)
+        target_compile_definitions(arcology PRIVATE ARC_IMGUI=1)
     else()
         target_sources(arcology PRIVATE ../ui/ui_none.c)
     endif()
@@ -217,10 +222,10 @@ else()
     #  what ctest runs.  app/stub.c stands in for the game and says why.
     add_executable(arcology ../app/main.c ../app/modes.cpp ../app/stub.c atlas/dump.c
                         soft/main.c ../util/devopts.c)
-    target_link_libraries(arcology PRIVATE sc2krender sc2kdev sc2k_warnings)
+    target_link_libraries(arcology PRIVATE arc_render arc_dev arc_warnings)
     install(TARGETS arcology RUNTIME DESTINATION bin)
     message(STATUS "SDL3 not found: arcology is built without the game "
-                   "(install SDL3, or configure with -DSC2K_FETCH_SDL3=ON)")
+                   "(install SDL3, or configure with -DARC_FETCH_SDL3=ON)")
 endif()
 
 #  shaders.c is generated from gpu/shaders/*.vert|frag and checked in, so a
@@ -249,8 +254,8 @@ add_test(NAME projection COMMAND ${Python3_EXECUTABLE}
 add_test(NAME layers COMMAND ${Python3_EXECUTABLE}
          "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/layer_check.py")
 
-if(EXISTS "${SC2K_ASSETS}/atlas.json")
-    add_test(NAME atlas_loads COMMAND arcology --atlas "${SC2K_ASSETS}")
+if(EXISTS "${ARC_ASSETS}/atlas.json")
+    add_test(NAME atlas_loads COMMAND arcology --atlas "${ARC_ASSETS}")
     #  No segment may be broken: a hard corner (the red node in show curves)
     #  or a segment without geometry.  A ratchet against tools/corner_baseline.json
     #  until the corpus is at zero.
@@ -278,14 +283,29 @@ if(EXISTS "${SC2K_ASSETS}/atlas.json")
     #  the vocabulary, so a setting or a rule that is not one -- which is
     #  silent at run time and costs an iteration to notice -- is a fault
     #  here.
-    if(SC2K_LUA)
-        add_test(NAME lua_lint COMMAND sh
-                 "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/lua_lint.sh" $<TARGET_FILE:arcology>)
+    #  C is not to call into a script except for the drive: Lua composes
+    #  and C serves.  A RATCHET -- it fails when the count rises -- so
+    #  the old contract cannot creep back while the new one is being
+    #  finished, and so "inverted" is a number rather than a judgement.
+    add_test(NAME call_up COMMAND ${Python3_EXECUTABLE}
+             "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/call_up.py")
+    add_test(NAME lua_lint COMMAND sh
+             "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/lua_lint.sh" $<TARGET_FILE:arcology>)
+    #  An incremental rebuild draws what a full build draws.  Which
+    #  chunks an edit touches is a CLOSURE -- a prediction made before
+    #  the building pass runs -- and one that predicts too little leaves
+    #  the last build's triangles standing in the chunks it skipped,
+    #  with nothing in the build to say so.  Five edits, each built both
+    #  ways and compared as a hash of the sorted tile dump.
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../cities/atlanta.sc2")
+        add_test(NAME incremental_rebuild COMMAND ${Python3_EXECUTABLE}
+                 "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/incr_check.py"
+                 --binary $<TARGET_FILE:arcology>)
     endif()
     #  The scripting layer answers, and only when asked: the reference
     #  script changes nothing, a rule changes the build, and the build
     #  with that rule still passes its own checks.
-    if(SC2K_LUA AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../cities/atlanta.sc2")
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../cities/atlanta.sc2")
         add_test(NAME lua_rules COMMAND ${Python3_EXECUTABLE}
                  "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/lua_check.py"
                  --binary $<TARGET_FILE:arcology>)
@@ -313,7 +333,7 @@ if(EXISTS "${SC2K_ASSETS}/atlas.json")
     #  pair the way its own stages want it, so the two are compared pair
     #  for pair over a whole city: floats against doubles cannot agree to
     #  the bit, and what this proves is that nothing else differs.
-    if(SC2K_LUA AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../cities/atlanta.sc2")
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../cities/atlanta.sc2")
         add_test(NAME lua_compose COMMAND sh
                  "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/strip_check.sh" $<TARGET_FILE:arcology>)
     endif()
@@ -343,8 +363,8 @@ endif()
 #  tools/render_diff.py and tools/pixel_diff.py go further -- blit list and
 #  pixels against the original renderer -- but they are slow enough to be
 #  run by hand rather than from ctest.
-set(SC2K_CITIES "" CACHE PATH "Folder holding the shipped city files")
-if(Python3_FOUND AND EXISTS "${SC2K_ASSETS}/atlas.json")
+set(ARC_CITIES "" CACHE PATH "Folder holding the shipped city files")
+if(Python3_FOUND AND EXISTS "${ARC_ASSETS}/atlas.json")
     add_test(NAME blit_matches_game
              COMMAND ${Python3_EXECUTABLE}
                      "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/blit_check.py")
@@ -360,18 +380,18 @@ endif()
 #  The terrain mesh must be watertight: no edge of any triangle may be
 #  free.  mesh_check counts them; the build fails the test on the first.
 #  With --roads3d the same run also checks that no terrain face rises
-#  above a road (mesh_check_roads).  SC2K_CITIES is the game folder,
+#  above a road (mesh_check_roads).  ARC_CITIES is the game folder,
 #  whose cities are under Cities/, or the Cities folder itself.
-if(TARGET arcology AND SC2K_CITIES AND EXISTS "${SC2K_ASSETS}/atlas.json")
+if(TARGET arcology AND ARC_CITIES AND EXISTS "${ARC_ASSETS}/atlas.json")
     foreach(city "Bayview" "Cape Wells" "Egypt Falls" "Felsenschloss")
-        set(city_file "${SC2K_CITIES}/Cities/${city}")
+        set(city_file "${ARC_CITIES}/Cities/${city}")
         if(NOT EXISTS "${city_file}")
-            set(city_file "${SC2K_CITIES}/${city}")
+            set(city_file "${ARC_CITIES}/${city}")
         endif()
         if(EXISTS "${city_file}")
             string(REPLACE " " "_" city_id "${city}")
             add_test(NAME mesh_watertight_${city_id}
-                     COMMAND arcology "${SC2K_ASSETS}" "${city_file}" --mesh-check --roads3d)
+                     COMMAND arcology "${ARC_ASSETS}" "${city_file}" --mesh-check --roads3d)
         endif()
     endforeach()
 endif()

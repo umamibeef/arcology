@@ -17,10 +17,10 @@ arc.rules.lane = function (n)
     --  so the overlay shows the lane meeting the deck's where it does.
     local total, s0 = 0.0, 0.0
     if d.ramp then
-        for k = 1, d.n do total = total + (n:piece(k)) end
+        for k = 0, d.n - 1 do total = total + (n:piece(k)) end
         if total < 1e-6 then return true end
     end
-    for k = 1, d.n do
+    for k = 0, d.n - 1 do
         local len, turns = n:piece(k)
         local step = d.ramp and d.step or (turns and lane.step_arc or lane.step_run)
         local cuts = math.max(1, math.ceil(len / step))

@@ -12,12 +12,12 @@
 --  from the HIGHER of each end's two corners, so on a tile that tilts
 --  across the road it stands on the ground and not under it.
 
-arc.rules.crossing_panel = function (x)
+arc.rules.panel = function (x)
     local d = x:info()
-    local _, _, g0 = x:at(1)
-    local _, _, g1 = x:at(2)
-    local _, _, g2 = x:at(3)
-    local _, _, g3 = x:at(4)
+    local _, _, g0 = x:at(0)
+    local _, _, g1 = x:at(1)
+    local _, _, g2 = x:at(2)
+    local _, _, g3 = x:at(3)
     x:quad(math.max(g0, g1) + d.lift, math.max(g2, g3) + d.lift, d.order + d.slot)
     return true
 end

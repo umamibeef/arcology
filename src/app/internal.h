@@ -55,6 +55,14 @@ typedef struct
     int32_t  anim_a, anim_b;
     int      dirty;      /* the city changed: sweep again          */
     int      mesh_dirty; /* the terrain changed: rebuild the mesh  */
+    /*  A reading of the scripts asked for a rebuild, and the frame that
+     *  announces it has not been drawn yet.  The build blocks for about
+     *  a second and a half; the reading itself takes about four
+     *  milliseconds, so a bar over the reading alone would never be
+     *  seen.  Holding the rebuild for one frame is what lets the panel
+     *  reach the screen before the window stops repainting, and it needs
+     *  no second frame path to do it. */
+    int      reload_pending;
     int      quit;
     uint8_t  sky[3];
 
@@ -70,6 +78,7 @@ typedef struct
     float    q_fx, q_fy;       /* ... and the world point itself, for picking what stands there */
     float    q_mx, q_my;       /* ... and the pointer, in the window's own points */
     int      prefs_ok;         /* the run may read and write the saved preferences: an interactive one, never a headless check or shot */
+    int      live;             /* a run with a window and a person at it: no check, no shot, no dump.  A build may be held a frame to say what it is doing only here -- a one-shot run would then write out the frame that says it. */
     int      offscreen;        /* every frame is drawn offscreen and read back: the interface's pipeline is made for that format (a --shot) */
     int      sel;              /* the map view's Shift-drag: an area being selected for a debug report (area.c) */
     int      inspect;          /* the inspector: the tile under the pointer outlined and reported on */

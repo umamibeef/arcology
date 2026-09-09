@@ -10,8 +10,8 @@
  *  the listing it came from.  Arithmetic is deliberately kept in the
  *  original's widths: the game runs on 16-bit registers in many places and
  *  the truncation is observable in the results. */
+#include "sim.h"
 #include "ext80.h"
-#include "sc2k.h"
 #include "sim_int.h"
 #include <stdio.h>
 #include <stdlib.h>

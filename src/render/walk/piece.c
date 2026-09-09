@@ -14,15 +14,7 @@ const uint8_t *s_check_xbld; /* the last built city's XBLD, for the piece scan *
  *  table, since every tile of the map is looked up in it. */
 static int road_carried(uint8_t b)
 {
-    static uint8_t carry[256];
-    static int     gen = -1;
-    if (gen != script_generation())
-    {
-        memset(carry, 0, sizeof carry);
-        script_rule_road_tiles(carry, 256);
-        gen = script_generation();
-    }
-    return carry[b];
+    return script_bytes("road_tiles")[b];
 }
 
 /*  A tile whose building stands up: a structure the deck would have to
@@ -34,9 +26,8 @@ int net_stands_up(uint8_t b)
     static int     gen = -1;
     if (gen != script_generation())
     {
-        memset(up, 0, sizeof up);
-        script_rule_byte_set("standing_tiles", up, 256);
         gen = script_generation();
+        memcpy(up, script_bytes("standing_tiles"), sizeof up);
     }
     return up[b];
 }
@@ -46,15 +37,14 @@ int net_stands_up(uint8_t b)
  *  arc.rules.carrier_tiles. */
 int net_carrier(uint8_t b)
 {
-    static uint8_t carry[256];
+    static uint8_t carries[256];
     static int     gen = -1;
     if (gen != script_generation())
     {
-        memset(carry, 0, sizeof carry);
-        script_rule_byte_set("carrier_tiles", carry, 256);
         gen = script_generation();
+        memcpy(carries, script_bytes("carrier_tiles"), sizeof carries);
     }
-    return carry[b];
+    return carries[b];
 }
 
 /*  A road crossing a railway -- a node of both networks, which pins the
@@ -66,9 +56,8 @@ int net_road_over_rail(uint8_t b)
     static int     gen = -1;
     if (gen != script_generation())
     {
-        memset(over, 0, sizeof over);
-        script_rule_byte_set("rail_crossing_tiles", over, 256);
         gen = script_generation();
+        memcpy(over, script_bytes("rail_crossing_tiles"), sizeof over);
     }
     return over[b];
 }
@@ -87,145 +76,53 @@ int net_road_near(uint8_t b)
     return road_carried(b) != 0;
 }
 
-/*  The family of a piece and its index in the shared layout, 0..14, or
- *  -1 for anything else.  A crossing answers for its road (0x44, 0x45,
- *  0x46) or its rail (0x47) with the straight piece along the right
- *  axis; road_second() gives the other family on it. */
+/*  The family a piece belongs to and its place in the shared layout, or
+ *  -1 for a byte no family claims.  Which byte is which is the SCRIPT'S
+ *  (scripts/net_tiles.lua), read once a generation into a table: every
+ *  tile of the map is looked up in it, twice.
+ *
+ *  With no rule no byte carries a network at all, which is what a run
+ *  that cannot find the scripts draws. */
+static void piece_table(const unsigned char **fam, const signed char **piece,
+                        const unsigned char **fam2, const signed char **piece2)
+{
+    script_pieces(fam, piece, fam2, piece2);
+}
+
+/*  A crossing answers for the family whose surface it is; piece_second
+ *  gives the other one, on the other axis. */
 int piece_family(uint8_t b, Family *f)
 {
-    if (b >= 0x0Eu && b <= 0x1Cu)
-    {
-        *f = F_POWER;
-        return b - 0x0E;
-    }
-    if (b >= 0x1Du && b <= 0x2Bu)
-    {
-        *f = F_ROAD;
-        return b - 0x1D;
-    }
-    if (b >= 0x2Cu && b <= 0x3Au)
-    {
-        *f = F_RAIL;
-        return b - 0x2C;
-    }
-    /*  The six crossings, read off every shipped city's neighbours: 0x43 a road east-west under a
-     *  power line, 0x44 a road north-south under one; 0x45 a road east-west
-     *  over a rail, 0x46 a road north-south over one; 0x47 a rail east-west
-     *  under a power line, 0x48 a rail north-south under one.  The highways
-     *  begin at 0x49. */
-    if (b == 0x43u || b == 0x45u)
-    {
-        *f = F_ROAD;
-        return 0;
-    }
-    if (b == 0x44u || b == 0x46u)
-    {
-        *f = F_ROAD;
-        return 1;
-    }
-    /*  What runs under a viaduct is drawn too: the deck's tile carried no
-     *  surface at all, so a road or a line vanished under every elevated
-     *  crossing.  Read off the shipped cities the way the crossings were:
-     *  0x4B spans a north-south road (545 of 579), 0x4C an east-west one
-     *  (652 of 674), 0x4D a north-south rail (52 of 54), 0x4E an east-west
-     *  one (37 of 41). */
-    if (b == 0x4Bu)
-    {
-        *f = F_ROAD;
-        return 1;
-    }
-    if (b == 0x4Cu)
-    {
-        *f = F_ROAD;
-        return 0;
-    }
-    if (b == 0x4Du)
-    {
-        *f = F_RAIL;
-        return 1;
-    }
-    if (b == 0x4Eu)
-    {
-        *f = F_RAIL;
-        return 0;
-    }
-    /*  Four more rail straights, and they are NOT in the 0x2C..0x3A run:
-     *  0x3B and 0x3D go north-south, 0x3C and 0x3E east-west.  Read off the
-     *  shipped cities the same way the crossings were -- of 37 tiles of
-     *  0x3B, 29 join north and south and five join one of them; 0x3C is 40
-     *  of 54 east-west; and so on.  (Two ids to an axis because the art has
-     *  two elevations of trestle.)
-     *
-     *  Rail under a HIGHWAY has the same shape as 0x47/0x48 under a power
-     *  line: 0x4D carries the rail north-south, 0x4E east-west.  They come
-     *  in pairs, one per tile of the highway's two-tile width, so each sees
-     *  rail on one side and its partner on the other -- of 62 tiles of
-     *  0x4D, 61 touch rail and every one of them touches another 0x4D.
-     *
-     *  A tile no family claims is not treated as bare ground: it falls
-     *  through to the BUILDING path and is given a levelled pad, so a rail
-     *  tile missing from these tables becomes a raised slab with the track
-     *  drawn on top of it and the ground either side untouched -- a piece
-     *  of track hanging in the air. */
-    if (b == 0x4Du)
-    {
-        *f = F_RAIL;
-        return 1; /* north-south */
-    }
-    if (b == 0x4Eu)
-    {
-        *f = F_RAIL;
-        return 0; /* east-west */
-    }
-    if (b == 0x3Bu || b == 0x3Du)
-    {
-        *f = F_RAIL;
-        return 1; /* north-south, as 0x48 is */
-    }
-    if (b == 0x3Cu || b == 0x3Eu)
-    {
-        *f = F_RAIL;
-        return 0; /* east-west, as 0x47 is */
-    }
-    if (b == 0x47u)
-    {
-        *f = F_RAIL;
-        return 0;
-    }
-    if (b == 0x48u)
-    {
-        *f = F_RAIL;
-        return 1;
-    }
-    return -1;
+    const unsigned char *fam, *fam2;
+    const signed char   *piece, *piece2;
+    piece_table(&fam, &piece, &fam2, &piece2);
+    *f = (Family)fam[b];
+    return piece[b];
 }
 
 /*  The second family a crossing carries, on the other axis: its piece
  *  index, or -1. */
 int piece_second(uint8_t b, Family *f)
 {
-    if (b == 0x43u || b == 0x47u)
-    {
-        *f = F_POWER;
-        return 1;
-    }
-    if (b == 0x44u || b == 0x48u)
-    {
-        *f = F_POWER;
-        return 0;
-    }
-    if (b == 0x45u)
-    {
-        *f = F_RAIL;
-        return 1;
-    }
-    if (b == 0x46u)
-    {
-        *f = F_RAIL;
-        return 0;
-    }
-    return -1;
+    const unsigned char *fam, *fam2;
+    const signed char   *piece, *piece2;
+    piece_table(&fam, &piece, &fam2, &piece2);
+    *f = (Family)fam2[b];
+    return piece2[b];
 }
+
+/*  A crossing a RAILWAY is part of, on either axis: a road over a line,
+ *  or a line under a power line.  Derived from the same table the
+ *  crossings themselves are declared in, so a script that names them
+ *  differently moves this with them. */
+int net_rail_crossing(uint8_t b)
+{
+    const unsigned char *fam, *fam2;
+    const signed char   *piece, *piece2;
+    piece_table(&fam, &piece, &fam2, &piece2);
+    return piece2[b] >= 0 && (fam[b] == F_RAIL || fam2[b] == F_RAIL);
+}
+
 
 const float ROAD_MU[4] = {0.5f, 1.0f, 0.5f, 0.0f}; /* edge midpoints, N E S W */
 const float ROAD_MV[4] = {0.0f, 0.5f, 1.0f, 0.5f};

@@ -16,10 +16,10 @@
 --  the ramp's only when nothing else is; taking the first road met
 --  instead leaves the lane leaving from an edge with no road on it.
 
-arc.rules.ramp_orient = function (o)
+arc.rules.orient = function (o)
     local dside, rside, eside, roads
 
-    for k = 1, 4 do
+    for k = 0, 3 do
         local deck, axis, road = o:side(k)
         if deck and axis and not dside then
             dside = k
@@ -40,8 +40,8 @@ arc.rules.ramp_orient = function (o)
 
     --  Prefer a road across the deck's axis to one opposite the deck.
     if rside then
-        local back = (dside + 1) % 4 + 1
-        for k = 1, 4 do
+        local back = (dside + 2) % 4
+        for k = 0, 3 do
             if k ~= dside and k ~= back then
                 local _, _, road = o:side(k)
                 if road then
