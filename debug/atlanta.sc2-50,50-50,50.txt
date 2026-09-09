@@ -1,0 +1,9 @@
+area  (unnamed)  cols 50..50  rows 50..50  (1 x 1 tiles)  rotation 0
+  north is decreasing row, east is decreasing col; a label is col,row
+tiles  (.. ground  ,, trees or rubble  ~~ water  rr road  tt rail  pp power  xx crossing  bb building; a highway piece by its id)
+       50
+   50  tt
+what stands there (every tile that is not plain ground)
+   50,50  xbld 0x2c rail                           alt  4  xter 0x00  Mesh: levelled pad at 4
+rail segment 1310 from 12,19 to 51,50: 1 of its 73 tiles are in the area, 29 pieces, 17 fitted nodes
+end of area

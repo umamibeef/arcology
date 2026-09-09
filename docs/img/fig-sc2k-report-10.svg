@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 250" role="img" aria-label="Finding a building's origin. A three by three building carries a corner marker in the high nibble of XZON on each of its four corner tiles. The five interior tiles carry zero. The search steps toward each marker in turn until it reaches the corner the current rotation calls the origin."><style>:root{--faint:#8C9490;--gold:#9A6712;--gold-bg:#F0E4CC;--muted:#5D6663; color-scheme:light dark}@media(prefers-color-scheme:dark){:root{--faint:#6B7472;--gold:#DDA43E;--gold-bg:#2A2318;--muted:#8B9491;}}text{font-family:Helvetica Neue,Helvetica,Arial,sans-serif}</style>
+        <defs><marker id="ar4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+
+        <g stroke="currentColor" stroke-width="1.1" fill="none">
+          <rect x="60"  y="50" width="56" height="56"/><rect x="116" y="50" width="56" height="56"/><rect x="172" y="50" width="56" height="56"/>
+          <rect x="60"  y="106" width="56" height="56"/><rect x="116" y="106" width="56" height="56"/><rect x="172" y="106" width="56" height="56"/>
+          <rect x="60"  y="162" width="56" height="56"/><rect x="116" y="162" width="56" height="56"/><rect x="172" y="162" width="56" height="56"/>
+        </g>
+        <g fill="var(--gold-bg)" stroke="var(--gold)" stroke-width="1.6">
+          <rect x="60"  y="50"  width="56" height="56"/><rect x="172" y="50"  width="56" height="56"/>
+          <rect x="60"  y="162" width="56" height="56"/><rect x="172" y="162" width="56" height="56"/>
+        </g>
+        <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="var(--gold)" text-anchor="middle">
+          <text x="88"  y="83">$10</text><text x="200" y="83">$80</text>
+          <text x="88"  y="195">$20</text><text x="200" y="195">$40</text>
+        </g>
+        <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="var(--faint)" text-anchor="middle">
+          <text x="144" y="83">0</text><text x="88" y="139">0</text><text x="144" y="139">0</text>
+          <text x="200" y="139">0</text><text x="144" y="195">0</text>
+        </g>
+        <text x="144" y="238" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="var(--muted)" text-anchor="middle">five of nine tiles carry no marker at all</text>
+
+        <line x1="250" y1="134" x2="310" y2="134" stroke="currentColor" stroke-width="1.2" marker-end="url(#ar4)"/>
+
+        <text x="330" y="62" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="currentColor">which marker is the origin turns with the view</text>
+        <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12.5" fill="currentColor">
+          <text x="330" y="92">rotation 0    $10  $20  $40  $80</text>
+          <text x="330" y="114">rotation 1    $20  $40  $80  $10</text>
+          <text x="330" y="136">rotation 2    $40  $80  $10  $20</text>
+          <text x="330" y="158">rotation 3    $80  $10  $20  $40</text>
+        </g>
+        <text x="330" y="186" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12.5" fill="var(--muted)">corner k of rotation r is $10 shifted left by (r + k) and 3</text>
+        <text x="330" y="212" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12.5" fill="var(--muted)">the search tries each corner in turn, then shifts by the size</text>
+        <text x="330" y="234" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12.5" fill="var(--muted)">to reach the tile the rest of the game calls the origin</text>
+      </svg>

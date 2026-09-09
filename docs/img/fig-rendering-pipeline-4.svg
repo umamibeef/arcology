@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 268" role="img" aria-label="Pipeline stages against three checks. blit_check covers sprite pixels, mirror pivot and anchors; render_diff covers only which shape and where; only pixel_diff covers draw order, palette and the shadow pass."><style>:root{--accent:#9A6712;--good:#5C7530; color-scheme:light dark}@media(prefers-color-scheme:dark){:root{--accent:#DDA43E;--good:#9AB962;}}text{font-family:Helvetica Neue,Helvetica,Arial,sans-serif}</style>
+  <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11.5" fill="currentColor" opacity=".72">
+    <text x="10" y="26" font-weight="600">stage</text>
+    <text x="392" y="26" font-weight="600">blit_check</text>
+    <text x="560" y="26" font-weight="600">render_diff</text>
+    <text x="732" y="26" font-weight="600">pixel_diff</text>
+  </g>
+  <line x1="10" y1="38" x2="880" y2="38" stroke="currentColor" stroke-width="1.2"/>
+  <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="13" fill="currentColor">
+    <text x="10" y="66">sprite pixels</text>
+    <text x="10" y="100">mirror pivot</text>
+    <text x="10" y="134">per-sprite anchor</text>
+    <text x="10" y="168">shape and position</text>
+    <text x="10" y="202">draw order</text>
+    <text x="10" y="236">shadow, palette</text>
+  </g>
+  <g stroke="currentColor" stroke-width="1" opacity=".2">
+    <line x1="10" y1="78" x2="880" y2="78"/>
+    <line x1="10" y1="112" x2="880" y2="112"/>
+    <line x1="10" y1="146" x2="880" y2="146"/>
+    <line x1="10" y1="180" x2="880" y2="180"/>
+    <line x1="10" y1="214" x2="880" y2="214"/>
+  </g>
+  <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="17" font-weight="600" fill="var(--good)">
+    <text x="424" y="70">✓</text><text x="424" y="104">✓</text><text x="424" y="138">✓</text>
+    <text x="598" y="172">✓</text>
+    <text x="762" y="70">✓</text><text x="762" y="104">✓</text><text x="762" y="138">✓</text>
+    <text x="762" y="172">✓</text><text x="762" y="206">✓</text><text x="762" y="240">✓</text>
+  </g>
+  <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="17" fill="currentColor" opacity=".26">
+    <text x="424" y="172">—</text><text x="424" y="206">—</text><text x="424" y="240">—</text>
+    <text x="598" y="70">—</text><text x="598" y="104">—</text><text x="598" y="138">—</text>
+    <text x="598" y="206">—</text><text x="598" y="240">—</text>
+  </g>
+  <rect x="738" y="46" width="62" height="206" rx="5" fill="none" stroke="var(--accent)" stroke-width="1.5"/>
+  <text x="812" y="154" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="var(--accent)">complete</text>
+</svg>

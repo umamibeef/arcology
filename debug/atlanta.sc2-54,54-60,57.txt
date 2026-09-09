@@ -1,0 +1,46 @@
+area  (unnamed)  cols 54..60  rows 54..57  (7 x 4 tiles)  rotation 0
+  north is decreasing row, east is decreasing col; a label is col,row
+tiles  (.. ground  ,, trees or rubble  ~~ water  rr road  tt rail  pp power  xx crossing  bb building; a highway piece by its id)
+       54  55  56  57  58  59  60
+   54  rr  rr  rr  rr  xx  rr  rr
+   55  bb  xx  bb  ,,  bb  ,,  rr
+   56  bb  xx  bb  ,,  ,,  rr  rr
+   57  bb  rr  bb  bb  ,,  rr  bb
+what stands there (every tile that is not plain ground)
+   54,54  xbld 0x1d road                           alt  4  xter 0x00  Mesh: levelled pad at 4
+   55,54  xbld 0x2b road                           alt  4  xter 0x00  Mesh: levelled pad at 4
+   56,54  xbld 0x22 road                           alt  4  xter 0x04  Mesh: sloped plane, NW 4 NE 5 SE 5 SW 4
+   57,54  xbld 0x1d road                           alt  4  xter 0x0d  Mesh: levelled pad at 5 (saddle: lifted a level, $17528)
+   58,54  xbld 0x43 level crossing                 alt  5  xter 0x00  Mesh: levelled pad at 5
+   59,54  xbld 0x1d road                           alt  5  xter 0x00  Mesh: levelled pad at 5
+   60,54  xbld 0x23 road                           alt  5  xter 0x00  Mesh: levelled pad at 5
+   54,55  xbld 0xd4 building                       alt  4  xter 0x00  Mesh: levelled pad at 4
+   55,55  xbld 0x44 level crossing                 alt  4  xter 0x00  Mesh: levelled pad at 4
+   56,55  xbld 0x79 building                       alt  4  xter 0x00  Mesh: levelled pad at 4
+   57,55  xbld 0x13 trees or rubble                alt  4  xter 0x04  Mesh: sloped plane, NW 4 NE 5 SE 5 SW 4
+   58,55  xbld 0x79 building                       alt  5  xter 0x00  Mesh: levelled pad at 5
+   59,55  xbld 0x07 trees or rubble                alt  5  xter 0x00  Mesh: ground, NW 5 NE 5 SE 5 SW 4.5
+   60,55  xbld 0x1e road                           alt  5  xter 0x00  Mesh: levelled pad at 5
+   54,56  xbld 0xd4 building                       alt  4  xter 0x00  Mesh: levelled pad at 4
+   55,56  xbld 0x44 level crossing                 alt  4  xter 0x00  Mesh: levelled pad at 4
+   56,56  xbld 0x78 building                       alt  4  xter 0x00  Mesh: levelled pad at 4
+   57,56  xbld 0x07 trees or rubble                alt  4  xter 0x0c  Mesh: ground, NW 4 NE 5 SE 4.33333 SW 4
+   58,56  xbld 0x09 trees or rubble                alt  4  xter 0x0d  Mesh: ground, NW 5 NE 4.5 SE 5 SW 4.33333
+   59,56  xbld 0x24 road                           alt  5  xter 0x00  Mesh: levelled pad at 5
+   60,56  xbld 0x2a road                           alt  5  xter 0x00  Mesh: levelled pad at 5
+   54,57  xbld 0xd4 building                       alt  4  xter 0x00  Mesh: levelled pad at 4
+   55,57  xbld 0x1e road                           alt  4  xter 0x00  Mesh: levelled pad at 4
+   56,57  xbld 0x8a building                       alt  4  xter 0x00  Mesh: levelled pad at 4
+   57,57  xbld 0x7a building                       alt  4  xter 0x00  Mesh: levelled pad at 4
+   58,57  xbld 0x08 trees or rubble                alt  4  xter 0x01  Mesh: ground, NW 4.33333 NE 5 SE 4 SW 4
+   59,57  xbld 0x1e road                           alt  4  xter 0x0d  Mesh: levelled pad at 5 (saddle: lifted a level, $17528)
+   60,57  xbld 0x78 building                       alt  5  xter 0x00  Mesh: levelled pad at 5
+road segment 580 from 56,51 to 55,54: 1 of its 5 tiles are in the area, 5 pieces, 4 fitted nodes
+road segment 621 from 51,54 to 55,54: 2 of its 5 tiles are in the area, 1 pieces, 2 fitted nodes
+road segment 623 from 55,54 to 60,56: 8 of its 8 tiles are in the area, 3 pieces, 3 fitted nodes
+road segment 624 from 55,54 to 55,61: 4 of its 8 tiles are in the area, 1 pieces, 2 fitted nodes
+road segment 639 from 60,56 to 62,56: 1 of its 3 tiles are in the area, 1 pieces, 2 fitted nodes
+road segment 640 from 60,56 to 59,61: 3 of its 7 tiles are in the area, 3 pieces, 3 fitted nodes
+junction 55,54: N none, E stop, S none, W none
+junction 60,56: N stop, E none, S none, W none
+end of area

@@ -1,0 +1,542 @@
+{
+ "1898.sc2": {
+  "corners": 1,
+  "nogeom": 0
+ },
+ "349ARCO.SC2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "349arco.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "AMAZINGC.SC2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "ARCOONE.SC2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "BABAR.SC2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "BIGGESTC.SC2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "BRIDGEPO.SC2": {
+  "corners": 1,
+  "nogeom": 0
+ },
+ "CAPEQUES.SC2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "FLARANGE.SC2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "FLOATING.SC2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "GREENLAN.SC2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "HAPPYGUY.SC2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "HILTON.SC2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "HIPPIVIL.SC2": {
+  "corners": 1,
+  "nogeom": 0
+ },
+ "ISLAND.SC2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "JUNETOWN.SC2": {
+  "corners": 0,
+  "nogeom": 2
+ },
+ "KATVILLE.SC2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "KEENLAND.SC2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "KEITH.SC2": {
+  "corners": 1,
+  "nogeom": 0
+ },
+ "LAKEVIEW.SC2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "LINCOLN.SC2": {
+  "corners": 2,
+  "nogeom": 0
+ },
+ "LOKEVILL.SC2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "MALTRON.SC2": {
+  "corners": 1,
+  "nogeom": 0
+ },
+ "MXBURG.SC2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "NEWORLEA.SC2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "PETER2.SC2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "PETER3.SC2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "SAM'STOW.SC2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "SIMCITY.SC2": {
+  "corners": 2,
+  "nogeom": 0
+ },
+ "STARTER.SC2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "SYDNEY.SC2": {
+  "corners": 2,
+  "nogeom": 0
+ },
+ "TESTCITY.SC2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "TORONTO.SC2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "UTOPIA.SC2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "ZUTHERLA.SC2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "amazingc.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "arcoone.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "atlanta.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "babar.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "barcelona.sc2": {
+  "corners": 9,
+  "nogeom": 0
+ },
+ "bayview.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "biggestc.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "bridgepo.sc2": {
+  "corners": 1,
+  "nogeom": 0
+ },
+ "cape-wells.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "capeques.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "centerville.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "ceres-garden-city.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "charleston.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "chicago.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "davenport.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "davidia-2-0.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "dullsville.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "eaven-moore.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "egypt-falls.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "felsenschloss.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "flarange.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "flint.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "floating.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "four-cities.sc2": {
+  "corners": 1,
+  "nogeom": 0
+ },
+ "greenlan.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "happyguy.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "happyland.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "hawaii.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "helena-point.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "herman-mallville.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "hi-loh20.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "hilton.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "hippivil.sc2": {
+  "corners": 1,
+  "nogeom": 0
+ },
+ "hollywood.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "homestead.sc2": {
+  "corners": 0,
+  "nogeom": 1
+ },
+ "island.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "junetown.sc2": {
+  "corners": 0,
+  "nogeom": 2
+ },
+ "katville.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "keenland.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "keith.sc2": {
+  "corners": 1,
+  "nogeom": 0
+ },
+ "la-isla.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "lakeland.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "lakeview.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "las-vegas.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "lincoln.sc2": {
+  "corners": 2,
+  "nogeom": 0
+ },
+ "lokevill.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "london.sc2": {
+  "corners": 1,
+  "nogeom": 0
+ },
+ "malibu.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "maltron.sc2": {
+  "corners": 1,
+  "nogeom": 0
+ },
+ "manhattan.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "maxis-land.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "mxburg.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "new-bay-city.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "new-monroe-bay.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "neworlea.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "nyc.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "oakland.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "parade.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "paris-2.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "paris.sc2": {
+  "corners": 2,
+  "nogeom": 0
+ },
+ "peter2.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "peter3.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "portland.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "puntjak-putih.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "retreat.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "retropolis.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "rio-de-janeiro.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "river5.sc2": {
+  "corners": 1,
+  "nogeom": 0
+ },
+ "roma.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "samstow.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "san-francisco.sc2": {
+  "corners": 1,
+  "nogeom": 0
+ },
+ "seven-spires.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "silicon-valley.sc2": {
+  "corners": 2,
+  "nogeom": 0
+ },
+ "simcity.sc2": {
+  "corners": 2,
+  "nogeom": 0
+ },
+ "soutien-gorge.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "spiralopolis.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "st-christopher.sc2": {
+  "corners": 1,
+  "nogeom": 0
+ },
+ "starter.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "sydney-2.sc2": {
+  "corners": 2,
+  "nogeom": 0
+ },
+ "sydney.sc2": {
+  "corners": 2,
+  "nogeom": 0
+ },
+ "symcity.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "the-bahamas.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "tokyo.sc2": {
+  "corners": 1,
+  "nogeom": 0
+ },
+ "tomg-b1.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "tomg-b2.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "tomg-b3.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "tomg-b4.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "tomg-c1.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "tomg-c2.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "tomg-c3.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "tomg-c4.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "toronto-2.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "toronto.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "utopia.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "venice.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "virtualville.sc2": {
+  "corners": 1,
+  "nogeom": 0
+ },
+ "volcano-city.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "washington-d-c.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ },
+ "zutherla.sc2": {
+  "corners": 0,
+  "nogeom": 0
+ }
+}

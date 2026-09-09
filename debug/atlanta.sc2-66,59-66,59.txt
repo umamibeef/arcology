@@ -1,0 +1,8 @@
+area  (unnamed)  cols 66..66  rows 59..59  (1 x 1 tiles)  rotation 0
+  north is decreasing row, east is decreasing col; a label is col,row
+tiles  (.. ground  ,, trees or rubble  ~~ water  rr road  tt rail  pp power  xx crossing  bb building; a highway piece by its id)
+       66
+   59  bb
+what stands there (every tile that is not plain ground)
+   66,59  xbld 0x9f building                       alt  5  xter 0x00  Mesh: levelled pad at 5
+end of area

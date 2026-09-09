@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 310" role="img" aria-label="How a tile's slope code is derived. Eight neighbours each contribute corner bits: the four diagonals contribute one corner each, the four sides contribute two. The bits combine into a four-bit mask, which indexes a sixteen-entry table of slope codes. Mask fifteen gives code 0x32, which means the tile must rise a step instead."><style>:root{--gold:#9A6712;--gold-bg:#F0E4CC;--muted:#5D6663;--rust:#9C462C; color-scheme:light dark}@media(prefers-color-scheme:dark){:root{--gold:#DDA43E;--gold-bg:#2A2318;--muted:#8B9491;--rust:#D07C5E;}}text{font-family:Helvetica Neue,Helvetica,Arial,sans-serif}</style>
+        <defs>
+          <marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+          </marker>
+        </defs>
+
+        <g stroke="currentColor" stroke-width="1.1" fill="none">
+          <rect x="40"  y="60"  width="56" height="56"/>
+          <rect x="96"  y="60"  width="56" height="56"/>
+          <rect x="152" y="60"  width="56" height="56"/>
+          <rect x="40"  y="116" width="56" height="56"/>
+          <rect x="152" y="116" width="56" height="56"/>
+          <rect x="40"  y="172" width="56" height="56"/>
+          <rect x="96"  y="172" width="56" height="56"/>
+          <rect x="152" y="172" width="56" height="56"/>
+        </g>
+        <rect x="96" y="116" width="56" height="56" fill="var(--gold-bg)" stroke="var(--gold)" stroke-width="1.7"/>
+
+        <g fill="var(--gold)">
+          <circle cx="96"  cy="116" r="4.5"/><circle cx="152" cy="116" r="4.5"/>
+          <circle cx="96"  cy="172" r="4.5"/><circle cx="152" cy="172" r="4.5"/>
+        </g>
+        <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="var(--gold)">
+          <text x="80"  y="112">1</text><text x="158" y="112">8</text>
+          <text x="80"  y="188">2</text><text x="158" y="188">4</text>
+        </g>
+
+        <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12.5" fill="currentColor" text-anchor="middle">
+          <text x="68"  y="93">1</text>   <text x="124" y="93">9</text>   <text x="180" y="93">8</text>
+          <text x="68"  y="149">3</text>                                   <text x="180" y="149">12</text>
+          <text x="68"  y="205">2</text>  <text x="124" y="205">6</text>  <text x="180" y="205">4</text>
+        </g>
+        <text x="124" y="252" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="var(--muted)" text-anchor="middle">corners each neighbour raises</text>
+
+        <line x1="228" y1="144" x2="288" y2="144" stroke="currentColor" stroke-width="1.2" marker-end="url(#ah2)"/>
+
+        <rect x="300" y="120" width="132" height="48" fill="none" stroke="currentColor" stroke-width="1.2"/>
+        <text x="366" y="142" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="13" fill="currentColor" text-anchor="middle">mask 0..15</text>
+        <text x="366" y="158" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="var(--muted)" text-anchor="middle">OR of the above</text>
+
+        <line x1="440" y1="144" x2="500" y2="144" stroke="currentColor" stroke-width="1.2" marker-end="url(#ah2)"/>
+
+        <text x="512" y="76" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="var(--muted)">``A5-0x4DEE``, sixteen entries</text>
+        <g stroke="currentColor" stroke-width=".9" fill="none">
+          <rect x="512" y="86" width="336" height="30"/>
+        </g>
+        <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="currentColor" text-anchor="middle">
+          <text x="533" y="106">0</text><text x="554" y="106">9</text><text x="575" y="106">10</text>
+          <text x="596" y="106">2</text><text x="617" y="106">11</text><text x="638" y="106">13</text>
+          <text x="659" y="106">3</text><text x="680" y="106">6</text><text x="701" y="106">12</text>
+          <text x="722" y="106">1</text><text x="743" y="106">13</text><text x="764" y="106">5</text>
+          <text x="785" y="106">4</text><text x="806" y="106">8</text><text x="827" y="106">7</text>
+        </g>
+        <rect x="837" y="86" width="11" height="30" fill="var(--rust)" opacity=".22"/>
+        <g stroke="currentColor" stroke-width=".5" opacity=".45">
+          <line x1="544" y1="86" x2="544" y2="116"/><line x1="565" y1="86" x2="565" y2="116"/>
+          <line x1="586" y1="86" x2="586" y2="116"/><line x1="607" y1="86" x2="607" y2="116"/>
+          <line x1="628" y1="86" x2="628" y2="116"/><line x1="649" y1="86" x2="649" y2="116"/>
+          <line x1="670" y1="86" x2="670" y2="116"/><line x1="691" y1="86" x2="691" y2="116"/>
+          <line x1="712" y1="86" x2="712" y2="116"/><line x1="733" y1="86" x2="733" y2="116"/>
+          <line x1="754" y1="86" x2="754" y2="116"/><line x1="775" y1="86" x2="775" y2="116"/>
+          <line x1="796" y1="86" x2="796" y2="116"/><line x1="817" y1="86" x2="817" y2="116"/>
+          <line x1="837" y1="86" x2="837" y2="116"/>
+        </g>
+        <text x="512" y="132" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10.5" fill="var(--muted)">mask 0</text>
+        <text x="848" y="132" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10.5" fill="var(--rust)" text-anchor="end">15</text>
+
+        <line x1="843" y1="120" x2="843" y2="182" stroke="var(--rust)" stroke-width="1.2" marker-end="url(#ah2)"/>
+        <rect x="596" y="186" width="252" height="52" fill="none" stroke="var(--rust)" stroke-width="1.3"/>
+        <text x="722" y="207" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12.5" fill="var(--rust)" text-anchor="middle">code $32 is not a slope</text>
+        <text x="722" y="225" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="var(--muted)" text-anchor="middle">all four corners higher: the tile rises a step</text>
+
+        <text x="512" y="266" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12.5" fill="var(--muted)">then: altitude ≥ water level → keep the code</text>
+        <text x="512" y="284" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12.5" fill="var(--muted)">one below → $20 + code, the shore · deeper → $10 + code</text>
+      <rect x="96" y="116" width="56" height="56" fill="none" stroke="var(--gold)" stroke-width="1.7"/><rect x="300" y="120" width="132" height="48" fill="none" stroke="currentColor" stroke-width="1.2"/><rect x="596" y="186" width="252" height="52" fill="none" stroke="var(--rust)" stroke-width="1.3"/></svg>

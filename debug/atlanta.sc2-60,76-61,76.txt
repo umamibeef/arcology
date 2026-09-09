@@ -1,0 +1,13 @@
+area  (unnamed)  cols 60..61  rows 76..76  (2 x 1 tiles)  rotation 0
+  north is decreasing row, east is decreasing col; a label is col,row
+tiles  (.. ground  ,, trees or rubble  ~~ water  rr road  tt rail  pp power  xx crossing  bb building; a highway piece by its id)
+       60  61
+   76  4a  4a
+what stands there (every tile that is not plain ground)
+   60,76  xbld 0x4a highway straight, north-south  alt  5  xter 0x00  Mesh: levelled pad at 5
+   61,76  xbld 0x4a highway straight, north-south  alt  5  xter 0x00  Mesh: levelled pad at 5
+highway band 1: 2 of its 296 tiles are in the area
+  walked from 101,62, 18 fitted nodes, 32 pieces
+  fitted nodes near the area (x,y radius): (61.00,77.50) r1.43 (61.00,76.50) r0.00
+deck stations in the area: 27 (the loft's band 2), first (61.00,77.00) s 60.04 z 6.03, last (60.72,76.04) s 61.08 z 6.03
+end of area

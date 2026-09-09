@@ -1,0 +1,49 @@
+area  (unnamed)  cols 68..74  rows 123..127  (7 x 5 tiles)  rotation 0
+  north is decreasing row, east is decreasing col; a label is col,row
+tiles  (.. ground  ,, trees or rubble  ~~ water  rr road  tt rail  pp power  xx crossing  bb building; a highway piece by its id)
+       68  69  70  71  72  73  74
+  123  xx  xx  rr  rr  rr  xx  rr
+  124  bb  bb  bb  bb  tt  tt  xx
+  125  bb  bb  tt  tt  tt  rr  rr
+  126  bb  tt  tt  ..  rr  rr  ~~
+  127  ..  tt  ..  ..  rr  bb  bb
+what stands there (every tile that is not plain ground)
+   68,123 xbld 0x43 level crossing                 alt  5  xter 0x00  Mesh: levelled pad at 5
+   69,123 xbld 0x43 level crossing                 alt  5  xter 0x00  Mesh: levelled pad at 5
+   70,123 xbld 0x1d road                           alt  5  xter 0x00  Mesh: levelled pad at 5
+   71,123 xbld 0x1d road                           alt  5  xter 0x00  Mesh: levelled pad at 5
+   72,123 xbld 0x1d road                           alt  5  xter 0x00  Mesh: levelled pad at 5
+   73,123 xbld 0x45 level crossing                 alt  5  xter 0x00  Mesh: levelled pad at 5
+   74,123 xbld 0x27 road                           alt  5  xter 0x00  Mesh: levelled pad at 5
+   68,124 xbld 0xa4 building                       alt  5  xter 0x00  Mesh: levelled pad at 5
+   69,124 xbld 0xa4 building                       alt  5  xter 0x00  Mesh: levelled pad at 5
+   70,124 xbld 0x87 building                       alt  5  xter 0x00  Mesh: levelled pad at 5
+   71,124 xbld 0x85 building                       alt  5  xter 0x00  Mesh: levelled pad at 5
+   72,124 xbld 0x33 rail                           alt  5  xter 0x00  Mesh: levelled pad at 5
+   73,124 xbld 0x39 rail                           alt  5  xter 0x00  Mesh: levelled pad at 5
+   74,124 xbld 0x46 level crossing                 alt  5  xter 0x00  Mesh: levelled pad at 5
+   68,125 xbld 0xa4 building                       alt  5  xter 0x00  Mesh: levelled pad at 5
+   69,125 xbld 0xa4 building                       alt  5  xter 0x00  Mesh: levelled pad at 5
+   70,125 xbld 0x33 rail                           alt  5  xter 0x00  Mesh: levelled pad at 5
+   71,125 xbld 0x2c rail                           alt  5  xter 0x00  Mesh: levelled pad at 5
+   72,125 xbld 0x35 rail                           alt  5  xter 0x00  Mesh: levelled pad at 5
+   73,125 xbld 0x24 road                           alt  5  xter 0x00  Mesh: levelled pad at 5
+   74,125 xbld 0x26 road                           alt  5  xter 0x00  Mesh: levelled pad at 5
+   68,126 xbld 0x87 building                       alt  5  xter 0x00  Mesh: levelled pad at 5
+   69,126 xbld 0x33 rail                           alt  5  xter 0x00  Mesh: levelled pad at 5
+   70,126 xbld 0x35 rail                           alt  5  xter 0x00  Mesh: levelled pad at 5
+   72,126 xbld 0x24 road                           alt  5  xter 0x00  Mesh: levelled pad at 5
+   73,126 xbld 0x26 road                           alt  5  xter 0x00  Mesh: levelled pad at 5
+   74,126 xbld 0x00 ground                         alt  5  xter 0x43  Mesh: water, surface 5, seabed NW 5 NE 5 SE 5 SW 5
+   69,127 xbld 0x2d rail                           alt  5  xter 0x00  Mesh: levelled pad at 5
+   72,127 xbld 0x1e road                           alt  5  xter 0x00  Mesh: levelled pad at 5
+   73,127 xbld 0xdc building                       alt  5  xter 0x00  Mesh: levelled pad at 5
+   74,127 xbld 0xdc building                       alt  5  xter 0x00  Mesh: levelled pad at 5
+road segment 1255 from 74,120 to 74,123: 1 of its 4 tiles are in the area, 1 pieces, 2 fitted nodes
+road segment 1292 from 67,123 to 74,123: 7 of its 8 tiles are in the area, 1 pieces, 2 fitted nodes
+road segment 1294 from 74,123 to 72,128: 7 of its 7 tiles are in the area, 5 pieces, 4 fitted nodes
+rail segment 1319 from 90,76 to 73,124: 2 of its 70 tiles are in the area, 23 pieces, 13 fitted nodes
+rail segment 1320 from 73,124 to 128,120: 2 of its 59 tiles are in the area, 5 pieces, 4 fitted nodes
+rail segment 1321 from 73,124 to 69,128: 8 of its 8 tiles are in the area, 8 pieces, 6 fitted nodes
+junction 74,123: N none, E none, S none, W stop
+end of area

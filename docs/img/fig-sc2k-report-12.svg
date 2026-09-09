@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 250" role="img" aria-label="The flood's four neighbour cases. Cases one and two read the water flag of a neighbour and mark that same neighbour. Cases three and four read the flag of the neighbour above or to the left, but write the flood marker to the neighbour below or to the right."><style>:root{--body:#2C3335;--gold:#9A6712;--gold-bg:#F0E4CC;--moss:#5C7530;--rust:#9C462C; color-scheme:light dark}@media(prefers-color-scheme:dark){:root{--body:#C6CDC9;--gold:#DDA43E;--gold-bg:#2A2318;--moss:#9AB962;--rust:#D07C5E;}}text{font-family:Helvetica Neue,Helvetica,Arial,sans-serif}</style>
+        <defs><marker id="ar6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+
+        <text x="40" y="28" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="var(--moss)">cases 1 and 2 — test and mark the same tile</text>
+        <g stroke="currentColor" stroke-width="1.1" fill="none">
+          <rect x="100" y="44" width="46" height="46"/>
+          <rect x="54"  y="90" width="46" height="46"/><rect x="100" y="90" width="46" height="46"/>
+        </g>
+        <rect x="100" y="90" width="46" height="46" fill="var(--gold-bg)" stroke="var(--gold)" stroke-width="1.6"/>
+        <g stroke="var(--moss)" stroke-width="1.6" fill="none" marker-end="url(#ar6)">
+          <path d="M118 88 L118 68"/>
+          <path d="M98 110 L82 110"/>
+        </g>
+        <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10.5" fill="var(--moss)">
+          <text x="152" y="66">read + write</text>
+          <text x="40" y="152">read + write</text>
+        </g>
+
+        <text x="420" y="28" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="var(--rust)">cases 3 and 4 — test one side, mark the other</text>
+        <g stroke="currentColor" stroke-width="1.1" fill="none">
+          <rect x="480" y="44" width="46" height="46"/>
+          <rect x="434" y="90" width="46" height="46"/><rect x="480" y="90" width="46" height="46"/><rect x="526" y="90" width="46" height="46"/>
+          <rect x="480" y="136" width="46" height="46"/>
+        </g>
+        <rect x="480" y="90" width="46" height="46" fill="var(--gold-bg)" stroke="var(--gold)" stroke-width="1.6"/>
+        <g stroke="var(--rust)" stroke-width="1.5" fill="none" stroke-dasharray="3 3">
+          <path d="M498 88 L498 70"/>
+          <path d="M478 104 L462 104"/>
+        </g>
+        <g stroke="var(--rust)" stroke-width="1.8" fill="none" marker-end="url(#ar6)">
+          <path d="M498 138 L498 158"/>
+          <path d="M528 118 L546 118"/>
+        </g>
+        <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10.5" fill="var(--rust)">
+          <text x="532" y="66">read ``$37B0E``</text>
+          <text x="356" y="108">read ``$37B54``</text>
+          <text x="532" y="176">write ``$37B32``</text>
+          <text x="580" y="122">write ``$37B70``</text>
+        </g>
+
+        <rect x="40" y="194" width="820" height="44" fill="var(--gold-bg)"/>
+        <text x="56" y="212" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12.5" fill="var(--body)">Transcribed as written. The comparison is exact with both quirks in place,</text>
+        <text x="56" y="228" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12.5" fill="var(--body)">and fails without them, over twenty runs across four cities.</text>
+      <rect x="100" y="90" width="46" height="46" fill="none" stroke="var(--gold)" stroke-width="1.6"/><rect x="480" y="90" width="46" height="46" fill="none" stroke="var(--gold)" stroke-width="1.6"/></svg>

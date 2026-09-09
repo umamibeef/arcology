@@ -1,0 +1,133 @@
+area  (unnamed)  cols 52..62  rows 70..77  (11 x 8 tiles)  rotation 0
+  north is decreasing row, east is decreasing col; a label is col,row
+tiles  (.. ground  ,, trees or rubble  ~~ water  rr road  tt rail  pp power  xx crossing  bb building; a highway piece by its id)
+       52  53  54  55  56  57  58  59  60  61  62
+   70  4a  4a  rr  rr  rr  rr  rr  xx  rr  rr  rr
+   71  4c  4c  rr  rr  5f  ,,  bb  bb  rr  bb  bb
+   72  67  67  49  4b  49  49  65  65  rr  bb  bb
+   73  67  67  49  4b  49  49  65  65  rr  rr  rr
+   74  ,,  ,,  ,,  rr  5e  ,,  67  67  65  65  bb
+   75  ,,  ,,  ,,  rr  ,,  ,,  67  67  65  65  bb
+   76  ,,  ,,  ,,  rr  ,,  ,,  ,,  60  4a  4a  5d
+   77  rr  rr  rr  rr  rr  rr  rr  rr  4c  4c  rr
+what stands there (every tile that is not plain ground)
+   52,70  xbld 0x4a highway straight, north-south  alt  5  xter 0x00  Mesh: levelled pad at 5
+   53,70  xbld 0x4a highway straight, north-south  alt  5  xter 0x00  Mesh: levelled pad at 5
+   54,70  xbld 0x24 road                           alt  5  xter 0x00  Mesh: levelled pad at 5
+   55,70  xbld 0x2b road                           alt  5  xter 0x00  Mesh: levelled pad at 5
+   56,70  xbld 0x1d road                           alt  5  xter 0x00  Mesh: levelled pad at 5
+   57,70  xbld 0x1d road                           alt  5  xter 0x00  Mesh: levelled pad at 5
+   58,70  xbld 0x1d road                           alt  5  xter 0x00  Mesh: levelled pad at 5
+   59,70  xbld 0x43 level crossing                 alt  5  xter 0x00  Mesh: levelled pad at 5
+   60,70  xbld 0x28 road                           alt  5  xter 0x00  Mesh: levelled pad at 5
+   61,70  xbld 0x1d road                           alt  5  xter 0x00  Mesh: levelled pad at 5
+   62,70  xbld 0x2a road                           alt  5  xter 0x00  Mesh: levelled pad at 5
+   52,71  xbld 0x4c highway over a road or rail    alt  5  xter 0x00  Mesh: levelled pad at 5
+   53,71  xbld 0x4c highway over a road or rail    alt  5  xter 0x00  Mesh: levelled pad at 5
+   54,71  xbld 0x2a road                           alt  5  xter 0x00  Mesh: levelled pad at 5
+   55,71  xbld 0x2b road                           alt  5  xter 0x00  Mesh: levelled pad at 5
+   56,71  xbld 0x5f on-ramp                        alt  5  xter 0x00  Mesh: levelled pad at 5
+   57,71  xbld 0x07 trees or rubble                alt  5  xter 0x00  Mesh: ground, NW 5 NE 5 SE 5 SW 5
+   58,71  xbld 0x7a building                       alt  5  xter 0x00  Mesh: levelled pad at 5
+   59,71  xbld 0x7b building                       alt  5  xter 0x00  Mesh: levelled pad at 5
+   60,71  xbld 0x1e road                           alt  5  xter 0x00  Mesh: levelled pad at 5
+   61,71  xbld 0x74 building                       alt  5  xter 0x00  Mesh: levelled pad at 5
+   62,71  xbld 0x91 building                       alt  5  xter 0x00  Mesh: levelled pad at 5
+   52,72  xbld 0x67 highway curve block            alt  5  xter 0x00  Mesh: levelled pad at 5
+   53,72  xbld 0x67 highway curve block            alt  5  xter 0x00  Mesh: levelled pad at 5
+   54,72  xbld 0x49 highway straight, east-west    alt  5  xter 0x00  Mesh: levelled pad at 5
+   55,72  xbld 0x4b highway over a road or rail    alt  5  xter 0x00  Mesh: levelled pad at 5
+   56,72  xbld 0x49 highway straight, east-west    alt  5  xter 0x00  Mesh: levelled pad at 5
+   57,72  xbld 0x49 highway straight, east-west    alt  5  xter 0x00  Mesh: levelled pad at 5
+   58,72  xbld 0x65 highway curve block            alt  5  xter 0x00  Mesh: levelled pad at 5
+   59,72  xbld 0x65 highway curve block            alt  5  xter 0x00  Mesh: levelled pad at 5
+   60,72  xbld 0x1e road                           alt  5  xter 0x00  Mesh: levelled pad at 5
+   61,72  xbld 0x79 building                       alt  5  xter 0x00  Mesh: levelled pad at 5
+   62,72  xbld 0x91 building                       alt  5  xter 0x00  Mesh: levelled pad at 5
+   52,73  xbld 0x67 highway curve block            alt  5  xter 0x00  Mesh: levelled pad at 5
+   53,73  xbld 0x67 highway curve block            alt  5  xter 0x00  Mesh: levelled pad at 5
+   54,73  xbld 0x49 highway straight, east-west    alt  5  xter 0x00  Mesh: levelled pad at 5
+   55,73  xbld 0x4b highway over a road or rail    alt  5  xter 0x00  Mesh: levelled pad at 5
+   56,73  xbld 0x49 highway straight, east-west    alt  5  xter 0x00  Mesh: levelled pad at 5
+   57,73  xbld 0x49 highway straight, east-west    alt  5  xter 0x00  Mesh: levelled pad at 5
+   58,73  xbld 0x65 highway curve block            alt  5  xter 0x00  Mesh: levelled pad at 5
+   59,73  xbld 0x65 highway curve block            alt  5  xter 0x00  Mesh: levelled pad at 5
+   60,73  xbld 0x25 road                           alt  5  xter 0x00  Mesh: levelled pad at 5
+   61,73  xbld 0x1d road                           alt  5  xter 0x00  Mesh: levelled pad at 5
+   62,73  xbld 0x1d road                           alt  5  xter 0x00  Mesh: levelled pad at 5
+   52,74  xbld 0x08 trees or rubble                alt  5  xter 0x00  Mesh: ground, NW 5 NE 5 SE 5 SW 5
+   53,74  xbld 0x09 trees or rubble                alt  5  xter 0x00  Mesh: ground, NW 5 NE 5 SE 5 SW 5
+   54,74  xbld 0x08 trees or rubble                alt  5  xter 0x00  Mesh: ground, NW 5 NE 5 SE 5 SW 5
+   55,74  xbld 0x2b road                           alt  5  xter 0x00  Mesh: levelled pad at 5
+   56,74  xbld 0x5e on-ramp                        alt  5  xter 0x00  Mesh: levelled pad at 5
+   57,74  xbld 0x08 trees or rubble                alt  5  xter 0x00  Mesh: ground, NW 5 NE 5 SE 5 SW 5
+   58,74  xbld 0x67 highway curve block            alt  5  xter 0x00  Mesh: levelled pad at 5
+   59,74  xbld 0x67 highway curve block            alt  5  xter 0x00  Mesh: levelled pad at 5
+   60,74  xbld 0x65 highway curve block            alt  5  xter 0x00  Mesh: levelled pad at 5
+   61,74  xbld 0x65 highway curve block            alt  5  xter 0x00  Mesh: levelled pad at 5
+   62,74  xbld 0x93 building                       alt  5  xter 0x00  Mesh: levelled pad at 5
+   52,75  xbld 0x0a trees or rubble                alt  4  xter 0x01  Mesh: ground, NW 5 NE 5 SE 4 SW 4
+   53,75  xbld 0x0a trees or rubble                alt  4  xter 0x01  Mesh: ground, NW 5 NE 5 SE 4 SW 4
+   54,75  xbld 0x08 trees or rubble                alt  4  xter 0x01  Mesh: ground, NW 5 NE 5 SE 4 SW 4
+   55,75  xbld 0x1f road                           alt  4  xter 0x01  Mesh: sloped plane, NW 5 NE 5 SE 4 SW 4
+   56,75  xbld 0x08 trees or rubble                alt  4  xter 0x01  Mesh: ground, NW 5 NE 5 SE 4 SW 4
+   57,75  xbld 0x08 trees or rubble                alt  4  xter 0x08  Mesh: ground, NW 5 NE 5 SE 5 SW 4
+   58,75  xbld 0x67 highway curve block            alt  5  xter 0x00  Mesh: levelled pad at 5
+   59,75  xbld 0x67 highway curve block            alt  5  xter 0x00  Mesh: levelled pad at 5
+   60,75  xbld 0x65 highway curve block            alt  5  xter 0x00  Mesh: levelled pad at 5
+   61,75  xbld 0x65 highway curve block            alt  5  xter 0x00  Mesh: levelled pad at 5
+   62,75  xbld 0x93 building                       alt  5  xter 0x00  Mesh: levelled pad at 5
+   52,76  xbld 0x09 trees or rubble                alt  4  xter 0x00  Mesh: ground, NW 4 NE 4 SE 4 SW 4
+   53,76  xbld 0x09 trees or rubble                alt  4  xter 0x00  Mesh: ground, NW 4 NE 4 SE 4 SW 4
+   54,76  xbld 0x08 trees or rubble                alt  4  xter 0x00  Mesh: ground, NW 4 NE 4 SE 4 SW 4
+   55,76  xbld 0x1e road                           alt  4  xter 0x00  Mesh: levelled pad at 4
+   56,76  xbld 0x09 trees or rubble                alt  4  xter 0x00  Mesh: ground, NW 4 NE 4 SE 4 SW 4
+   57,76  xbld 0x08 trees or rubble                alt  4  xter 0x0c  Mesh: ground, NW 4 NE 5 SE 4 SW 4
+   58,76  xbld 0x07 trees or rubble                alt  4  xter 0x0d  Mesh: ground, NW 5 NE 4 SE 5 SW 4
+   59,76  xbld 0x60 on-ramp                        alt  5  xter 0x00  Mesh: levelled pad at 5
+   60,76  xbld 0x4a highway straight, north-south  alt  5  xter 0x00  Mesh: levelled pad at 5
+   61,76  xbld 0x4a highway straight, north-south  alt  5  xter 0x00  Mesh: levelled pad at 5
+   62,76  xbld 0x5d on-ramp                        alt  5  xter 0x00  Mesh: levelled pad at 5
+   52,77  xbld 0x1d road                           alt  4  xter 0x00  Mesh: levelled pad at 4
+   53,77  xbld 0x1d road                           alt  4  xter 0x00  Mesh: levelled pad at 4
+   54,77  xbld 0x1d road                           alt  4  xter 0x00  Mesh: levelled pad at 4
+   55,77  xbld 0x2b road                           alt  4  xter 0x00  Mesh: levelled pad at 4
+   56,77  xbld 0x1d road                           alt  4  xter 0x00  Mesh: levelled pad at 4
+   57,77  xbld 0x1d road                           alt  4  xter 0x00  Mesh: levelled pad at 4
+   58,77  xbld 0x22 road                           alt  4  xter 0x04  Mesh: sloped plane, NW 4 NE 5 SE 5 SW 4
+   59,77  xbld 0x2b road                           alt  5  xter 0x00  Mesh: levelled pad at 5
+   60,77  xbld 0x4c highway over a road or rail    alt  5  xter 0x00  Mesh: levelled pad at 5
+   61,77  xbld 0x4c highway over a road or rail    alt  5  xter 0x00  Mesh: levelled pad at 5
+   62,77  xbld 0x2b road                           alt  5  xter 0x00  Mesh: levelled pad at 5
+highway band 1: 32 of its 296 tiles are in the area
+  walked from 101,62, 23 fitted nodes, 38 pieces
+  fitted nodes near the area (x,y radius): (61.00,79.00) r2.00 (61.00,75.00) r1.00 (59.00,75.00) r1.00 (59.00,73.00) r1.00 (53.00,73.00) r2.00 (53.00,69.00) r1.01
+deck stations in the area: 365 (the loft's band 2), first (61.27,78.00) s 60.54 z 6.03, last (53.00,70.00) s 74.44 z 6.03
+road segment 754 from 55,67 to 55,70: 1 of its 4 tiles are in the area, 1 pieces, 2 fitted nodes
+road segment 757 from 62,67 to 62,70: 1 of its 4 tiles are in the area, 1 pieces, 2 fitted nodes
+road segment 772 from 55,70 to 60,70: 6 of its 6 tiles are in the area, 1 pieces, 2 fitted nodes
+road segment 773 from 55,70 to 55,71: 2 of its 2 tiles are in the area, 1 pieces, 2 fitted nodes
+road segment 774 from 55,70 to 54,71: 3 of its 3 tiles are in the area, 3 pieces, 3 fitted nodes
+road segment 775 from 60,70 to 62,70: 3 of its 3 tiles are in the area, 1 pieces, 2 fitted nodes
+road segment 776 from 60,70 to 64,73: 6 of its 8 tiles are in the area, 3 pieces, 3 fitted nodes
+road segment 777 from 62,70 to 64,70: 1 of its 3 tiles are in the area, 1 pieces, 2 fitted nodes
+road segment 806 from 51,71 to 54,71: 3 of its 4 tiles are in the area, 1 pieces, 2 fitted nodes
+road segment 807 from 54,71 to 55,71: 2 of its 2 tiles are in the area, 1 pieces, 2 fitted nodes
+road segment 808 from 55,71 to 55,74: 4 of its 4 tiles are in the area, 1 pieces, 2 fitted nodes
+road segment 837 from 55,74 to 55,77: 4 of its 4 tiles are in the area, 1 pieces, 2 fitted nodes
+road segment 868 from 51,77 to 55,77: 4 of its 5 tiles are in the area, 1 pieces, 2 fitted nodes
+road segment 870 from 55,77 to 59,77: 5 of its 5 tiles are in the area, 1 pieces, 2 fitted nodes
+road segment 871 from 55,77 to 55,82: 1 of its 6 tiles are in the area, 1 pieces, 2 fitted nodes
+road segment 872 from 59,77 to 62,77: 4 of its 4 tiles are in the area, 1 pieces, 2 fitted nodes
+road segment 873 from 62,77 to 64,77: 1 of its 3 tiles are in the area, 1 pieces, 2 fitted nodes
+on-ramp 56,71: ON to the deck, on the deck's centreline at 56.50,73.00, along 1,0, toward the deck 0,1, 3 tiles of lane drop
+on-ramp 56,74: OFF the deck, on the deck's centreline at 56.50,73.00, along -1,0, toward the deck 0,-1, 3 tiles of lane drop
+on-ramp 59,76: ON to the deck, on the deck's centreline at 61.00,76.50, along 0,-1, toward the deck 1,0, 2 tiles of lane drop
+on-ramp 62,76: OFF the deck, on the deck's centreline at 61.00,76.50, along 0,1, toward the deck -1,0, 2 tiles of lane drop
+junction 55,70: N stop, E none, S stop, W none
+junction 60,70: N none, E none, S stop, W none
+junction 62,70: N stop, E none, S none, W none
+junction 54,71: N stop, E none, S none, W none
+junction 55,71: N none, E none, S none, W stop
+junction 55,77: N none, E stop, S none, W stop
+end of area

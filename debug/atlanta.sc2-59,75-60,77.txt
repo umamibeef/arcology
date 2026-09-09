@@ -1,0 +1,22 @@
+area  (unnamed)  cols 59..60  rows 75..77  (2 x 3 tiles)  rotation 0
+  north is decreasing row, east is decreasing col; a label is col,row
+tiles  (.. ground  ,, trees or rubble  ~~ water  rr road  tt rail  pp power  xx crossing  bb building; a highway piece by its id)
+       59  60
+   75  67  65
+   76  60  4a
+   77  rr  4c
+what stands there (every tile that is not plain ground)
+   59,75  xbld 0x67 highway curve block            alt  5  xter 0x00  Mesh: levelled pad at 5
+   60,75  xbld 0x65 highway curve block            alt  5  xter 0x00  Mesh: levelled pad at 5
+   59,76  xbld 0x60 on-ramp                        alt  5  xter 0x00  Mesh: levelled pad at 5
+   60,76  xbld 0x4a highway straight, north-south  alt  5  xter 0x00  Mesh: levelled pad at 5
+   59,77  xbld 0x2b road                           alt  5  xter 0x00  Mesh: levelled pad at 5
+   60,77  xbld 0x4c highway over a road or rail    alt  5  xter 0x00  Mesh: levelled pad at 5
+highway band 1: 4 of its 296 tiles are in the area
+  walked from 101,62, 18 fitted nodes, 30 pieces
+  fitted nodes near the area (x,y radius): (61.00,77.50) r1.43 (61.00,76.50) r1.43 (59.67,74.33) r4.88
+deck stations in the area: 63 (the loft's band 2), first (61.00,76.90) s 59.15 z 6.03, last (60.08,75.03) s 61.27 z 6.03
+road segment 870 from 55,77 to 59,77: 1 of its 5 tiles are in the area, 1 pieces, 2 fitted nodes
+road segment 872 from 59,77 to 62,77: 2 of its 4 tiles are in the area, 1 pieces, 2 fitted nodes
+on-ramp 59,76: ON to the deck, on the deck's centreline at 61.00,76.50, along 0,-1, toward the deck 1,0, 2 tiles of lane drop
+end of area

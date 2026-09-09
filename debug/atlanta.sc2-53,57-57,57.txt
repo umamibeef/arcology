@@ -1,0 +1,13 @@
+area  (unnamed)  cols 53..57  rows 57..57  (5 x 1 tiles)  rotation 0
+  north is decreasing row, east is decreasing col; a label is col,row
+tiles  (.. ground  ,, trees or rubble  ~~ water  rr road  tt rail  pp power  xx crossing  bb building; a highway piece by its id)
+       53  54  55  56  57
+   57  bb  bb  rr  bb  bb
+what stands there (every tile that is not plain ground)
+   53,57  xbld 0xd4 building                       alt  4  xter 0x00  Mesh: levelled pad at 4
+   54,57  xbld 0xd4 building                       alt  4  xter 0x00  Mesh: levelled pad at 4
+   55,57  xbld 0x1e road                           alt  4  xter 0x00  Mesh: levelled pad at 4
+   56,57  xbld 0x8a building                       alt  4  xter 0x00  Mesh: levelled pad at 4
+   57,57  xbld 0x7a building                       alt  4  xter 0x00  Mesh: levelled pad at 4
+road segment 624 from 55,54 to 55,61: 1 of its 8 tiles are in the area, 1 pieces, 2 fitted nodes
+end of area
