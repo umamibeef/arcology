@@ -10,7 +10,7 @@ layer to be wrong:
     survive, and the two copies would drift apart the moment either
     changed.  This is the one that matters most.
   * a CONSTANT changes the build.  A script that only deepens the
-    crossing band must move the counts; a proxy table that swallows the
+    meet band must move the counts; a proxy table that swallows the
     write shows up here and nowhere else.
   * a RULE changes the build.  A script that signals every leg must move
     the counts too, or the hooks are dead.
@@ -39,7 +39,7 @@ NONE = "arc.rules.control = nil\n"
 CONST = "arc.geo.cross_deep = 0.36\n"
 
 #  A rule that raises before it draws anything, in the busiest place
-#  there is: every road surface in the city comes through arc.rules.strip.
+#  there is: every line surface in the city comes through arc.rules.strip.
 RAISES = """
 arc.rules.strip = function (s)
     local bad
@@ -53,7 +53,7 @@ arc.rules.control = function (at)
     for e = 1, 4 do if at.arms[e] then c[e] = 2 end end
     return c
 end
-arc.rules.crossing = function (m)
+arc.rules.stripe = function (m)
     if m.control == 0 then return 0 end
     return math.min(m.want, m.straight, 0.35 * m.room)
 end
@@ -76,7 +76,7 @@ def counts(out):
     """The lines that say what was built, keyed by their first word."""
     keep = {}
     for line in out.splitlines():
-        m = re.match(r"^(crossings|walkways|outlines|overlap|lanes)\b(.*)$", line)
+        m = re.match(r"^(meets|walkways|outlines|overlap|lanes)\b(.*)$", line)
         if m:
             keep.setdefault(m.group(1), []).append(m.group(2))
     return keep
@@ -111,7 +111,7 @@ def main():
     if none_rc != 0:
         print("lua: clearing a rule made the build fail")
         return 1
-    line = " ".join(counts(none_out).get("crossings", []))
+    line = " ".join(counts(none_out).get("meets", []))
     m = re.search(r"(\d+) junction mouths; (\d+) uncontrolled", line)
     if not m or m.group(1) != m.group(2):
         print("lua: clearing arc.rules.control left junctions controlled --")
@@ -130,7 +130,7 @@ def main():
         if rc != 0:
             print("lua:", what, "made the mesh unsound")
             return 1
-        if counts(out).get("crossings") == counts(bare).get("crossings"):
+        if counts(out).get("meets") == counts(bare).get("meets"):
             print("lua:", what, "changed nothing;", why)
             return 1
 

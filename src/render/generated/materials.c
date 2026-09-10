@@ -1,4 +1,4 @@
-/*  GENERATED from src/render/mesh/materials.def -- do not edit. */
+/*  GENERATED from src/render/mesh/materials.def.  Do not edit. */
 #include "materials.h"
 
 const RMaterial r_materials[] = {
@@ -9,20 +9,20 @@ const RMaterial r_materials[] = {
     {"seabed", MAT_SEABED},
     {"earth", MAT_EARTH},
     {"surface", MAT_SURFACE},
-    {"road", MAT_ROAD},
+    {"line", MAT_LINE},
     {"prop", MAT_PROP},
     {"lamp", MAT_LAMP},
     {"zebra", MAT_ZEBRA},
-    {"rail", MAT_RAIL},
+    {"thread", MAT_THREAD},
     {"skirt", MAT_SKIRT},
     {"walk", MAT_WALK},
-    {"rail_x", MAT_RAIL_X},
+    {"thread_x", MAT_THREAD_X},
     {"vehicle", MAT_VEHICLE},
     {"xpanel", MAT_XPANEL},
     {"xapproach", MAT_XAPPROACH},
     {"pier", MAT_PIER},
-    {"hiway", MAT_HIWAY},
-    {"hiway_lane", MAT_HIWAY_LANE},
+    {"band", MAT_BAND},
+    {"band_lane", MAT_BAND_LANE},
     {"zone", MAT_ZONE},
     {"hilite", MAT_HILITE},
 };

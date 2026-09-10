@@ -1,7 +1,7 @@
---  second_train.lua -- a level crossing's second-train sign (spec 3.15).
+--  second_train.lua -- a level meet's second-train sign (spec 3.15).
 --
---  A post with a yellow diamond on it, one facing each of the crossing's
---  four footway corners where the line carries two tracks or more.
+--  A post with a yellow diamond on it, one facing each of the meet's
+--  four margin corners where the line carries two threads or more.
 
 arc.model.define("second_train", {
     p = {

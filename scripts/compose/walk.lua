@@ -14,7 +14,7 @@
 --  drawing a SIDEWAYS STEP -- and as two vertices that is two elbows a
 --  tile apart.  Drawn instead as one diagonal it is a 45 degree line
 --  between the middles of the two tile edges it crosses, with a 45
---  degree corner at each end.  A road's band holds on that line; a wider
+--  degree corner at each end.  A line's band holds on that line; a wider
 --  band does not, so only a narrow one is stepped this way.
 
 --  Half a tile of straight stays either side of the diagonal: a corner a

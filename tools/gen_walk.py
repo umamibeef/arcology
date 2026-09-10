@@ -1,4 +1,4 @@
-"""Recover the road-walk's transition table by executing its dispatch.
+"""Recover the line-walk's transition table by executing its dispatch.
 
    WARNING, and the reason tools/walk_deps.py exists: this probes with a
    value in ONE layer and zero in the others, so it can only represent a
@@ -102,7 +102,7 @@ def _emit_one(w, name, t, comment):
 
 
 def emit(w):
-    w('/*  The road walk in $245E8 is a state machine: it carries a transport')
+    w('/*  The line walk in $245E8 is a state machine: it carries a transport')
     w(' *  mode, steps onto a tile, and a fourteen-case switch at $247EC picks')
     w(' *  the new mode, the step cost, and whether the walk moved or arrived.')
     w(' *  Fourteen cases of overlapping range tests is a great deal of')

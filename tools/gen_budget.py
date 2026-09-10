@@ -69,7 +69,7 @@ def masks():
 
     Recovered by running the budget pass at $263C8 once per tile type with
     a census holding a single tile, because the fifteen nested range tests
-    there overlap: bridges and crossings are charged to two departments at
+    there overlap: bridges and meets are charged to two departments at
     once, which is easy to miss by eye.
     """
     m = membership(probe=1, lo=0, hi=0x70)

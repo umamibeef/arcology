@@ -1,7 +1,7 @@
-/*  paths.c -- finding the art, the cities, and one named city.  None of it
- *  is configuration: the game looks beside its binary, then up towards the
- *  repository root, then in the working directory, so a fresh clone runs
- *  with no arguments at all. */
+/*  paths.c: finding the art, the cities, and one named city.  None of it
+ *  is configuration: the game looks beside its binary, then up towards
+ *  the repository root, then in the working directory.  So a fresh clone
+ *  runs with no arguments at all. */
 #include <SDL3/SDL.h>
 
 #include "fs.h"
@@ -23,9 +23,9 @@ int looks_like_assets(const char *p)
 }
 
 /*  Beside the binary, then up towards the repo root, then the working
- *  directory.  An explicit --assets never reaches here: the option parser
- *  fills the path itself and this only runs when none was given, so
- *  reading --assets again here was a second parser for one argument. */
+ *  directory.  An explicit --assets never reaches here: the option
+ *  parser fills the path itself and this only runs when none was given.
+ *  So reading --assets again here was a second parser for one argument. */
 int find_assets(char *out, size_t n, const char *argv0)
 {
     char        base[1024], probe[1024];
@@ -172,7 +172,7 @@ int scan_cities(RUiState *s)
         s->n_cities++;
     }
     closedir(d);
-    for (i = 1; i < s->n_cities; ++i) /* the list is short; keep it simple */
+    for (i = 1; i < s->n_cities; ++i) /* the list is short.  Keep it simple */
         for (j = i; j > 0 && strcasecmp(s->city_list[j - 1], s->city_list[j]) > 0;
              --j)
         {
@@ -184,8 +184,8 @@ int scan_cities(RUiState *s)
     return s->n_cities;
 }
 
-/*  A city argument may be a path or just a name; a name is looked for in
- *  the cities directory. */
+/*  A city argument may be a path or just a name.  A name is looked for
+ *  in the cities directory. */
 int resolve_city(char *out, size_t n, const char *arg, const char *dir)
 {
     char probe[1024];

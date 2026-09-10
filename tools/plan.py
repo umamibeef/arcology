@@ -21,14 +21,14 @@ allows me to inspect a city?").
 
     the ground        green, darker low, lighter high
     water             blue
-    a road tile       warm grey        a rail tile      brown-grey
-    a highway tile    pale blue        a building       dark slate
+    a line tile       warm grey        a thread tile      brown-grey
+    a band tile    pale blue        a building       dark slate
     a gate            a blue tick across the corridor
     the centreline    yellow, the band's edges grey -- red outside the corridor
     a corner          red where it sweeps, white where it has no room
     a line            cyan for a straight, magenta for a slope: the tangent
                       fit's runs, which do not bend; the joins are between
-    a red band edge   the road over a building, a network or water
+    a red band edge   the line over a building, a network or water
     a junction        orange: the outline its arms cut out
 """
 import os
@@ -154,7 +154,7 @@ def parse(text):
             cur["prims"].append((int(t[1]), tuple(float(v) for v in t[2].split(",")),
                                  tuple(float(v) for v in t[3].split(","))))
         elif line.startswith("SPIRAL"):
-            # a ramp's helix: centre, radius, the angles it turns through
+            # a spur's helix: centre, radius, the angles it turns through
             t = line.split()
             d["spirals"].append((tuple(float(v) for v in t[1].split(",")), float(t[2]), float(t[3]), float(t[4])))
     return d
@@ -207,11 +207,11 @@ def tile_colour(b, t, shade):
     if t >= 0x10:
         base = (46, 96, 156)  # water
     elif 0x1D <= b <= 0x2B or 0x43 <= b <= 0x46:
-        base = (150, 148, 142)  # a road
+        base = (150, 148, 142)  # a line
     elif 0x2C <= b <= 0x3A or b in (0x47, 0x48):
-        base = (152, 126, 106)  # a rail
+        base = (152, 126, 106)  # a thread
     elif 0x49 <= b <= 0x68:
-        base = (140, 166, 192)  # a highway
+        base = (140, 166, 192)  # a band
     elif b >= 0x70:
         base = (86, 90, 98)  # a building
     elif 0x0E <= b <= 0x1C:
@@ -274,7 +274,7 @@ def main():
         tiles = set(s["tiles"])
         # The path as it is actually built: straight runs joined by the
         # arc each corner was given (RAD).  Drawing the raw polyline
-        # instead showed sharp vertices the road does not have.
+        # instead showed sharp vertices the line does not have.
         for kind, a, b in s.get("prims", []):
             cv.line(X(a[0]), Y(a[1]), X(b[0]), Y(b[1]), (80, 220, 230) if kind == 0 else (230, 90, 210),
                     3 if scale >= 8 else 1)
@@ -287,7 +287,7 @@ def main():
             if scale >= 8:
                 for sgn in (-1, 1):
                     # red where the band's edge has left the corridor: the
-                    # road has to fit inside the tiles the segment owns
+                    # line has to fit inside the tiles the segment owns
                     steps = max(2, int(ln * 8))
                     for k in range(steps):
                         t0, t1 = k / steps, (k + 1) / steps

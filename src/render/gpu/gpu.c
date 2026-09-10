@@ -1,8 +1,9 @@
-/*  gpu.c -- the device: making it, and putting data on it.  What the
- *  renderer asks of it is in gpu.h; drawing with it is gpu/frame.c. */
+/*  gpu.c: the device: making it, and putting data on it.  What the
+ *  renderer asks of it is in gpu.h.  Drawing with it is gpu/frame.c. */
 #include "gpu/internal.h"
 #include "log.h"
 #include "opt.h"
+#include "script.h"
 #include "project.h"
 
 #include <math.h>
@@ -143,7 +144,7 @@ static SDL_GPUGraphicsPipeline *make_pipe(RGpu *g, const char *vs_name, const ch
     ct.blend_state.enable_blend = blend ? true : false;
     if (blend)
     {
-        /*  Over the frame by the source's alpha; the target's alpha is
+        /*  Over the frame by the source's alpha.  The target's alpha is
          *  the palette index the resolve pass reads, so it is kept. */
         ct.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
         ct.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
@@ -360,9 +361,14 @@ RGpu *gpu_create(SDL_Window *win, const RAtlas *a, char *err, size_t err_len)
         g->depth_fmt = SDL_GPU_TEXTUREFORMAT_D16_UNORM;
     R_DBG("gpu", "depth %s", g->depth_fmt == SDL_GPU_TEXTUREFORMAT_D32_FLOAT ? "D32_FLOAT" : "D16_UNORM");
 
-    /*  Pipelines: the terrain writes depth, the sprites test it, the
-     *  shadows test it into the mask, the water is terrain with its own
-     *  fragment shader, the mesh is geometry, the resolve needs none. */
+    /*  Pipelines.
+     *
+     *      The terrain writes depth.
+     *      The sprites test it.
+     *      The shadows test it into the mask.
+     *      The water is terrain with its own fragment shader.
+     *      The mesh is geometry.
+     *      The resolve needs none. */
     g->pipe_terrain = make_pipe(g, "sprite.vert", "sprite.frag", g->color_fmt, 1, 1, L_INSTANCE, 0);
     g->pipe_sprite  = make_pipe(g, "sprite.vert", "sprite.frag", g->color_fmt, 1, 0, L_INSTANCE, 0); /* the painter: the art tests, the ground wrote      */
     g->pipe_sprite_depth = make_pipe(g, "sprite.vert", "sprite.frag", g->color_fmt, 1, 1, L_INSTANCE, 0); /* the camera's depth: the art writes it, it stands in the world */
@@ -399,7 +405,7 @@ RGpu *gpu_create(SDL_Window *win, const RAtlas *a, char *err, size_t err_len)
     }
 
     /*  The atlases: palette indices as they are, one R8 texture per art
-     *  set.  Nothing is resolved to colour on the CPU. */
+     *  set.  Nothing is resolved to color on the CPU. */
     for (i = 0; i < a->n_levels; ++i)
     {
         const RAtlasLevel *l = &a->level[i];
@@ -426,10 +432,10 @@ RGpu *gpu_create(SDL_Window *win, const RAtlas *a, char *err, size_t err_len)
         return NULL;
     }
     gpu_set_palette(g, a);
-    /*  The sun, fitted to the slope sprites: of the four plain slopes at
-     *  32 px the one facing south (code 1) is the brightest at a mean
-     *  luminance of 135, then east 88, north 84 and west 71, so the light
-     *  comes from the south-east, over the viewer's shoulder. */
+    /*  The sun, fitted to the slope sprites.  Of the four plain slopes
+     *  at 32 px the one facing south (code 1) is the brightest.  Its
+     *  mean luminance is 135, then east 88, north 84 and west 71.  So
+     *  the light comes from the south-east, over the viewer's shoulder. */
     gpu_set_light(g, 0.35f, 0.85f, 0.9f, 0.5f, 0.6f);
     return g;
 }
@@ -494,7 +500,7 @@ void gpu_destroy(RGpu *g)
 }
 
 /*  A palette entry is water when it is strongly blue.  In the water and
- *  shore sprites those are 79, 130, 184..188 and 192..195; the beach is
+ *  shore sprites those are 79, 130, 184..188 and 192..195.  The beach is
  *  104 and 106.  The animated runs cycle blues among blues, so the mark
  *  survives the animation.  Only the water sprites' pipeline reads it. */
 static int is_water_colour(const uint8_t *rgb)
@@ -534,11 +540,11 @@ void gpu_set_light(RGpu *g, float x, float y, float z, float ambient, float diff
 }
 
 /*  Terrain art: the land shapes 256..269 (269 is also the map-edge dirt
- *  column), which the mesh replaces; and the water art 270..290 -- open
+ *  column), which the mesh replaces.  And the water art 270..290.  Open
  *  water, the shore shapes, the water column 284 and the channel pieces
- *  285..290 that XTER 0x40..0x45 draw -- which the water shader paints
- *  inside.  Everything else the terrain pass paints -- lot tints,
- *  data-view tints, the power markers -- stays a sprite whatever is
+ *  285..290 that XTER 0x40..0x45 draw.  Which the water shader paints
+ *  inside.  Everything else the terrain pass paints: lot tints,
+ *  data-view tints, the power markers: stays a sprite whatever is
  *  switched on. */
 static uint8_t terrain_kind(int32_t tile)
 {
@@ -588,6 +594,10 @@ int gpu_set_ops(RGpu *g, const ROpList *ops, const RSweep *sw)
         g->inst_cap = (uint32_t)cap;
     }
     g->n_inst = 0;
+    /*  Which tiles the MESH draws the art of.  Read once for the sweep,
+     *  since a table lookup by name for every sprite of every frame is
+     *  the same answer over and over. */
+    const uint8_t *meshed = script_bytes("meshed_tiles");
     for (k = 0; k < ops->n; ++k)
     {
         const ROp   *op = &ops->v[k];
@@ -604,9 +614,9 @@ int gpu_set_ops(RGpu *g, const ROpList *ops, const RSweep *sw)
         in->src[1] = (int32_t)t->y;
         in->src[2] = op->flip;
         in->src[3] = op->stencil;
-        /*  misc[1] is the road's width for a stencilled car and, for
-         *  every other op, the tile's altitude: what sprite.vert needs to
-         *  put the sprite back where its tile went when the camera is
+        /*  misc[1] is the line's width for a stencilled car and, for
+         *  every other op, the tile's altitude.  What sprite.vert needs
+         *  to put the sprite back where its tile went when the camera is
          *  off the original's own. */
         in->misc[1] = (float)op->alt;
         in->misc[2] = in->misc[3] = 0.0f;
@@ -644,26 +654,27 @@ int gpu_set_ops(RGpu *g, const ROpList *ops, const RSweep *sw)
         else
         {
             /*  The underground lattice is emitted as a plain sprite, not
-             *  as terrain; it is the empty tile's art all the same. */
+             *  as terrain.  It is the empty tile's art all the same. */
             int32_t sh         = op->shape - l->id_base;
-            g->kind[g->n_inst] = (sh >= 305 && sh <= 318)                                     ? K_UG_LATTICE
-                                 : ((sh >= 0x0E && sh <= 0x50) || (sh >= 0x5D && sh <= 0x68)) ? K_ROAD_ART
-                                 : (op->stencil >= 0)                                         ? K_CAR
-                                 : (sh >= 374 && sh <= 378)                                   ? K_TRAIN
-                                 : (sh >= 0xC6 && sh <= 0xFF)                                 ? K_LANDMARK
-                                                                                              : K_SPRITE;
+            g->kind[g->n_inst] = (sh >= 305 && sh <= 318)                       ? K_UG_LATTICE
+                                 : (sh >= 0 && sh < 256 && meshed[sh])          ? K_LINE_ART
+                                 : (op->stencil >= 0)                           ? K_CAR
+                                 : (sh >= 374 && sh <= 378)                     ? K_TRAIN
+                                 : (sh >= 0xC6 && sh <= 0xFF)                   ? K_LANDMARK
+                                                                                : K_SPRITE;
         }
-        /*  misc[0]: the op's painter's slot times 256, plus the tile's
-         *  altitude in levels times four, plus one for art that stands -- a building, a tree, a car, a pole, a
-         *  bridge -- and nothing for art that lies flat -- the land's
-         *  slopes, the ground, the water, the lattice, a silhouette, and
-         *  a road, rail or power piece no taller than a tile's diamond.
-         *  sprite.vert's depth reads both; the altitude rides here
-         *  because misc[1] is a stencilled car's road width. */
+        /*  misc[0] is the op's painter's slot times 256.  It adds the
+         *  tile's altitude in levels times four.  It adds one for art
+         *  that stands: a building, a tree, a car, a pole or a bridge.
+         *  It adds nothing for art that lies flat.  That is the land's
+         *  slopes, the ground, the water, the lattice and a silhouette.
+         *  It also covers a line, thread or power piece no taller than a
+         *  tile's diamond. sprite.vert's depth reads both.  The altitude
+         *  rides here because misc[1] is a stencilled car's line width. */
         {
             uint8_t kd   = g->kind[g->n_inst];
             int     flat = kd == K_TERRAIN || kd == K_LAND_ART || kd == K_WATER_ART || kd == K_WATER_COL || kd == K_WATER_EDGE || kd == K_UG_LATTICE || kd == K_SHADOW ||
-                       (kd == K_ROAD_ART && (int32_t)t->h <= (int32_t)l->tile_h + 1);
+                       (kd == K_LINE_ART && (int32_t)t->h <= (int32_t)l->tile_h + 1);
             in->misc[0]  = 256.0f * (float)op->order + 4.0f * (float)op->alt + (flat ? 0.0f : 1.0f); /* exact in a float below 2^24 */
         }
         {
@@ -704,8 +715,8 @@ int gpu_set_ops(RGpu *g, const ROpList *ops, const RSweep *sw)
 
 #define GPU_SLOTS (3 * MESH_CHUNKS)
 
-/*  A slot's room for a range: an eighth over and a floor, so a chunk can
- *  grow a little before the buffer is laid out again; none under
+/*  A slot's room for a range: an eighth over and a floor.  So a chunk
+ *  can grow a little before the buffer is laid out again.  None under
  *  --gpu-tight, which lays it out at every upload to exercise that. */
 static uint32_t slot_room(uint32_t n)
 {
@@ -736,9 +747,10 @@ static void mesh_ranges(const RMesh *m, uint32_t *first, uint32_t *count, const 
     }
 }
 
-/*  Every slot laid out afresh, in order, each with its room; a buffer too
- *  small for the total is made anew.  Either way every slot is uploaded
- *  after this: the old contents are in the wrong places, or gone. */
+/*  Every slot laid out afresh, in order, each with its room.  A buffer
+ *  too small for the total is made anew.  Either way every slot is
+ *  uploaded after this: the old contents are in the wrong places, or
+ *  gone. */
 static int slots_lay(RGpu *g, const uint32_t *count)
 {
     uint32_t pos = 0;
@@ -766,9 +778,12 @@ static int slots_lay(RGpu *g, const uint32_t *count)
     return 0;
 }
 
-/*  The ranges `up` names into their slots: one transfer buffer holding
- *  them end to end, one copy pass, and no cycling, so the other slots'
- *  contents stay. */
+/*  The ranges `up` names into their slots.
+ *
+ *      One transfer buffer holding them end to end.
+ *      One copy pass.
+ *      No cycling.
+ *      So the other slots' contents stay. */
 static int slots_upload(RGpu *g, const uint32_t *first, const uint32_t *count, const RMeshVert *const *list, const uint8_t *up)
 {
     uint32_t               bytes = 0, at = 0;
@@ -837,8 +852,8 @@ int gpu_set_mesh(RGpu *g, const RMesh *m)
         return 0;
     }
     mesh_ranges(m, first, count, list);
-    /*  The ranges to upload: the changed chunks' -- every one when a
-     *  slot must move, since the layout, or the buffer, is new. */
+    /*  The ranges to upload: the changed chunks'.  Every one when a slot
+     *  must move, since the layout, or the buffer, is new. */
     for (k = 0; k < GPU_SLOTS; ++k)
         if (slot_changed(m, k) && count[k] > g->slot[k].cap)
             lay = 1;

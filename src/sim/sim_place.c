@@ -1,8 +1,9 @@
-/*  sim_place.c -- putting something down deliberately.  What the player
- *  builds and what the city builds for itself: the zone tiers, the upgrade,
- *  the church, the special buildings with their runways and cranes, and the
- *  stations and marinas a zone gets automatically when it grows next to the
- *  right thing.  Split out of sim.c; addresses still point into CODE 2. */
+/*  sim_place.c: putting something down deliberately.  What the player
+ *  builds, and what the city builds for itself.  That is the zone tiers,
+ *  the upgrade and the church.  It is also the special buildings with
+ *  their runways and cranes.  It covers the stations and marinas a zone
+ *  gets when it grows next to the right thing.
+ *  Addresses still point into CODE 2. */
 #include "ext80.h"
 #include "sim.h"
 #include "sim_int.h"
@@ -18,16 +19,16 @@ static const int SCAN_DX[4] = {-1, 0, 2, 0}; /* A5-0x6236 */
 static const int RING_DY[8] = {0, 0, 0, 1, 2, 2, 2, 1};
 static const int RING_DX[8] = {0, -1, -2, -2, -2, -1, 0, 0};
 /* ================================================================== *
- *  $33A90 -- lay a crane and its pier.
+ *  $33A90: lay a crane and its pier.
  *
- *  A seaport reaches into the water: the anchor tile takes the crane
- *  and four tiles running away from it take the pier.  The direction is
- *  whichever of the four neighbours is water, tried east, south, west,
+ *  A seaport reaches into the water: the anchor tile takes the crane and
+ *  four tiles running away from it take the pier.  The direction is
+ *  whichever of the four neighbors is water, tried east, south, west,
  *  north, and the first one wins.
  *
  *  The conditions are strict, which is why a seaport grows slowly: the
  *  four tiles have to be water, empty, on the map, and the last of them
- *  deep enough -- its own altitude plus two no higher than the water
+ *  deep enough: its own altitude plus two no higher than the water
  *  level stored in the same word.  A strip running east or west also
  *  wants an even row, and one running north or south an even column.
  * ================================================================== */
@@ -35,7 +36,7 @@ static const int CRANE_DY[4] = {0, 1, 0, -1};
 static const int CRANE_DX[4] = {1, 0, -1, 0};
 
 /* ================================================================== *
- *  $B0BC  autoRailStationTry -- put a train on this tile if it is rail,
+ *  $B0BC  autoRailStationTry: put a train on this tile if it is rail,
  *  unoccupied, and the city has not already auto-placed five things
  *  this cycle.  A train is three records: one locomotive and two
  *  carriages, chained through byte +2, with the tile tagged in XTXT so
@@ -58,11 +59,11 @@ static int auto_rail_station_try(City *c, int y, int x)
           (b >= 0x6C && b < 0x70) || b == 0x4D || b == 0x4E))
         return 0; /* $B180 */
 
-    /*  $B19A adds $FFD4 in a WORD and then compares SIGNED, so this is
-     *  "bld - $2C <= 9" with 16-bit wraparound: only ids $2C..$35 get
-     *  through, and everything the four range tests above admitted --
-     *  $4D, $4E, the $45 and $6C runs -- is rejected here.  Computing
-     *  the sum in int, without the wrap, rejects everything. */
+    /*  $B19A adds $FFD4 in a WORD and then compares SIGNED.  So this is
+     *  "bld - $2C <= 9" with 16-bit wraparound.  Only ids $2C..$35 get
+     *  through, and everything the four range tests above admitted. $4D,
+     *  $4E, the $45 and $6C runs.  Is rejected here.  Computing the sum
+     *  in int, without the wrap, rejects everything. */
     if ((int16_t)(uint16_t)(c->xbld[y][x] + 0xFFD4) > 9)
         return 0; /* $B19E */
     if (c->xtxt[y][x] != 0)
@@ -90,7 +91,7 @@ static int auto_rail_station_try(City *c, int y, int x)
     thing(c, car1)[4] = (uint8_t)x;
     thing(c, car2)[4] = (uint8_t)x;
 
-    /*  only the locomotive looks ahead; the carriages sit on the tile */
+    /*  only the locomotive looks ahead.  The carriages sit on the tile */
     thing(c, loco)[6] = (uint8_t)(y + STEP_DY[dir]); /* $B2B6 */
     thing(c, car1)[6] = (uint8_t)y;
     thing(c, car2)[6] = (uint8_t)y;
@@ -121,7 +122,7 @@ void grow_to_3x3(City *c, int y, int x, int zone)
 
     for (idx = 0; idx < 4; idx++) /* $33016 */
     {
-        /*  $32C20 -- the four anchors: (y, x), (y-1, x), (y, x+1),
+        /*  $32C20: the four anchors: (y, x), (y-1, x), (y, x+1),
          *  (y-1, x+1). */
         int ay = y - (idx & 1);
         int ax = x + (idx >> 1);
@@ -133,9 +134,9 @@ void grow_to_3x3(City *c, int y, int x, int zone)
         if (i != 8)
             continue; /* $33012, this anchor will not take it */
 
-        /*  $32D58 -- road access.  Four diagonals just outside the
-         *  block, each accepting the road pieces that actually point
-         *  into it.  Any one of them is enough. */
+        /*  $32D58: road access.  Four diagonals just outside the block,
+         *  each accepting the road pieces that actually point into it.
+         *  Any one of them is enough. */
         if (ay > 0 && ay < 127)
         {
             int b = c->xbld[ay - 1][ax + 1];
@@ -163,8 +164,8 @@ void grow_to_3x3(City *c, int y, int x, int zone)
         if (!road)
             continue; /* $32E86 */
 
-        /*  $32E90 -- anything substantial already standing on the ring
-         *  is demolished first, in the same order it was tested. */
+        /*  $32E90: anything substantial already standing on the ring is
+         *  demolished first, in the same order it was tested. */
         for (i = 0; i < 8; i++)
             if (c->xbld[ay + RING_DY[i]][ax + RING_DX[i]] >= 0x8C)
                 clear_footprint(c, ay + RING_DY[i], ax + RING_DX[i]);
@@ -175,7 +176,7 @@ void grow_to_3x3(City *c, int y, int x, int zone)
 }
 
 /* ================================================================== *
- *  $C104  autoMarinaTry -- put a boat on this water tile.  A boat is a
+ *  $C104  autoMarinaTry: put a boat on this water tile.  A boat is a
  *  single record, not a chain: kind $09, a direction taken from the
  *  dice rather than by looking where it can go, and both "ahead" bytes
  *  fixed at 4.
@@ -209,7 +210,7 @@ static int auto_marina_try(City *c, int y, int x)
 }
 
 /* ================================================================== *
- *  $C070  autoMarinaScan -- the four tiles around the marina.  Unlike
+ *  $C070  autoMarinaScan: the four tiles around the marina.  Unlike
  *  the rail version this does NOT stop at the first success: it tries
  *  all four every time, so one marina can put out several boats in a
  *  cycle, up to the budget of four.
@@ -238,7 +239,7 @@ void auto_marina(City *c, int y, int x)
 }
 
 /* ================================================================== *
- *  $B058  autoRailStationScan -- try four tiles around the station.
+ *  $B058  autoRailStationScan: try four tiles around the station.
  * ================================================================== */
 int sim_auto_rail_station(City *c, int y, int x)
 {
@@ -256,18 +257,18 @@ int sim_auto_rail_station(City *c, int y, int x)
 }
 
 /* ================================================================== *
- *  $33844 -- lay a runway.
+ *  $33844: lay a runway.
  *
  *  A runway is a strip of five tiles rather than a footprint, so it has
  *  its own path.  Which way the strip runs comes from the parity of how
  *  many runway tiles the city already has and of the tile's own
- *  coordinates, so successive runways alternate between across and
- *  down and a tile on an even row and an even column takes neither.
+ *  coordinates.  So successive runways alternate between across and down
+ *  and a tile on an even row and an even column takes neither.
  *
  *  The walk happens twice.  The first pass only checks: five tiles that
- *  are on the map and in the right zone, and a tile that is already
- *  runway does not count toward the five, so an existing strip is
- *  extended rather than counted twice.  The second pass lays them.
+ *  are on the map and in the right zone.  A tile that is already runway
+ *  does not count toward the five, so an existing strip is extended
+ *  rather than counted twice.  The second pass lays them.
  *
  *  XBIT bit 1 carries the tile's orientation, and $DD and $DE are the
  *  two halves of the sprite.  A tile already laid the wrong way round
@@ -278,7 +279,7 @@ static int place_runway(City *c, int y, int x, int zone)
     int ystep = 0, xstep = 0;
     int yy, xx, n, want;
 
-    /*  $33846 -- the direction.  Odd runway count prefers down, even
+    /*  $33846: the direction.  Odd runway count prefers down, even
      *  prefers across, and each falls back to the other. */
     if (c->census[0xDD] & 1)
     {
@@ -299,7 +300,7 @@ static int place_runway(City *c, int y, int x, int zone)
             return 0; /* $33894 */
     }
 
-    /*  $3389A -- the checking pass */
+    /*  $3389A: the checking pass */
     yy = y;
     xx = x;
     for (n = 0; n < 5;)
@@ -308,19 +309,19 @@ static int place_runway(City *c, int y, int x, int zone)
             return 0; /* $338C0 */
         if ((c->xzon[yy][xx] & 0x0F) != zone)
             return 0; /* $338E2 */
-        /*  $338FC -- a tile that is already runway is stepped over
-         *  without counting, so the strip runs past it */
+        /*  $338FC: a tile that is already runway is stepped over without
+         *  counting, so the strip runs past it */
         if (c->xbld[yy][xx] != 0xDD && c->xbld[yy][xx] != 0xDE)
             n++;
         yy += ystep;
         xx += xstep;
     }
 
-    /*  $3391C -- which of the two sprites this strip wants, from its
+    /*  $3391C: which of the two sprites this strip wants, from its
      *  direction and the map rotation */
     want = ((ystep != 0) != ((c->rotation & 1) != 0));
 
-    /*  $3393E -- the laying pass */
+    /*  $3393E: the laying pass */
     yy = y;
     xx = x;
     for (n = 0; n < 5;)
@@ -329,13 +330,13 @@ static int place_runway(City *c, int y, int x, int zone)
 
         if (b == 0xDD || b == 0xDE)
         {
-            /*  $33970 -- already runway, so it does not count */
+            /*  $33970: already runway, so it does not count */
             if (b == 0xDD)
             {
                 int have = (c->xbit[yy][xx] & 0x02) ? 1 : 0; /* $3398E */
                 if (have != want)
                 {
-                    /*  $339A8 -- laid the wrong way round */
+                    /*  $339A8: laid the wrong way round */
                     sim_set_tile(c, yy, xx, 0xDE);
                     c->xzon[yy][xx] = (uint8_t)((c->xzon[yy][xx] & 0x0F) | 0xF0);
                     if (zone != 7)
@@ -366,7 +367,7 @@ static int place_crane(City *c, int y, int x, int zone)
 {
     int d, yy, xx, n, want;
 
-    /*  $33A94 -- which way is the water */
+    /*  $33A94: which way is the water */
     for (d = 0; d < 4; d++)
     {
         int ny = y + CRANE_DY[d], nx = x + CRANE_DX[d];
@@ -378,14 +379,14 @@ static int place_crane(City *c, int y, int x, int zone)
     if (d == 4)
         return 0; /* $33AD4, nothing to reach into */
 
-    /*  $33ADA -- a pier running across wants an even row, one running
-     *  down an even column */
+    /*  $33ADA: a pier running across wants an even row, one running down
+     *  an even column */
     if (CRANE_DX[d] != 0 && (y & 1))
         return 0;
     if (CRANE_DY[d] != 0 && (x & 1))
         return 0;
 
-    /*  $33B12 -- four tiles of open water, and nothing already on them */
+    /*  $33B12: four tiles of open water, and nothing already on them */
     yy = y;
     xx = x;
     for (n = 0; n < 5; n++)
@@ -400,9 +401,9 @@ static int place_crane(City *c, int y, int x, int zone)
             return 0; /* $33B84 */
     }
 
-    /*  $33B96 -- and the far end deep enough.  ALTM keeps the tile's
-     *  own height in the low five bits and the water level in the next
-     *  five, so this asks for two levels of clearance. */
+    /*  $33B96: and the far end deep enough.  ALTM keeps the tile's own
+     *  height in the low five bits and the water level in the next five.
+     *  So this asks for two levels of clearance. */
     {
         uint16_t a  = c->altm[yy][xx];
         int      hi = (a >> 5) & 0x1F;
@@ -411,7 +412,7 @@ static int place_crane(City *c, int y, int x, int zone)
             return 0; /* $33BCA */
     }
 
-    /*  $33BEA -- the crane goes on the anchor tile */
+    /*  $33BEA: the crane goes on the anchor tile */
     if (c->xbld[y][x] >= 0x0D)
         clear_tile(c, y, x);           /* $33BF8 */
     stamp_footprint(c, y, x, 0xE0, 1); /* $33C0E */
@@ -420,11 +421,11 @@ static int place_crane(City *c, int y, int x, int zone)
     if (zone == 7)
         c->xbit[y][x] &= 0x0F; /* $33C60 */
 
-    /*  $33C64 -- which of the two pier sprites, from the direction and
-     *  the map rotation, exactly as the runway picks its own */
+    /*  $33C64: which of the two pier sprites, from the direction and the
+     *  map rotation, exactly as the runway picks its own */
     want = ((CRANE_DY[d] != 0) != ((c->rotation & 1) != 0));
 
-    /*  $33C96 -- and the four pier tiles */
+    /*  $33C96: and the four pier tiles */
     yy = y;
     xx = x;
     for (n = 0; n < 4; n++)
@@ -441,8 +442,8 @@ static int place_crane(City *c, int y, int x, int zone)
 
 int sim_place_special(City *c, int y, int x, int bld, int zone)
 {
-    /*  $333D0 -- everything but the military has to be on or beside a
-     *  powered tile; a base makes its own arrangements. */
+    /*  $333D0: everything but the military has to be on or beside a
+     *  powered tile.  A base makes its own arrangements. */
     if (zone != 7 && !near_powered(c, y, x))
         return 0; /* $333EA */
 
@@ -504,13 +505,13 @@ int sim_place_special(City *c, int y, int x, int bld, int zone)
         int r, cc;
 
         /*  NOTE: at y == 0 or x == 0 these read one row/column off the
-         *  edge.  The original does the same -- it indexes its row
-         *  pointer table at -1 -- so the behaviour is left alone rather
-         *  than guarded, which would diverge.  Unreachable in practice:
-         *  the zone has to extend past the tile for the walk to move.
+         *  edge.  The original does the same: it indexes its row pointer
+         *  table at -1: so the behavior is left alone rather than
+         *  guarded, which would diverge.  Unreachable in practice: the
+         *  zone has to extend past the tile for the walk to move.
          *
-         *  Walk up to two tiles up and two left for as long as the
-         *  neighbour is still the same zone, so the 3x3 lands on the
+         *  Walk up to two tiles up and two left, for as long as the
+         *  neighbor is still the same zone.  So the 3x3 lands on the
          *  corner of the base rather than wherever the scan happened to
          *  be standing. */
         if ((c->xzon[y - 1][x] & 0x0F) == zone)
@@ -550,9 +551,9 @@ int sim_place_special(City *c, int y, int x, int bld, int zone)
     return 0xFF;
 }
 
-/*  $332C6 -- may this tile join a building anchored nearby?  It has to
- *  be on the map, at the same altitude, in the same zone, carrying
- *  nothing bigger than `maxbld`, and be neither road nor rail. */
+/*  $332C6: may this tile join a building anchored nearby?  It has to be
+ *  on the map, at the same altitude, in the same zone, carrying nothing
+ *  bigger than `maxbld`, and be neither road nor rail. */
 int tile_fits(const City *c, int y, int x, int alt, int zone, int maxbld)
 {
     uint8_t  b;
@@ -579,10 +580,10 @@ int tile_fits(const City *c, int y, int x, int alt, int zone, int maxbld)
 
 void sim_place(City *c, int y, int x, int tier, int kind) /* placeBuilding $3258A */
 {
-    /*  How big the building is, measured by calling the routine for
-     *  every (tier, kind) pair and seeing which tiles it wrote: it
-     *  depends on the tier alone, and tiers 2 and 3 are both 2x2.
-     *  The block hangs down and to the LEFT of the tile given. */
+    /*  How big the building is.  It is measured by calling the routine
+     *  for every (tier, kind) pair, and seeing which tiles it wrote: it
+     *  depends on the tier alone.  Tiers 2 and 3 are both 2x2.  The
+     *  block hangs down and to the LEFT of the tile given. */
     static const int SIZE[4] = {1, 2, 2, 3};
     int              id, n, i, j;
 
@@ -591,7 +592,7 @@ void sim_place(City *c, int y, int x, int tier, int kind) /* placeBuilding $3258
 
     if (tier == 1 && kind == 0)
     {
-        /*  $325AA -- three bands of four, so a cell worth 192 or more
+        /*  $325AA: three bands of four, so a cell worth 192 or more
          *  always draws from the top band. */
         int band = c->xval[y / 2][x / 2] / 64;
         if (band > 2)
@@ -614,12 +615,12 @@ void sim_place(City *c, int y, int x, int tier, int kind) /* placeBuilding $3258
         return;
     }
 
-    /*  $326C4 -- the edge test uses the HALF extent, not the full one.  The
-     *  original carries a size of 1, 2, 3 or 4 by tier and halves it, which
-     *  gives 0, 1, 1, 2 -- exactly n - 1 here.  Testing against n instead
-     *  rejects a row and a column that the game accepts, so a building at
-     *  row 125 or column 125 never appeared.  That is why every remaining
-     *  difference sat at the map edge. */
+    /*  $326C4: the edge test uses the HALF extent, not the full one.
+     *  The original carries a size of 1, 2, 3 or 4 by tier and halves
+     *  it.  This gives 0, 1, 1, 2: exactly n - 1 here.  Testing against
+     *  n instead rejects a row and a column that the game accepts, so a
+     *  building at row 125 or column 125 never appeared.  That is why
+     *  every remaining difference sat at the map edge. */
     {
         const int half = n - 1;
         if (y < 2 || x < 2 || y > 0x7E - half || x > 0x7E - half)
@@ -635,7 +636,7 @@ void sim_place(City *c, int y, int x, int tier, int kind) /* placeBuilding $3258
             c->xbit[ty][tx] |= 0xE0;
         }
 
-    /*  $3274C -- only the four corners of the block carry a corner bit,
+    /*  $3274C: only the four corners of the block carry a corner bit,
      *  and which bit goes where turns with the map.  Order is top-left,
      *  bottom-left, bottom-right, top-right. */
     {
@@ -649,7 +650,7 @@ void sim_place(City *c, int y, int x, int tier, int kind) /* placeBuilding $3258
     }
 }
 
-/*  $33028 -- grow the building at (y,x) into what its new tier needs.  The
+/*  $33028: grow the building at (y,x) into what its new tier needs.  The
  *  coin the caller tossed decides between two shapes at every tier above
  *  the first: one big building, or several small ones. */
 void sim_upgrade(City *c, int y, int x, int tier, int coin)
@@ -686,7 +687,7 @@ void sim_upgrade(City *c, int y, int x, int tier, int coin)
                 break;
             }
             {
-                /*  $33106 -- eight small buildings round the edge of the
+                /*  $33106: eight small buildings round the edge of the
                  *  3x3, then one 2x2 dropped on a corner of it at
                  *  random. */
                 static const int DY[8] = {0, 1, 2, 2, 2, 1, 0, 0};
@@ -704,7 +705,7 @@ void sim_upgrade(City *c, int y, int x, int tier, int coin)
     }
 }
 
-/*  $32830 -- a decaying residential block becomes a church when the city
+/*  $32830: a decaying residential block becomes a church when the city
  *  has fewer than one per 2500 people.  Two tiles by two, anchored one
  *  column left of the tile that decayed. */
 void sim_build_church(City *c, int y, int x)
@@ -720,14 +721,14 @@ void sim_build_church(City *c, int y, int x)
             c->xzon[y + dy][x + dx] = 0;                 /* both nibbles */
             c->xbit[y + dy][x + dx] |= 0xE0;
         }
-    /*  $328EC -- then one corner bit per sub-tile, chosen by the current
-     *  rotation so the building is simulated exactly once.  The four writes
-     *  are unrolled in the original and they do NOT run in raster order:
-     *  $328EC takes the top-left, $32916 the bottom-left, $32938 the
-     *  bottom-right and $3296E the top-right.  Every other footprint in the
-     *  game goes round the block the same way, so walking this one in rows
-     *  put 0x20 and 0x40 on the wrong diagonal -- which the renderer reads
-     *  as a church facing the other way. */
+    /*  $328EC: then one corner bit per sub-tile, chosen by the current
+     *  rotation so the building is simulated exactly once.  The four
+     *  writes are unrolled in the original and they do NOT run in raster
+     *  order: $328EC takes the top-left, $32916 the bottom-left, $32938
+     *  the bottom-right and $3296E the top-right.  Every other footprint
+     *  in the game goes round the block the same way, so walking this
+     *  one in rows put 0x20 and 0x40 on the wrong diagonal.  Which the
+     *  renderer reads as a church facing the other way. */
     {
         static const int CY[4] = {0, 1, 1, 0};
         static const int CX[4] = {-1, -1, 0, 0};

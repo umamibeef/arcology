@@ -1,4 +1,4 @@
---  junction.lua -- a junction's asphalt.
+--  junction.lua -- a junction's fill.
 --
 --  The outline is a solver's work: which arms leave, at what angle, how
 --  far each mouth is held back, and how round each corner comes out.
@@ -6,13 +6,13 @@
 --  its own ground and split half way out.
 --
 --  The junction's own tile is a levelled pad, so inside it every height
---  is that flat one; where the outline reaches past the tile the asphalt
+--  is that flat one; where the outline reaches past the tile the fill
 --  has to follow the ground, and a triangle running from the middle
 --  straight to the rim would cut under it on the way.  Hence the split:
 --  the fan is two rings, not one.
 --
---  The polygon it is given already stops on the footway's inner edge
---  where there is a band, so the asphalt is laid INSIDE the pavement and
+--  The polygon it is given already stops on the margin's inner edge
+--  where there is a band, so the fill is laid INSIDE the margin and
 --  the two meet edge to edge rather than one lying over the other.
 
 arc.rules.junction = function (j)

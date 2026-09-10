@@ -1,13 +1,13 @@
-/*  log.cpp -- the C face over spdlog.  See log.h. spdlog handles the parts
- *  that are tedious and easy to get subtly wrong: colour sinks that ask the
- *  terminal rather than guessing, the Windows console, locking, and levels
- *  from the environment.  What is added here is the NO_COLOR family, which
- *  spdlog does not read, and the stream split.  Streams.  Diagnostics go to
- *  stderr and stay there.  This program's stdout carries measured output --
- *  the --run summary, --check counts, --pick coordinates -- which people
- *  pipe into other things, so a log line on stdout would corrupt data
- *  rather than merely annoy.  The sinks are separate so that decision is
- *  one line to revisit. */
+/*  log.cpp: the C face over spdlog.  See log.h. spdlog handles the parts
+ *  that are tedious and easy to get subtly wrong.  Color sinks that ask
+ *  the terminal rather than guessing, the Windows console, locking, and
+ *  levels from the environment.  What is added here is the NO_COLOR
+ *  family, which spdlog does not read, and the stream split.  Streams.
+ *  Diagnostics go to stderr and stay there.  This program's stdout
+ *  carries measured output.  That is the --run summary, --check counts
+ *  and --pick coordinates.  People pipe them into other things, so a log
+ *  line on stdout would corrupt data rather than merely annoy.  The
+ *  sinks are separate so that decision is one line to revisit. */
 #include "log.h"
 
 #include <spdlog/cfg/env.h>
@@ -46,7 +46,7 @@ bool no_color_set()
     return v && *v;
 }
 
-/*  FORCE_COLOR is npm's, CLICOLOR_FORCE is BSD's; either disables when
+/*  FORCE_COLOR is npm's, CLICOLOR_FORCE is BSD's.  Either disables when
  *  set to "0".  CLICOLOR=0 asks for none even on a terminal. */
 bool force_colour()
 {
@@ -61,35 +61,41 @@ bool clicolor_off()
     return v && std::strcmp(v, "0") == 0;
 }
 
-/*  A source's own colour. spdlog's "%^...%$" colours by LEVEL, so wrapping
- *  the source name in it paints every source the same and only the severity
- *  varies -- which is not what a source label is for.  You want to find the
- *  gpu lines by colour while the level still tells you how bad they are, so
- *  the two have to be coloured independently.  spdlog has no flag for that;
- *  this is one.  The palette deliberately excludes red and yellow: those
- *  belong to warn and error, and a source painted red would read as a
- *  severity.  The colour comes from a hash of the name, so a source keeps
- *  the same colour between runs and across machines without a registry to
- *  maintain -- and adding a source needs no change here. */
+/*  A source's own color.  spdlog's "%^...%$" colors by LEVEL.  Wrapping
+ *  the source name in it paints every source the same, and only the
+ *  severity varies.  Which is not what a source label is for.  You want
+ *  to find the gpu lines by color while the level still tells you how
+ *  bad they are.  So the two have to be colored independently.  Spdlog
+ *  has no flag for that.  This is one.  The palette deliberately
+ *  excludes red and yellow: those belong to warn and error, and a source
+ *  painted red would read as a severity.  The color comes from a hash of
+ *  the name.  So a source keeps the same color between runs and across
+ *  machines without a registry to maintain: and adding a source needs no
+ *  change here. */
 class source_flag : public spdlog::custom_flag_formatter
 {
   public:
     void format(const spdlog::details::log_msg &msg, const std::tm &, spdlog::memory_buf_t &dest) override
     {
-        /*  Nine colours, as far apart as the wheel allows once the level's
-         *  own are kept clear -- spdlog paints debug cyan, info green, warn
-         *  yellow and error red, and nothing here is near any of those.
-         *  Nine rather than two dozen: the point of a source colour is to
-         *  tell the sources apart at a glance, and two dozen blues do not
-         *  do that, while nine spread from blue through violet and magenta
-         *  to pink, with one orange, do.  Consecutive entries alternate hue
-         *  families, so the first few sources to appear -- the ones every
-         *  run has -- contrast most.  The source sits in its own bracket
-         *  now, so an orange source is not mistaken for a warning the way
-         *  it could be when the two stood side by side unlabelled.  These
-         *  are 256-colour codes.  A terminal old enough not to know them
-         *  ignores the escape rather than printing rubbish, and NO_COLOR
-         *  skips them entirely. */
+        /*  Nine colors, as far apart as the wheel allows once the
+         *  level's own are kept clear.
+         *
+         *      Spdlog paints debug cyan.
+         *      Info green.
+         *      Warn yellow and error red.
+         *
+         *  Nothing here is near any of those.  Nine rather than two
+         *  dozen: the point of a source color is to tell the sources
+         *  apart at a glance.  Two dozen blues do not do that, while
+         *  nine spread from blue through violet and magenta to pink,
+         *  with one orange, do.  Consecutive entries alternate hue
+         *  families, so the first few sources to appear.  The ones every
+         *  run has.  Contrast most.  The source sits in its own bracket
+         *  now.  So an orange source is not mistaken for a warning the
+         *  way it could be when the two stood side by side unlabelled.
+         *  These are 256-color codes.  A terminal old enough not to know
+         *  them ignores the escape rather than printing rubbish, and
+         *  NO_COLOR skips them entirely. */
         static const char *const PALETTE[] = {
             "\033[38;5;33m",  /* blue          */
             "\033[38;5;201m", /* magenta       */
@@ -110,14 +116,14 @@ class source_flag : public spdlog::custom_flag_formatter
             dest.append(name.data(), name.data() + name.size());
             return;
         }
-        /*  Colours are handed out in the order sources first appear,
-         *  not hashed from the name.  A hash is tempting -- it needs no
-         *  state and is stable between runs -- but with a dozen sources
-         *  and any workable palette it collides, and the pair it
-         *  collided on was `city` and `cities`, which are precisely the
-         *  two a reader must not confuse.  Order guarantees the first
-         *  two dozen sources are all different, which is the property
-         *  actually wanted. */
+        /*  Colors are handed out in the order sources first appear, not
+         *  hashed from the name.  A hash is tempting.  It needs no state
+         *  and is stable between runs.  But with a dozen sources and any
+         *  workable palette it collides, and the pair it collided on was
+         *  `city` and `cities`.  This are precisely the two a reader
+         *  must not confuse.  Order guarantees the first two dozen
+         *  sources are all different, which is the property actually
+         *  wanted. */
         size_t idx;
         {
             std::lock_guard<std::mutex> lock(g_mutex);
@@ -139,16 +145,16 @@ class source_flag : public spdlog::custom_flag_formatter
     }
 };
 
-/*  The stamp: the date, then the hour and minute, then the seconds to the
- *  hundredth after the point --
+/*  The stamp: the date, then the hour and minute, then the seconds to
+ *  the hundredth after the point.
  *
  *  [20260801:1349.3455]
  *
- *  -- Arcology's own form.  Local time, no zone, and no separators inside a
- *  field, so it sorts as text and is one token to a parser. spdlog has
- *  flags for the parts but none for hundredths (%e is thousandths), and the
- *  dot in the middle of a field is not something its pattern language can
- *  put there, so the whole thing is one flag. */
+ *  Arcology's own form.  Local time, no zone, and no separators inside a
+ *  field.  So it sorts as text and is one token to a parser.  Spdlog has
+ *  flags for the parts, but none for hundredths (%e is thousandths).
+ *  And the dot in the middle of a field is not something its pattern
+ *  language can put there.  So the whole thing is one flag. */
 class stamp_flag : public spdlog::custom_flag_formatter
 {
   public:
@@ -168,9 +174,9 @@ class stamp_flag : public spdlog::custom_flag_formatter
 };
 
 /*  The level in capitals, padded to five so the brackets line up down a
- *  page -- [INFO ] over [DEBUG]. spdlog's %l is lower case and %L a single
- *  letter; neither is that.  CRITICAL is cut to CRIT for the width; nothing
- *  here emits it. */
+ *  page.  It reads [INFO ] over [DEBUG].  spdlog's %l is lower case, and
+ *  %L a single letter.  Neither is that.  CRITICAL is cut to CRIT for
+ *  the width.  Nothing here emits it. */
 class level_flag : public spdlog::custom_flag_formatter
 {
   public:
@@ -190,9 +196,9 @@ class level_flag : public spdlog::custom_flag_formatter
 };
 
 /*  [stamp][LEVEL][source] message.  Each field in its own brackets, the
- *  stamp first because that is where every log reader looks for one.  The
- *  colour, where there is any, stays inside the brackets: the level in
- *  spdlog's own severity colour, the source in its palette entry. */
+ *  stamp first because that is where every log reader looks for one.
+ *  The color.  There there is any, stays inside the brackets: the level
+ *  in spdlog's own severity color, the source in its palette entry. */
 const char *const PATTERN = "[%~][%^%_%$][%*] %v";
 
 std::unique_ptr<spdlog::pattern_formatter> make_formatter()
@@ -200,7 +206,7 @@ std::unique_ptr<spdlog::pattern_formatter> make_formatter()
     auto f = spdlog::details::make_unique<spdlog::pattern_formatter>();
     f->add_flag<stamp_flag>('~').add_flag<level_flag>('_').add_flag<source_flag>('*').set_pattern(PATTERN);
     /*  set_pattern works out whether the pattern needs the local time
-     *  from spdlog's own flags only; a custom flag does not count, and
+     *  from spdlog's own flags only.  A custom flag does not count, and
      *  without this the stamp is handed an all-zero tm and prints the
      *  year 1900. */
     f->need_localtime(true);
@@ -209,9 +215,9 @@ std::unique_ptr<spdlog::pattern_formatter> make_formatter()
 
 void setup()
 {
-    /*  A refusal beats a request, a request beats spdlog's own guess --
+    /*  A refusal beats a request, a request beats spdlog's own guess:
      *  and its guess already covers isatty, TERM and the Windows
-     *  console, so there is nothing to reimplement here. */
+     *  console.  So there is nothing to reimplement here. */
     spdlog::color_mode mode = spdlog::color_mode::automatic;
     if (no_color_set() || clicolor_off())
         mode = spdlog::color_mode::never;
@@ -220,17 +226,17 @@ void setup()
 
     auto sink = std::make_shared<spdlog::sinks::ansicolor_stderr_sink_mt>(mode);
     g_sink    = sink;
-    /*  Ask the sink whether colour survived BEFORE building a formatter:
-     *  source_flag reads g_colour to decide whether to emit escapes at
-     *  all, so under NO_COLOR the lines come out clean rather than
+    /*  Ask the sink whether color survived BEFORE building a formatter:
+     *  source_flag reads g_color to decide whether to emit escapes at
+     *  all.  So under NO_COLOR the lines come out clean rather than
      *  stripped afterwards. */
     g_colour = sink->should_color();
     sink->set_formatter(make_formatter());
 
     /*  The formatter goes on the registry too, not just the sink:
-     *  loggers made later are given the REGISTRY's formatter, which
+     *  loggers made later are given the REGISTRY's formatter.  This
      *  would otherwise put spdlog's default pattern back and lose both
-     *  the timestamp and the source colour. */
+     *  the timestamp and the source color. */
     spdlog::set_formatter(make_formatter());
     spdlog::set_level(spdlog::level::info);
     /*  SPDLOG_LEVEL=debug, or SPDLOG_LEVEL=gpu=debug,atlas=off */
@@ -248,7 +254,7 @@ spdlog::logger *logger_for(const char *source)
     g_colour_of.emplace(key, g_colour_of.size());
     auto lg = std::make_shared<spdlog::logger>(key, g_sink);
     lg->flush_on(spdlog::level::warn);
-    /*  initialize_logger applies whatever SPDLOG_LEVEL asked for -- the
+    /*  initialize_logger applies whatever SPDLOG_LEVEL asked for: the
      *  global level, or a per-source one like `gpu=debug`.  Setting the
      *  level here by hand instead would quietly throw that away, which
      *  is what made per-source filtering look broken. */
@@ -281,8 +287,8 @@ void log_init(void) { std::call_once(g_once, setup); }
 void log_set_level(RLogLevel max)
 {
     std::call_once(g_once, setup);
-    /*  set_level on the registry so loggers made later inherit it too;
-     *  an explicit --verbose is meant to beat SPDLOG_LEVEL. */
+    /*  set_level on the registry so loggers made later inherit it too.
+     *  An explicit --verbose is meant to beat SPDLOG_LEVEL. */
     spdlog::set_level(to_spdlog(max));
     std::lock_guard<std::mutex> lock(g_mutex);
     for (auto &kv : g_loggers)
@@ -299,9 +305,9 @@ void log_set_colour(int on)
     std::lock_guard<std::mutex> lock(g_mutex);
     g_sink   = sink;
     g_colour = sink->should_color();
-    /*  A new sink comes with spdlog's default pattern; without this the
-     *  stamp, the brackets and the source colour all vanish the moment
-     *  colour is toggled. */
+    /*  A new sink comes with spdlog's default pattern.  Without this the
+     *  stamp, the brackets and the source color all vanish the moment
+     *  color is toggled. */
     sink->set_formatter(make_formatter());
     for (auto &kv : g_loggers)
         kv.second->sinks() = {g_sink};
@@ -313,14 +319,13 @@ int log_colour(void)
     return g_colour ? 1 : 0;
 }
 
-/*  The banner's gradient runs across its width, character by
- *  character, through the first three colours the sources are painted
- *  in -- blue, magenta, orange -- so the art and the log lines under it
- *  are one palette.  A terminal that announces truecolor in COLORTERM
- *  gets the blend exact; any other gets the nearest of the 256-colour
- *  cube's 216, which is banded but never wrong, and macOS's own
- *  Terminal is one of those.  Blanks are left bare: colouring a space
- *  is bytes for nothing. */
+/*  The banner's gradient runs across its width, character by character,
+ *  through the first three colors the sources are painted in, blue,
+ *  magenta, orange.  So the art and the log lines under it are one
+ *  palette.  A terminal that announces truecolor in COLORTERM gets the
+ *  blend exact.  Any other gets the nearest of the 256-color cube's 216,
+ *  which is banded but never wrong, and macOS's own Terminal is one of
+ *  those.  Blanks are left bare: coloring a space is bytes for nothing. */
 static void banner_colour(float t, bool truecolor, char *out, size_t n)
 {
     static const int STOP[3][3] = {
@@ -398,7 +403,7 @@ void log_msg(RLogLevel lvl, const char *source, const char *fmt, ...)
     va_end(ap);
 
     /*  The message is already formatted, so it is passed as a plain
-     *  string: a stray brace in a path must not reach spdlog's own
+     *  string.  A stray brace in a path must not reach spdlog's own
      *  formatter and throw. */
     logger_for(source)->log(to_spdlog(lvl), "{}", buf);
 }

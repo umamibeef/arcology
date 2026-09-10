@@ -1,14 +1,15 @@
-/*  music.h -- the game's music: its own songs, through its own instruments.
- *  The Macintosh original carries a complete sample-based synthesizer,
- *  Steve Hales' SoundMusicSys: a MIDI resource per song, an INST resource
- *  per instrument naming an 'snd ' sample, and a SONG resource per song
- *  whose remap table says which instrument each MIDI channel plays.  All of
- *  it is read out of your copy by tools/music.py into assets/music; this
- *  plays it back the way that engine does, as far as it has been read: the
- *  channel is the instrument (program changes are honoured only when the
- *  song's flags ask), a note is its sample resampled from the root key,
- *  looped while held where the sample loops, released over the song's
- *  decay, six voices to a song. */
+/*  music.h: the game's music: its own songs, through its own
+ *  instruments.  The Macintosh original carries a complete sample-based
+ *  synthesizer, Steve Hales' SoundMusicSys.  It holds a MIDI resource
+ *  per song.  It holds an INST resource per instrument, naming an 'snd '
+ *  sample.  It holds a SONG resource per song whose remap table says
+ *  which instrument each MIDI channel plays.  All of it is read out of
+ *  your copy by tools/music.py into assets/music.  This plays it back
+ *  the way that engine does, as far as it has been read.  The channel is
+ *  the instrument.  Program changes are honored only when the song's
+ *  flags ask.  A note is its sample, resampled from the root key.  It
+ *  loops while held where the sample loops, and is released over the
+ *  song's decay, six voices to a song. */
 #ifndef MUSIC_H
 #define MUSIC_H
 
@@ -32,8 +33,8 @@ int  music_play(RMusic *m, int song_id);
 void music_stop(RMusic *m);
 /*  The generator the scheduler draws from: n in, 0..n-1 out.  The app
  *  hands it the game's own rand, so the music shares the stream the
- *  simulation uses, as the original's does; without one a private
- *  copy of that generator, from the same state, is used. */
+ *  simulation uses, as the original's does.  Without one a private copy
+ *  of that generator, from the same state, is used. */
 void music_set_rand(RMusic *m, uint16_t (*rand_fn)(uint16_t n));
 /*  The Options menu's switch: off stops, on starts the rotation. */
 void music_set_enabled(RMusic *m, int on);

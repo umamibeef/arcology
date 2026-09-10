@@ -1,18 +1,18 @@
-/*  ext80.h -- the 80-bit extended arithmetic SimCity 2000's economic model
- *  runs on.  The game reaches it through the SANE trap _FP68K ($A9EB): push
- *  two operand pointers and an opword, trap, read the result back.  The
- *  opword is the operation in bits 0-4 and the operand format in bits
- *  11-13.  Across the whole program only 21 distinct opwords appear, so
- *  this implements exactly the operations that are actually used.  Apple
- *  Silicon has no hardware 80-bit type -- long double here is 53-bit -- so
- *  this is a software implementation rather than a wrapper. */
+/*  ext80.h: the 80-bit extended arithmetic SimCity 2000's economic model
+ *  runs on.  The game reaches it through the SANE trap _FP68K ($A9EB):
+ *  push two operand pointers and an opword, trap, read the result back.
+ *  The opword is the operation in bits 0-4 and the operand format in
+ *  bits 11-13.  Across the whole program only 21 distinct opwords
+ *  appear, so this implements exactly the operations that are actually
+ *  used.  Apple Silicon has no hardware 80-bit type: long double here is
+ *  53-bit: so this is a software implementation rather than a wrapper. */
 #ifndef EXT80_H
 #define EXT80_H
 #include <stdint.h>
 
 /*  value = (-1)^sign * sig * 2^(exp-63), with bit 63 of sig set when
- *  normal.  sig == 0 means zero.  The game's model never produces inf
- *  or nan, so those are represented but not elaborated. */
+ *  normal.  Sig == 0 means zero.  The game's model never produces inf or
+ *  nan, so those are represented but not elaborated. */
 typedef struct
 {
     uint64_t sig;
@@ -58,9 +58,9 @@ ext80 ext_div(ext80 a, ext80 b);
 int   ext_cmp(ext80 a, ext80 b); /* -1, 0, +1 */
 
 /*  The trap itself, in sane.c: the opword the 68k code pushed, the
- *  destination and the source.  Returns the comparison result for
- *  FOCMP and 0 otherwise.  The header above describes it; nothing
- *  declared it, so it was global by default and nothing said so. */
+ *  destination and the source.  Returns the comparison result for FOCMP
+ *  and 0 otherwise.  The header above describes it.  Nothing declared
+ *  it, so it was global by default and nothing said so. */
 int fp68k(uint16_t opword, void *dst, const void *src);
 
 /* read/write the 10-byte in-memory form the 68k code passes around */

@@ -1,39 +1,25 @@
 /*  The piece tables: which family a tile's piece belongs to, how it
- *  links to its neighbours, and the second piece a tile may carry. */
+ *  links to its neighbors, and the second piece a tile may carry. */
 #include <math.h>
 #include <string.h>
 
 #include "mesh/internal.h"
-#include "net/internal.h"
+#include "pipeline.h"
 
 const uint8_t *s_check_xbld; /* the last built city's XBLD, for the piece scan */
 
-/*  What road a building byte carries, as arc.rules.road_tiles reads the
- *  city: 1 a road piece, 2 a road crossing something, 3 a road running
- *  under a deck that stands on the tile.  Read once a generation into a
- *  table, since every tile of the map is looked up in it. */
-static int road_carried(uint8_t b)
+/*  What line a building byte carries, as arc.rules.line_tiles reads the
+ *  city.  1 is a line piece, and 2 a line lapped by something.  3 is a
+ *  line running under a slab that stands on the tile.  Read once a
+ *  generation into a table, since every tile of the map is looked up in
+ *  it. */
+static int line_carried(uint8_t b)
 {
-    return script_bytes("road_tiles")[b];
+    return script_bytes("line_tiles")[b];
 }
 
-/*  A tile whose building stands up: a structure the deck would have to
- *  clear, rather than a surface network it crosses over.  Which bytes is
- *  arc.rules.standing_tiles. */
-int net_stands_up(uint8_t b)
-{
-    static uint8_t up[256];
-    static int     gen = -1;
-    if (gen != script_generation())
-    {
-        gen = script_generation();
-        memcpy(up, script_bytes("standing_tiles"), sizeof up);
-    }
-    return up[b];
-}
-
-/*  A CARRIER: a bridge, a tunnel end, a crossing or a highway -- a tile
- *  a road runs on into rather than stopping at.  Which bytes is
+/*  A CARRIER: a bridge, a tunnel end, a meet or a band: a tile a line
+ *  runs on into rather than stopping at.  Which bytes is
  *  arc.rules.carrier_tiles. */
 int net_carrier(uint8_t b)
 {
@@ -47,33 +33,33 @@ int net_carrier(uint8_t b)
     return carries[b];
 }
 
-/*  A road crossing a railway -- a node of both networks, which pins the
- *  two to one altitude.  Which bytes is arc.rules.road_tiles's
- *  "crossing" entries that name a railway. */
-int net_road_over_rail(uint8_t b)
+/*  Two families lapping one cell: a node of both networks, which pins
+ *  the two to one altitude.  Which bytes is arc.rules.line_tiles's
+ *  "meet" entries that name the second family. */
+int net_line_lapped(uint8_t b)
 {
     static uint8_t over[256];
     static int     gen = -1;
     if (gen != script_generation())
     {
         gen = script_generation();
-        memcpy(over, script_bytes("rail_crossing_tiles"), sizeof over);
+        memcpy(over, script_bytes("lap_tiles"), sizeof over);
     }
     return over[b];
 }
 
-/*  A road standing on the tile itself. */
-int net_road_on(uint8_t b)
+/*  A line standing on the tile itself. */
+int net_line_on(uint8_t b)
 {
-    int k = road_carried(b);
+    int k = line_carried(b);
     return k == 1 || k == 2;
 }
 
-/*  A road a ramp or a lane may join: on the tile, or under a deck that
+/*  A line a spur or a lane may join: on the tile, or under a slab that
  *  stands on it. */
-int net_road_near(uint8_t b)
+int net_line_near(uint8_t b)
 {
-    return road_carried(b) != 0;
+    return line_carried(b) != 0;
 }
 
 /*  The family a piece belongs to and its place in the shared layout, or
@@ -89,7 +75,7 @@ static void piece_table(const unsigned char **fam, const signed char **piece,
     script_pieces(fam, piece, fam2, piece2);
 }
 
-/*  A crossing answers for the family whose surface it is; piece_second
+/*  A meet answers for the family whose surface it is.  Piece_second
  *  gives the other one, on the other axis. */
 int piece_family(uint8_t b, Family *f)
 {
@@ -100,7 +86,7 @@ int piece_family(uint8_t b, Family *f)
     return piece[b];
 }
 
-/*  The second family a crossing carries, on the other axis: its piece
+/*  The second family a meet carries, on the other axis: its piece
  *  index, or -1. */
 int piece_second(uint8_t b, Family *f)
 {
@@ -111,35 +97,35 @@ int piece_second(uint8_t b, Family *f)
     return piece2[b];
 }
 
-/*  A crossing a RAILWAY is part of, on either axis: a road over a line,
+/*  A lap the SECOND family is part of, on either axis: a line over a line,
  *  or a line under a power line.  Derived from the same table the
- *  crossings themselves are declared in, so a script that names them
+ *  meets themselves are declared in, so a script that names them
  *  differently moves this with them. */
-int net_rail_crossing(uint8_t b)
+int net_thread_lap(uint8_t b)
 {
     const unsigned char *fam, *fam2;
     const signed char   *piece, *piece2;
     piece_table(&fam, &piece, &fam2, &piece2);
-    return piece2[b] >= 0 && (fam[b] == F_RAIL || fam2[b] == F_RAIL);
+    return piece2[b] >= 0 && (fam[b] == net_thread->f || fam2[b] == net_thread->f);
 }
 
 
-const float ROAD_MU[4] = {0.5f, 1.0f, 0.5f, 0.0f}; /* edge midpoints, N E S W */
-const float ROAD_MV[4] = {0.0f, 0.5f, 1.0f, 0.5f};
-const float ROAD_DU[4] = {0.0f, 1.0f, 0.0f, -1.0f}; /* out through the edge */
-const float ROAD_DV[4] = {-1.0f, 0.0f, 1.0f, 0.0f};
+const float SIDE_MU[4] = {0.5f, 1.0f, 0.5f, 0.0f}; /* edge midpoints, N E S W */
+const float SIDE_MV[4] = {0.0f, 0.5f, 1.0f, 0.5f};
+const float SIDE_DU[4] = {0.0f, 1.0f, 0.0f, -1.0f}; /* out through the edge */
+const float SIDE_DV[4] = {-1.0f, 0.0f, 1.0f, 0.0f};
 
-/*  Which edges a piece joins, from the road art: the asphalt (palette
+/*  Which edges a piece joins, from the line art.  The fill (palette
  *  0x91) or a dash (0x8B) in the three-by-three around each edge's
- *  midpoint, a tenth of the way in.  The slope pieces' art is tall; they
- *  are straight along their slope, which the terrain code says. */
+ *  midpoint, a tenth of the way in.  The slope pieces' art is tall.
+ *  They are straight along their slope, which the terrain code says. */
 /*  The artwork a piece's links are read from, and the answers read so
- *  far.  It is always the FINEST level, whatever level is being drawn: a
- *  road piece's connectivity is a property of its tile id, not of how
- *  large the sprite is.  At eight pixels the three-by-three window the
- *  probe puts at each quarter of the diamond reaches the middle of the
- *  tile, finds road under all four, and reads every piece as a
- *  crossroads. */
+ *  far.  It is always the FINEST level, whatever level is being drawn.
+ *  A line piece's connectivity is a property of its tile id, not of how
+ *  large the sprite is.  At eight pixels the probe's window reaches the
+ *  middle of the tile.  It is three by three, at each quarter of the
+ *  diamond, and it reaches the middle of the tile, finds line under all
+ *  four.  Reads every piece as a crossroads. */
 static const RAtlasLevel *s_piece_art;
 static int8_t             s_piece_links[15];
 static int                s_piece_read;
@@ -169,7 +155,7 @@ int piece_links(const RAtlasLevel *l, int piece, uint8_t xter)
         return 0;
     if (piece >= 2 && piece <= 5)
     {
-        uint8_t mask = CODE_MASK[slope_code(xter)];
+        uint8_t mask = script_bytes("corner_lifts")[slope_code(xter)];
         return (mask == 3 || mask == 12) ? (L_E | L_W) : (L_N | L_S);
     }
     if (s_piece_links[piece] >= 0)
@@ -227,12 +213,12 @@ int link_count(int links)
     return (links & 1) + ((links >> 1) & 1) + ((links >> 2) & 1) + ((links >> 3) & 1);
 }
 
-/*  The links a tile can actually follow: those its neighbour returns,
- *  and those that leave the map.  A piece whose art points at grass, a
- *  stub against the flat side of a T, a road bulldozed short: the
- *  original draws every such sprite as it is, so the segment must end
- *  there, at a butt end, rather than the tile going undrawn because
- *  the chain it lies on has no node to be walked from. */
+/*  The links a tile can actually follow: those its neighbor returns, and
+ *  those that leave the map.  A piece whose art points at grass, a stub
+ *  against the flat side of a T, a line bulldozed short.  The original
+ *  draws every such sprite as it is.  So the segment must end there, at
+ *  a butt end.  Otherwise the tile goes undrawn, because the chain it
+ *  lies on has no node to be walked from. */
 int eff_links(const RCity *c, const RAtlasLevel *l, int32_t col, int32_t row, Family f)
 {
     int links = tile_links(c, l, col, row, f), out = 0, e;
@@ -241,10 +227,10 @@ int eff_links(const RCity *c, const RAtlasLevel *l, int32_t col, int32_t row, Fa
         int32_t nc, nr;
         if (!(links & (1 << e)))
             continue;
-        nc = col + (int32_t)ROAD_DU[e];
-        nr = row + (int32_t)ROAD_DV[e];
+        nc = col + (int32_t)SIDE_DU[e];
+        nr = row + (int32_t)SIDE_DV[e];
         if (nc < 0 || nr < 0 || nc >= R_MAP || nr >= R_MAP)
-            out |= 1 << e; /* off the map: the road runs to the edge */
+            out |= 1 << e; /* off the map: the line runs to the edge */
         else if (tile_links(c, l, nc, nr, f) & (1 << ((e + 2) & 3)))
             out |= 1 << e;
     }

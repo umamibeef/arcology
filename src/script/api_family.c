@@ -1,33 +1,33 @@
-/*  api_family.c -- arc.family, where a family is declared.
+/*  api_family.c: arc.family, where a family is declared.
  *
  *      arc.family.define{
- *          name = "road", tiles = "road", answers = true, walk = 0,
- *          width = "road_w", rmin = "road_rmin", rmax = "road_rmax",
- *          material = arc.mat.road, loft = "road",
- *          curbs = true, caps = true, classed = true,
+ *          name = "line", tiles = "line", answers = true, walk = 0,
+ *          width = "line_w", rmin = "line_rmin", rmax = "line_rmax",
+ *          material = arc.mat.line, loft = "line",
+ *          lips = true, caps = true, classed = true,
  *          stages = { box = "road_box", record = "road_record" },
  *      }
  *
- *  Everything a family is comes through here: its width and its radii by
- *  the name of the live knob, its material, the loft kind its segments
- *  are drawn as, what it builds at a junction and which stages it
- *  supplies.  A stage names either one of the pipeline's primitives or a
- *  rule of the script's own, and net/family.c decides which -- so a
- *  highway drawn another way is another file here, not a change in C.
+ *  Everything a family is comes through here.  It gives its width and
+ *  its radii by the name of the live knob.  It gives its material, the
+ *  loft kind its segments are drawn as, what it builds at a junction and
+ *  which stages it supplies.  A stage names one of the pipeline's
+ *  primitives, or a rule of the script's own.  net/family.c decides
+ *  which.  So a band drawn another way is another file here, not a
+ *  change in C.
  *
  *  A name nothing answers to is a fault, reported and refused.  A family
  *  half declared would draw a city half wrong and say nothing, which is
- *  worse than one that never appears.
- */
+ *  worse than one that never appears. */
 #include <string.h>
 
 #include "internal.h"
-#include "net/internal.h"
+#include "pipeline.h"
 #include "script.h"
 
 
 /*  A field of the table at `t`, as a string copied into the caller's own
- *  room: the Lua string dies with the table and a family outlives it. */
+ *  room.  The Lua string dies with the table, and a family outlives it. */
 static void field_str(lua_State *L, int t, const char *key, char *out, size_t cap, const char *def)
 {
     const char *s;
@@ -65,13 +65,13 @@ static float field_f(lua_State *L, int t, const char *key, float def)
 }
 
 /*  The scratch a declaration is read into.  One, reused: what a family
- *  keeps must outlive the Lua table it came from, and the program and
- *  the lint must read a declaration by the same expression or the lint
+ *  keeps must outlive the Lua table it came from.  The program and the
+ *  lint must read a declaration by the same expression or the lint
  *  passes what the program refuses. */
 static struct
 {
     NetFamilyDecl d;
-    char          name[64], tiles[32], loft[32], ends[32], slot[64];
+    char          name[64], tiles[32], loft[32], ends[32], slot[64], graph[32], props[32], margin[32];
     char          width[64], rmin[64], rmax[64], stage[NET_HOOKS][64];
 } s_read;
 
@@ -84,7 +84,7 @@ const NetFamilyDecl *api_family_read(lua_State *L, int t)
     memset(&s_read, 0, sizeof s_read);
     field_str(L, t, "name", s_read.name, sizeof s_read.name, NULL);
     field_str(L, t, "tiles", s_read.tiles, sizeof s_read.tiles, NULL);
-    field_str(L, t, "loft", s_read.loft, sizeof s_read.loft, "road");
+    field_str(L, t, "loft", s_read.loft, sizeof s_read.loft, "line");
     field_str(L, t, "lane_ends", s_read.ends, sizeof s_read.ends, "open");
     field_str(L, t, "slot", s_read.slot, sizeof s_read.slot, "slot_strip");
     field_str(L, t, "width", s_read.width, sizeof s_read.width, NULL);
@@ -105,15 +105,29 @@ const NetFamilyDecl *api_family_read(lua_State *L, int t)
     d->fit               = field_int(L, t, "fit", 0);
     d->junc_lift         = field_f(L, t, "junc_lift", 0.0f);
     d->shelf_grade       = field_f(L, t, "shelf_grade", 0.0f);
-    d->curbs             = field_bool(L, t, "curbs");
-    d->ramps             = field_bool(L, t, "ramps");
+    d->lips             = field_bool(L, t, "lips");
+    d->spurs             = field_bool(L, t, "spurs");
     d->ends_at_buildings = field_bool(L, t, "ends_at_buildings");
     d->caps              = field_bool(L, t, "caps");
     d->classed           = field_bool(L, t, "classed");
+    /*  Where a strip files itself for the traffic.  A family that says
+     *  so needs no record stage: the pipeline files it. */
+    field_str(L, t, "graph", s_read.graph, sizeof s_read.graph, "");
+    d->graph        = s_read.graph[0] ? s_read.graph : NULL;
+    d->record_class = field_int(L, t, "record_class", -1);
+    d->stations     = field_bool(L, t, "stations");
+    d->meets    = field_bool(L, t, "meets");
+    d->paved        = field_bool(L, t, "paved");
+    d->crossed      = field_bool(L, t, "crossed");
+    d->threads       = field_bool(L, t, "threads");
+    field_str(L, t, "props", s_read.props, sizeof s_read.props, "");
+    d->props        = s_read.props[0] ? s_read.props : NULL;
+    field_str(L, t, "margin", s_read.margin, sizeof s_read.margin, "");
+    d->margin      = s_read.margin[0] ? s_read.margin : NULL;
     d->lane_paint        = field_f(L, t, "lane_paint", 0.0f);
     d->free_reach        = field_int(L, t, "free_reach", 0);
     d->turnout           = field_f(L, t, "turnout", 0.0f);
-    d->deck              = field_bool(L, t, "deck");
+    d->slab              = field_bool(L, t, "slab");
     /*  The stages, each under its own name: `stages = { box = "..." }`. */
     lua_getfield(L, t, "stages");
     for (h = 0; h < NET_HOOKS; ++h)
@@ -135,13 +149,13 @@ static int l_family_define(lua_State *L)
     return 1;
 }
 
-/*  The NUMBERS a family is drawn by, pushed rather than asked for: what
+/*  The NUMBERS a family is drawn by, pushed rather than asked for.  What
  *  is true of every strip and every junction of one family, and used all
- *  through the build.  Keyed by the family's name, since the highway and
- *  the road share a tile family and not their numbers.
+ *  through the build.  Keyed by the family's name, since the band and
+ *  the line share a tile family and not their numbers.
  *
- *  The reading is script_rule_family's, unchanged -- the same table read
- *  the same way -- so what moved is only who starts it. */
+ *  The reading is script_rule_family's, unchanged.  The same table read
+ *  the same way.  So what moved is only who starts it. */
 #define FAM_RULES_MAX 8
 static struct
 {

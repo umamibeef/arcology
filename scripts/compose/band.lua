@@ -1,10 +1,10 @@
 --  band.lua -- where a band's edge runs, in one place.
 --
---  A strip's carriageway and the footway beside it share a line: the
---  carriageway stops at the footway's inner edge and the footway starts
+--  A strip's way and the margin beside it share a line: the
+--  way stops at the margin's inner edge and the margin starts
 --  there.  Two expressions for one line agree only by luck, and where
---  they disagree by a hair the road is drawn a hair under its own
---  pavement.  So there is one expression, and both use it.
+--  they disagree by a hair the line is drawn a hair under its own
+--  margin.  So there is one expression, and both use it.
 --
 --  It is worked out in the MESH'S own precision.  Vertices are floats
 --  there, and a line computed to more places than the mesh can keep
@@ -13,7 +13,7 @@
 --
 --  `sgn` is which hand of the centreline: 1 the right looking along it,
 --  -1 the left.  `w` is that side's own share of the half width, which a
---  deck narrows where a ramp has taken its outer lane.  `h` is the half
+--  slab narrows where a spur has taken its outer lane.  `h` is the half
 --  width already scaled by whatever share of the band this edge is.
 local f32 = arc.put.f32
 

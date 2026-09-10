@@ -1,23 +1,23 @@
-/*  model.c -- the walk that draws a model, and the cache behind it.
- *  See geo/model.h.  Each model is its own file under scripts/models. */
+/*  model.c: the walk that draws a model, and the cache behind it.  See
+ *  mesh/model.h.  Each model is its own file under scripts/models. */
 #include <math.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 
 #include "mesh/internal.h"
-#include "net/internal.h"
-#include "geo/model.h"
+#include "pipeline.h"
+#include "mesh/model.h"
 #include "script.h"
 
-/*  Every model is a SCRIPT'S.  Nothing here ships a prop's shape: a name
- *  appears the moment a file under scripts/models defines it, and a prop
- *  whose model no name matches draws nothing -- which is what a build
- *  that cannot find its scripts looks like. */
+/*  Every model is a SCRIPT'S.  Nothing here ships a prop's shape.  A
+ *  name appears the moment a file under scripts/models defines it, and a
+ *  prop whose model no name matches draws nothing.  Which is what a
+ *  build that cannot find its scripts looks like. */
 #define MODEL_MAX 64
 
 /*  The last size each model was asked for, and what it answered.  A prop
- *  drawn every frame is built once; one whose size follows the junction
+ *  drawn every frame is built once.  One whose size follows the junction
  *  it stands at is built again when the junction changes. */
 static ModelPart s_part[MODEL_MAX][MODEL_PARTS];
 static ModelHead s_head[MODEL_MAX];
@@ -63,7 +63,7 @@ int net_model_shape(int model, float size, const ModelHead **head, const ModelPa
 
 /*  One model, at (x, y) facing (fx, fy).  A part's `w` is across the
  *  facing and `d` along it, so a prop turned to face another way keeps
- *  its shape; with the facings on the tile's own axes that is the two
+ *  its shape.  With the facings on the tile's own axes that is the two
  *  swapping over. */
 int net_model_put(int model, RMesh *m, const RCity *c, uint8_t mask_bit, float order,
                   float x, float y, float fx, float fy, float size, float phase, float group)
@@ -119,17 +119,17 @@ int net_model_put_on(int model, RMesh *m, const RCity *c, uint8_t mask_bit, floa
                 float g = on_base ? base : surface_at_world(c, mask_bit, px, py);
                 int   k;
                 for (k = 0; k < 3; ++k)
-                    if (put_lamp_face(m, order, px, py, g, p->z0 - p->z1 * (float)k, fx, fy, p->w, phase, group + (float)k) != 0)
+                    if (put_lamp_face(m, order, px, py, g, p->z0 - p->z1 * (float)k, fx, fy, p->w, phase, group + (float)k, 0) != 0)
                         return -1;
                 break;
             }
             case M_PRISM:
             {
                 /*  Along the facing rather than square to the map, and
-                 *  cut on the tile folds, so a piece reaching into the
-                 *  next tile keeps that tile's ground.  Its two feet may
-                 *  stand at different heights, which is how an arm rises
-                 *  as it reaches out. */
+                 *  cut on the tile folds.  A piece reaching into the
+                 *  next tile then keeps that tile's ground.  Its two
+                 *  feet may stand at different heights, which is how an
+                 *  arm rises as it reaches out. */
                 float g0 = on_base ? base : surface_at_world(c, mask_bit, x, y);
                 float g1 = on_base ? base2 : g0;
                 if (put_prism_clip_m(m, c, mask_bit, order, x + fx * p->ax, y + fy * p->ax, fx, fy,
@@ -142,7 +142,7 @@ int net_model_put_on(int model, RMesh *m, const RCity *c, uint8_t mask_bit, floa
             case M_FACE:
             {
                 float g = on_base ? base : surface_at_world(c, mask_bit, px, py);
-                if (put_lamp_face(m, order, px, py, g, p->z0, fx, fy, p->w, phase, p->code) != 0)
+                if (put_lamp_face(m, order, px, py, g, p->z0, fx, fy, p->w, phase, p->code, p->uv) != 0)
                     return -1;
                 break;
             }

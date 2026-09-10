@@ -159,21 +159,21 @@ FIGURES = [
               "point, then an eight-cycle, a four-cycle and an eight-cycle "
               "running the OTHER way; the 15-entry run is seven swaps, a "
               "blink rather than a flow. Turning all 49 as one block mixed "
-              "ramps that have nothing to do with each other. The timing is "
+              "spurs that have nothing to do with each other. The timing is "
               "the game's own: 12 ticks, 5 steps a second. A palette-only "
               "effect leaves every index identical, so the pixel "
               "comparison has nothing to compare; the permutation and the "
               "cadence are read from the listing."),
 
     dict(tab="Settled", key="judge-hotspot", tool="pixel_sbs", anim_sbs=5,
-         title="Road, rail and power crossing",
+         title="Road, thread and power meet",
          city=MANHATTAN,
          args=["--crop", "1920,1620,120,110", "--scale", "5", "--whole"],
          cap="ours | the game's own renderer | any differing pixel in magenta",
          note="Traffic is stencilled, not layered. The game writes a "
               "car pixel only where the destination is still index 0x91, "
-              "the road surface ($1987E), so a power line or a building "
-              "already covering the road erases the car underneath. That "
+              "the line surface ($1987E), so a power line or a building "
+              "already covering the line erases the car underneath. That "
               "is how the original gets correct occlusion for traffic "
               "with no depth information, and it is invisible to a blit "
               "list &mdash; the list is identical either way."),
@@ -306,7 +306,7 @@ _DIFFS, _NPX, _NGRP, _NTOT = find_differences(MANHATTAN, (1500, 1200, 900, 700))
 #  was found; if any of them regresses it shows up here first.
 VERIFY = [("2018,1634,90,70", "Traffic beneath the power lines"),
           ("1762,1570,90,70", "Downtown blocks"),
-          ("1570,1506,90,70", "Waterfront and rail")]
+          ("1570,1506,90,70", "Waterfront and thread")]
 for _n, (_crop, _what) in enumerate(VERIFY, 1):
     FIGURES.append(dict(
         tab="Open", key="verify-%d" % _n, tool="pixel_sbs", anim_sbs=5,
@@ -323,10 +323,10 @@ for _n, (_crop, _what) in enumerate(VERIFY, 1):
              "cars do not go through the ordinary blitter at all. All "
              "five call "
              "sites use $19004, whose inner loops read the destination "
-             "and write only where it is index 0x91, the road surface "
-             "($1987E). A car is stencilled onto asphalt rather than "
+             "and write only where it is index 0x91, the line surface "
+             "($1987E). A car is stencilled onto fill rather than "
              "layered over it, so a power line, a building or a bridge "
-             "rail already covering the road erases the car underneath "
+             "thread already covering the line erases the car underneath "
              "it. The blit list is identical either way; only the "
              "write differs."
              % (_NTOT, _NPX)))

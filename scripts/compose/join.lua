@@ -1,20 +1,20 @@
 --  join.lua -- the arc where two of a path's lines cross.
 --
---  Two lines that cross take one vertex at the crossing, and a fillet is
+--  Two lines that cross take one vertex at the meet, and a fillet is
 --  swept into the corner there.  Three things have to be true of it.
 --
---  The crossing has to be AHEAD of the line behind and BEHIND the line
+--  The meet has to be AHEAD of the line behind and BEHIND the line
 --  in front, or the path would double back on itself to reach it.  How
---  far outside that a crossing may still sit depends on what the lines
---  are.  A run ends on its own last tile, so a crossing more than three
+--  far outside that a meet may still sit depends on what the lines
+--  are.  A run ends on its own last tile, so a meet more than three
 --  quarters of a tile outside it is not this corner.  A free line ends
 --  where its last point projects, which at a shallow angle can be a long
---  way past the crossing: it needs only to be half a tile ahead of the
---  vertex behind and half a tile short of its own far end, and the deck
+--  way past the meet: it needs only to be half a tile ahead of the
+--  vertex behind and half a tile short of its own far end, and the slab
 --  it draws to get there has to hold on the corridor like any other.
 --
 --  The corner has to leave nothing bare.  The points between the two
---  lines are the road's own tiles, and a corner that cuts inside them
+--  lines are the line's own tiles, and a corner that cuts inside them
 --  abandons the very cells it was drawn for.
 --
 --  And an arc has to fit that reads as an arc.  A radius under the kink
@@ -28,7 +28,7 @@ local f32 = arc.put.f32
 --  An arc under this reads as a corner.
 local KINK = 0.30
 
---  How far outside its line a crossing may sit: three quarters of a tile
+--  How far outside its line a meet may sit: three quarters of a tile
 --  for a run, and for a free line the whole of its own reach less half a
 --  tile at each end.
 local RUN_SLACK  = 0.75
@@ -48,7 +48,7 @@ arc.rules.meet = function (j)
 
     if not j:covers() then return true end
 
-    --  The tangent the crossing may take: the edge behind is the end's
+    --  The tangent the meet may take: the edge behind is the end's
     --  own budget where it is the path's, the biarc's remainder where the
     --  vertex behind was built by one, and otherwise this corner's share.
     local bin, bout

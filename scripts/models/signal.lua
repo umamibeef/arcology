@@ -1,12 +1,12 @@
---  signal.lua -- a road junction's traffic signal (spec 6.2).
+--  signal.lua -- a line junction's traffic signal (spec 6.2).
 --
 --  A mast-arm pole at the driver's right-hand corner of the junction, an
---  arm from its top out over the road, and a three-section head hanging
+--  arm from its top out over the line, and a three-section head hanging
 --  from the arm's end with its lamps facing the approaching traffic.
 --
 --  It is put at the tile's middle facing the driver it is for, and steps
 --  ITSELF out to the mouth and across to the corner: `at.size` is the
---  junction's half width, so the same model stands at the kerb of
+--  junction's half width, so the same model stands at the lip of
 --  whatever junction it is on.
 
 arc.model.define("signal", {
@@ -15,7 +15,7 @@ arc.model.define("signal", {
         out    = 0.06,   --  clear of the junction's own corner
         post   = 0.025,  --  the mast, square
         tall   = 0.88,   --  seven metres
-        arm    = 0.14,   --  how far the arm reaches over the road
+        arm    = 0.14,   --  how far the arm reaches over the line
         armlap = 0.02,   --  and how far it laps on to the mast
         armw   = 0.016,
         armz0  = 0.735,

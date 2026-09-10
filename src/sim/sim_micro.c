@@ -1,9 +1,10 @@
-/*  sim_micro.c -- the microsimulators, and the year-end pass over them.
- *  $101AC: the XMIC records the special buildings carry, aged one year at a
- *  time -- a power plant approaching the end of its life, a prison setting
- *  the police radius around it, an arcology counting toward the ending.
- *  Allocating a record when a building goes up is here too, since it is the
- *  same table.  Split out of sim.c; addresses still point into CODE 2. */
+/*  sim_micro.c: the microsimulators, and the year-end pass over them.
+ *  $101AC: the XMIC records the special buildings carry, aged one year
+ *  at a time: a power plant approaching the end of its life, a prison
+ *  setting the police radius around it, an arcology counting toward the
+ *  ending.  Allocating a record when a building goes up is here too,
+ *  since it is the same table.  Addresses still
+ *  point into CODE 2. */
 #include "ext80.h"
 #include "sim.h"
 #include "sim_int.h"
@@ -55,8 +56,8 @@ static int micro_find_tile(const City *c, int rec)
 }
 
 /*  $10392.  What the city is charged to put a worn-out plant back:
- *  A5-0x5198 maps the plant's id onto an index, and A5+0x616 is the
- *  cost table the build menu prices from. */
+ *  A5-0x5198 maps the plant's id onto an index.  A5+0x616 is the cost
+ *  table the build menu prices from. */
 static int32_t micro_rebuild_cost(int type)
 {
     int n;
@@ -68,13 +69,13 @@ static int32_t micro_rebuild_cost(int type)
 
 int micro_cap(const City *c, int want, int per)
 {
-    /*  Everything here is a WORD.  $1124E and $11252 read both arguments
-     *  as words, $1126A truncates the quotient to one, and $1126C
-     *  compares them SIGNED.  A big city divides out past 32767 and the
-     *  comparison then reads it as negative, so the cap does not clamp
-     *  -- it wraps, and the museum in a million-strong city reports a
-     *  negative attendance.  Computing this in ints gives a tidier
-     *  answer and the wrong one. */
+    /*  Everything here is a WORD. $1124E and $11252 read both arguments
+     *  as words. $1126A cuts the quotient to one. $1126C compares them
+     *  SIGNED.  A big city divides out past 32767 and the comparison
+     *  then reads it as negative.  So the cap does not clamp: it wraps,
+     *  and the museum in a million-strong city reports a negative
+     *  attendance.  Computing this in ints gives a tidier answer and the
+     *  wrong one. */
     int16_t w = (int16_t)want;
     int16_t p = (int16_t)per;
     int16_t have;
@@ -85,12 +86,12 @@ int micro_cap(const City *c, int want, int per)
 }
 
 /*  $FD28.  What a brand-new record starts life holding.  A fixed-slot
- *  building ADDS to a record shared with every other copy of itself; a slot
- *  of its own is cleared first and then filled.  The seven plant figures
- *  are the game's megawatt ratings -- gas 50, oil 220, nuclear 500, solar
- *  50, microwave 1600, fusion 2500, coal 200, with hydro worth 20 apiece
- *  and wind 4 -- which is a useful check that the id chain has been read
- *  the right way round. */
+ *  building ADDS to a record shared with every other copy of itself.  A
+ *  slot of its own is cleared first and then filled.  The seven plant
+ *  figures are the game's megawatt ratings, gas 50, oil 220, nuclear
+ *  500, solar 50, microwave 1600, fusion 2500, coal 200, with hydro
+ *  worth 20 apiece and wind 4.  This is a useful check that the id chain
+ *  has been read the right way round. */
 static void micro_init(City *c, int slot, int bld)
 {
     uint8_t *r    = micro_rec(c, slot);
@@ -124,7 +125,7 @@ static void micro_init(City *c, int slot, int bld)
         return;
     }
 
-    /*  $FE0C -- a slot of its own: cleared, then filled by type. */
+    /*  $FE0C: a slot of its own: cleared, then filled by type. */
     r[1] = 0;
     micro_set_w(r, 0, 0);
     micro_set_w(r, 1, 0);
@@ -181,7 +182,7 @@ static void micro_init(City *c, int slot, int bld)
             micro_set_w(r, 2, (int)((uint16_t)Random() % 60));      /* $10040 */
             break;
         /*  The four arcologies, $100AA/$100E4/$1011E/$1015A: a starting
-         *  population, a life of five, and the YEAR they went up, which
+         *  population, a life of five, and the YEAR they went up.  This
          *  is what the Launch Arco's ending counts from.  The llama dome
          *  keeps its year the same way ($1018E). */
         case 0xFB:
@@ -213,17 +214,17 @@ static void micro_init(City *c, int slot, int bld)
 }
 
 /* ================================================================== *
- *  $EEAE  allocMicro -- give a newly placed special building its XMIC
+ *  $EEAE  allocMicro: give a newly placed special building its XMIC
  *  record, and answer the marker the caller writes into XTXT.
  *
  *  Which slot it gets is a table, not a search: `MICRO_CLASS` maps the
- *  building id to zero (no record at all -- runways and cranes are
- *  here, which is why the growth scan never allocates one), to a FIXED
- *  slot shared with every other copy of that building, or to "take the
+ *  building id to zero (no record at all.  Runways and cranes are here.
+ *  This is why the growth scan never allocates one.  It goes to a FIXED
+ *  slot, shared with every other copy of that building, or to "take the
  *  first free slot from ten up".
  *
- *  When they are all taken the table is not simply full: an arcology
- *  gives up, and anything else EVICTS the first record below 0xFB and
+ *  When they are all taken the table is not simply full.  An arcology
+ *  gives up.  Anything else EVICTS the first record below 0xFB, and
  *  scrubs its marker off the map, so the arcologies outlive everything
  *  else in the table.
  *
@@ -265,9 +266,8 @@ int sim_alloc_micro(City *c, int y, int x, int bld)
         }
         if (slot >= N_MICRO)
             return 0; /* $EF88 */
-        /*  $EF4C -- and the evicted record's marker comes off the map,
-         *  or a tile would point at a record that is now somebody
-         *  else's. */
+        /*  $EF4C: and the evicted record's marker comes off the map, or
+         *  a tile would point at a record that is now somebody else's. */
         {
             int yy, xx;
             for (yy = 0; yy < MAP_H; yy++)
@@ -285,8 +285,8 @@ int sim_alloc_micro(City *c, int y, int x, int bld)
         micro_init(c, slot, bld);
     }
 
-    /*  $EFB6 -- the default name, unless this is a shared record that
-     *  has been named already. */
+    /*  $EFB6: the default name, unless this is a shared record that has
+     *  been named already. */
     if (c->xlab && (size_t)((slot + 0x33) * 25 + 16) <= c->xlab_len)
     {
         uint8_t *lab = c->xlab + (slot + 0x33) * 25;
@@ -303,11 +303,11 @@ int sim_alloc_micro(City *c, int y, int x, int bld)
 void sim_microsim(City *c)
 {
     int i;
-    /*  $101E4 -- a2, the ceiling nearly every staffed building uses. */
+    /*  $101E4: a2, the ceiling nearly every staffed building uses. */
     const int pop_50 = (int)((uint32_t)c->population / 50u);
     /*  What the loop accumulates.  $101B4 counts the Launch Arcos it
-     *  passes; $101DA totals the police workload, which the tail stores
-     *  at A5+0x2C92; $101DE totals the population living in arcologies.
+     *  passes.  $101DA totals the police workload.  The tail stores it
+     *  at A5+0x2C92. $101DE totals the population living in arcologies.
      *
      *  $101D4 takes a copy of the police term BEFORE $101E0 clears it,
      *  because the police arm divides by five minus last year's value
@@ -316,12 +316,12 @@ void sim_microsim(City *c)
     int32_t   police_load  = 0;
     int32_t   arco_pop     = 0;
     const int police_term0 = c->police_term;
-    /*  $10240 -- raised when any school's rating falls under four. */
+    /*  $10240: raised when any school's rating falls under four. */
     int school_failing = 0;
     int riot_brewing   = 0;
 
-    /*  $101B4 -- the counts the arms share, each a tile census divided
-     *  by the building's footprint. */
+    /*  $101B4: the counts the arms share, each a tile census divided by
+     *  the building's footprint. */
     const int arco_n    = (c->census[0xFB] + c->census[0xFC] + c->census[0xFD] +
                            c->census[0xFE]) >>
                           4;                    /* $101F8, 4x4 */
@@ -349,7 +349,7 @@ void sim_microsim(City *c)
             continue;
         switch (t)
         {
-            /*  $1042C -- the stadium.  Attendance is the city divided
+            /*  $1042C: the stadium.  Attendance is the city divided
              *  between its stadiums, held under 25000, and then capped
              *  again at a fifth of the population. */
             case 0xD7:
@@ -365,30 +365,30 @@ void sim_microsim(City *c)
                     break;
                 }
 
-            /*  $104B6 -- city hall.  One number, and it is the only arm
+            /*  $104B6: city hall.  One number, and it is the only arm
              *  that takes both of $11246's arguments as constants: the
              *  long pushed at $104B6 is two words, 200 then 900. */
             case 0xD0:
                 micro_set_w(r, 0, micro_cap(c, 0xC8, 0x384));
                 break;
 
-            /*  $10614 -- a prison.  Three quarters of last year's
-             *  inmates stay, the city's police workload sends more, and
-             *  what comes out is added to the police term -- so the
-             *  prisons, not the stations, are what set the coverage
-             *  radius at the end of the pass. */
+            /*  $10614.  A prison.  Three quarters of last year's inmates
+             *  stay, the city's police workload sends more, and what
+             *  comes out is added to the police term.  So the prisons,
+             *  not the stations, are what set the coverage radius at the
+             *  end of the pass. */
             case 0xD8:
                 {
                     int32_t held = (int32_t)(uint16_t)micro_w(r, 0);
                     int32_t rate;
                     int     n = prison_n < 1 ? 1 : prison_n;
                     held -= ASR(held + (int32_t)((uint32_t)ASR(held, 1) >> 30), 2);
-                    /*  $10646 reads the GLOBAL at A5+0x2C92, which the
-                     *  pass does not write until its tail -- so a prison
-                     *  sees LAST year's city-wide police workload, not the
-                     *  total this year's loop is busy accumulating.  Using
-                     *  the running total instead is wrong by a year and the
-                     *  arithmetic never gives it away. */
+                    /*  $10646 reads the GLOBAL at A5+0x2C92.  This the
+                     *  pass does not write until its tail: so a prison
+                     *  sees LAST year's city-wide police workload, not
+                     *  the total this year's loop is busy accumulating.
+                     *  Using the running total instead is wrong by a
+                     *  year and the arithmetic never gives it away. */
                     held += c->misc[MISC_POLICE_LOAD] / n;
                     if (held > 0x2710)
                         held = (int32_t)(Random() & 0x3FF) + 0x2710; /* $1065E */
@@ -404,20 +404,20 @@ void sim_microsim(City *c)
                         r[1] = 0; /* $10732 */
                         break;
                     }
-                    /*  $106E8 -- `moveq #$a6` is -90, so this is rate - 90. */
+                    /*  $106E8: `moveq #$a6` is -90, so this is rate - 90. */
                     rate = rate - 90 + (100 - c->dept[DEPT_POLICE].funding) / 10;
                     r[1] = (uint8_t)(rate ? (int32_t)Random() % rate : 0);
                     break;
                 }
 
-            /*  $10C56, $10C5A -- the arcologies.  Their residents are
-             *  what the structure holds, what the region's arcologies
-             *  can between them support, and what the tax rates allow;
-             *  the smallest wins, and the total is the population term
-             *  graph series 0 adds to the head count.
+            /*  $10C56, $10C5A: the arcologies.  Their residents are what
+             *  the structure holds, what the region's arcologies can
+             *  between them support, and what the tax rates allow.  The
+             *  smallest wins, and the total is the population term graph
+             *  series 0 adds to the head count.
              *
-             *  $FE, the Launch Arco, counts itself on the way past --
-             *  see the end of the pass for what that is for. */
+             *  $FE, the Launch Arco, counts itself on the way past: see
+             *  the end of the pass for what that is for. */
             case 0xFE:
                 launch_arco++; /* $10C56, then falls through */
                 /* fall through */
@@ -448,10 +448,10 @@ void sim_microsim(City *c)
                     break;
                 }
 
-            /*  $10D7C -- the Llama Dome, which reports three figures
-             *  about llamas and derives them from the city's size and
-             *  four dice.  It is a joke building and the code treats it
-             *  as one. */
+            /*  $10D7C: the Llama Dome, which reports three figures about
+             *  llamas and derives them from the city's size and four
+             *  dice.  It is a joke building and the code treats it as
+             *  one. */
             case 0xFF:
                 {
                     int32_t d3;
@@ -464,15 +464,16 @@ void sim_microsim(City *c)
                     break;
                 }
 
-            /*  $102F0 -- the seven burning power plants.  They age a year,
-             *  report an output that wanders a little around the supplied
-             *  percentage, get a newspaper story at forty-eight, and at
-             *  fifty they are finished.  Which way "finished" goes depends
-             *  on the DISASTER switch, and not the way round you would
-             *  guess: with disasters turned OFF ($13AA set) the city
-             *  quietly rebuilds the plant and bills you for it, falling
-             *  back to demolition if the treasury cannot cover it.  With
-             *  disasters ON the plant simply goes. */
+            /*  $102F0: the seven burning power plants.  They age a year,
+             *  report an output that wanders a little around the
+             *  supplied percentage, get a newspaper story at
+             *  forty-eight, and at fifty they are finished.  Which way
+             *  "finished" goes depends on the DISASTER switch, and not
+             *  the way round you would guess: with disasters turned OFF
+             *  ($13AA set) the city quietly rebuilds the plant and bills
+             *  you for it, falling back to demolition if the treasury
+             *  cannot cover it.  With disasters ON the plant simply
+             *  goes. */
             case 0xC9:
             case 0xCA:
             case 0xCB:
@@ -484,7 +485,7 @@ void sim_microsim(City *c)
                     int at;
                     r[1]++; /* $102FA */
                     micro_set_w(r, 1, (int)(c->power_pct + (int32_t)(Random() & 7)));
-                    /*  $1032E -- the story at forty-eight is interface. */
+                    /*  $1032E: the story at forty-eight is interface. */
                     if (r[1] <= 0x32) /* $10358 */
                         break;
                     at = micro_find_tile(c, i); /* $1127E */
@@ -504,14 +505,19 @@ void sim_microsim(City *c)
                         }
                         /*  $103C4 and $103F8, the same two lines twice.
                          *  The call they guard with MISC[1021] is $392E,
-                         *  which SCROLLS THE VIEW to the tile so you watch
-                         *  the plant go -- interface, not simulation, and
-                         *  nothing to port. (symbols.json carried it as
-                         *  `powerLineRemove` for a while, which is why an
-                         *  earlier note here said a routine was missing.
-                         *  None is.) No shipped city has a fifty-year-old
-                         *  plant, so this arm is transcription only: read
-                         *  off the listing and never checked against the
+                         *  which SCROLLS THE VIEW to the tile so you
+                         *  watch the plant go.
+                         *
+                         *      Interface.
+                         *      Not simulation.
+                         *      Nothing to port.
+                         *
+                         *  (symbols.json carried it as `powerLineRemove`
+                         *  for a while.  This is why an earlier note
+                         *  here said a routine was missing.  None is.)
+                         *  No shipped city has a fifty-year-old plant,
+                         *  so this arm is transcription only: read off
+                         *  the listing and never checked against the
                          *  oracle. */
                         sim_demolish_and_place(c, y, x, 0xFF);
                         r[0] = 0; /* $103EE, the record dies with it */
@@ -519,18 +525,17 @@ void sim_microsim(City *c)
                     break;
                 }
 
-            /*  $1073A -- a school.  Pupils come out of the youngest
-             *  two age brackets, teachers out of the education budget
-             *  less a penalty for last year's rating, and the new
-             *  rating is pupils per teacher on a scale that runs
-             *  backwards.  A rating under four raises a flag the pass
-             *  carries to its end. */
+            /*  $1073A: a school.  Pupils come out of the youngest two
+             *  age brackets, teachers out of the education budget less a
+             *  penalty for last year's rating.  The new rating is pupils
+             *  per teacher on a scale that runs backwards.  A rating
+             *  under four raises a flag the pass carries to its end. */
             case 0xD6:
                 {
                     int32_t fund = c->dept[DEPT_SCHOOL].funding;
                     int32_t pupils, staff;
                     int     per, w0, w1;
-                    /*  $1073E -- signed divide by four, THINK C's way. */
+                    /*  $1073E: signed divide by four, THINK C's way. */
                     micro_set_w(r, 2, (int)ASR(fund + (int32_t)((uint32_t)ASR(fund, 1) >> 30), 2));
                     per    = school_n < 1 ? 1 : school_n;
                     pupils = (int32_t)(Random() & 0xF); /* $10790, drawn FIRST */
@@ -560,7 +565,7 @@ void sim_microsim(City *c)
                     break;
                 }
 
-            /*  $108BC -- a college.  The same shape as the school one
+            /*  $108BC: a college.  The same shape as the school one
              *  bracket up, and the penalty for a bad year is four times
              *  as heavy. */
             case 0xD9:
@@ -592,17 +597,17 @@ void sim_microsim(City *c)
                     break;
                 }
 
-            /*  $109E8 -- a hospital.  Patients are the city's people
-             *  divided between the hospitals; staff is what health
-             *  funding buys, less a penalty for last year's rating; and
+            /*  $109E8: a hospital.  Patients are the city's people
+             *  divided between the hospitals.  Staff is what health
+             *  funding buys, less a penalty for last year's rating.  And
              *  the new rating is patients per staff, on a scale that
-             *  runs backwards -- fewer patients each is better. */
+             *  runs backwards: fewer patients each is better. */
             case 0xD1:
                 {
                     int32_t fund = c->dept[DEPT_HEALTH].funding;
                     int32_t pat, staff;
                     int     per, w0, w1;
-                    /*  $109EC -- (x + (x >>> 31)) >> 1 is how THINK C
+                    /*  $109EC: (x + (x >>> 31)) >> 1 is how THINK C
                      *  divides a signed long by two. */
                     micro_set_w(r, 2, (int)ASR(fund + (int32_t)((uint32_t)fund >> 31), 1));
                     per = 25 * hosp_n;
@@ -630,10 +635,10 @@ void sim_microsim(City *c)
                     break;
                 }
 
-            /*  $10B24 -- the zoo.  Four numbers about the animals, and
-             *  not one of them is derived from anything: the zoo is
-             *  scenery that reports on itself.  Note the generator --
-             *  $20EE6 is THINK C's rand, not the Toolbox's. */
+            /*  $10B24: the zoo.  Four numbers about the animals, and not
+             *  one of them is derived from anything: the zoo is scenery
+             *  that reports on itself.  Note the generator: $20EE6 is
+             *  THINK C's rand, not the Toolbox's. */
             case 0xDA:
                 r[1] = (uint8_t)lib_rand(100);
                 micro_set_w(r, 0, (int)lib_rand(100));
@@ -641,9 +646,9 @@ void sim_microsim(City *c)
                 micro_set_w(r, 2, (int)lib_rand(100));
                 break;
 
-            /*  $10B8A -- the mayor's house.  It keeps the approval
-             *  figure the February poll last wrote, and counts down a
-             *  timer whose expiry is somebody else's business. */
+            /*  $10B8A: the mayor's house.  It keeps the approval figure
+             *  the February poll last wrote, and counts down a timer
+             *  whose expiry is somebody else's business. */
             case 0xF3:
                 micro_set_w(r, 1, (int)c->approval);
                 if (micro_w(r, 2) != 0) /* $10BB0 */
@@ -653,11 +658,11 @@ void sim_microsim(City *c)
                 }
                 break;
 
-            /*  $11028 -- the library system, funded from the school
+            /*  $11028: the library system, funded from the school
              *  budget.  Its second word is the only ACCUMULATING figure
-             *  in the whole pass: knowledge is added to, not
-             *  recomputed, and a library funded below fifty per cent
-             *  subtracts -- `moveq #$ce` is -50, not 206. */
+             *  in the whole pass: knowledge is added to, not recomputed,
+             *  and a library funded below fifty per cent subtracts:
+             *  `moveq #$ce` is -50, not 206. */
             case 0xF5:
                 {
                     int32_t fund = c->dept[DEPT_SCHOOL].funding;
@@ -665,8 +670,8 @@ void sim_microsim(City *c)
                     int32_t know;
                     micro_set_w(r, 0, micro_cap(c, (int)(n * (fund << 2)), 0x12));
                     know = n * (fund - 50) + (int32_t)(uint16_t)micro_w(r, 1);
-                    /*  $1109A -- kept only while it is under 32000 and
-                     *  above zero; outside that the old figure stands. */
+                    /*  $1109A: kept only while it is under 32000 and
+                     *  above zero.  Outside that the old figure stands. */
                     if (know < 0x7D00 && know > 0)
                         micro_set_w(r, 1, (int)know);
                     {
@@ -679,11 +684,11 @@ void sim_microsim(City *c)
                     break;
                 }
 
-            /*  $104D6 -- a police station.  Its beat is what the
-             *  budget pays for, capped by the city's size; its workload
-             *  is the city's crime spread over the stations; and the
-             *  workload accumulates into a city-wide total that the
-             *  tail turns into the coverage radius. */
+            /*  $104D6: a police station.  Its beat is what the budget
+             *  pays for, capped by the city's size.  Its workload is the
+             *  city's crime spread over the stations.  And the workload
+             *  accumulates into a city-wide total that the tail turns
+             *  into the coverage radius. */
             case 0xD2:
                 {
                     int32_t fund = c->dept[DEPT_POLICE].funding;
@@ -693,15 +698,15 @@ void sim_microsim(City *c)
                     n    = c->census[0xD2] < 1 ? 1 : (int)c->census[0xD2]; /* $10518 */
                     load = (int)((uint32_t)c->crime_tot / (uint32_t)n);
                     micro_set_w(r, 1, load);
-                    /*  $1053E -- five minus the term the pass started with,
-                     *  never less than one. */
+                    /*  $1053E: five minus the term the pass started
+                     *  with, never less than one. */
                     per = 5 - police_term0;
                     if (per < 1)
                         per = 1;
                     {
                         int v = load / per + (int)(Random() & 0xF); /* $1055E */
                         micro_set_w(r, 2, v);
-                        /*  $10580 -- and into the city-wide total, which
+                        /*  $10580: and into the city-wide total, which
                          *  saturates rather than wrapping. */
                         if (police_load + v >= 0xFFFF)
                             police_load = 0xFFFF;
@@ -711,7 +716,7 @@ void sim_microsim(City *c)
                     break;
                 }
 
-            /*  $105A0 -- a fire station.  Engines from the budget, crews
+            /*  $105A0: a fire station.  Engines from the budget, crews
              *  from the engines, and a response time nobody can predict. */
             case 0xD3:
                 {
@@ -725,8 +730,8 @@ void sim_microsim(City *c)
                     break;
                 }
 
-            /*  $10F18 -- the park system.  Visitors are what the parks
-             *  could take, and what the city has people to send; both
+            /*  $10F18: the park system.  Visitors are what the parks
+             *  could take, and what the city has people to send.  Both
              *  are held under 65000 before the smaller wins. */
             case 0xD5:
                 {
@@ -746,8 +751,8 @@ void sim_microsim(City *c)
                     break;
                 }
 
-            /*  $10FBC -- a museum, funded out of the education budget
-             *  like the schools and the library. */
+            /*  $10FBC: a museum, funded out of the education budget like
+             *  the schools and the library. */
             case 0xD4:
                 {
                     int32_t fund = c->dept[DEPT_COLLEGE].funding;
@@ -756,7 +761,7 @@ void sim_microsim(City *c)
                     break;
                 }
 
-            /*  $10EDE -- hydro dams.  Two ids because a dam has two
+            /*  $10EDE: hydro dams.  Two ids because a dam has two
              *  orientations, and neither ages: they are the one plant
              *  the game never makes you replace. */
             case 0xC6:
@@ -768,13 +773,13 @@ void sim_microsim(City *c)
                     break;
                 }
 
-            /*  $10EAE -- wind.  Also ageless. */
+            /*  $10EAE: wind.  Also ageless. */
             case 0xC8:
                 micro_set_w(r, 0, (int)c->census[0xC8]);
                 micro_set_w(r, 1, (int)(uint16_t)(c->census[0xC8] << 2));
                 break;
 
-            /*  $10E86, $10E1A, $10E5A -- the three transit systems.  Each
+            /*  $10E86, $10E1A, $10E5A: the three transit systems.  Each
              *  takes a tile count and last year's ridership, which the tail
              *  then clears ready for the year ahead.  The ridership
              *  counters are longs and only their LOW word is read here
@@ -794,13 +799,13 @@ void sim_microsim(City *c)
                 micro_set_w(r, 2, (int)(int16_t)(c->transit_rail & 0xFFFF));
                 break;
 
-            /*  $10BCA -- a statue has nothing to simulate.  It picks a
+            /*  $10BCA: a statue has nothing to simulate.  It picks a
              *  number so the plaque can say something. */
             case 0xDB:
                 micro_set_w(r, 1, (int)((uint16_t)Random() % 42));
                 break;
 
-            /*  $10BEC -- water treatment and desalinization.  Both keep
+            /*  $10BEC: water treatment and desalinization.  Both keep
              *  the supply percentage they saw, a satisfaction roll, and
              *  a staff figure the city's size caps. */
             case 0xF4:
@@ -815,8 +820,8 @@ void sim_microsim(City *c)
                 }
                 break;
 
-            /*  $11104 -- the marina's boats: eight a berth plus a few,
-             *  and never more than the city has people to sail them. */
+            /*  $11104: the marina's boats: eight a berth plus a few, and
+             *  never more than the city has people to sail them. */
             case 0xF8:
                 {
                     int v = (int)(uint16_t)(c->census[0xF8] << 3) +
@@ -830,32 +835,32 @@ void sim_microsim(City *c)
         }
     }
 
-    /*  $11144 -- the tail. */
+    /*  $11144: the tail. */
     c->misc[MISC_POLICE_LOAD] = police_load; /* $11144 */
     c->misc[MISC_ARCO_POP]    = arco_pop;    /* $1114A */
-    /*  $1114E -- the three ridership counters start the year at zero.  The
-     *  transit arms above have just copied them into their records, which
-     *  is the only place last year's figure survives. */
+    /*  $1114E: the three ridership counters start the year at zero.  The
+     *  transit arms above have just copied them into their records,
+     *  which is the only place last year's figure survives. */
     c->transit_bus = c->transit_rail = c->transit_subway = 0;
 
-    /*  $1115A -- the police term the prisons accumulated, per prison.  It
-     *  comes out as 0 or 1 and nothing else: under eighty it is 1, at
-     *  eighty or over it is 0, and with no prisons at all it is 0. $23E0C
-     *  reads it as `(term + 5) * funding`, so all this decides is whether
-     *  the beat reaches five tiles or six. */
+    /*  $1115A: the police term the prisons accumulated, per prison.  It
+     *  comes out as 0 or 1 and nothing else.  Under eighty it is 1, at
+     *  eighty or over it is 0, and with no prisons at all it is 0.
+     *  $23E0C reads it as `(term + 5) * funding`.  So all this decides
+     *  is whether the beat reaches five tiles or six. */
     if (prison_n > 0)
         c->police_term =
             (int16_t)((c->police_term / prison_n) < 0x50 ? 1 : 0);
     else
         c->police_term = 0; /* $11182 */
 
-    /*  $11186 and $1119A -- a failing school and a prison over capacity
+    /*  $11186 and $1119A: a failing school and a prison over capacity
      *  each get a newspaper story.  Interface, both of them. */
     (void)school_failing;
     (void)riot_brewing;
 
-    /*  $111AE -- and the ending.  More than three hundred Launch Arcos
-     *  with six million people in the city's arcologies, and they all
+    /*  $111AE: and the ending.  More than three hundred Launch Arcos
+     *  with six million people in the city's arcologies.  They all
      *  leave: every $FE tile is demolished and the treasury is paid a
      *  hundred thousand a piece. */
     if ((c->census[0xFE] >> 4) > 0x12C &&

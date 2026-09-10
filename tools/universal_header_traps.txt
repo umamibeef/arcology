@@ -253,7 +253,7 @@
 0xA838	CalcMask
 0xA839	SeedFill
 0xA83A	ZoomWindow
-0xA83B	TrackBox
+0xA83B	ThreadBox
 0xA83C	TEGetOffset
 0xA83D	TEDispatch
 0xA83E	TEStyleNew
@@ -493,7 +493,7 @@
 0xA91B	MoveWindow
 0xA91C	HiliteWindow
 0xA91D	SizeWindow
-0xA91E	TrackGoAway
+0xA91E	ThreadGoAway
 0xA91F	SelectWindow
 0xA920	BringToFront
 0xA921	SendBehind
@@ -584,7 +584,7 @@
 0xA965	SetMaxCtl
 0xA966	TestControl
 0xA967	DragControl
-0xA968	TrackControl
+0xA968	ThreadControl
 0xA969	DrawControls
 0xA96A	GetControlAction
 0xA96A	GetCtlAction

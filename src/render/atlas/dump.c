@@ -1,9 +1,9 @@
-/*  atlasdump -- load the extracted atlases and report what is in them.
- *  This is the C side of the round-trip that tools/artpack.py verifies on
- *  the Python side.  It prints a CRC32 over each atlas's index plane; the
- *  same number computed from the same PNG in Python is what proves the two
- *  readers agree.  Give it an id to also write that tile back out as a PNG.
- *  arcology --atlas <assets dir> [shap id [out.png]] */
+/*  atlasdump: load the extracted atlases and report what is in them.
+ *  This is the C side of the round-trip that tools/artpack.py verifies
+ *  on the Python side.  It prints a CRC32 over each atlas's index plane.
+ *  The same number computed from the same PNG in Python is what proves
+ *  the two readers agree.  Give it an id to also write that tile back
+ *  out as a PNG. arcology --atlas <assets dir> [shap id [out.png]] */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

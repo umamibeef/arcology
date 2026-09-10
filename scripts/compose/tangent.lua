@@ -12,7 +12,7 @@
 --
 --  At an END the edge is shared with the junction rather than another
 --  corner, and the junction wants the arm to leave it straight for a
---  while -- the approach, which scales with the road's width.  But not
+--  while -- the approach, which scales with the line's width.  But not
 --  at the price of a legal arc.  Where both fit, the approach is kept.
 --  Where they do not, the arc comes first and the straight is cut back
 --  to what the junction's own trim needs and no more.  And where even

@@ -1,23 +1,29 @@
-/*  The segment table: every segment the grading pass walked and fitted,
- *  replayed by the building pass, and the loft's stations kept per
- *  segment across passes and builds. */
+/*  The segment table.
+ *
+ *      Every segment the grading pass walked and fitted.
+ *      Replayed by the building pass.
+ *      The loft's stations kept per segment across passes and builds. */
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "dump.h"
 #include "mesh/internal.h"
-#include "net/internal.h"
+#include "pipeline.h"
 #include "opt.h"
 
-/*  One segment walk's working state, handed to the stages below so
- *  each can be read on its own: the tiles walked, the fit's points and
- *  pieces, the nodes at either end and what kind they are. */
+/*  One segment walk's working state, handed to the stages below so each
+ *  can be read on its own.
+ *
+ *      The tiles walked.
+ *      The fit's points and pieces.
+ *      The nodes at either end and what kind they are. */
 
-/*  THE SEGMENT TABLE. Every segment the measuring walk fits is kept -- its
- *  pieces, the fit's nodes, its corridor tiles, the tiles it marked
- *  visited, its nodes and class -- so the drawing walk reads it back
- *  instead of walking and fitting the map a second time.  A segment the
- *  pools cannot hold is simply walked again, as before. */
+/*  THE SEGMENT TABLE.  Every segment the measuring walk fits is kept.
+ *  It keeps its pieces, the fit's nodes, its corridor tiles, the tiles
+ *  it marked visited, its nodes and class.  So the drawing walk reads it
+ *  back instead of walking and fitting the map a second time.  A segment
+ *  the pools cannot hold is simply walked again, as before. */
 #define SEG_MAX    16384
 #define SEG_PIECES 262144
 #define SEG_PTS    131072
@@ -32,12 +38,12 @@ static int     s_nseg, s_nsegp, s_nsegq, s_nsegt, s_nsegm;
 int32_t        s_seg_at[R_MAP * R_MAP * 4]; /* (tile, edge) -> the segment starting or ending there, or -1 */
 
 /*  The loft's stations per kept segment, kept across the two passes and,
- *  for a segment no edit came near, across builds: sampling every segment
- *  was a third of a build (Atlanta: 9.8 ms in each pass of 83).  Two
- *  arenas, this build's and the last one's, grown on demand; a segment's
- *  samples are valid for the same trimmed pieces (hashed) when no tile near
- *  it changed (mesh_incr_near).  The last build's table survives as (start
- *  tile, edge) -> hash and range. */
+ *  for a segment no edit came near, across builds.  Sampling every
+ *  segment was a third of a build.
+ *  Two arenas, this build's and the last one's, grown on demand.  A
+ *  segment's samples are valid for the same trimmed pieces (hashed) when
+ *  no tile near it changed (mesh_incr_near).  The last build's table
+ *  survives as (start tile, edge) -> hash and range. */
 typedef struct
 {
     int32_t  sfirst, ns, np;
@@ -51,12 +57,12 @@ static PrevSeg  s_prev[SEG_MAX];
 static int32_t  s_prev_at[R_MAP * R_MAP * 4];
 static int      s_nprev;
 
-/*  The trimmed pieces as a key: the fields that carry geometry, and for
- *  an arc its centre, radius and angles -- never a straight's unset arc
- *  fields, nor an arc's unset a and b, which hold whatever the fit's
- *  buffers held before and made every arc hash differently from one
- *  build to the next (211 of 1,322 segments missed the cache after an
- *  edit for that alone). */
+/*  The trimmed pieces as a key.  It hashes the fields that carry
+ *  geometry.  For an arc that is its center, radius and angles, never a
+ *  straight's unset arc fields, nor an arc's unset a and b.  These hold
+ *  whatever the fit's buffers held before.  They made every arc hash
+ *  differently from one build to the next (211 of 1,322 segments missed
+ *  the cache after an edit for that alone). */
 static void hash_bytes(uint64_t *h, const void *p, size_t n)
 {
     const uint8_t *b = (const uint8_t *)p;
@@ -76,7 +82,7 @@ uint64_t pieces_hash(const Piece *pc, int np, float total)
         hash_bytes(&h, &p->len, sizeof p->len);
         if (p->arc)
         {
-            /* an arc is its centre, radius and angles; the fillet leaves its a and b unset */
+            /* an arc is its center, radius and angles.  The fillet leaves its a and b unset */
             hash_bytes(&h, &p->c, sizeof p->c);
             hash_bytes(&h, &p->r, sizeof p->r);
             hash_bytes(&h, &p->t0, sizeof p->t0);
@@ -263,19 +269,19 @@ int seg_store(const Seg *x)
     for (k = 0; k < x->nm; ++k)
         s_segm[s_nsegm++] = x->marks[k];
     s_seg_at[(x->row * R_MAP + x->col) * 4 + x->e] = s_nseg;
-    /*  The far end too, so a walk starting there finds it -- but only on
-     *  the map: a road running off the edge leaves the walk's far node
+    /*  The far end too, so a walk starting there finds it: but only on
+     *  the map: a line running off the edge leaves the walk's far node
      *  one tile outside, and that index aliases another tile's edge
-     *  (Atlanta 0,35: it took the slot of the segment leaving south). */
+     * . */
     if (x->cc >= 0 && x->cr >= 0 && x->cc < R_MAP && x->cr < R_MAP)
         s_seg_at[(x->cr * R_MAP + x->cc) * 4 + x->back] = s_nseg;
     ++s_nseg;
     return 1;
 }
 
-/*  Read a kept segment back into a walk's context: the pieces into the
- *  walk's own buffers (the trims cut them), the tiles it marked as
- *  visited marked again, its class restored. */
+/*  Read a kept segment back into a walk's context.  The pieces go into
+ *  the walk's own buffers, where the trims cut them.  The tiles it
+ *  marked as visited marked again, its class restored. */
 void seg_load(Seg *x, const RSeg *r)
 {
     int k;
@@ -330,7 +336,7 @@ int seg_table_get(int i, int32_t *col, int32_t *row, int32_t *cc, int32_t *cr, c
 /*  The fitted pieces of the segment at (col, row, e), taken from that
  *  end: as stored when it starts there, reversed when it ends there.  A
  *  turnout cuts its branch along this path and puts the port on it
- *  (lane.c port_pose), so a branch that bends within the reach is met
+ *  (lane.c port_pose).  So a branch that bends within the reach is met
  *  by a curve and not by a hook. */
 int seg_table_pieces_from(int32_t col, int32_t row, int e, Piece *out, int cap, int *np)
 {
@@ -377,8 +383,8 @@ int seg_table_nodes(int i, const V2 **q, const float **rad, int *nk)
 }
 
 /*  The building pass's measure, from the table: every kept segment's
- *  arms and crossings again, without walking or fitting anything.  The
- *  grading pass fitted them; the pieces are the same in both. */
+ *  arms and meets again, without walking or fitting anything.  The
+ *  grading pass fitted them.  The pieces are the same in both. */
 int seg_table_replay(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit, int comp, uint8_t *visited)
 {
     int i;
@@ -387,7 +393,7 @@ int seg_table_replay(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mas
         const RSeg *r = &s_segs[i];
         Seg         x;
         if (r->band)
-            continue; /* a highway band: no arms, no crossings; hiway.c replays it */
+            continue; /* a band band: no arms, no meets.  Band.c replays it */
         memset(&x, 0, sizeof x);
         x.m = m, x.c = c, x.l = l, x.mask_bit = mask_bit, x.comp = comp, x.f = r->f, x.col = r->col, x.row = r->row, x.e = r->e;
         x.visited = visited;
@@ -396,13 +402,13 @@ int seg_table_replay(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mas
         x.ee = r->e;
         seg_load(&x, r);
         seg_measure_arms(&x);
-        if (seg_measure_crossings(&x) != 0)
+        if (seg_measure_laps(&x) != 0)
             return -1;
     }
     return 0;
 }
 
-/* ---- highway bands in the table ------------------------------------------ */
+/* ---- band bands in the table ------------------------------------------ */
 
 int seg_store_band(int32_t col, int32_t row, int ew, int sign, const Piece *pc, int np, const V2 *q, const float *rad, const float *tlim, int nk, const int32_t *own, int n_own)
 {
@@ -421,7 +427,7 @@ int seg_store_band(int32_t col, int32_t row, int ew, int sign, const Piece *pc, 
     r->cr     = row;
     r->e      = (int8_t)(ew + (sign < 0 ? 2 : 0)); /* the start cell and the way the walk ran: the band's key across builds */
     r->back   = (int8_t)sign;
-    r->f      = F_ROAD;
+    r->f      = net_line->f;
     r->cls    = -1.0f;
     r->hw     = 1.0f;
     r->total  = total;
@@ -480,8 +486,8 @@ int seg_table_unchanged(int i)
     return p >= 0 && s_prev[p].ns > 0 && r->ns > 0 && s_prev[p].phash == r->phash && s_prev[p].np == r->np;
 }
 
-/*  The table index of the k-th band, in the order the walk stored them
- *  -- the order hiway.c's band table keeps too. */
+/*  The table index of the k-th band, in the order the walk stored them:
+ *  the order band.c's band table keeps too. */
 int seg_table_band_index(int k)
 {
     int i;
@@ -489,4 +495,32 @@ int seg_table_band_index(int k)
         if (s_segs[i].band && k-- == 0)
             return i;
     return -1;
+}
+
+/*  How many of a segment's tiles read as each class.  One class for the
+ *  whole segment follows from it.  Settling that is the SCRIPT'S
+ *  (arc.rules.seg_class): the counting is a reading of the map and the
+ *  median drawn from it is not. */
+void seg_class_counts(const Seg *x, int cnt[3])
+{
+    const RCity *c   = x->c;
+    const V2    *pts = x->pts;
+    int          k;
+    cnt[0] = cnt[1] = cnt[2] = 0;
+    for (k = 0; k < x->n; ++k)
+    {
+        int32_t tc = (int32_t)floorf(pts[k].x), tr = (int32_t)floorf(pts[k].y);
+        if (tc < 0 || tr < 0 || tc >= R_MAP || tr >= R_MAP)
+            continue;
+        ++cnt[(int)line_class(c, tc, tr)];
+    }
+}
+
+/*  And the class the drive settled for this segment, read back.  A
+ *  family that carries no class keeps none. */
+int seg_class(Seg *x)
+{
+    if (x->f == net_line->f)
+        x->cls = (float)net_seg_class_of(x->col, x->row, x->e);
+    return 0;
 }

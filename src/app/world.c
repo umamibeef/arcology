@@ -1,7 +1,7 @@
-/*  world.c -- building what gets drawn.  The sweep's op list, the terrain
+/*  world.c: building what gets drawn.  The sweep's op list, the terrain
  *  mesh, the traffic, and the two one-frame paths that check or shoot
- *  instead of running.  All of it is cache invalidation in the end: the app
- *  marks itself dirty, and these are what pay the debt. */
+ *  instead of running.  All of it is cache invalidation in the end: the
+ *  app marks itself dirty, and these are what pay the debt. */
 #include "adapt.h"
 #include "internal.h"
 #include "log.h"
@@ -29,11 +29,11 @@ int resweep(App *a)
     adapt_city(a->view, a->city);
     a->opts.draw_traffic = !geometry_on(a); /* the 3D networks carry their own vehicles */
     /*  At a quarter turn the sweep runs on the renderer's view of the
-     *  city from that orientation -- the art, the anchors and the
+     *  city from that orientation.  The art, the anchors and the
      *  painter's order the original would show, read off the unturned
-     *  grid -- and is projected unturned; the mesh, built once from the
-     *  same grid, is projected at the quarter about the map's centre, and
-     *  the two meet.  Nothing is rewritten. */
+     *  grid.  And is projected unturned.  The mesh, built once from the
+     *  same grid, is projected at the quarter about the map's center,
+     *  and the two meet.  Nothing is rewritten. */
     if (sweep_wanted(a))
     {
         adapt_city_turned(a->view_rot, a->city, sweep_wanted(a));
@@ -48,12 +48,12 @@ int resweep(App *a)
     return 0;
 }
 
-/*  The terrain field: per tile, a water tile's distance to the nearest
- *  land and a land tile's distance to the nearest water, both in tiles by
- *  a two-pass chamfer transform (3-4 weights, so diagonals count about
- *  1.4), and the water's depth in levels from ALTM.  The water shader
- *  lays foam by the first and grades colour by the depth; the ground
- *  shader lays sand and damp ground by the third. */
+/*  The terrain field.  Per tile it holds a water tile's distance to the
+ *  nearest land, and a land tile's distance to the nearest water.  Both
+ *  are in tiles by a two-pass chamfer transform, with 3-4 weights, so
+ *  diagonals count about 1.4.  The water's depth comes in levels from
+ *  ALTM.  The water shader lays foam by the first and grades color by
+ *  the depth.  The ground shader lays sand and damp ground by the third. */
 static void chamfer(int32_t *d)
 {
     int32_t r, cc;
@@ -112,9 +112,9 @@ void shore_field(const RCity *c, uint8_t *out)
             if (depth < 0)
                 depth = 0;
             /*  Surface water on the ground, XTER 0x30 on, has no bed of
-             *  its own (its table is its level) and would read as the
-             *  shallows' turquoise; the original paints a stream the
-             *  sea's blue, so it reads as a level deep.  Colour only. */
+             *  its own.  Its table is its level, so it would read as the
+             *  shallows' turquoise.  The original paints a stream the
+             *  sea's blue, so it reads as a level deep.  Color only. */
             if (c->xter[k] >= 0x30u && depth < 1)
                 depth = 1;
             depth *= R_SHORE_SCALE;
@@ -126,18 +126,19 @@ void shore_field(const RCity *c, uint8_t *out)
     }
 }
 
-/*  The traffic, advanced to `time` and rebuilt into the movers' buffer;
- *  with the road mesh off, or underground, the buffer is empty. */
+/*  The traffic, advanced to `time` and rebuilt into the movers' buffer.
+ *  With the road mesh off, or underground, the buffer is empty. */
 int traffic_frame(App *a, float time)
 {
     int on = geometry_on(a) && !a->opts.underground;
     if (!on)
         return gpu_set_movers(a->gpu, NULL, 0);
-    if (a->traffic_time > 0.0f && time > a->traffic_time)
-        traffic_step(&a->traffic, &a->mesh, time - a->traffic_time, time);
-    a->traffic_time = time;
-    if (traffic_build(&a->traffic, &a->mesh, a->view) != 0)
-        return -1;
+    {
+        float dt = a->traffic_time > 0.0f && time > a->traffic_time ? time - a->traffic_time : 0.0f;
+        a->traffic_time = time;
+        if (traffic_moving(&a->traffic, &a->mesh, a->view, dt, time, 1) != 0)
+            return -1;
+    }
     return gpu_set_movers(a->gpu, a->traffic.scratch.land, a->traffic.scratch.n_land);
 }
 
@@ -178,12 +179,14 @@ int remesh(App *a)
         float t = (float)atof(g_dev.traffic_t), at = 0.0f;
         while (at < t)
         {
-            traffic_step(&a->traffic, &a->mesh, 0.05f, at);
+            traffic_moving(&a->traffic, &a->mesh, a->view, 0.05f, at, 0);
             at += 0.05f;
         }
     }
     if (traffic_frame(a, a->gv.time) != 0)
         return -1;
+    if (g_dev.traffic_t)
+        traffic_digest(&a->traffic, &a->mesh);
     a->mesh_dirty = 0;
     R_DBG("mesh", "%u vertices, %u retaining walls; canvas %dx%d origin %d,%d "
                   "tile %dx%d step %d",
@@ -301,18 +304,18 @@ int check_frame(App *a, SDL_Window *win, const char *out_path)
     return rc;
 }
 
-/*  The game's frame taken headless: three of the live loop's own frames
- *  -- ImGui keeps a window hidden on the frame that first sizes it, and
- *  a table's columns settle on their own first frame -- the third read
- *  back to a PNG at `path`.  With no path the frames are run for what
- *  they lay out and fill in, and nothing is written. */
+/*  The game's frame taken headless: three of the live loop's own frames.
+ *  ImGui keeps a window hidden on the frame that first sizes it, and a
+ *  table's columns settle on their own first frame.  The third read back
+ *  to a PNG at `path`.  With no path the frames are run for what they
+ *  lay out and fill in, and nothing is written. */
 int shot_frame(App *a, SDL_Window *win, const char *path)
 {
     RImage img;
     int    k, rc;
-    /*  The frame's time: the clock's, or --traffic-t's, so a shot taken
-     *  with the traffic advanced is the same frame every run and two
-     *  builds can be compared on it. */
+    /*  The frame's time is the clock's, or --traffic-t's.  So a shot
+     *  taken with the traffic advanced is the same frame every run, and
+     *  two builds can be compared on it. */
     float time = g_dev.traffic_t ? (float)atof(g_dev.traffic_t) : (float)((double)(SDL_GetTicksNS() - a->t0_ns) / 1e9);
     for (k = 0; k < 3; ++k)
         if (app_frame(a, win, -1.0f, time, k == 2 && path ? &img : NULL) != 0)

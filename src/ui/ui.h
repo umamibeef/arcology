@@ -1,14 +1,14 @@
-/*  ui.h -- the in-game UI behind a C interface.  The widgets are Dear
- *  ImGui, hosted in ui.cpp, the one C++ file in the game; ui_none.c is the
- *  same interface doing nothing, for a build without it.  The app owns an
- *  RUiState: before the frame it fills in what the UI shows; the UI edits
- *  the switches in place and raises the commands; after the frame the app
- *  applies them and clears them.  The UI knows nothing of the city or the
- *  renderer, only this struct.  The look is the original's: its tool
- *  palette and menus from the resource fork's own art and menu resources,
- *  and System 7 window chrome drawn by hand.  Theming is kept in one place,
- *  apply_theme in ui.cpp, so a Kaleidoscope scheme can drive it later
- *  (docs/future.rst). */
+/*  ui.h: the in-game UI behind a C interface.  The widgets are Dear
+ *  ImGui, hosted in ui.cpp, the one C++ file in the game.  Ui_none.c is
+ *  the same interface doing nothing, for a build without it.  The app
+ *  owns an RUiState: before the frame it fills in what the UI shows.
+ *  The UI edits the switches in place and raises the commands.  After
+ *  the frame the app applies them and clears them.  The UI knows nothing
+ *  of the city or the renderer, only this struct.  The look is the
+ *  original's.  Its tool palette and menus come from the resource fork's
+ *  own art and menu resources.  The System 7 window chrome is drawn by
+ *  hand.  Theming is kept in one place, apply_theme in ui.cpp.  So a
+ *  Kaleidoscope scheme can drive it later (docs/future.rst). */
 #ifndef R_UI_H
 #define R_UI_H
 
@@ -95,18 +95,23 @@ typedef struct
     /* --- switches: shown and edited in place -------------------- */
     int32_t speed; /* 1 pause .. 5                      */
     /*  geometry is the one switch: the terrain mesh, the water shader
-     *  and the road strips together.  plan is the map view, the camera
+     *  and the road strips together.  Plan is the map view, the camera
      *  raised to look straight down. */
     int geometry, plan, grid, plain_sweep, underground;
-    int markings, furniture, sidewalks; /* the road-marking, street-furniture and sidewalk passes */
+    int markings, furniture, margins; /* the road-marking, street-furniture and margin passes */
     /*  Outline: the roads and their works stand aside and the fitted
-     *  curves and the footway network are drawn on bare ground.  A view of
+     *  curves and the margin network are drawn on bare ground.  A view of
      *  its own, from the View menu, --outline, or the last of --tune. */
     int outline;
-    /*  The road geometry's knobs, live: the two widths, the tightest and
-     *  widest curve each family may take, the straight approach at a
-     *  node, the corridor margin and the junction trim.  The app fills
-     *  them from the mesh and takes them back when tune_changed. */
+    /*  The road geometry's knobs, live.
+     *
+     *      The two widths.
+     *      The tightest and widest curve each family may take.
+     *      The straight approach at a node.
+     *      The corridor margin and the junction trim.
+     *
+     *  The app fills them from the mesh and takes them back when
+     *  tune_changed. */
     float tune[19];
     int   tune_changed, show_tuning;
     /*  The script console: one line in, the last answers out.  The app
@@ -116,10 +121,10 @@ typedef struct
     char script_line[512];
     char script_out[8192];
     char script_status[256];
-    /*  Every cell's own number at its bottom-right corner, in the map view.
-     *  The app hands over the map's affine frame on screen: the origin and
-     *  one column's and one row's step, valid while the camera looks
-     *  straight down. */
+    /*  Every cell's own number at its bottom-right corner, in the map
+     *  view.  The app hands over the map's affine frame on screen.  It
+     *  is the origin, and one column's and one row's step.  It holds
+     *  while the camera looks straight down. */
     int     show_cells, cell_ok;
     float   cell_o[2], cell_c[2], cell_r[2];
     int32_t view; /* 0..11, the game's map views       */
@@ -145,7 +150,7 @@ typedef struct
     int     comp_n_also;
     float   comp_mat;       /* its material */
     uint32_t comp_tris;     /* how many triangles the component has ... */
-    uint32_t comp_gen_tris; /* ... and the whole thing its generating call made; 0 when it was made under none */
+    uint32_t comp_gen_tris; /* ... and the whole thing its generating call made.  0 when it was made under none */
     float   comp_box[6];    /* and the box it occupies */
     int     comp_box_ok;
     int     show_inspect; /* set by the app */
@@ -155,7 +160,7 @@ typedef struct
     /* --- commands: raised by the UI, cleared by the app ---------- */
     int want_quit, want_save, want_screenshot;
     /*  the load menu.  The app fills city_list by scanning city_dir and
-     *  raises open_load when it wants the menu up; the UI raises
+     *  raises open_load when it wants the menu up.  The UI raises
      *  want_load with a path in load_path when the player picks one. */
     int     want_load, open_load;
     char    load_path[512];
@@ -167,9 +172,9 @@ typedef struct
     int32_t want_rotate;    /* +1 clockwise, -1 anticlockwise    */
     int32_t want_sound;     /* a sound id to play, 0 none         */
     char    save_path[512];
-    /*  The themes: every pack found under assets/themes, the one worn
-     *  now by name ("none" for the hand-drawn look), and the request to
-     *  change, which app applies and saves. */
+    /*  The themes.  They are every pack found under assets/themes, and
+     *  the one worn now by name ("none" for the hand-drawn look).  A
+     *  request to change comes back, which app applies and saves. */
     char theme_list[RUI_MAX_THEMES][64];
     int  n_themes;
     char theme_name[64];
@@ -178,9 +183,9 @@ typedef struct
     int music_on, want_music;
     /*  LOADING.  Empty when nothing is.  The scripts are read in a few
      *  milliseconds and the world they describe takes a second and a
-     *  half to build, so what this announces is the BUILD: the frame
-     *  carrying it is the last one drawn before the build blocks, and it
-     *  is what the window shows for as long as that takes. */
+     *  half to build.  So what this announces is the BUILD: the frame
+     *  carrying it is the last one drawn before the build blocks.  It is
+     *  what the window shows for as long as that takes. */
     char loading[64];   /* what is happening, written ON the bar */
     char loading_note[64]; /* the detail under it */
     int  loading_step;  /* how far through the load, and how many steps it has */
@@ -231,20 +236,20 @@ extern const char *const RUI_TOOL_NAME[RUI_N_TOOLS];
 
 typedef struct RUi RUi;
 
-/*  Create the UI on the window and device; `swap_fmt` is the swapchain's
- *  SDL_GPUTextureFormat, `dpi` the window's pixel density.  Returns
- *  NULL when the UI is not built in. */
+/*  Create the UI on the window and device.  `swap_fmt` is the
+ *  swapchain's SDL_GPUTextureFormat, `dpi` the window's pixel density.
+ *  Returns NULL when the UI is not built in. */
 RUi *ui_create(struct SDL_Window *win, struct SDL_GPUDevice *dev, int swap_fmt, float dpi, const char *assets_dir);
 void ui_destroy(RUi *u);
 
 /*  Dress the interface in a Kaleidoscope scheme: `dir` holds a theme
  *  pack (theme.png and theme.txt, written by tools/scheme.py from the
- *  scheme's resource fork).  Returns 0, or -1 if the pack is not there;
- *  without one the look is System 7's, drawn by hand. */
+ *  scheme's resource fork).  Returns 0, or -1 if the pack is not there.
+ *  Without one the look is System 7's, drawn by hand. */
 int ui_set_theme(RUi *u, const char *dir);
 
-/*  Take the scheme off again: the hand-drawn look, and the style
- *  colours the scheme had changed put back. */
+/*  Take the scheme off again: the hand-drawn look, and the style colors
+ *  the scheme had changed put back. */
 void ui_clear_theme(RUi *u);
 
 /*  Hand the UI an event.  Returns 1 when the UI owns the pointer or

@@ -7,10 +7,10 @@
 --  what it is made of and where it is in a cut.
 --
 --  `s` is the strip itself -- `s.kind` is "strip" -- and every face it
---  lays is attributed to it.  Take this file away and the roads, the
---  railways and the decks have no surface at all.
+--  lays is attributed to it.  Take this file away and the lines, the
+--  railways and the slabs have no surface at all.
 
---  One station, interpolated between two, where a junction's crossing
+--  One station, interpolated between two, where a junction's meet
 --  band cuts the pair that straddles its edge.  The two then meet along
 --  the line rather than lapping by the rest of a quad.
 --  Every step is taken in the mesh's own precision: a station worked out
@@ -49,11 +49,11 @@ arc.rules.strip = function (s)
     local n = s:count()
     if n < 2 then return true end
     local fam = arc.rules.family({name = d.family, width = d.half * 2})
-    --  A family that carries a footway keeps only the carriageway here:
-    --  the outer share of the band is the footway's own, laid from the
+    --  A family that carries a margin keeps only the way here:
+    --  the outer share of the band is the margin's own, laid from the
     --  network, and the two meet along that line rather than one being
     --  painted over the other.
-    local inset = (d.curbs and fam.footway) and fam.footway.inner or 1.0
+    local inset = (d.lips and fam.margin) and fam.margin.inner or 1.0
     local slot = arc.geo[d.slot]
     local cut, dip = fam.strip.cut, fam.strip.dip
     local app = fam.approach
@@ -61,12 +61,12 @@ arc.rules.strip = function (s)
     for i = 1, n - 1 do
         local pv, cu = station(s, i - 1), station(s, i)
         --  The ground's own line at the two STATIONS, which a pair cut
-        --  short at a crossing band still answers to: a station below it
+        --  short at a meet band still answers to: a station below it
         --  is in a cut whatever the quad was trimmed to.
         local zo0, zo1 = pv.zorig, cu.zorig
-        --  What the junction's own crossing covers is left to it: the
+        --  What the junction's own meet covers is left to it: the
         --  band is laid square to the mouth, on the ground this strip
-        --  graded, and the carriageway starts exactly where it ends.
+        --  graded, and the way starts exactly where it ends.
         --  Every step in the mesh's own precision, the comparisons with
         --  it: a band's edge worked out to more places than the mesh can
         --  keep cuts the pair at a hair from where the band itself was
@@ -83,7 +83,7 @@ arc.rules.strip = function (s)
             local ha = arc.band_half(d.half, s:width(pv.dx, pv.dy), inset)
             local hb = arc.band_half(d.half, s:width(cu.dx, cu.dy), inset)
             --  a0/b0 the right-hand edge (across negative), a1/b1 the
-            --  left; a deck's may be narrowed where a ramp took a lane
+            --  left; a slab's may be narrowed where a spur took a lane
             local a0x, a0y = arc.band_edge(pv.x, pv.y, pv.dx, pv.dy, ha, pv.wr, 1)
             local a1x, a1y = arc.band_edge(pv.x, pv.y, pv.dx, pv.dy, ha, pv.wl, -1)
             local b0x, b0y = arc.band_edge(cu.x, cu.y, cu.dx, cu.dy, hb, cu.wr, 1)
@@ -96,20 +96,20 @@ arc.rules.strip = function (s)
             local mat, ala, alb = d.mat, pv.s, cu.s
             local cls = 0
 
-            --  A road's own pair: the class it carries, and its one
-            --  marking -- the approach to a level crossing, whose along
-            --  is the distance to the crossing.
-            if d.family == "road" then
+            --  A line's own pair: the class it carries, and its one
+            --  marking -- the approach to a level meet, whose along
+            --  is the distance to the meet.
+            if d.family == "line" then
                 cls = d.class >= 0 and d.class
-                      or s:road_class(math.floor(mx), math.floor(my))
+                      or s:line_class(math.floor(mx), math.floor(my))
                 if app and pv.xd > app.near and 0.5 * (pv.xd + cu.xd) < app.far then
                     mat, ala, alb = arc.mat.xapproach, pv.xd, cu.xd
                 end
             end
 
-            if d.deck then arc.deck.gore(s, d, i, pv, cu, ha, hb, order, ala, alb) end
+            if d.slab then arc.slab.gore(s, d, i, pv, cu, ha, hb, order, ala, alb) end
 
-            --  A quad in a cut, the road below the ground at a corner,
+            --  A quad in a cut, the line below the ground at a corner,
             --  is flagged in its class (4 and up) so the clipping check
             --  knows the ground standing over it is meant, held back by
             --  the walls below.
@@ -120,12 +120,12 @@ arc.rules.strip = function (s)
                       or pv.z < f32(zo0 - dip) or cu.z < f32(zo1 - dip)
             s:class(sunk and cls + 4 or cls)
 
-            --  One quad, the whole band: the sidewalk pass and the
+            --  One quad, the whole band: the margin pass and the
             --  marking pass draw these same vertices again under their
             --  own pass number, so a strip costs one quad however many
             --  passes paint it.  A band that stands on the ground is
             --  drawn ON it -- handed no height, every piece it is cut
-            --  into takes the drawn surface at its own corners.  A deck
+            --  into takes the drawn surface at its own corners.  A slab
             --  carries its own height and keeps it.
             local qa = d.flies and pv.z or -1.0
             local qb = d.flies and cu.z or -1.0
@@ -133,8 +133,8 @@ arc.rules.strip = function (s)
                    qa, qb, acr, acl, ala, alb, mat, order + slot)
             s:class(cls)
 
-            if d.deck then
-                arc.deck.under(s, d, i, n, pv, cu, a0x, a0y, a1x, a1y, b0x, b0y, b1x, b1y, order)
+            if d.slab then
+                arc.slab.under(s, d, i, n, pv, cu, a0x, a0y, a1x, a1y, b0x, b0y, b1x, b1y, order)
             end
         end
         ::next::

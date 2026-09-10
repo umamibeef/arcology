@@ -1,16 +1,16 @@
-/*  dev.c -- the verification driver and every developer mode.  It was
+/*  dev.c: the verification driver and every developer mode.  It was
  *  called main.c and holds no main: `arcology` has one entry point in
  *  src/app, which dispatches here by mode name.  The file is the library
- *  the CMake target arc_dev is named for.  The point of the reconstruction
- *  is that it can be checked, so this runs every check there is and prints
- *  one table.  Three kinds of evidence, in increasing order of strength:
- *  format     re-serialise a city and compare the bytes aggregate
- *  recompute a total and compare it to the file's own per-cell   recompute
- *  a whole layer and diff it cell by cell Nothing here is fitted.  Where a
- *  check falls short of 100% the reason is recorded next to it, and in
- *  every case so far the reason is that a save records a city mid-cycle:
- *  values written by an earlier phase describe a map that later phases have
- *  already changed. */
+ *  the CMake target arc_dev is named for.  The point of the
+ *  reconstruction is that it can be checked, so this runs every check
+ *  there is and prints one table.  Three kinds of evidence, in
+ *  increasing order of strength.  FORMAT re-serializes a city and
+ *  compares the bytes.  AGGREGATE recomputes a total and compares it to
+ *  the file's own.  PER-CELL recomputes a whole layer and diffs it cell
+ *  by cell.  Nothing here is fitted.  Where a check falls short of 100%
+ *  the reason is recorded next to it.  In every case so far the reason
+ *  is that a save records a city mid-cycle.  Values written by an
+ *  earlier phase describe a map that later phases have already changed. */
 #include "advisor.h"
 #include "arco.h"
 #include "sim.h"
@@ -123,14 +123,14 @@ static void check_city(const char *path, City *c, void *ctx)
     memcpy(xval0, c->xval, sizeof xval0);
     memcpy(xplt0, c->xplt, sizeof xplt0);
 
-    /*  Two different questions, so two different runs.  ISOLATED gives each
-     *  stage the inputs the file recorded and asks whether the
-     *  transcription of that one stage is right.  CHAINED runs them in the
-     *  order $2317E does -- land value is stage 5, density stage 7, crime
-     *  stage 9 -- with each stage feeding the next, and asks whether the
-     *  whole pass reproduces.  It cannot, because two of the inputs are
-     *  destroyed before the save is written, and the point of showing it is
-     *  to see how far that propagates. */
+    /*  Two different questions, so two different runs.  ISOLATED gives
+     *  each stage the inputs the file recorded and asks whether the
+     *  transcription of that one stage is right.  CHAINED runs them in
+     *  the order $2317E does.  Land value is stage 5, density stage 7,
+     *  crime stage 9.  With each stage feeding the next, and asks
+     *  whether the whole pass reproduces.  It cannot, because two of the
+     *  inputs are destroyed before the save is written.  The point of
+     *  showing it is to see how far that propagates. */
     sim_crime(c); /* isolated */
     bad = 0;
     for (y = 0; y < HALF_H; y++)
@@ -171,11 +171,11 @@ static void check_city(const char *path, City *c, void *ctx)
     t->val_cells += HALF_H * HALF_W;
     memcpy(c->xval, xval0, sizeof xval0);
 
-    /*  Police and fire coverage, and the budget amounts they scale
-     *  with.  All three are new here: coverage was blocked until the
-     *  budget block was found in MISC, and the budget amounts can now
-     *  be recomputed from the census and checked against what the file
-     *  recorded for them. */
+    /*  Police and fire coverage, and the budget amounts they scale with.
+     *  All three are new here.  Coverage was blocked until the budget
+     *  block was found in MISC.  The budget amounts come from the
+     *  census.  They are checked against what the file recorded for
+     *  them. */
     memcpy(xplc0, c->xplc, sizeof xplc0);
     memcpy(xfir0, c->xfir, sizeof xfir0);
     {
@@ -251,10 +251,10 @@ static void check_city(const char *path, City *c, void *ctx)
     if (!bad)
         t->pop_perfect++;
 
-    /*  Chained: put every layer back to what the file recorded and then
+    /*  Chained.  Put every layer back to what the file recorded.  Then
      *  run the pass the way $2317E runs it, stage 1 through stage 9,
      *  each stage feeding the next.  Starting part way in would not be
-     *  the same experiment -- the stages share one scratch plane that
+     *  the same experiment: the stages share one scratch plane that
      *  stage 1 is responsible for filling. */
     memcpy(c->xpop, xpop0, sizeof xpop0);
     memcpy(c->xval, xval0, sizeof xval0);
@@ -316,10 +316,10 @@ static void check_city(const char *path, City *c, void *ctx)
     }
 }
 
-/*  A whole file in memory, and how many bytes that was.  Answers NULL --
- *  and a length of zero -- for a file that will not open, will not
- *  measure, will not fit, or will not read to its end, so a caller has
- *  one thing to test rather than four. */
+/*  A whole file in memory, and how many bytes that was.  Answers NULL,
+ *  and a length of zero, for a file that will not open, will not
+ *  measure, will not fit.  Will not read to its end, so a caller has one
+ *  thing to test rather than four. */
 static uint8_t *slurp(const char *path, long *len)
 {
     FILE    *f = fopen(path, "rb");
@@ -382,9 +382,9 @@ static void roundtrip(const char *dir, int *files, int *lossless, int *exact)
                 (*lossless)++;
             city_free(&b);
         }
-        /*  Both files whole, to compare byte for byte.  A file that
-         *  will not open, will not measure or will not fit in memory
-         *  reads as no bytes, which is not an exact round trip. */
+        /*  Both files whole, to compare byte for byte.  A file that will
+         *  not open, will not measure or will not fit in memory reads as
+         *  no bytes.  This is not an exact round trip. */
         o1 = slurp(path, &n1);
         o2 = slurp(tmp, &n2);
         /*  An exact round trip: both files read whole, the same length,
@@ -409,7 +409,7 @@ static void pct(const char *label, long ok, long total, const char *note)
 }
 
 /*  Same, plus how far out the misses are.  A layer can be 6%% exact and
- *  still be broadly right; the mean error says which. */
+ *  still be broadly right.  The mean error says which. */
 static void pct_err(const char *label, long ok, long total, long err, long cells, const char *note)
 {
     printf("    %-34s %7ld / %-8ld %6.2f%%   mean err %5.1f / 255  %s\n",
@@ -422,7 +422,7 @@ static void pct_err(const char *label, long ok, long total, long err, long cells
 }
 
 /*  The developer modes of `arcology`.  app/main.c dispatches here when
- *  argv[1] names one of them; see ARC_DEV_MODES there. */
+ *  argv[1] names one of them.  See ARC_DEV_MODES there. */
 int arc_dev_main(int argc, char **argv)
 {
     static Tally t;
@@ -438,10 +438,10 @@ int arc_dev_main(int argc, char **argv)
     /*  The modes below, in the order they are tested:
      *
      *  --allocmicro  place one special building of every id and report
-     *                the marker and the record it produced;
+     *                the marker and the record it produced.
      *                tools/micro_alloc_check.py drives $EEAE against it.
      *  --micro       run the year-end microsim pass and dump what it
-     *                wrote; tools/micro_check.py drives $101AC against it.
+     *                wrote.  Tools/micro_check.py drives $101AC against it.
      *  --convert     a 1995 save becomes a .arco world, or back again.
      *                The direction is read off the OUTPUT name, because
      *                that is what the person typing it is thinking about. */
@@ -534,8 +534,8 @@ int arc_dev_main(int argc, char **argv)
             free(c);
             return 1;
         }
-        /*  city_save answers 1 for success, arco_save answers 0 -- see
-         *  the note in city_load.  Normalise here, once. */
+        /*  city_save answers 1 for success, arco_save answers 0: see the
+         *  note in city_load.  Normalize here, once. */
         ok = to_arco ? arco_save(argv[3], c) == 0 : city_save(argv[3], c) != 0;
         printf("%s  %s -> %s\n", ok ? "wrote" : "FAILED", argv[2], argv[3]);
         city_free(c);
@@ -687,7 +687,7 @@ int arc_dev_main(int argc, char **argv)
     }
     if (argc >= 3 && !strcmp(argv[1], "--advisor"))
     {
-        /*  --advisor <city> [ticks]: run the clock and print what the
+        /*  --advisor <city> [ticks] runs the clock.  It prints what the
          *  board would have said, at the points where the original
          *  itself decides it has something to say. */
         static City c, before;
@@ -699,7 +699,7 @@ int arc_dev_main(int argc, char **argv)
             fprintf(stderr, "not a city\n");
             return 1;
         }
-        /*  --advisor <city> [ticks] [plain]  -- the joke board is on
+        /*  --advisor <city> [ticks] [plain]  : the joke board is on
          *  unless you ask for the plain one. */
         if (argc >= 5 && !strcmp(argv[4], "plain"))
             advisor_set(ADVISOR_PLAIN);
@@ -734,12 +734,12 @@ int arc_dev_main(int argc, char **argv)
     }
     if (argc >= 5 && !strcmp(argv[1], "--clock"))
     {
-        /*  --clock <city> <ticks> <dir>: run the 25-phase clock for <ticks>
-         *  phases and write every layer and every scalar out, so
-         *  tools/clock_check.py can diff the lot against $21EDE driven the
-         *  same number of times.  Passes checked one at a time hide
-         *  anything that travels between phases.  This is the test that
-         *  does not. */
+        /*  --clock <city> <ticks> <dir>: run the 25-phase clock for
+         *  <ticks> phases and write every layer and every scalar out.
+         *  So tools/clock_check.py can diff the lot against $21EDE
+         *  driven the same number of times.  Passes checked one at a
+         *  time hide anything that travels between phases.  This is the
+         *  test that does not. */
         static City c;
         char        p[1024];
         FILE       *f;
@@ -755,8 +755,8 @@ int arc_dev_main(int argc, char **argv)
             sim_tick(&c);
 
         /*  The dice matter as much as the state: two engines can reach
-         *  the same totals having rolled different numbers, and the
-         *  next tick will then part company.  Wind and solar output are
+         *  the same totals having rolled different numbers.  The next
+         *  tick will then part company.  Wind and solar output are
          *  drawn, so power_capacity is one of the figures that moves
          *  when a stream drifts. */
         {
@@ -846,14 +846,14 @@ int arc_dev_main(int argc, char **argv)
         for (i = 0; i < 3; i++)
             fprintf(f, "rci_pop%d %d\n", i, (int)c.rci_pop[i]);
         /*  The eleven industry levels.  Read the LIVE array, not the
-         *  MISC copy: the economy updates industry_level[] and MISC is
+         *  MISC copy.  The economy updates industry_level[] and MISC is
          *  only refreshed on save, so dumping MISC here reports last
          *  save's numbers and invents a divergence. */
         for (i = 0; i < 11; i++)
             fprintf(f, "ind_level%d %d\n", i, (int)c.industry_level[i]);
-        /*  The age pyramid.  MISC interleaves the three series three longs
-         *  to a bracket; the game keeps them as three separate arrays, so
-         *  they are dumped the way the game holds them. */
+        /*  The age pyramid.  MISC interleaves the three series three
+         *  longs to a bracket.  The game keeps them as three separate
+         *  arrays, so they are dumped the way the game holds them. */
         for (i = 0; i < 20; i++)
         {
             fprintf(f, "heads%d %d\n", i, (int)c.misc[MISC_HIST_BASE + 3 * i]);
@@ -898,9 +898,9 @@ int arc_dev_main(int argc, char **argv)
             c.years = atoi(argv[4]);
         rng_seed(1, 1);
         /*  the order $2317E runs its stages in.  Power and water come
-         *  first: series 8 and 9 are 100 minus what they leave behind,
-         *  and water_pct can pass 100, which is how a sample goes
-         *  negative and why the scale compares unsigned. */
+         *  first: series 8 and 9 are 100 minus what they leave behind.
+         *  Water_pct can pass 100.  This is how a sample goes negative
+         *  and why the scale compares unsigned. */
         sim_power_grid(&c);
         sim_water_grid(&c);
         sim_pollution(&c);
@@ -1004,8 +1004,8 @@ int arc_dev_main(int argc, char **argv)
     }
     if (argc >= 3 && !strcmp(argv[1], "--terrain"))
     {
-        /*  --terrain <city>: run $128DE over a spread of tiles and
-         *  print every layer it can touch.  $5FAA is stubbed on both
+        /*  --terrain <city> runs $128DE over a spread of tiles.  It
+         *  prints every layer it can touch.  $5FAA is stubbed on both
          *  sides, so this checks everything except the demolition. */
         static City c;
         int         k, i;
@@ -1031,7 +1031,7 @@ int arc_dev_main(int argc, char **argv)
     if (argc >= 3 && !strcmp(argv[1], "--raise"))
     {
         /*  --raise <city>: test then raise a spread of tiles, printing
-         *  ALTM, XBIT, XZON and the funds, so $8758 and $896C can be
+         *  ALTM, XBIT, XZON and the funds.  So $8758 and $896C can be
          *  diffed together the way the volcano uses them. */
         static City c;
         int         k, i;
@@ -1057,7 +1057,7 @@ int arc_dev_main(int argc, char **argv)
     if (argc >= 3 && !strcmp(argv[1], "--settile"))
     {
         /*  --settile <city>: run a fixed sequence of setTile calls and
-         *  print what moved, so $4110 can be diffed whole -- including
+         *  print what moved.  So $4110 can be diffed whole: including
          *  the military branch, which no shipped city exercises on its
          *  own. */
         static City     c;
@@ -1247,7 +1247,7 @@ int arc_dev_main(int argc, char **argv)
     {
         /*  One growth phase, logging every random number drawn.  The
          *  original's stream is captured the same way under the
-         *  interpreter; the first entry that differs is the first place
+         *  interpreter.  The first entry that differs is the first place
          *  the reconstruction took a different branch. */
         static City c;
         int         i, drawn;
@@ -1272,7 +1272,7 @@ int arc_dev_main(int argc, char **argv)
     if (argc >= 3 && !strcmp(argv[1], "--growth"))
     {
         /*  Run the sixteen growth phases the way the clock does and
-         *  print the population accumulators, so they can be diffed
+         *  print the population accumulators.  So they can be diffed
          *  against the original doing the same. */
         static City c;
         int         i, yy, xx;
@@ -1348,8 +1348,8 @@ int arc_dev_main(int argc, char **argv)
     if (argc >= 3 && !strcmp(argv[1], "--budget"))
     {
         /*  Recompute the budget from the tile census and print what each
-         *  department comes to, so it can be diffed against the original
-         *  running the same city under the interpreter. */
+         *  department comes to.  So it can be diffed against the
+         *  original running the same city under the interpreter. */
         static City c;
         int         i;
         if (!city_load(argv[2], &c))
@@ -1365,8 +1365,8 @@ int arc_dev_main(int argc, char **argv)
     }
     if (argc >= 4 && !strcmp(argv[1], "--dump"))
     {
-        /*  Run the stages in $2317E's order and write the layers out, so
-         *  they can be diffed against the interpreter running the
+        /*  Run the stages in $2317E's order and write the layers out.
+         *  So they can be diffed against the interpreter running the
          *  original's own code from the same starting state.  That
          *  comparison tests the transcription with the save file's
          *  snapshot skew taken out of the picture entirely. */
@@ -1384,7 +1384,7 @@ int arc_dev_main(int argc, char **argv)
          *      --pre=p   the power grid
          *      --pre=w   the water grid
          *      --pre=pw  both
-         *      --pre=p!  the power grid ALONE, no scan
+         *      --pre=p!  The power grid ALONE, no scan
          *      --pre=w!  the water grid alone */
         {
             const char *pre = (argc >= 5 && !strncmp(argv[4], "--pre=", 6))

@@ -1,21 +1,19 @@
-/*  api_data.c -- the data a script PUSHES down: arc.bytes and
- *  arc.numbers.
+/*  api_data.c: the data a script PUSHES down: arc.bytes and arc.numbers.
  *
- *  What a byte of the city's save means -- whether it is water, whether
- *  a viaduct may fly over it, which network piece it carries -- is the
+ *  What a byte of the city's save means.  Whether it is water, whether a
+ *  viaduct may fly over it, which network piece it carries.  Is the
  *  script's to say.  It says it once, when it is read:
  *
- *      arc.bytes("water_tiles", t)          -- yes or no, per byte
- *      arc.bytes("slope_codes", t, "number") -- a number, per byte
+ *      arc.bytes("water_tiles", t)   : yes or no, per byte
+ *      arc.bytes("slope_codes", t, "number"): a number, per byte
  *
  *  and the pipeline reads the answer straight out of a table of 256.
  *  Nothing calls up: a build asking a rule what a byte means would be C
- *  driving the answer, which is the contract the other way round.
+ *  driving the answer.  This is the contract the other way round.
  *
- *  A reading of the scripts clears the lot, so what stands is exactly
- *  what this reading pushed -- the same rule the families and the
- *  materials keep.
- */
+ *  A reading of the scripts clears the lot.  So what stands is exactly
+ *  what this reading pushed: the same rule the families and the
+ *  materials keep. */
 #include <string.h>
 
 #include "internal.h"
@@ -75,7 +73,7 @@ static int l_bytes(lua_State *L)
 }
 
 /*  arc.numbers(name, t): a table of named numbers, kept the same way and
- *  read the same way -- a distance, a share, a count that the pipeline
+ *  read the same way.  A distance, a share, a count that the pipeline
  *  wants once a build and must not have to ask a rule for. */
 #define NUMS_MAX 8
 #define NUM_MAX  32
@@ -141,12 +139,12 @@ static int l_numbers(lua_State *L)
 
 /*  ---- the tables with a SHAPE ---------------------------------------
  *
- *  Two of what a byte means does not fit in one number: which network a
+ *  Two of what a byte means does not fit in one number.  Which network a
  *  byte carries and where in the shared layout it sits (and the same
- *  again for the second family a crossing carries), and what part of a
- *  highway a byte is and which way it runs.  Both are pushed whole and
- *  read as arrays, for the same reason the plain ones are: every tile of
- *  the map is looked up in them. */
+ *  again for the second family a meet carries).  What part of a band a
+ *  byte is and which way it runs.  Both are pushed whole and read as
+ *  arrays, for the same reason the plain ones are.  Every tile of the
+ *  map is looked up in them. */
 static struct
 {
     unsigned char fam[256], fam2[256];
@@ -156,7 +154,7 @@ static struct
 static struct
 {
     unsigned char kind[256], ew[256];
-} s_hiway;
+} s_band;
 
 void script_pieces(const unsigned char **fam, const signed char **piece,
                    const unsigned char **fam2, const signed char **piece2)
@@ -165,9 +163,9 @@ void script_pieces(const unsigned char **fam, const signed char **piece,
     *fam2 = s_piece.fam2, *piece2 = s_piece.piece2;
 }
 
-void script_highways(const unsigned char **kind, const unsigned char **ew)
+void script_bandtiles(const unsigned char **kind, const unsigned char **ew)
 {
-    *kind = s_hiway.kind, *ew = s_hiway.ew;
+    *kind = s_band.kind, *ew = s_band.ew;
 }
 
 /*  A family by the name a script calls it, in the Family enum's order. */
@@ -175,8 +173,8 @@ static int family_code(const char *name)
 {
     return !name                     ? -1
            : strcmp(name, "power") == 0 ? 0
-           : strcmp(name, "road") == 0  ? 1
-           : strcmp(name, "rail") == 0  ? 2
+           : strcmp(name, "line") == 0  ? 1
+           : strcmp(name, "thread") == 0  ? 2
                                         : -1;
 }
 
@@ -221,11 +219,11 @@ static int l_pieces(lua_State *L)
     return 1;
 }
 
-static int l_highways(lua_State *L)
+static int l_bands(lua_State *L)
 {
     int i;
     luaL_checktype(L, 1, LUA_TTABLE);
-    memset(&s_hiway, 0, sizeof s_hiway);
+    memset(&s_band, 0, sizeof s_band);
     for (i = 0; i < 256; ++i)
     {
         lua_pushinteger(L, i);
@@ -235,9 +233,9 @@ static int l_highways(lua_State *L)
             const char *k, *a;
             lua_getfield(L, -1, "kind");
             k             = lua_tostring(L, -1);
-            s_hiway.kind[i] = (unsigned char)(!k                          ? 0
-                                              : strcmp(k, "ramp") == 0     ? 2
-                                              : strcmp(k, "onramp") == 0   ? 3
+            s_band.kind[i] = (unsigned char)(!k                          ? 0
+                                              : strcmp(k, "incline") == 0  ? 2
+                                              : strcmp(k, "spur") == 0     ? 3
                                               : strcmp(k, "curve") == 0    ? 4
                                               : strcmp(k, "junction") == 0 ? 5
                                               : strcmp(k, "over") == 0     ? 6
@@ -245,7 +243,7 @@ static int l_highways(lua_State *L)
             lua_pop(L, 1);
             lua_getfield(L, -1, "axis");
             a             = lua_tostring(L, -1);
-            s_hiway.ew[i] = (unsigned char)(a && strcmp(a, "ew") == 0);
+            s_band.ew[i] = (unsigned char)(a && strcmp(a, "ew") == 0);
             lua_pop(L, 1);
         }
         lua_pop(L, 1);
@@ -262,8 +260,8 @@ void api_data_open(lua_State *L)
     lua_setfield(L, -2, "numbers");
     lua_pushcfunction(L, l_pieces);
     lua_setfield(L, -2, "pieces");
-    lua_pushcfunction(L, l_highways);
-    lua_setfield(L, -2, "highways");
+    lua_pushcfunction(L, l_bands);
+    lua_setfield(L, -2, "bands");
 }
 
 void script_data_reset(void)
@@ -273,6 +271,6 @@ void script_data_reset(void)
     memset(&s_piece, 0, sizeof s_piece);
     memset(s_piece.piece, -1, sizeof s_piece.piece);
     memset(s_piece.piece2, -1, sizeof s_piece.piece2);
-    memset(&s_hiway, 0, sizeof s_hiway);
+    memset(&s_band, 0, sizeof s_band);
     s_n = s_n_num = 0;
 }

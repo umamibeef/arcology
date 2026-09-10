@@ -1,9 +1,9 @@
-/*  options.cpp -- what the command line says, read by CLI11. CLI11 binds
+/*  options.cpp: what the command line says, read by CLI11.  CLI11 binds
  *  every option straight into the Startup, the App and the developer
- *  switches (g_dev, opt.h): no argv loop, no string table, --help is
- *  generated from the same registrations, and a flag nothing registered is
- *  an error.  Split out of app.c: reading the arguments and running the
- *  program are two jobs. */
+ *  switches (g_dev, opt.h).  There is no argv loop and no string table,
+ *  and --help is generated from the same registrations.  A flag nothing
+ *  registered is an error.  Split out of app.c: reading the arguments
+ *  and running the program are two jobs. */
 #include <dirent.h>
 #include <math.h>
 #include <stdio.h>
@@ -81,15 +81,15 @@ struct Plain : CLI::Formatter
 const DevFlag FLAGS[] = {
     {"curve-dump",  &g_dev.curve_dump,  "every corner: where, how far it turns, its radius"                            },
     {"junc-dump",   &g_dev.junc_dump,   "every junction: its arms, their trims, its outline"                           },
-    {"buried-all",  &g_dev.buried_all,  "the mesh check lists every footway with its own piece under it"               },
-    {"sidewalk-dump", &g_dev.sidewalk_dump, "every sidewalk end that meets nothing"},
+    {"buried-all",  &g_dev.buried_all,  "the mesh check lists every margin with its own piece under it"               },
+    {"margin-dump", &g_dev.margin_dump, "every margin end that meets nothing"},
     {"path-dump",   &g_dev.path_dump,   "the fit stage by stage, for tools/plan.py"                                    },
     {"plan-dump",   &g_dev.plan_dump,   "the fit stage by stage, for tools/plan.py"                                    },
     {"prof-dump",   &g_dev.prof_dump,   "the finished profile of every segment"                                        },
     {"loft-dump",   &g_dev.loft_dump,   "the loft's stations"                                                          },
-    {"hiway-dump",  &g_dev.hiway_dump,  "the highway bands and their ramps"                                            },
+    {"band-dump",  &g_dev.band_dump,  "the band bands and their spurs"                                            },
     {"clip-dump",   &g_dev.clip_dump,   "the road clip check's samples, tile by tile"                                  },
-    {"input-log",   &g_dev.input_log,   "every mouse and touch event as it arrives, to see what the trackpad sends"     },
+    {"input-log",   &g_dev.input_log,   "every mouse and touch event as it arrives, to see what the threadpad sends"     },
     {"inspect",     &g_dev.inspect,     "the inspector on from the start: the mesh under the pointer outlined, named and reported" },
     {"noscale",     &g_dev.noscale,     "the node approach unscaled by the road's width"                               },
     {"no-sort",     &g_dev.no_sort,     "draw in the sweep's order, to show what it costs"                             },
@@ -110,11 +110,11 @@ const DevFlag FLAGS[] = {
     {"scriptwin",   &g_dev.scriptwin,   "open the script console"                                                      },
     {"mute",        &g_dev.mute,        "no sound and no music: for runs under test"                                   },
     {"gpu-debug",   &g_dev.gpu_debug,   "the device's validation layer"                                                },
-    {"xing-debug",  &g_dev.xing_debug,  "the level crossings, verbosely"                                               },
+    {"meet-debug",  &g_dev.lap_debug,  "the level meets, verbosely"                                               },
     {"box-debug",   &g_dev.box_debug,   "the traffic's boxes, verbosely"                                               },
 };
 const DevValue VALUES[] = {
-    {"tune",        &g_dev.tune,         nullptr,          "the road and highway knobs, as the tuning window sets them: nineteen, in its order",                                       "W_ROAD,W_RAIL,RMIN_ROAD,RMIN_RAIL,RMAX_ROAD,RMAX_RAIL,APPROACH,MARGIN,TRIM,CURVES"},
+    {"tune",        &g_dev.tune,         nullptr,          "the road and band knobs, as the tuning window sets them: nineteen, in its order",                                       "W_ROAD,W_RAIL,RMIN_ROAD,RMIN_RAIL,RMAX_ROAD,RMAX_RAIL,APPROACH,MARGIN,TRIM,CURVES"},
     {"lua",         &g_dev.lua,          nullptr,          "the script the rules and the knobs are read from, watched and read again when it changes",      "FILE"                                                                     },
     {"lua-eval",    &g_dev.lua_eval,     nullptr,          "run one chunk of script once the world is built, and print what it answers",                    "SRC"                                                                      },
     {"win",         &g_dev.win,          nullptr,          "render at a larger framebuffer",                                                       "WxH"                                                                              },
@@ -129,7 +129,7 @@ const DevValue VALUES[] = {
     {"tile-dump",   &g_dev.tile_dump,    nullptr,          "every face whose centroid lies on a tile, or 'all' for the whole mesh by tile",        "C,R"                                                                              },
     {"dump-to", &g_dev.dump_to, nullptr, "write every --x-dump to FILE instead of stdout ('-' is stdout)", "FILE"},
     {"field-dump",  &g_dev.field_dump,   nullptr,          "the terrain field, to a file",                                                         "FILE"                                                                             },
-    {"road-dump",   &g_dev.road_dump_at, &g_dev.road_dump, "the fitted points of every segment, or of one tile's",                                 "[C,R]"                                                                            },
+    {"line-dump",   &g_dev.line_dump_at, &g_dev.line_dump, "the fitted points of every segment, or of one tile's",                                 "[C,R]"                                                                            },
     {"lane-dump",   &g_dev.lane_dump_at, &g_dev.lane_dump, "a junction's ports, connectors and lanes; bare, the misses and tight turns city-wide", "[C,R]"                                                                            },
     {"probe",       &g_dev.probe,        nullptr,          "every surface over one point of the map, highest first",                               "X,Y"                                                                              },
     {"gpu-dump",    &g_dev.gpu_dump_at,  &g_dev.gpu_dump,  "a tile's instances on the device",                                                     "[R,C]"                                                                            },
@@ -140,7 +140,7 @@ extern "C" int parse_options(Startup *o, App *a, int argc, char **argv)
 {
     std::string              pos1, pos2, assets, check_s, shot_s, theme, scroll, centre, pick, angle_s, pitch_s;
     std::vector<std::string> song;
-    bool                     no_markings = false, no_furniture = false, no_sidewalks = false; /* CLI11 zeroes an int it binds a flag to, and a negated flag on an int counts backwards: bools, then the fields */
+    bool                     no_markings = false, no_furniture = false, no_margins = false; /* CLI11 zeroes an int it binds a flag to, and a negated flag on an int counts backwards: bools, then the fields */
     std::vector<std::string> dev_vals(sizeof VALUES / sizeof VALUES[0]);
     int                      ww = 1280, wh = 800;
     static std::string       hold_check, hold_shot, hold_theme, hold_song[2];
@@ -149,7 +149,7 @@ extern "C" int parse_options(Startup *o, App *a, int argc, char **argv)
     memset(o, 0, sizeof *o);
     memset(&g_dev, 0, sizeof g_dev);
     soft_defaults(&a->opts);
-    a->gv.pivot_c = a->gv.pivot_r = 64.0f; /* until the view turns: the map's centre */
+    a->gv.pivot_c = a->gv.pivot_r = 64.0f; /* until the view turns: the map's center */
     a->sky[0]                     = 16;
     a->sky[1]                     = 20;
     a->sky[2]                     = 22;
@@ -182,8 +182,8 @@ extern "C" int parse_options(Startup *o, App *a, int argc, char **argv)
     app.add_flag("--cells", a->us.show_cells, "every cell's col,row at its bottom-right corner, in the map view");
     app.add_flag("--no-markings", no_markings, "no road markings: blank asphalt, the marking pass off");
     app.add_flag("--no-furniture", no_furniture, "no street furniture: lamps, signs, signals, gates, the furniture pass off");
-    app.add_flag("--no-sidewalks", no_sidewalks, "no sidewalks: the carriageway alone, the sidewalk pass off");
-    app.add_flag("--outline", o->outline, "outline: the roads stand aside and the fitted curves and the footway network are drawn on bare ground");
+    app.add_flag("--no-margins", no_margins, "no margins: the carriageway alone, the margin pass off");
+    app.add_flag("--outline", o->outline, "outline: the roads stand aside and the fitted curves and the margin network are drawn on bare ground");
     app.add_flag("!--no-things", a->opts.draw_things, "no things: the sprites of what stands on the tiles");
     app.add_flag("--underground", a->opts.underground, "the underground view");
     app.add_option("--centre,--center", centre, "put map tile (col,row) in the middle")->option_text("C,R");
@@ -245,7 +245,7 @@ extern "C" int parse_options(Startup *o, App *a, int argc, char **argv)
     }
     a->gv.markings  = no_markings ? 0 : 1;
     a->gv.furniture = no_furniture ? 0 : 1;
-    a->gv.sidewalks = no_sidewalks ? 0 : 1;
+    a->gv.margins = no_margins ? 0 : 1;
     hold_check = check_s, hold_shot = shot_s, hold_theme = theme;
     o->check     = !check_s.empty();
     o->check_out = check_s.empty() ? NULL : hold_check.c_str();
@@ -280,8 +280,8 @@ extern "C" int parse_options(Startup *o, App *a, int argc, char **argv)
     }
     if (assets.size())
         snprintf(o->assets_dir, sizeof o->assets_dir, "%s", assets.c_str());
-    /*  --win WxH renders at a larger framebuffer, so a shot of the
-     *  same ground carries more pixels -- the window is otherwise fixed. */
+    /*  --win WxH renders at a larger framebuffer, so a shot of the same
+     *  ground carries more pixels: the window is otherwise fixed. */
     if (g_dev.win)
     {
         int w2 = 0, h2 = 0;
@@ -293,13 +293,14 @@ extern "C" int parse_options(Startup *o, App *a, int argc, char **argv)
     }
     o->ww = ww;
     o->wh = wh;
-    /*  The geometry and the water shader are the game's look; the
-     *  o->sprites are the o->check's baseline and an option (--o->sprites,
-     *  or the t and y keys).  A headless run defaults to o->sprites because
-     *  --o->check and --run are comparison harnesses and the o->sprites are
-     *  what they compare against.  --geometry overrides that: it is how a
-     *  headless run produces a picture of the game as it actually looks,
-     *  which is what tools/gen_showcase.py wants. */
+    /*  The geometry and the water shader are the game's look.  The
+     *  o->sprites are the o->check's baseline and an option
+     *  (--o->sprites, or the t and y keys).  A headless run defaults to
+     *  o->sprites because --o->check and --run are comparison harnesses
+     *  and the o->sprites are what they compare against.  --geometry
+     *  overrides that.  It is how a headless run produces a picture of
+     *  the game as it actually looks, which is what
+     *  tools/gen_showcase.py wants. */
     if (o->want_geometry || (!o->check && !o->run_frames && !o->sprites))
         a->gv.geometry = 1;
     /*  --plan starts in the map view: the camera at 90, turned to the
@@ -310,10 +311,10 @@ extern "C" int parse_options(Startup *o, App *a, int argc, char **argv)
         a->angle = a->gv.angle = PLAN_YAW; /* the map view: north up, east right */
     }
     /*  --tune w_road,w_rail,rmin_road,rmin_rail,rmax_road,rmax_rail,
-     *  approach,margin,trim,curves -- the
-     *  knobs the tuning window shows, in the struct's order, for a
-     *  headless render of a particular setting.  Give as many as you
-     *  mean to change; the rest keep their defaults. */
+     *  approach,margin,trim,curves: the knobs the tuning window shows,
+     *  in the struct's order, for a headless render of a particular
+     *  setting.  Give as many as you mean to change.  The rest keep
+     *  their defaults. */
     if (g_dev.tune)
     {
         float *t = mesh_tune();

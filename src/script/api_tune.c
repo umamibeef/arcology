@@ -1,11 +1,11 @@
-/*  api_tune.c -- `arc.tune` and `arc.geo`: every tuned number the road
+/*  api_tune.c: `arc.tune` and `arc.geo`: every tuned number the line
  *  works are drawn with, by name.
  *
- *  Both hold nothing themselves.  A read goes to the C, so the value is
- *  the one the build is running with however it was last moved -- by a
- *  script, by a slider, by a switch.  A write goes to the C too, which
- *  holds it to a range the rest of the pipeline can still draw with, and
- *  asks for the world to be drawn again.
+ *  Both hold nothing themselves.  A read goes to the C.  So the value is
+ *  the one the build is running with, however it was last moved.  It may
+ *  be moved by a script, by a slider, by a switch.  A write goes to the
+ *  C too.  This holds it to a range the rest of the pipeline can still
+ *  draw with.  Asks for the world to be drawn again.
  *
  *  A table that holds nothing cannot be walked with pairs, so
  *  `arc.settings()` answers a plain snapshot of both for printing. */
@@ -15,7 +15,7 @@
 #include <string.h>
 
 #include "internal.h"
-#include "net/internal.h"
+#include "pipeline.h"
 
 typedef int (*SetFn)(const char *name, float v);
 typedef const char *(*NameFn)(int i, float *v);

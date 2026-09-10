@@ -1,4 +1,4 @@
-/*  dump.c -- the developer dumps' one sink; see dump.h. */
+/*  dump.c: the developer dumps' one sink.  See dump.h. */
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>

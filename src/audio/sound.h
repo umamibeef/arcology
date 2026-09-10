@@ -1,10 +1,16 @@
-/*  sound.h -- the game's sounds, played through SDL's audio.  The effects
- *  are the original's 'snd ' resources 500..527, decoded to assets/sounds
- *  by tools/snd.py.  Where the original plays each one is not yet read out
- *  of the binary; the app plays them where they plainly belong: the click
- *  on a palette button, the bulldozer, the disasters, the year's cheers and
- *  boos, and a building's own sound under the query tool, which is how the
- *  original lets a building be heard. */
+/*  sound.h: the game's sounds, played through SDL's audio.  The effects
+ *  are the original's 'snd ' resources 500..527, decoded to
+ *  assets/sounds by tools/snd.py.  Where the original plays each one is
+ *  not yet read out of the binary.  The app plays them where they
+ *  plainly belong.
+ *
+ *      The click on a palette button.
+ *      The bulldozer.
+ *      The disasters.
+ *      The year's cheers and boos.
+ *      A building's own sound under the query tool.
+ *
+ *  This is how the original lets a building be heard. */
 #ifndef R_SOUND_H
 #define R_SOUND_H
 
@@ -47,7 +53,7 @@ enum
 typedef struct RSound RSound;
 
 /*  Open the default playback device and load the effects.  NULL when the
- *  device or the files are not there; every call then does nothing. */
+ *  device or the files are not there.  Every call then does nothing. */
 RSound *sound_create(const char *assets_dir);
 void    sound_destroy(RSound *s);
 void    sound_play(RSound *s, int id);

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""buried_check.py -- nothing of a road may be laid under its own footway.
+"""buried_check.py -- nothing of a line may be laid under its own margin.
 
-A footway is the one surface a person stands on.  Where a junction's own
-asphalt, or a strip's own carriageway, is drawn beneath the footway that
+A margin is the one surface a person stands on.  Where a junction's own
+fill, or a strip's own way, is drawn beneath the margin that
 belongs to it, the two were never made to meet: the surface was not drawn
-back to its own kerb.  Both faces then lie at one height, and which one a
+back to its own lip.  Both faces then lie at one height, and which one a
 pixel shows rests on the painter's slot alone.
 
 `arcology --mesh-check` counts those pairs (mesh_check_overlap).  The
@@ -34,7 +34,7 @@ def measure(binary, city):
         return None
     out = subprocess.run([binary, path, "--mute", "--mesh-check"],
                          capture_output=True, text=True, cwd=ROOT).stdout
-    m = re.search(r"(\d+) of road works buried under a footway", out)
+    m = re.search(r"(\d+) of line works buried under a margin", out)
     return int(m.group(1)) if m else None
 
 
@@ -66,9 +66,9 @@ def main():
         print("buried: baseline written:", now)
         return 0
     for city, was, n in worse:
-        print(f"buried: {city} got worse: {was} -> {n} faces under their own footway")
+        print(f"buried: {city} got worse: {was} -> {n} faces under their own margin")
     total = sum(now.values())
-    print(f"buried: {len(now)} cities, {total} faces under their own footway"
+    print(f"buried: {len(now)} cities, {total} faces under their own margin"
           f"{' -- WORSE' if worse else ''}")
     return 1 if worse else 0
 

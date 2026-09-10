@@ -1,6 +1,6 @@
 --  runs.lua -- cutting a path's steps into the runs it is made of.
 --
---  A fitted road is a chain of straight lines with arcs between them,
+--  A fitted line is a chain of straight lines with arcs between them,
 --  and this is where the lines come from.  The steps between the path's
 --  points are walked once, and every span of them is asked what sort of
 --  line it could be:
@@ -11,7 +11,7 @@
 --                  minority one every `period` steps, whose line is the
 --                  midline of the staircase;
 --    a free line -- any chord at all, sat midway across the points it
---                  covers.  Only a deck asks for this: it rides free
+--                  covers.  Only a slab asks for this: it rides free
 --                  air and is not held to the tiles under it.
 --
 --  The score of a span is the steps it covers less half a point for the
@@ -90,12 +90,12 @@ end
 
 --  THE CHORD A FREE SPAN IS GIVEN.
 --
---  A deck is a raised thing and rides where its corridor lets it, so its
+--  A slab is a raised thing and rides where its corridor lets it, so its
 --  line need not pass through the chain's points at all.  It is the
 --  span's chord, moved across to sit midway between the outermost of the
 --  points it covers -- so a line that misses every point by a little is
---  still a line.  Held to its points instead, a deck turns 45 degrees
---  one way and 31 back at a crossing where the whole move is a bend of
+--  still a line.  Held to its points instead, a slab turns 45 degrees
+--  one way and 31 back at a meet where the whole move is a bend of
 --  fourteen.
 --
 --  A span that reaches the chain's own end is the chord itself, through
@@ -167,7 +167,7 @@ arc.rules.runs = function (x)
             end
         end
 
-        --  A free line, for a deck.  The corridor sampling is the dear
+        --  A free line, for a slab.  The corridor sampling is the dear
         --  part of the whole cut, so a span that cannot beat what is
         --  already held is never sampled.
         if d.free then

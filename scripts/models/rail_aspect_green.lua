@@ -1,4 +1,4 @@
---  rail_aspect_green.lua -- a rail signal's lit aspect.
+--  rail_aspect_green.lua -- a thread signal's lit aspect.
 --
 --  One lamp face on the signal's head, green on a block signal.  Which
 --  of the two aspects is drawn is the traffic's; the shape is the same

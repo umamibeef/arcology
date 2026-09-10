@@ -1,11 +1,13 @@
-/*  --soft -- draw a city with the reference rasteriser.
+/*  main.c: the --soft mode.  It draws a city with the reference
+ *  rasteriser.
  *
- *      arcology --soft <assets dir> <city file> [out.png] [--zoom N] [--n N]
+ *      arcology --soft <assets dir> <city file> [out.png] [--zoom N]
+ *      [--n N]
  *
  *  Prints the CRC32 of the raw RGB buffer.  That number, not the PNG's
- *  bytes, is what the Python check compares: two deflate implementations
- *  need not agree on compressed output for the pixels to be identical.
- */
+ *  bytes, is what the Python check compares.  Two deflate
+ *  implementations need not agree on compressed output for the pixels to
+ *  be identical. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,11 +17,11 @@
 #include "soft/soft.h"
 #include "dump.h"
 
-/*  Crop then magnify, in place, for the preview sheets: a 128x128 city at
- *  the 32 px art set is 4224x2468, so a detail has to be cut out and blown
- *  up with nearest-neighbour before it is legible at all.  Integer scale
- *  only -- this is pixel art and any interpolation is a lie about what the
- *  renderer produced. */
+/*  Crop then magnify, in place, for the preview sheets: a 128x128 city
+ *  at the 32 px art set is 4224x2468.  So a detail has to be cut out and
+ *  blown up with nearest-neighbor before it is legible at all.  Integer
+ *  scale only.  This is pixel art and any interpolation is a lie about
+ *  what the renderer produced. */
 static int image_crop_scale(RImage *im, int cx, int cy, int cw, int chh,
                             int scale)
 {
@@ -44,7 +46,7 @@ static int image_crop_scale(RImage *im, int cx, int cy, int cw, int chh,
         size_t npx = (size_t) cw * (size_t) chh * (size_t) scale *
                      (size_t) scale;
         dst  = (uint8_t *) malloc(npx * 3u);
-        /*  The index plane travels with the colour plane, or an indexed
+        /*  The index plane travels with the color plane, or an indexed
          *  export after a crop writes whatever was there before. */
         dsti = (uint8_t *) malloc(npx);
         dstp = (uint16_t *) malloc(npx * sizeof(uint16_t));
@@ -148,9 +150,9 @@ int soft_main(int argc, char **argv)
             phase = atoi(argv[++i]);
         else if (strcmp(argv[i], "--focus") == 0 && i + 1 < argc)
         {
-            /*  row,col,pad and, optionally, an offset from that tile --
-             *  a sprite is not always drawn on its own tile (an aircraft
-             *  goes 120 px up), so the box has to be movable. */
+            /*  row,col,pad and, optionally, an offset from that tile: a
+             *  sprite is not always drawn on its own tile (an aircraft
+             *  goes 120 px up).  So the box has to be movable. */
             int got = sscanf(argv[++i], "%d,%d,%d,%d,%d", &frow, &fcol,
                              &fpad, &fdx, &fdy);
             if (got != 3 && got != 5)
@@ -170,8 +172,8 @@ int soft_main(int argc, char **argv)
         fprintf(stderr, "%s\n", a.err);
         return 1;
     }
-    /*  _AnimatePalette rotates two runs of the palette -- 155..203 and
-     *  224..238 -- and the game touches no pixels to do it.  Rotating them
+    /*  _AnimatePalette rotates two runs of the palette, 155..203 and
+     *  224..238, and the game touches no pixels to do it.  Rotating them
      *  here is the whole of the water shimmer and the blinking lights. */
     if (phase)
         atlas_animate(&a, phase);
@@ -225,7 +227,7 @@ int soft_main(int argc, char **argv)
     }
 
     /*  --focus wins over --crop: frame the box on the tile the renderer
-     *  actually placed, so a sprite that stands well above its own tile
+     *  actually placed.  So a sprite that stands well above its own tile
      *  still lands inside the picture. */
     if (frow >= 0)
     {

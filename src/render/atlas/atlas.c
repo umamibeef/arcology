@@ -1,6 +1,7 @@
-/*  atlas.c -- load the PNG atlases and JSON sidecars artpack.py emits.
- *  See atlas.h for the portability rules.  The short version: fixed-width
- *  types, binary-mode I/O, no POSIX, and nothing that assumes a byte order. */
+/*  atlas.c: load the PNG atlases and JSON sidecars artpack.py emits.
+ *  See atlas.h for the portability rules.  The short version:
+ *  fixed-width types, binary-mode I/O, no POSIX, and nothing that
+ *  assumes a byte order. */
 #include "atlas/atlas.h"
 #include "tables.h"
 
@@ -74,7 +75,7 @@ static char *read_text(const char *path, size_t *out_len)
 }
 
 /* ------------------------------------------------------------------ *
- *  jsmn navigation.  jsmn gives a flat token array; these walk it.
+ *  jsmn navigation.  Jsmn gives a flat token array.  These walk it.
  * ------------------------------------------------------------------ */
 static int tok_eq(const char *js, const jsmntok_t *t, const char *s)
 {
@@ -519,15 +520,15 @@ done:
 }
 
 /*  Advance the animated runs to `phase`.  The game does NOT rotate them:
- *  $9750 keeps two colour tables, swaps them every 12 ticks and rebuilds
+ *  $9750 keeps two color tables, swaps them every 12 ticks and rebuilds
  *  one from the other through a permutation ($9770, $97FA): new[i] =
  *  prev[perm[i]] The 49-entry run is three eight-cycles, a four-cycle, a
  *  fixed point and then an eight-cycle, a four-cycle and an eight-cycle
- *  running the other way -- several independent ramps, not one.  The
- *  15-entry run is seven swaps and a fixed point, which is a blink rather
- *  than a flow.  Turning all 49 as a single block mixes ramps that have
- *  nothing to do with each other.  No pixel is
- *  touched; only the table moves. 12 ticks is 5 steps a second. */
+ *  running the other way: several independent spurs, not one.  The
+ *  15-entry run is seven swaps and a fixed point, which is a blink
+ *  rather than a flow.  Turning all 49 as a single block mixes spurs
+ *  that have nothing to do with each other.  No pixel is touched.  Only
+ *  the table moves. 12 ticks is 5 steps a second. */
 void atlas_animate(RAtlas *a, int32_t phase)
 {
     uint8_t tmp[256][4];
@@ -643,9 +644,9 @@ const RTile *atlas_tile(const RAtlasLevel *l, int32_t shap_id)
 
 const RAtlasLevel *atlas_level_for_scale(const RAtlas *a, float scale)
 {
-    /*  Switch at the geometric means of the neighbouring native scales
-     *  (0.25, 0.5, 1.0), so no set is ever stretched by more than sqrt(2)
-     *  in either direction. */
+    /*  Switch at the geometric means of the neighboring native scales
+     *  (0.25, 0.5, 1.0).  So no set is ever stretched by more than
+     *  sqrt(2) in either direction. */
     int want = 32, i, best = 0;
     if (scale < 0.35355339f)
         want = 8;

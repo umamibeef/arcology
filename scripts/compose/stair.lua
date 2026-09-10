@@ -1,9 +1,9 @@
---  stair.lua -- the points a highway band's fit is given.
+--  stair.lua -- the points a band band's fit is given.
 --
 --  A band is a run of cells, and most of them become a point of the
 --  chain the fit works on.  The exception is a STAIRCASE.
 --
---  The game has no diagonal highway.  It lays one as curve blocks
+--  The game has no diagonal band.  It lays one as curve blocks
 --  turning alternately -- left, right, left -- with a straight cell or
 --  two between them, and that is what a diagonal looks like in the data.
 --  Given every block as a point, the fit sees a polyline of right-angle
@@ -14,13 +14,13 @@
 --  So a staircase is ONE point, at the centre of all the cells it is
 --  made of.  The run before it, the diagonal through its middle and the
 --  run after it are three legs, and the fit fillets the two bends
---  between them.  The coverage rule keeps the deck over the short
+--  between them.  The coverage rule keeps the slab over the short
 --  straights it skipped.
 --
 --  A run of blocks is a staircase when it turns at least twice and turns
 --  the OTHER WAY each time.  The same way twice is a spiral, not a
---  diagonal.  And it may not step over a cell an on-ramp pins: a ramp
---  joins the deck cell it touches, so the deck has to pass over that
+--  diagonal.  And it may not step over a cell an on-spur pins: a spur
+--  joins the slab cell it touches, so the slab has to pass over that
 --  cell rather than sliding its diagonal off it.
 
 arc.rules.stair = function (s)

@@ -1,13 +1,14 @@
-/*  modes.cpp -- the developer modes, and which program a line asks for.
+/*  modes.cpp: the developer modes, and which program a line asks for.
  *  The verification driver, the game, the atlas dumper and the software
- *  rasteriser are one binary, and CLI11 decides which of them runs.  Every developer mode is a flag
- *  here, with the spelling it has always had (--verify, --clock and the
- *  rest) because two dozen checkers in tools/ pass them.  The mode must
- *  lead the line and the rest of the line is its own, read by its own main
- *  -- so this parser stops at the first thing it does not know and hands
- *  the whole line on.  A line with no mode is the game's, and
- *  app/options.cpp reads that.  The descriptions are one line each; the
- *  mode's own code in sim/dev.c is the reference for what it prints. */
+ *  rasteriser are one binary, and CLI11 decides which of them runs.
+ *  Every developer mode is a flag here, with the spelling it has always
+ *  had.  Two dozen checkers in tools/ pass them, so the spellings cannot
+ *  change.  The mode must lead the line and the rest of the line is its
+ *  own, read by its own main.  So this parser stops at the first thing
+ *  it does not know and hands the whole line on.  A line with no mode is
+ *  the game's, and app/options.cpp reads that.  The descriptions are one
+ *  line each.  The mode's own code in sim/dev.c is the reference for
+ *  what it prints. */
 #include "modes.h"
 
 #include <cstdio>

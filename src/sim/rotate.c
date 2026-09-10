@@ -1,18 +1,24 @@
-/*  rotate.c -- the map rotation, as $3AECA performs it.  Rotating the view
- *  in SimCity 2000 does not change how the map is drawn: it rewrites the
- *  map.  $3AECA turns every layer through 90 degrees in place -- the seven
- *  full-resolution layers, the eight data layers at half and quarter
- *  resolution, and the XTHG records -- and then bumps g_rotation.  The
- *  geometry, read off the four stores in the loop at $3AF7E and the ring
- *  bounds at $3B34E..$3B35E: new[y][x] = old[N-1-x][y] Three layers pass
- *  every byte through a translation table, because their ids encode a
- *  direction: XBLD (A5-0xEE2), XTER (A5-0xDE2), XUND (A5-0xD9C).  ALTM,
- *  XZON, XTXT and XBIT move as plain bytes; XZON's corner nibble is
- *  therefore not rotated, which is why ROT_CORNER_MASK is indexed by the
- *  rotation afterwards.  The tables below are those three, straight out of
- *  the A5 image (tools/rotate.py reads them the same way, and turning all
- *  shipped cities four times returns every map layer to its original
- *  bytes).  Anticlockwise ($3A7BA) is three turns clockwise here. */
+/*  rotate.c: the map rotation, as $3AECA performs it.  Rotating the view
+ *  in SimCity 2000 does not change how the map is drawn.  It rewrites
+ *  the map. $3AECA turns every layer through 90 degrees in place.  That
+ *  is the seven full-resolution layers, the eight data layers at half
+ *  and quarter resolution, and the XTHG records: and then bumps
+ *  g_rotation.  The geometry comes off the four stores in the loop at
+ *  $3AF7E, and the ring bounds at $3B34E..$3B35E.  It is new[y][x] =
+ *  old[N-1-x][y] Three layers pass every byte through a translation
+ *  table, because their ids encode a direction.
+ *
+ *      XBLD (A5-0xEE2).
+ *      XTER (A5-0xDE2).
+ *      XUND (A5-0xD9C).
+ *
+ *  ALTM, XZON, XTXT and XBIT move as plain bytes.  XZON's corner nibble
+ *  is therefore not rotated, which is why ROT_CORNER_MASK is indexed by
+ *  the rotation afterwards.  The tables below are those three, straight
+ *  out of the A5 image.  tools/rotate.py reads them the same way.
+ *  Turning all shipped cities four times returns every map layer to its
+ *  original bytes).  Anticlockwise ($3A7BA) is three turns clockwise
+ *  here. */
 #include "sim.h"
 
 #include <string.h>
@@ -813,10 +819,10 @@ static void rotate_layer(uint8_t *buf, int n, const uint8_t *table, int stride)
         }
 }
 
-/*  One XTHG record, 12 bytes ($3B96E).  +3 is y and +4 is x; the pair
- *  rotates like every other coordinate, new = (127 - y, x).  Types 10
- *  to 13 carry a four-direction heading, everything else an eight; type
- *  1 alone also turns the nibble at +2. */
+/*  One XTHG record, 12 bytes ($3B96E).  +3 is y and +4 is x.  The pair
+ *  rotates like every other coordinate, new = (127 - y, x).  Types 10 to
+ *  13 carry a four-direction heading, everything else an eight.  Type 1
+ *  alone also turns the nibble at +2. */
 void sim_rotate_thing(uint8_t *r)
 {
     uint8_t t = r[0], y;
@@ -847,9 +853,9 @@ const uint8_t *sim_rot_table(int layer)
                                               : ROT_XUND;
 }
 
-/*  The city turned a quarter clockwise, as the original's rotate does;
+/*  The city turned a quarter clockwise, as the original's rotate does.
  *  `turns` of them, so 3 is anticlockwise.  This REWRITES the map, as
- *  the original's own Rotate command does; the game's view of a turn
+ *  the original's own Rotate command does.  The game's view of a turn
  *  does not use it (see adapt_city_turned): it is here for --rotate. */
 void sim_rotate(City *c, int turns)
 {

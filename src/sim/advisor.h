@@ -1,12 +1,16 @@
-/*  advisor.h -- the board of advisors.  This is NOT part of the
+/*  advisor.h: the board of advisors.  This is NOT part of the
  *  reconstruction.  Everything else in src/sim/ is answerable to the
- *  original's own code; this file is a layer on top that reads the model
- *  and says something about it.  It writes nothing back, so the simulation
- *  stays exactly as verified.  What is faithful here is WHEN an advisor
- *  speaks.  The triggers are the points where the original itself decides
- *  it has something to say: the story ladder at $30E30, the disaster
- *  trigger at $310B0, and the ordinance that passes itself at $2670A.  The
- *  words are ours. */
+ *  original's own code.  This file is a layer on top that reads the
+ *  model and says something about it.  It writes nothing back, so the
+ *  simulation stays exactly as verified.  What is faithful here is WHEN
+ *  an advisor speaks.  The triggers are the points where the original
+ *  itself decides it has something to say.
+ *
+ *      The story ladder at $30E30.
+ *      The disaster trigger at $310B0.
+ *      The ordinance that passes itself at $2670A.
+ *
+ *  The words are ours. */
 #ifndef ADVISOR_H
 #define ADVISOR_H
 #include "sim.h"
@@ -28,9 +32,9 @@ typedef struct
 } AdvisorMsg;
 
 /*  Two sets of words share the same triggers.  The plain set states what
- *  the model is doing; the joke set is the Something Awful board.  The joke
- *  set is on by default and falls back to the plain line when it has
- *  nothing for a particular trigger, so turning it off never loses coverage
+ *  the model is doing.  The joke set is the Something Awful board.  The
+ *  joke set is on by default.  It falls back to the plain line when it
+ *  has nothing for a trigger.  So turning it off never loses coverage,
  *  and turning it on never loses a message. */
 enum
 {

@@ -1,10 +1,11 @@
-/*  sim_scan.c -- the passes that read the whole map and write a plane.
- *  Power and water, handed out in queue order until capacity runs out;
- *  traffic, pollution, population and demand; the forest, the weather and
- *  the newspaper's rolls; the graphs; land value, crime, and the coverage
- *  each service station spreads.  These are the phases that produce the
- *  overlays, and between them they are most of what the city knows about
- *  itself.  Split out of sim.c; addresses still point into CODE 2. */
+/*  sim_scan.c: the passes that read the whole map and write a plane.
+ *  Power and water, handed out in queue order until capacity runs out.
+ *  Traffic, pollution, population and demand.  The forest, the weather
+ *  and the newspaper's rolls.  The graphs.  Land value, crime, and the
+ *  coverage each service station spreads.  These are the phases that
+ *  produce the overlays, and between them they are most of what the city
+ *  knows about itself.  Addresses still point into
+ *  CODE 2. */
 #include "ext80.h"
 #include "sim.h"
 #include "sim_int.h"
@@ -13,16 +14,16 @@
 #include <stdlib.h>
 #include <string.h>
 
-/*  A5+0x13BA -- the one scratch plane the whole of $2317E shares, 128 rows
+/*  A5+0x13BA: the one scratch plane the whole of $2317E shares, 128 rows
  *  of 128 words.  Nothing ever clears it between stages, so each stage
- *  reads whatever the last one left in the cells it touches.  That is not
- *  tidy, and reproducing it is the difference between land value at 89% and
- *  at 100%: stage 4 seeds its accumulators from stage 1's raw pollution and
- *  stage 3's building marks.  Modelling the two stages with separate arrays
- *  loses exactly that. */
+ *  reads whatever the last one left in the cells it touches.  That is
+ *  not tidy.  Reproducing it is the difference between land value at 89%
+ *  and at 100%.  Stage 4 seeds its accumulators from stage 1's raw
+ *  pollution.  It also seeds them from stage 3's building marks.
+ *  Modeling the two stages with separate arrays loses exactly that. */
 static int16_t pad[MAP_H][MAP_W];
 
-/*  Push the four neighbours that have not been visited yet.  The order is
+/*  Push the four neighbors that have not been visited yet.  The order is
  *  load bearing and is taken literally from $21250, $2128A, $212C6 and
  *  $21304: west, north, east, south.  Power is handed out in queue order
  *  until capacity runs out, so this order decides which tiles brown out
@@ -40,12 +41,11 @@ static void push_neighbours(City *c, int y, int x)
 }
 
 /*  Pass 2 walks the marks pass 1 left, so its test is inverted: push a
- *  neighbour only while it is still marked ($21482, $214C2, ...).  The
+ *  neighbor only while it is still marked ($21482, $214C2, ...).  The
  *  pass clears each mark as it goes, which both terminates the walk and
  *  leaves the map clean for the next plant.  Getting this backwards
- *  makes the flood die on the first tile -- it produced almost no
- *  powered tiles at all.
- */
+ *  makes the flood die on the first tile: it produced almost no powered
+ *  tiles at all. */
 static void push_marked(City *c, int y, int x)
 {
     if (x > 0 && (c->xbit[y][x - 1] & XBIT_VISITED))
@@ -59,25 +59,25 @@ static void push_marked(City *c, int y, int x)
 }
 
 /*  Output of one tile of a power plant.  Eight of the ten are constants
- *  from the switch at $21174; two are computed.  $211DA reads the
- *  terrain, which is why a wind farm on a mountain really does produce
- *  more, and $2119C reads the weather global at A5+0x1F02.
- */
+ *  from the switch at $21174.  Two are computed.  $211DA reads the
+ *  terrain.  This is why a wind farm on a mountain really does produce
+ *  more, and $2119C reads the weather global at A5+0x1F02. */
 static int32_t plant_output(const City *c, int y, int x, uint8_t bld)
 {
     int32_t v = BUILDING[bld].power;
     if (v >= 0)
         return v;
 
-    /*  Both rolls are UNCONDITIONAL in the original -- $211EA and $211B2
-     *  draw first and divide afterwards.  Skipping the draw when the span
-     *  works out at zero costs a number out of the stream, and the solar
-     *  span reaches zero as soon as cloud cover passes 90, which the
-     *  weather walk makes reachable.  The guard is kept on the division
-     *  alone, where the original would trap.  The roll is the WHOLE sixteen
-     *  bits: $211B6 and $211EE clear a register and move the word into it,
-     *  so the value the divide sees runs 0..65535.  Masking to 0x7FFF loses
-     *  the top bit and gives a different remainder for half of all draws. */
+    /*  Both rolls are UNCONDITIONAL in the original: $211EA and $211B2
+     *  draw first and divide afterwards.  Skipping the draw when the
+     *  span works out at zero costs a number out of the stream.  The
+     *  solar span reaches zero as soon as cloud cover passes 90, which
+     *  the weather walk makes reachable.  The guard is kept on the
+     *  division alone, where the original would trap.  The roll is the
+     *  WHOLE sixteen bits: $211B6 and $211EE clear a register and move
+     *  the word into it.  So the value the divide sees runs 0..65535.
+     *  Masking to 0x7FFF loses the top bit and gives a different
+     *  remainder for half of all draws. */
     if (v == -1)
     { /* Wind,  $211DA */
         int span = ASR(c->weather1, 3) + 1;
@@ -92,15 +92,16 @@ static int32_t plant_output(const City *c, int y, int x, uint8_t bld)
     }
 }
 
-/*  $210A2 -- flood one power network.  Two BFS passes over the same
- *  network, which is the part that matters: pass 1  walk every conductive
- *  tile, sum generating capacity, count the tiles that draw power, and mark
- *  each tile visited. pass 2  walk it again handing out power in queue
- *  order, one unit per drawing tile, until capacity is exhausted.  Tiles
- *  the second pass reaches after that stay unpowered, and the visited mark
- *  is cleared behind it so a different plant can pick up the remainder on a
- *  later flood.  That is why $20FC4's outer loop skips tiles that already
- *  have XBIT_POWERED: a fully served network is done, a starved one is not. */
+/*  $210A2: flood one power network.  Two BFS passes over the same
+ *  network.  This is the part that matters: pass 1  walk every
+ *  conductive tile, sum generating capacity, count the tiles that draw
+ *  power, and mark each tile visited. pass 2  walk it again handing out
+ *  power in queue order, one unit per drawing tile, until capacity is
+ *  exhausted.  Tiles the second pass reaches after that stay unpowered.
+ *  The visited mark is cleared behind it so a different plant can pick
+ *  up the remainder on a later flood.  That is why $20FC4's outer loop
+ *  skips tiles that already have XBIT_POWERED: a fully served network is
+ *  done, a starved one is not. */
 static void power_flood(City *c, int y0, int x0, int32_t *supply, int32_t *drawn)
 {
     int32_t generated = 0, consumers = 0, capacity;
@@ -170,9 +171,9 @@ static void power_flood(City *c, int y0, int x0, int32_t *supply, int32_t *drawn
     }
 }
 
-/*  $20FC4 -- phase 1.  Note what power_pct actually is: the game divides
+/*  $20FC4: phase 1.  Note what power_pct actually is: the game divides
  *  drawn-by-capacity, not capacity-by-demand, and returns 100 when there
- *  are no plants at all.  It is a load meter, not a coverage meter.     */
+ *  are no plants at all.  It is a load meter, not a coverage meter. */
 void sim_power_grid(City *c)
 {
     int32_t supply = 0, drawn = 0;
@@ -203,15 +204,15 @@ void sim_power_grid(City *c)
         c->power_pct = 100; /* $2108C */
 }
 
-/*  $2182E -- flood one water network.  Structurally identical to the
- *  power flood: measure, then distribute, with the visited bit as the
+/*  $2182E: flood one water network.  Structurally identical to the power
+ *  flood: measure, then distribute, with the visited bit as the
  *  handshake between the two passes.  What differs is where capacity
  *  comes from, and it is worth reading:
  *
  *    Pump ($218F0)            weather/2 + 5*pumpTerm, plus 10 for every
- *                             tile of FRESH water in its 3x3 neighbourhood
+ *                             tile of FRESH water in its 3x3 neighborhood
  *    Desalinization ($21990)  20 for every tile of SALT water in its 3x3
- *    Reservoir ($21A10)       stores 100; contributes 100 if it was still
+ *    Reservoir ($21A10)       stores 100.  Contributes 100 if it was still
  *                             watered from last cycle, then is cleared
  *    Water Treatment ($21A36) contributes nothing, always clears
  *
@@ -222,14 +223,13 @@ void sim_power_grid(City *c)
  *
  *  One consequence worth stating, because it caps how exactly a saved
  *  city can be reproduced.  The schedule runs the water grid at phase 20
- *  ($220DA) and $33FAE at phase 21 ($220E4), and $33FAE rewrites both
+ *  ($220DA).  It runs $33FAE at phase 21 ($220E4).  $33FAE rewrites both
  *  weather bytes as a running average ($34CAC, $34CD2).  So the weather
  *  saved in MISC[26] is always at least one update newer than the
  *  weather this pass actually used.  Networks with a comfortable
- *  capacity margin are insensitive to that and reproduce exactly;
- *  networks sitting right at their budget boundary cannot, and no
- *  amount of care here will fix it -- the input is gone.
- */
+ *  capacity margin are insensitive to that and reproduce exactly.
+ *  Networks sitting right at their budget boundary cannot, and no amount
+ *  of care here will fix it: the input is gone. */
 static int fresh_or_salt(const City *c, int y, int x, int want)
 {
     int n = 0, yy, xx;
@@ -356,12 +356,11 @@ static void water_flood(City *c, int y0, int x0, int32_t *cap_out, int32_t *met_
     }
 }
 
-/*  $2156E.  The sweep order genuinely depends on the map rotation --
- *  the original branches four ways on g_rotation and runs a different
- *  loop nest for each.  Rotation 0 is column-major, shown here.  Order
+/*  $2156E.  The sweep order genuinely depends on the map rotation: the
+ *  original branches four ways on g_rotation and runs a different loop
+ *  nest for each.  Rotation 0 is column-major, shown here.  Order
  *  decides which source claims a shared network and, since water is
- *  rationed in queue order, which tiles run dry.
- */
+ *  rationed in queue order, which tiles run dry. */
 void sim_water_grid(City *c)
 {
     int32_t capacity = 0, met = 0;
@@ -423,30 +422,31 @@ void sim_water_grid(City *c)
         }
     }
 
-    /*  $217D2 -- water treatment, and it has to happen here, before
-     *  water_pct is rescaled, because the comparison is against the raw
-     *  delivered total rather than the percentage.  Each Water Treatment
-     *  plant covers two thousand units of what the network actually
-     *  delivers, and the building is 2x2, so the census tile count is
-     *  divided by four to count plants.  Once the plants cover the whole
-     *  delivery the flag goes up, and $23308 adds it to the pollution blur
-     *  divisor -- a larger divisor being how treatment shows up as less
-     *  pollution.  Leaving this out costs nothing until the water phase
-     *  runs before the scan, which is the order the clock uses ($220DA then
-     *  $21FB0).  Driving the scan on its own hides it entirely. */
+    /*  $217D2: water treatment, and it has to happen here, before
+     *  water_pct is rescaled.  This is because the comparison is against
+     *  the raw delivered total rather than the percentage.  Each Water
+     *  Treatment plant covers two thousand units of what the network
+     *  actually delivers.  The building is 2x2, so the census tile count
+     *  is divided by four to count plants.  Once the plants cover the
+     *  whole delivery the flag goes up, and $23308 adds it to the
+     *  pollution blur divisor: a larger divisor being how treatment
+     *  shows up as less pollution.  Leaving this out costs nothing until
+     *  the water phase runs before the scan, which is the order the
+     *  clock uses ($220DA then $21FB0).  Driving the scan on its own
+     *  hides it entirely. */
     c->misc[1043] =
         (uint32_t)((uint32_t)(c->census[0xF4] >> 2) * 2000u) >= (uint32_t)met
             ? 1
             : 0;
 
-    /* $217FE: like power, this is a load meter -- what fraction of the
-     * network's capacity is being drawn -- and 100 when there is none. */
+    /* $217FE: like power, this is a load meter.  What fraction of the
+     * network's capacity is being drawn.  And 100 when there is none. */
     c->water_capacity = capacity; /* A5+0x11D2 */
     c->water_pct      = capacity ? met * 100 / capacity : 100;
 }
 
 /* ================================================================== *
- *  Phase 19 -- traffic.  $2530E both decays the layer and totals it,
+ *  Phase 19: traffic.  $2530E both decays the layer and totals it,
  *  which is why a saved city's MISC traffic figure is a snapshot from
  *  the last time this ran rather than the sum of the layer on disk.
  * ================================================================== */
@@ -466,9 +466,9 @@ void sim_traffic_total(City *c)
 
 /*  $23302 computes the blur divisor as 4 - A5+0x2C8A + A5+0x2CA0, plus
  *  one when ordinance bit 0x80000 is set.  All three inputs are in the
- *  save -- MISC[1037], MISC[1043] and MISC[1000] -- so the whole thing
- *  is derived here rather than passed in, which is how an earlier
- *  version managed to drop the ordinance term silently.               */
+ *  save, MISC[1037], MISC[1043] and MISC[1000].  So the whole thing is
+ *  derived here rather than passed in, which is how an earlier version
+ *  managed to drop the ordinance term silently. */
 void sim_pollution(City *c)
 {
     int y2, x2;
@@ -497,7 +497,7 @@ void sim_pollution(City *c)
         }
     }
 
-    /* --- stage 2: 5-point blur, centre weighted twice ------------- */
+    /* --- stage 2: 5-point blur, center weighted twice ------------- */
     c->pollution_tot = 0;
     for (y2 = 0; y2 < HALF_H; y2++)
     {
@@ -538,7 +538,7 @@ void sim_pollution(City *c)
 }
 
 /* ================================================================== *
- *  Phase 21 -- population.  $33FAE, short enough to read whole.
+ *  Phase 21: population.  $33FAE, short enough to read whole.
  * ================================================================== */
 void sim_population(City *c)
 {
@@ -560,25 +560,26 @@ void sim_population(City *c)
         c->misc[16] += newpop; /* $3402E, A5+0x1E22 */
     }
 
-    /*  $34032 -- the residential, commercial and industrial split.
-     *  accum8 holds six zone accumulators and the three figures are
-     *  consecutive pairs of them, which is why their sum is accum8[0]
-     *  and why graph series 0 equals the sum of series 1 to 3. */
+    /*  $34032: the residential, commercial and industrial split. accum8
+     *  holds six zone accumulators and the three figures are consecutive
+     *  pairs of them.  This is why their sum is accum8[0] and why graph
+     *  series 0 equals the sum of series 1 to 3. */
     for (i = 0; i < 3; i++)
         c->rci_pop[i] = c->accum8[2 * i + 1] + c->accum8[2 * i + 2];
 
-    /*  $345DA -- the three zone departments' tax base is that split times
-     *  ten, a plain integer multiply.  The SANE sequence just above it in
-     *  $33FAE looks like it feeds this and does not: its result goes to a
-     *  local array at -$18(a6), and $345E0 overwrites the same scratch long
-     *  with rci_pop[i] * 10 before the store.  What the float sequence
-     *  actually computes is a growth ratio, (previous / (rci_pop[i] + 1)) -
-     *  1, kept for the demand model.  That part is not ported. */
+    /*  $345DA: the three zone departments' tax base is that split times
+     *  ten, a plain integer multiply.  The SANE sequence just above it
+     *  in $33FAE looks like it feeds this and does not.  Its result goes
+     *  to a local array at -$18(a6), and $345E0 overwrites the same
+     *  scratch long with rci_pop[i] * 10 before the store.  What the
+     *  float sequence actually computes is a growth ratio, (previous /
+     *  (rci_pop[i] + 1)) - 1, kept for the demand model.  That part is
+     *  not ported. */
     for (i = 0; i < 3; i++)
         c->dept[i].amount = c->rci_pop[i] * 10;
 
-    /*  $34602 -- and a share of the same ordinance term the graph uses,
-     *  a sixth to residential and a twelfth to the other two. */
+    /*  $34602: and a share of the same ordinance term the graph uses, a
+     *  sixth to residential and a twelfth to the other two. */
     c->dept[0].amount += c->misc[MISC_2C98] / 6;
     c->dept[1].amount += c->misc[MISC_2C98] / 12;
     c->dept[2].amount += c->misc[MISC_2C98] / 12;
@@ -587,17 +588,17 @@ void sim_population(City *c)
 }
 
 /* ================================================================== *
- *  $34068 .. $34790 -- the demand model, the rest of populationPass.
+ *  $34068 .. $34790: the demand model, the rest of populationPass.
  *
- *  For each of the three zone kinds the routine works out how much
- *  room there is, divides that by how much is already built, and moves
- *  the demand figure by the shortfall.  Two things shape it: what the
- *  city can support, and what the tax rate costs.
+ *  For each of the three zone kinds the routine works out how much room
+ *  there is, divides that by how much is already built.  Moves the
+ *  demand figure by the shortfall.  Two things shape it: what the city
+ *  can support, and what the tax rate costs.
  *
  *  The arithmetic is SANE single precision throughout.  Every step is
  *  taken back to a float rather than staying extended, so the chain of
- *  conversions below is the calculation, not ceremony around it --
- *  folding it into double arithmetic gives different answers.
+ *  conversions below is the calculation, not ceremony around it.
+ *  Folding it into double arithmetic gives different answers.
  *
  *  One faithful oddity: the original builds its 64-bit comp operands as
  *  a cleared high long and the value in the low long, so a negative
@@ -614,13 +615,13 @@ static ext80 z2x_sgl(float f) { return ext_from_float(f); }
 
 void sim_demand(City *c)
 {
-    /*  room[i] is how much of each zone the city could carry; the
+    /*  room[i] is how much of each zone the city could carry.  The
      *  original keeps it as three singles at -$c(a6). */
     float   room[3], ratio[3];
     int32_t cap;
     int     i;
 
-    /*  $34068 -- the workforce, and last month's residential head count
+    /*  $34068: the workforce, and last month's residential head count
      *  over it.  A5+0x2C7E holds the previous month's figure and is
      *  replaced with this month's at $34110, so the ratio always looks
      *  one month back. */
@@ -629,7 +630,7 @@ void sim_demand(City *c)
                                         ext_add(ext_from_i32(1), z2x_sgl(jobs))));
     c->misc[29]       = c->rci_pop[0]; /* $34110 */
 
-    /*  $34114 -- the city's own size against a fixed 150000, and the
+    /*  $34114: the city's own size against a fixed 150000, and the
      *  difficulty multiplier with a hundredth of A5+0x2C8C added. */
     const float growth =
         x2z_sgl(ext_div(z2x_sgl(x2z_sgl(z2x_i32(c->population + 50000))),
@@ -640,12 +641,12 @@ void sim_demand(City *c)
                         ext_div(z2x_i16((int16_t)c->misc[1036]),
                                 ext_from_i32(100))));
 
-    /*  $34254 -- residential room is the workforce plus a fiftieth of
-     *  the residents themselves. */
+    /*  $34254: residential room is the workforce plus a fiftieth of the
+     *  residents themselves. */
     room[0] = x2z_sgl(ext_add(z2x_sgl(jobs),
                               z2x_sgl(x2z_sgl(z2x_i32(c->rci_pop[0] / 50)))));
 
-    /*  $34284 -- commerce and industry both scale the industrial head
+    /*  $34284: commerce and industry both scale the industrial head
      *  count by that jobs share, then by their own multiplier. */
     {
         const ext80 base =
@@ -656,9 +657,9 @@ void sim_demand(City *c)
     if (room[2] < 15.0f)
         room[2] = 15.0f; /* $34362 */
 
-    /*  $3436A -- and then four ceilings, which is where the city's own
-     *  buildings come in.  Residential is held down by how much there
-     *  is to do: stadium, marina, zoo, and a third of the parks. */
+    /*  $3436A: and then four ceilings, which is where the city's own
+     *  buildings come in.  Residential is held down by how much there is
+     *  to do: stadium, marina, zoo, and a third of the parks. */
     {
         uint16_t t = (uint16_t)(10 + c->census[0xD7] + c->census[0xF8] +
                                 c->census[0xDA] + (uint16_t)(c->census[0xD5] / 3));
@@ -666,13 +667,13 @@ void sim_demand(City *c)
         if (room[0] > (float)cap)
             room[0] = (float)cap; /* $343E8 */
     }
-    /*  $343EE -- and by how much commerce there is to work in */
+    /*  $343EE: and by how much commerce there is to work in */
     cap = c->rci_pop[1] * 4 + 500;
     if (room[0] > (float)cap)
         room[0] = (float)cap; /* $34446 */
 
-    /*  $3444C -- commerce is held down by the airport: runway tiles
-     *  plus the counter at A5+0x2C96. */
+    /*  $3444C: commerce is held down by the airport: runway tiles plus
+     *  the counter at A5+0x2C96. */
     {
         uint16_t t = (uint16_t)(c->census[0xDD] + c->census[0xDE] +
                                 (uint16_t)c->misc[1044]);
@@ -680,7 +681,7 @@ void sim_demand(City *c)
         if (room[1] > (float)cap)
             room[1] = (float)cap; /* $344C6 */
     }
-    /*  $344CC -- and industry by the seaport: cranes plus A5+0x2C94. */
+    /*  $344CC: and industry by the seaport: cranes plus A5+0x2C94. */
     {
         uint16_t t =
             (uint16_t)(c->census[0xE0] + 1 + (uint16_t)c->misc[1033]);
@@ -689,7 +690,7 @@ void sim_demand(City *c)
             room[2] = (float)cap; /* $34538 */
     }
 
-    /*  $34544 -- room against what is already there.  A ratio of zero
+    /*  $34544: room against what is already there.  A ratio of zero
      *  means the city is exactly as full as it can be. */
     for (i = 0; i < 3; i++)
         ratio[i] = x2z_sgl(ext_add(ext_from_i32(-1),
@@ -697,7 +698,7 @@ void sim_demand(City *c)
                                            z2x_sgl(x2z_sgl(z2x_i32(
                                                c->rci_pop[i] + 1))))));
 
-    /*  $34644 -- and the month's move: six hundred times the shortfall,
+    /*  $34644: and the month's move: six hundred times the shortfall,
      *  plus whatever the tax rate is worth.  Ordinances nudge the rate
      *  the table is read at rather than the demand itself. */
     for (i = 0; i < 3; i++)
@@ -732,9 +733,9 @@ void sim_demand(City *c)
         }
         if (f < 0)
             f = 0; /* $346BE */
-        /*  the original indexes the table with no upper bound; funding
-         *  never reaches the end of it, and stopping there is safer
-         *  than reading past the table in C. */
+        /*  the original indexes the table with no upper bound.  Funding
+         *  never reaches the end of it, and stopping there is safer than
+         *  reading past the table in C. */
         if (f > 23)
             f = 23;
 
@@ -759,12 +760,12 @@ void sim_demand(City *c)
 }
 
 /* ================================================================== *
- *  $34792 -- the forest, still inside populationPass.
+ *  $34792: the forest, still inside populationPass.
  *
- *  One tile a month, chosen at random, and then its neighbour in a
- *  random direction.  Trees advance a stage; bare ground that is not
- *  rubble puts out a sapling.  Water grows nothing, and anything above
- *  a tree is left alone.
+ *  One tile a month, chosen at random, and then its neighbor in a random
+ *  direction.  Trees advance a stage.  Bare ground that is not rubble
+ *  puts out a sapling.  Water grows nothing, and anything above a tree
+ *  is left alone.
  *
  *  It is small and it is why a city left alone slowly turns green
  *  again.  It also draws four to six dice a month, which is enough to
@@ -780,14 +781,14 @@ void sim_forest(City *c)
     int32_t x = (int32_t)(Random() & 0xFFFF) % 128; /* $347AE */
     int32_t b = c->xbld[y][x];
 
-    /*  $347D8 -- rubble clears itself one time in sixteen */
+    /*  $347D8: rubble clears itself one time in sixteen */
     if (b == RUBBLE && (Random() & 0xF) == 0)
         sim_set_tile(c, (int)y, (int)x, 0);
 
     if (c->xbit[y][x] & XBIT_WATER) /* $34804 */
         return;
 
-    /*  $3480E -- a tile that is not already forest only gets a turn one
+    /*  $3480E: a tile that is not already forest only gets a turn one
      *  time in sixteen */
     if ((b < TREE_FIRST || b > 13) && (Random() & 0xF) != 0)
         return;
@@ -795,8 +796,8 @@ void sim_forest(City *c)
     if (b >= TREE_FIRST && b < 12) /* $34828 */
         sim_set_tile(c, (int)y, (int)x, (uint8_t)(b + 1));
 
-    /*  $34846 -- and now the neighbour, one step in one direction, the
-     *  map edge simply refusing to move */
+    /*  $34846: and now the neighbor, one step in one direction, the map
+     *  edge simply refusing to move */
     switch (Random() & 3)
     {
         case 0:
@@ -829,13 +830,13 @@ void sim_forest(City *c)
 }
 
 /* ================================================================== *
- *  $348F0 -- the newspaper's dice.
+ *  $348F0: the newspaper's dice.
  *
  *  Every roll here only decides whether a headline is printed, and the
- *  headlines are interface.  The rolls themselves are not optional: the
- *  original draws between fourteen and eighteen numbers a month here,
- *  and a stream that skips them puts every later roll in the month out
- *  of step.  The same lesson as the train horn, at a larger scale.
+ *  headlines are interface.  The rolls themselves are not optional.  The
+ *  original draws between fourteen and eighteen numbers a month here.  A
+ *  stream that skips them puts every later roll in the month out of
+ *  step.  The same lesson as the train horn, at a larger scale.
  *
  *  So the shape is kept and the messages are dropped, with one piece of
  *  real state: $34BF4 walks the seventeen deadlines at A5+0x1E4C and
@@ -846,19 +847,19 @@ void sim_news_rolls(City *c)
     int32_t r;
     int     i;
 
-    /*  $348F0 -- one of six openings, and only the first rolls again */
+    /*  $348F0: one of six openings, and only the first rolls again */
     if ((int32_t)(Random() & 0xFFFF) % 6 == 0)
     {
         Random(); /* $34920 */
         Random(); /* $3493A */
     }
 
-    /*  $349A4 -- the stadium's own headline, drawn only when there is
-     *  a stadium to write about */
+    /*  $349A4: the stadium's own headline, drawn only when there is a
+     *  stadium to write about */
     if (c->census[0xD7] != 0)
         Random(); /* $349B0 */
 
-    /*  $349DC .. $34AFC -- eight rolls against four of the map-view
+    /*  $349DC .. $34AFC: eight rolls against four of the map-view
      *  averages, a coarse one and a fine one each */
     Random(); /* $349E6 traffic   & 0x7F */
     Random(); /* $34A10 traffic   & 0x0F */
@@ -869,13 +870,13 @@ void sim_news_rolls(City *c)
     Random(); /* $34ADA jobless   & 0x3F */
     Random(); /* $34AFC jobless   & 0x03 */
 
-    /*  $34B1C and $34B80 -- education and health each take one roll,
-     *  and which of the two branches runs decides what it is compared
+    /*  $34B1C and $34B80: education and health each take one roll, and
+     *  which of the two branches runs decides what it is compared
      *  against rather than whether it happens. */
     Random(); /* $34B26 or $34B5A */
     Random(); /* $34B8A or $34BBE */
 
-    /*  $34BE6 -- one time in eight the deadlines are looked at */
+    /*  $34BE6: one time in eight the deadlines are looked at */
     r = Random() & 7;
     if (r == 0)
         for (i = 0; i < 17; i++)
@@ -893,7 +894,7 @@ void sim_news_rolls(City *c)
 }
 
 /* ================================================================== *
- *  $34C58 -- the weather.
+ *  $34C58: the weather.
  *
  *  Twelve states, and each month the weather steps to one of eight
  *  successors drawn from a table that changes with the season.  Cloud,
@@ -906,8 +907,8 @@ void sim_news_rolls(City *c)
  * ================================================================== */
 void sim_weather(City *c)
 {
-    /*  $15256 -- the season is the month shifted one and divided by
-     *  three, so December, January and February share one set. */
+    /*  $15256: the season is the month shifted one and divided by three,
+     *  so December, January and February share one set. */
     const int season = (int)(((c->month + 1) % 12) / 3);
     int       st     = c->weather_state;
     int       roll;
@@ -919,7 +920,7 @@ void sim_weather(City *c)
     c->weather_state = (int16_t)st;
     c->misc[27]      = st;
 
-    /*  $34C8A -- half way toward the new state, three times over. */
+    /*  $34C8A: half way toward the new state, three times over. */
     c->weather2            = (int16_t)((c->weather2 + WEATHER_CLOUD[st]) / 2);
     c->weather1            = (int16_t)((c->weather1 + WEATHER_WIND[st]) / 2);
     c->temperature         = (int16_t)((c->temperature + WEATHER_TEMP[st]) / 2);
@@ -931,7 +932,7 @@ void sim_weather(City *c)
 /* ================================================================== *
  *  The population model, applied to a map rather than accumulated over
  *  a cycle.  $3170E credits a tile only at the corner selected by the
- *  current rotation, so a multi-tile building counts once; the amount
+ *  current rotation, so a multi-tile building counts once.  The amount
  *  is GROWTH_TABLE indexed by the building's tier ($31DDA), and $33FAE
  *  multiplies the total by ten.
  * ================================================================== */
@@ -962,24 +963,22 @@ int32_t sim_map_population(const City *c)
 }
 
 /* ================================================================== *
- *  $224BA  overlayAverages -- the four numbers under the map views.
+ *  $224BA  overlayAverages: the four numbers under the map views.
  *
  *  These are not standalone globals.  A5+0x2BDC is XGRP, a table of
- *  sixteen pointers, one per graph series, and A5+0x2BEC, 0x2BF0,
- *  0x2BF4 and 0x2BF8 are entries 4 to 7 of it.  What this routine
- *  stores is the newest sample of the traffic, pollution, land value
- *  and crime series; the map views and the ambient rolls at $9E76 read
- *  that sample.
+ *  sixteen pointers, one per graph series, and A5+0x2BEC, 0x2BF0, 0x2BF4
+ *  and 0x2BF8 are entries 4 to 7 of it.  What this routine stores is the
+ *  newest sample of the traffic, pollution, land value and crime series.
+ *  The map views and the ambient rolls at $9E76 read that sample.
  *
  *  It is one step of graphHistoryPass ($22330), which shifts every
  *  series back a slot before this runs and maintains the graph scales
- *  after it.  Call sim_graph_pass for the whole month; this entry
- *  point stays because the four values are read on their own.
+ *  after it.  Call sim_graph_pass for the whole month.  This entry point
+ *  stays because the four values are read on their own.
  *
- *  Traffic divides by three transport departments' `amount`; the other
- *  three divide by a quarter of the developed-tile count.  Both
- *  divisors add one, so an empty city divides by one rather than
- *  faulting.
+ *  Traffic divides by three transport departments' `amount`.  The other
+ *  three divide by a quarter of the developed-tile count.  Both divisors
+ *  add one, so an empty city divides by one rather than faulting.
  *
  *  The driver at $9E76 reads two of these to decide whether to roll for
  *  an ambient sound, which is the only place the simulation reads them
@@ -987,7 +986,7 @@ int32_t sim_map_population(const City *c)
  * ================================================================== */
 void sim_overlay_averages(City *c)
 {
-    /*  $224C0 -- departments 10, 11 and 12, field +0x60 */
+    /*  $224C0: departments 10, 11 and 12, field +0x60 */
     const int32_t roads = c->dept[10].amount + c->dept[11].amount +
                           c->dept[12].amount + 1; /* $224CC */
     const int32_t d     = c->developed;
@@ -996,8 +995,8 @@ void sim_overlay_averages(City *c)
     c->graph[GRAPH_TRAFFIC][0] =
         (int32_t)((uint32_t)c->traffic_tot / (uint32_t)roads);
 
-    /*  $224E0 -- d/4 rounded toward zero, then +1.  The shift dance is
-     *  how THINK C divides a signed word by four. */
+    /*  $224E0: d/4 rounded toward zero, then +1.  The shift dance is how
+     *  THINK C divides a signed word by four. */
     n = ((d + ((d >> 1 >> 8 >> 6) & 3)) >> 2) + 1;
 
     c->graph[GRAPH_POLLUTION][0] =
@@ -1008,7 +1007,7 @@ void sim_overlay_averages(City *c)
         (int32_t)((uint32_t)c->crime_tot / (uint32_t)n);
 }
 
-/*  $2233C, $2263E and $226A8 -- shift a band up by one, oldest first,
+/*  $2233C, $2263E and $226A8: shift a band up by one, oldest first,
  *  leaving `first` free for a new sample. */
 static void graph_shift(int32_t *series, int first, int count)
 {
@@ -1018,7 +1017,7 @@ static void graph_shift(int32_t *series, int first, int count)
         series[k] = series[k - 1];
 }
 
-/*  $22490 onward -- the running maximum, always an unsigned compare. */
+/*  $22490 onward: the running maximum, always an unsigned compare. */
 static int32_t graph_rise(int32_t have, int32_t sample)
 {
     return (uint32_t)sample > (uint32_t)have ? sample : have;
@@ -1030,38 +1029,38 @@ void sim_graph_pass(City *c)
     int32_t       arcos, bonus, scale, jobless;
     int           i;
 
-    /*  $2233C -- every series gives up its oldest month */
+    /*  $2233C: every series gives up its oldest month */
     for (i = 0; i < N_GRAPH; i++)
         graph_shift(c->graph[i], GRAPH_MONTH, GRAPH_N_MONTH);
 
-    /*  $22370 -- the four arcology counts are tile counts and an
-     *  arcology covers sixteen tiles, so >> 4 counts buildings.  The
-     *  original adds them in sixteen bits, so the sum can wrap. */
+    /*  $22370: the four arcology counts are tile counts and an arcology
+     *  covers sixteen tiles, so >> 4 counts buildings.  The original
+     *  adds them in sixteen bits, so the sum can wrap. */
     arcos = (uint16_t)(c->census[0xFB] + c->census[0xFC] +
                        c->census[0xFD] + c->census[0xFE]) >>
             4;
     bonus = arcos > 140 ? (arcos - 140) * 20000 : 0; /* $22396 */
 
-    /*  $223B0 -- city size, then the three zone series.  The shift
-     *  dances at $223CA and $22408 are signed divides by two and by
-     *  four, which C rounds toward zero the same way. */
+    /*  $223B0: city size, then the three zone series.  The shift dances
+     *  at $223CA and $22408 are signed divides by two and by four, which
+     *  C rounds toward zero the same way. */
     c->graph[GRAPH_CITY_SIZE][0] = c->accum8[0] * 10 + m + bonus;
     c->graph[GRAPH_RESIDENTS][0] = c->rci_pop[0] * 10 + m / 2 + bonus / 2;
     c->graph[GRAPH_COMMERCE][0]  = c->rci_pop[1] * 10 + m / 4 + bonus / 4;
     c->graph[GRAPH_INDUSTRY][0]  = c->rci_pop[2] * 10 + m / 4 + bonus / 4;
 
-    /*  $22490 -- the four population series share one scale, and it is
+    /*  $22490: the four population series share one scale, and it is
      *  city size alone that can push it up. */
     scale = graph_rise(c->graph_max[GRAPH_CITY_SIZE],
                        c->graph[GRAPH_CITY_SIZE][0]);
     for (i = GRAPH_CITY_SIZE; i <= GRAPH_INDUSTRY; i++)
         c->graph_max[i] = scale;
 
-    /*  $224BA -- traffic, pollution, land value and crime */
+    /*  $224BA: traffic, pollution, land value and crime */
     sim_overlay_averages(c);
 
-    /*  $2252A -- the four map overlays share a scale too, and here any
-     *  of the four can raise it. */
+    /*  $2252A: the four map overlays share a scale too, and here any of
+     *  the four can raise it. */
     scale = 0;
     for (i = GRAPH_TRAFFIC; i <= GRAPH_CRIME; i++)
     {
@@ -1071,41 +1070,40 @@ void sim_graph_pass(City *c)
     for (i = GRAPH_TRAFFIC; i <= GRAPH_CRIME; i++)
         c->graph_max[i] = scale;
 
-    /*  $2257C -- coverage is stored as the share supplied, so the
-     *  globals hold the shortfall. */
+    /*  $2257C: coverage is stored as the share supplied, so the globals
+     *  hold the shortfall. */
     c->graph[GRAPH_POWER][0] = 100 - c->power_pct;
     c->graph[GRAPH_WATER][0] = 100 - c->water_pct;
 
-    /*  $22594 -- the two age-weighted scores.  The original writes
+    /*  $22594: the two age-weighted scores.  The original writes
      *  education first. */
     c->graph[GRAPH_EDUCATION][0] = c->misc[MISC_AGE_W90];
     c->graph[GRAPH_HEALTH][0]    = c->misc[MISC_AGE_W65];
 
-    /*  $225A4 -- the jobless share, kept at A5+0x2C82 as well because
-     *  the economy reads it back.  The +1 keeps an empty city from
-     *  dividing by zero. */
+    /*  $225A4: the jobless share, kept at A5+0x2C82 as well because the
+     *  economy reads it back.  The +1 keeps an empty city from dividing
+     *  by zero. */
     jobless                         = (int32_t)(((uint32_t)c->accum8[7] * 100u) /
                                                 (uint32_t)(c->accum8[0] + c->accum8[7] + 1));
     c->unemployment                 = jobless;
     c->graph[GRAPH_UNEMPLOYMENT][0] = jobless;
 
-    /*  $225CE -- the three national figures */
+    /*  $225CE: the three national figures */
     c->graph[GRAPH_NAT_GNP][0]  = c->misc[MISC_NAT_INDEX2];
     c->graph[GRAPH_NAT_POP][0]  = c->misc[MISC_NAT_INDEX];
     c->graph[GRAPH_FED_RATE][0] = (int16_t)c->misc[MISC_NAT_MOOD];
 
-    /*  $225E8 -- the remaining eight each keep their own scale */
+    /*  $225E8: the remaining eight each keep their own scale */
     for (i = GRAPH_POWER; i < N_GRAPH; i++)
         c->graph_max[i] = graph_rise(c->graph_max[i], c->graph[i][0]);
 
-    /*  $22616 -- except that GNP is drawn against national population
+    /*  $22616: except that GNP is drawn against national population
      *  whenever that is the taller of the two. */
     c->graph_max[GRAPH_NAT_GNP] =
         graph_rise(c->graph_max[GRAPH_NAT_GNP], c->graph_max[GRAPH_NAT_POP]);
 
-    /*  $2262C -- January and July move the half-yearly band, and the
-     *  new slot takes a copy of this month rather than its own
-     *  reading. */
+    /*  $2262C: January and July move the half-yearly band, and the new
+     *  slot takes a copy of this month rather than its own reading. */
     if (c->month == 0 || c->month == 6)
         for (i = 0; i < N_GRAPH; i++)
         {
@@ -1113,7 +1111,7 @@ void sim_graph_pass(City *c)
             c->graph[i][GRAPH_HALFYEAR] = c->graph[i][0];
         }
 
-    /*  $2268E -- every fifth January the five-yearly band moves too */
+    /*  $2268E: every fifth January the five-yearly band moves too */
     if (c->month == 0 && c->years % 5 == 0)
         for (i = 0; i < N_GRAPH; i++)
         {
@@ -1122,7 +1120,7 @@ void sim_graph_pass(City *c)
         }
 }
 
-/*  $23432 -- the city centre is the mean row and column of every tile
+/*  $23432: the city center is the mean row and column of every tile
  *  carrying a developed building.  It also seeds the scratch and clears
  *  the flood bit that stage 4 reuses as a half-res mask. */
 void sim_city_centre(City *c, int *cy, int *cx)
@@ -1140,12 +1138,12 @@ void sim_city_centre(City *c, int *cy, int *cx)
             pad[y][x] = 0x28;                        /* $234A8 */
             c->xbit[y][x] &= (uint8_t)~XBIT_VISITED; /* $234C6 */
         }
-    /*  $234EA divides by twice the count, and the value kept in a2/a3
-     *  -- the one the distance term uses -- is that half-resolution
+    /*  $234EA divides by twice the count, and the value kept in a2/a3.
+     *  The one the distance term uses.  Is that half-resolution
      *  quotient.  Only the copy written to the globals at $23508 is
      *  doubled, for MISC[1030]/[1031].  Using the doubled value in the
-     *  distance term is wrong and quietly halves every centrality
-     *  bonus in the city. */
+     *  distance term is wrong and quietly halves every centrality bonus
+     *  in the city. */
     n *= 2; /* $234EA */
     *cy = (int)((uint32_t)sy / (uint32_t)n);
     *cx = (int)((uint32_t)sx / (uint32_t)n);
@@ -1238,28 +1236,27 @@ static int32_t stencil(int plane_row0, int qy, int qx)
 
 /*  stage 5 ($236E4) turns the planes into XVAL.  Commercial reads plane
  *  A and gets the full centrality bonus plus a lift from population
- *  density; residential reads plane A at half the bonus; industry reads
- *  plane B, the water plane, at a quarter.  Each subtracts pollution and
- *  crime at its own weight, which is where the character of the three
- *  zone types actually lives.
- */
+ *  density.  Residential reads plane A at half the bonus.  Industry
+ *  reads plane B, the water plane, at a quarter.  Each subtracts
+ *  pollution and crime at its own weight, which is where the character
+ *  of the three zone types actually lives. */
 void sim_land_value(City *c)
 {
     int cy, cx, hy, hx;
 
     /*  The shared plane is deliberately NOT cleared here.  Stage 4 seeds
-     *  its two accumulators from whatever is already in it -- stage 1's
-     *  raw, unblurred pollution, overwritten at building tiles by
-     *  stage 3's marks -- so land value depends on an intermediate that
+     *  its two accumulators from whatever is already in it.  That is
+     *  stage 1's raw, unblurred pollution.  Stage 3's marks overwrite it
+     *  at building tiles, so land value depends on an intermediate that
      *  no save file records.  Run after sim_pollution, as $2317E runs
-     *  its stages, that intermediate is present and land value comes
-     *  out exact; run on a bare save it cannot, and the gap between the
-     *  two numbers in the report is the size of what the file lost. */
+     *  its stages, that intermediate is present and land value comes out
+     *  exact.  Run on a bare save it cannot, and the gap between the two
+     *  numbers in the report is the size of what the file lost. */
     sim_city_centre(c, &cy, &cx);
-    /*  $23506 doubles both before storing them: sim_city_centre
-     *  hands back the half-resolution centre, which is what the
-     *  land value stage wants, and the globals hold it in whole
-     *  tiles, which is what the disasters want. */
+    /*  $23506 doubles both before storing them: sim_city_center hands
+     *  back the half-resolution center, which is what the land value
+     *  stage wants.  The globals hold it in whole tiles, which is what
+     *  the disasters want. */
     c->centre_y = (int16_t)(cy * 2); /* $23508 */
     c->centre_x = (int16_t)(cx * 2); /* $23510 */
     build_planes(c);
@@ -1329,7 +1326,7 @@ void sim_land_value(City *c)
 }
 
 /* ================================================================== *
- *  $2317E stage 9 ($23FAE) -- crime.
+ *  $2317E stage 9 ($23FAE): crime.
  *
  *  Every input is produced earlier in the same pass, so a saved city
  *  holds exactly the values this stage saw.  That makes crime, unlike
@@ -1346,10 +1343,11 @@ void sim_crime(City *c)
     static uint8_t mask[HALF_H][HALF_W];
     int            hy, hx, y, x;
 
-    /*  Stage 4 marks this mask into XBIT bit 3, but that bit is also the
-     *  flood-fill scratch and both flood passes clear it, so whether a
-     *  save still carries it depends on when the save happened.  Derive
-     *  it from the map instead -- same condition, $235DA. */
+    /*  Stage 4 marks this mask into XBIT bit 3.  But that bit is also
+     *  the flood-fill scratch and both flood passes clear it.  So
+     *  whether a save still carries it depends on when the save
+     *  happened.  Derive it from the map instead: same condition,
+     *  $235DA. */
     memset(mask, 0, sizeof mask);
     for (y = 0; y < MAP_H; y++)
         for (x = 0; x < MAP_W; x++)
@@ -1415,7 +1413,7 @@ void sim_crime(City *c)
     }
 }
 
-/*  $241B2 -- add to one cell of a coverage layer, clamped to a byte.
+/*  $241B2: add to one cell of a coverage layer, clamped to a byte.
  *  Off-map cells are dropped rather than wrapped. */
 static void coverage_point(uint8_t plane[QTR_H][QTR_W], int y, int x, int16_t amount)
 {
@@ -1431,11 +1429,11 @@ static void coverage_point(uint8_t plane[QTR_H][QTR_W], int y, int x, int16_t am
     plane[y][x] = (uint8_t)v;
 }
 
-/*  $24232 -- stamp the diamond.  The original writes out all thirty-odd
- *  calls by hand; COVERAGE_KERNEL is the same list, recovered by running
- *  it.  Each ring step is done in sixteen bits, so a station funded hard
- *  enough to overflow the intermediate really does wrap, and that is
- *  reproduced rather than smoothed over. */
+/*  $24232: stamp the diamond.  The original writes out all thirty-odd
+ *  calls by hand.  COVERAGE_KERNEL is the same list, recovered by
+ *  running it.  Each ring step is done in sixteen bits, so a station
+ *  funded hard enough to overflow the intermediate really does wrap.
+ *  That is reproduced rather than smoothed over. */
 static void coverage_spread(uint8_t plane[QTR_H][QTR_W], int y, int x, int16_t s)
 {
     int16_t ring[COVERAGE_RINGS];
@@ -1469,7 +1467,7 @@ void sim_coverage(City *c)
     memset(c->xplc, 0, sizeof c->xplc);
     memset(c->xfir, 0, sizeof c->xfir);
 
-    /*  1 .. 0x7E.  The first and last row and column are skipped, which
+    /*  1 .. 0x7E.  The first and last row and column are skipped.  This
      *  is the loop the original writes ($23CB2 sets 1, $23ED0 stops
      *  below 0x7F), not an off-by-one here. */
     for (y = 1; y < MAP_H - 1; y++)
@@ -1516,7 +1514,7 @@ void sim_coverage(City *c)
     }
 
     /*  $23EE4.  The multiply by four is a word shift and the clamp is
-     *  one sided -- the original never floors the result at zero. */
+     *  one sided: the original never floors the result at zero. */
     for (qy = 0; qy < QTR_H; qy++)
     {
         for (qx = 0; qx < QTR_W; qx++)
@@ -1526,11 +1524,11 @@ void sim_coverage(City *c)
             if (v > 255)
                 v = 255;
 
-            /*  $23F30 -- the rate of growth, before the new density
+            /*  $23F30: the rate of growth, before the new density
              *  overwrites the old.  It is an average of the CHANGE,
-             *  weighted seven to one toward the running value, and it
-             *  is offset by 128 so that a quarter holding steady reads
-             *  as the middle of the range rather than as zero. */
+             *  weighted seven to one toward the running value.  It is
+             *  offset by 128 so that a quarter holding steady reads as
+             *  the middle of the range rather than as zero. */
             d = (v - c->xpop[qy][qx]) * 8 + 128;        /* $23F32 */
             r = (int16_t)(c->xrog[qy][qx] * 7 + d) / 8; /* $23F52 */
             if (r < 0)

@@ -1,6 +1,6 @@
 --  fit.lua -- how a fitted path finishes.
 --
---  The tangent fit finds the straight runs of a road and puts a vertex
+--  The tangent fit finds the straight runs of a line and puts a vertex
 --  where two of them meet.  What is left is two decisions, and they are
 --  here: which of those vertices say nothing and can go, and what radius
 --  each of the rest is given.
@@ -12,7 +12,7 @@
 --
 --  How the edges are shared out is arc.end_budget's and arc.demand's,
 --  in tangent.lua, because the join stage settles the same question at a
---  crossing and the two must answer it the same way.
+--  meet and the two must answer it the same way.
 
 --  Every step in the mesh's own precision: the fit works in floats, and
 --  a budget worked out to more places than it can hold splits an edge a

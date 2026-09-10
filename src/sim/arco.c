@@ -1,12 +1,18 @@
 /* ==================================================================== *
- *  .arco -- the reader and writer.  See arco.h for what the format is
+ *  .arco: the reader and writer.  See arco.h for what the format is
  *  and why it is a ZIP.
  *
  *  The ZIP here is deliberately the smallest thing that a real unzip
- *  will open: local headers, a central directory, an end record, and
- *  deflate from lodepng, which the renderer already carries for PNG.
- *  No zip64, no encryption, no directory entries.  A file this reader
- *  writes opens in Finder, Explorer, `unzip`, and Python's `zipfile`.
+ *  will open.
+ *
+ *      Local headers.
+ *      A central directory.
+ *      An end record.
+ *      Deflate from lodepng.
+ *
+ *  This the renderer already carries for PNG.  No zip64, no encryption,
+ *  no directory entries.  A file this reader writes opens in Finder,
+ *  Explorer, `unzip`, and Python's `zipfile`.
  *
  *  What is NOT here, on purpose: a schema.  The manifest is written by
  *  hand and read by a parser that looks for the keys it wants and
@@ -195,9 +201,9 @@ static int zip_finish(Zip *z, const char *path)
         buf_u32(&z->out, e->offset);
         buf_str(&z->out, e->name);
     }
-    /*  Measure the central directory BEFORE the end record starts, or
-     *  the twelve bytes written just below land inside the size and
-     *  every reader computes a negative prefix. */
+    /*  Measure the central directory BEFORE the end record starts.
+     *  Otherwise the twelve bytes written just below land inside the
+     *  size and every reader computes a negative prefix. */
     cd_size = z->out.n - start;
     buf_u32(&z->out, 0x06054B50);
     buf_u16(&z->out, 0); /* this disk               */
@@ -308,8 +314,8 @@ static long json_int(const char *js, const char *key, long dflt)
 
 /* ---- layers -------------------------------------------------------- */
 /*  Every grid the world holds, with its element size and resolution
- *  divisor.  Adding a layer is a line here and a file in the archive;
- *  a reader that does not know the name simply does not ask for it. */
+ *  divisor.  Adding a layer is a line here and a file in the archive.  A
+ *  reader that does not know the name simply does not ask for it. */
 typedef struct
 {
     const char *name;
@@ -349,10 +355,10 @@ static void layers_of(City *c, Layer *L, int *n)
     *n = i;
 }
 
-/*  A layer, chunk by chunk, little-endian.  Little-endian is the one place
- *  this format breaks with the original on purpose: the 1995 file is
- *  big-endian because a 68000 was, and every machine that will ever open a
- *  .arco is not. */
+/*  A layer, chunk by chunk, little-endian.  Little-endian is the one
+ *  place this format breaks with the original on purpose: the 1995 file
+ *  is big-endian because a 68000 was.  Every machine that will ever open
+ *  a .arco is not. */
 static int put_layer(Zip *z, int cx, int cy, const Layer *l)
 {
     int      side = ARCO_CHUNK / l->div;
@@ -438,9 +444,9 @@ static void json_escape(char *out, size_t n, const char *in)
     out[o] = 0;
 }
 
-/*  The city's name.  It is not a field on City -- it is the CNAM chunk,
- *  a Pascal string in a 32-byte slot -- so it is decoded here rather
- *  than assumed. */
+/*  The city's name.  It is not a field on City.  It is the CNAM chunk, a
+ *  Pascal string in a 32-byte slot: so it is decoded here rather than
+ *  assumed. */
 static void city_name(const City *c, char *out, size_t n)
 {
     size_t len = 0;
@@ -494,9 +500,9 @@ static int write_manifest(Zip *z, const City *c)
                 "fields are still being named.\",\n");
     buf_fmt(&b, "    \"imported_from\": \"sc2\",\n");
     /*  The order the 1995 file listed its chunks in.  It has no meaning
-     *  to this format -- .arco stores layers by name -- but writing a
-     *  .sc2 back out in a different order would change the bytes, and a
-     *  round trip that is only ALMOST exact is not worth having. */
+     *  to this format.  .arco stores layers by name.  But writing a .sc2
+     *  back out in a different order would change the bytes.  A round
+     *  trip that is only ALMOST exact is not worth having. */
     buf_fmt(&b, "    \"sc2_chunk_order\": \"");
     {
         int k;
@@ -598,9 +604,9 @@ int arco_save(const char *path, const City *c)
     if (c->xthg && zip_add(&z, "cities/0/xthg.bin", c->xthg, c->xthg_len))
         goto fail;
     /*  The graph history is NOT passed through as the original's blob.
-     *  XGRP is just graph[16][52] written big-endian, so .arco stores the
-     *  numbers themselves, little-endian, under a name that says what they
-     *  are.  city_save rebuilds the chunk from them. */
+     *  XGRP is graph[16][52] written big-endian.  So .arco stores the
+     *  numbers themselves, little-endian, under a name that says what
+     *  they are. city_save rebuilds the chunk from them. */
     {
         static int32_t g[N_GRAPH * GRAPH_SAMPLES];
         int            gi, gk;
@@ -736,8 +742,8 @@ int arco_load(const char *path, City *c)
             free(d);
     }
 
-    /*  The scalars come from MISC, exactly as they do for a 1995 save,
-     *  so there is one path that turns MISC into a City and not two that
+    /*  The scalars come from MISC, exactly as they do for a 1995 save.
+     *  So there is one path that turns MISC into a City and not two that
      *  can disagree.  The graph history goes back into graph[][], and
      *  city_save writes XGRP from there, so nothing has to keep the
      *  original blob. */

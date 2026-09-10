@@ -1,4 +1,4 @@
-/*  ui_none.c -- the UI interface with no UI behind it. */
+/*  ui_none.c: the UI interface with no UI behind it. */
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>

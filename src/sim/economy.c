@@ -1,12 +1,12 @@
-/*  economy.c -- economyPass ($34D04), phase 21. The only part of the
- *  simulation that uses floating point, and it does so entirely through the
- *  SANE trap: every arithmetic step is a call to _FP68K with an opword
- *  saying what to do and in which format.  The formats matter -- values are
- *  repeatedly rounded down to single precision between steps -- so this
- *  mirrors the original's operations through ext80 rather than computing
- *  the same formula in double and hoping the rounding agrees.  The
- *  operation sequence was not read off the listing.  It was recorded by
- *  watching all 186 _FP68K sites under the interpreter
+/*  economy.c: economyPass ($34D04), phase 21.  The only part of the
+ *  simulation that uses floating point.  It does so entirely through the
+ *  SANE trap.  Every arithmetic step is a call to _FP68K with an opword
+ *  saying what to do and in which format.  The formats matter.  Values
+ *  are repeatedly rounded down to single precision between steps.  So
+ *  this mirrors the original's operations through ext80 rather than
+ *  computing the same formula in double and hoping the rounding agrees.
+ *  The operation sequence was not read off the listing.  It was recorded
+ *  by watching all 186 _FP68K sites under the interpreter
  *  (tools/trace_economy.py), which is what the comments cite. */
 #include "ext80.h"
 #include "sim.h"
@@ -20,11 +20,11 @@ static ext80 z2x_i32(int32_t v) { return ext_from_i32(v); }
 static float x2z_sgl(ext80 a) { return (float)ext_to_double(a); }
 static ext80 z2x_sgl(float f) { return ext_from_float(f); }
 
-/*  $36332 -- the shape all four float blocks in the emigration loop
- *  share: truncate cc * b / a, with every operand rounded to single
- *  precision on the way in and the quotient rounded to single again
- *  before it is truncated.  Doing this in plain integers gives a
- *  different answer on about one bracket in twenty. */
+/*  $36332: the shape all four float blocks in the emigration loop share:
+ *  truncate cc * b / a, with every operand rounded to single precision
+ *  on the way in and the quotient rounded to single again before it is
+ *  truncated.  Doing this in plain integers gives a different answer on
+ *  about one bracket in twenty. */
 static int32_t emig_share(float a, float b, float cc)
 {
     ext80 q = ext_div(ext_mul(z2x_sgl(cc), z2x_sgl(b)), z2x_sgl(a));
@@ -33,21 +33,21 @@ static int32_t emig_share(float a, float b, float cc)
 
 /*  The original builds its float operands out of a 64-bit comp whose
  *  high half it clears and whose low half it fills with a long.  A
- *  negative long therefore arrives as a large POSITIVE number -- and
- *  the two weighted series are allowed to go negative.  Transcribed as
+ *  negative long therefore arrives as a large POSITIVE number: and the
+ *  two weighted series are allowed to go negative.  Transcribed as
  *  written, not as intended. */
 static float comp_sgl(int32_t v) { return (float)(uint32_t)v; }
 
 void sim_economy(City *c)
 {
-    /*  $34D0C -- the one constant the routine embeds, 1200.0: twelve
+    /*  $34D0C: the one constant the routine embeds, 1200.0: twelve
      *  months times a hundred, because the national growth rate is a
      *  percentage per year. */
     const ext80 twelve_hundred = ext_from_i32(1200);
 
-    /*  $34D1C..$34D9A -- how much the national indicator moves this
-     *  month.  Every step is taken back to single precision, which is
-     *  why this is not simply nat * rate / 1200. */
+    /*  $34D1C..$34D9A: how much the national indicator moves this month.
+     *  Every step is taken back to single precision.  This is why this
+     *  is not simply nat * rate / 1200. */
     float rate  = x2z_sgl(z2x_i16((int16_t)c->misc[MISC_NAT_CYCLE])); /* $1EB0 */
     float nat   = x2z_sgl(z2x_i32(c->misc[MISC_NAT_INDEX]));          /* $1EB2 */
     ext80 step  = z2x_sgl(nat);
@@ -55,8 +55,8 @@ void sim_economy(City *c)
     step        = ext_div(step, twelve_hundred);
     float delta = x2z_sgl(step);
 
-    /*  $34DA2 -- past five million the indicator falls instead of
-     *  rising, which is what stops a runaway. */
+    /*  $34DA2: past five million the indicator falls instead of rising,
+     *  which is what stops a runaway. */
     {
         ext80 v = z2x_i32(c->misc[MISC_NAT_INDEX]);
         if (c->misc[MISC_NAT_INDEX] > 0x4C4B40)
@@ -66,7 +66,7 @@ void sim_economy(City *c)
         c->misc[MISC_NAT_INDEX] = ext_to_i32(v); /* $34E0C truncates */
     }
 
-    /*  $34E22..$34F3A -- the same shape again for the second indicator,
+    /*  $34E22..$34F3A: the same shape again for the second indicator,
      *  except that its rate is looked up in a table by the national
      *  cycle rather than being the cycle itself, and it turns over at
      *  three and a half million instead of five. */
@@ -90,9 +90,9 @@ void sim_economy(City *c)
         c->misc[MISC_NAT_INDEX2] = ext_to_i32(v);
     }
 
-    /*  $34F42..$350EA -- one month in ten the nation takes stock.  The
+    /*  $34F42..$350EA: one month in ten the nation takes stock.  The
      *  number everything turns on is the second indicator as a
-     *  percentage of the first; below 45 the nation is in a slump and
+     *  percentage of the first.  Below 45 the nation is in a slump and
      *  above 75 it is booming, with two bands in between. */
     if ((uint16_t)Random() % 10 == 0) /* $34F4C */
     {
@@ -139,15 +139,15 @@ void sim_economy(City *c)
      *  are not reconstructed yet.  By the time control reaches this
      *  loop the C is a few draws out of phase with the original, so the
      *  jittered rate differs and the four indicators land a little
-     *  apart.  The transcription below is faithful; it simply cannot be
+     *  apart.  The transcription below is faithful.  It simply cannot be
      *  checked until the routine is complete in order.  That is why the
      *  national indicators above, which run before any draw, are exact
      *  on all eighteen cities and these are not.
      *
-     *  $350F0..$35460 -- four more indicators in the block at A5+0x1ECE,
+     *  $350F0..$35460: four more indicators in the block at A5+0x1ECE,
      *  each grown the same way but at a rate jittered by the dice:
      *  (Random() % 3) added to the national cycle.  An indicator whose
-     *  step rounds to nothing still creeps up half the time, which is
+     *  step rounds to nothing still creeps up half the time.  This is
      *  what stops a small one from being stuck at its value for ever. */
     {
         int i;
@@ -179,10 +179,11 @@ void sim_economy(City *c)
             if (jstep == 0)
                 *slot += (Random() & 1); /* $35200 */
 
-            /*  $3521C -- then the partner series at A5+0x1ECA moves too, at
-             *  a rate set by how the two stand against each other.  The
-             *  same 45/60/75 bands as the national cycle, so a series that
-             *  has fallen behind its partner is pushed harder. */
+            /*  $3521C: then the partner series at A5+0x1ECA moves too,
+             *  at a rate set by how the two stand against each other.
+             *  The same 45/60/75 bands as the national cycle.  So a
+             *  series that has fallen behind its partner is pushed
+             *  harder. */
             {
                 int32_t *mate = &c->misc[MISC_IND4_B + 4 * i];
                 int32_t  m    = *mate;
@@ -199,18 +200,18 @@ void sim_economy(City *c)
                                      : band < 0x4B   ? 2
                                                      : 3;
 
-                /*  $352FC -- the nation's rate for this cycle, less how
+                /*  $352FC: the nation's rate for this cycle, less how
                  *  excitable it is, less the band, plus a die. */
                 rate2 = (int32_t)((uint16_t)Random() % 5) + (NAT_RATE_TABLE[(int16_t)c->misc[MISC_NAT_CYCLE] & 0x0F] - (int16_t)c->misc[MISC_NAT_MOOD]) - band;
 
                 acc2 = z2x_sgl(x2z_sgl(z2x_i32(rate2)));            /* $3533C */
                 acc2 = ext_mul(acc2, z2x_sgl(x2z_sgl(z2x_i32(m)))); /* $353AC */
                 acc2 = ext_div(acc2, twelve_hundred);               /* $353BA */
-                /*  $353C8 -- and here, unlike the first half, the step
-                 *  is NOT truncated before it is applied: it stays a
-                 *  single and the truncation happens once, after the
-                 *  addition.  Rounding it early costs one unit on the
-                 *  slower-moving series. */
+                /*  $353C8: and here, unlike the first half, the step is
+                 *  NOT truncated before it is applied: it stays a single
+                 *  and the truncation happens once, after the addition.
+                 *  Rounding it early costs one unit on the slower-moving
+                 *  series. */
                 fstep2 = x2z_sgl(acc2);
 
                 if (m > 0x3567E0)
@@ -221,13 +222,13 @@ void sim_economy(City *c)
         }
     }
 
-    /*  $35464 -- once in sixty-four months one of the four indicators is
+    /*  $35464: once in sixty-four months one of the four indicators is
      *  knocked back: itself to three quarters and its partner to a half.
-     *  The first die is drawn every month whatever happens and the second
-     *  only when it comes up zero, so leaving this out draws one fewer
-     *  number a month and every later roll is somebody else's.  Both
-     *  multipliers are doubles, not singles: $354AE and $354FC pass format
-     *  0x0800 rather than 0x1000. */
+     *  The first die is drawn every month whatever happens and the
+     *  second only when it comes up zero.  So leaving this out draws one
+     *  fewer number a month and every later roll is somebody else's.
+     *  Both multipliers are doubles, not singles: $354AE and $354FC pass
+     *  format 0x0800 rather than 0x1000. */
     if ((Random() & 0x3F) == 0)
     {
         const int i    = (int)(Random() & 3); /* $35474 */
@@ -240,10 +241,10 @@ void sim_economy(City *c)
             ext_mul(z2x_i32(*mate), ext_from_double(0.5))); /* $354FC */
     }
 
-    /*  $3551E -- how much of each of eleven industries the nation wants
+    /*  $3551E: how much of each of eleven industries the nation wants
      *  this month.  The mix is tabulated for five technology eras fifty
      *  years apart, and the pass interpolates linearly between the era
-     *  the city is in and the next one by how far through it is; past
+     *  the city is in and the next one by how far through it is.  Past
      *  the last era the final row is used unchanged. */
     {
         int era  = (int)((c->year_founded - 1900) / 50 + c->years / 50); /* $3551E */
@@ -264,10 +265,10 @@ void sim_economy(City *c)
         }
     }
 
-    /*  $35608 -- what the nation actually buys from each of the eleven
+    /*  $35608: what the nation actually buys from each of the eleven
      *  industries.  Each industry's level is pulled a quarter of the way
-     *  toward the era mix every month, and the pull is jittered by four
-     *  128-sided dice summed together -- a crude bell curve centred on
+     *  toward the era mix every month.  The pull is jittered by four
+     *  128-sided dice summed together: a crude bell curve centered on
      *  254, so mix * r / 256 is the mix itself give or take.  The
      *  quarter-weighting is what makes an industry take a few years to
      *  respond to a change of era rather than snapping to it. */
@@ -282,7 +283,7 @@ void sim_economy(City *c)
             int32_t  r   = (int32_t)game_rand127() + game_rand127() + game_rand127() + game_rand127(); /* $35626.. */
             acc += (c->industry_mix[k] * r) / 256;                                                     /* $3565E, $35666 */
             *lvl = (int16_t)(acc / 4);                                                                 /* $35674, $3568C */
-            /*  $356A4 -- the working copy is taken unconditionally... */
+            /*  $356A4: the working copy is taken unconditionally... */
             c->industry_scaled[k] = *lvl;
 
             /*  ...and under one ordinance four of them are knocked back a
@@ -290,7 +291,7 @@ void sim_economy(City *c)
              *  four.  The original unrolls the multiply and the four frame
              *  slots it names are -$2c, -$28, -$24 and -$18 ($356C6,
              *  $35710, $3575A, $357A4).  The array starts at -$2c with a
-             *  stride of four, so those are industries 0, 1, 2 and **5** --
+             *  stride of four, so those are industries 0, 1, 2 and **5**.
              *  the fourth is index five, not index three.  Reading it as
              *  "the first four" knocks back an industry that should be left
              *  alone and spares one that should not be, which is a
@@ -305,11 +306,11 @@ void sim_economy(City *c)
                         z2x_i32(c->industry_scaled[HIT[j]]), nine_tenths));
             }
 
-            /*  $357DE -- then the mix is tilted by how the population is
-             *  doing.  A city that is growing wants more of industry 4, and
-             *  the second age average moves six industries in bands.  These
-             *  compound: they are inside the per-industry loop and so run
-             *  eleven times. */
+            /*  $357DE: then the mix is tilted by how the population is
+             *  doing.  A city that is growing wants more of industry 4.
+             *  The second age average moves six industries in bands.
+             *  These compound.  They are inside the per-industry loop
+             *  and so run eleven times. */
             {
                 int32_t q = c->misc[MISC_AGE_W90];
                 int     j;
@@ -339,8 +340,9 @@ void sim_economy(City *c)
                 }
             }
 
-            /*  $35B44 -- what is left once what the nation already has is
-             *  taken off is the UNMET demand; a surplus counts for nothing. */
+            /*  $35B44: what is left once what the nation already has is
+             *  taken off is the UNMET demand.  A surplus counts for
+             *  nothing. */
             c->industry_scaled[k] -= (int16_t)c->misc[MISC_IND_SUPPLIED + 3 * k];
             if (c->industry_scaled[k] > 0)
                 unmet += c->industry_scaled[k];
@@ -348,12 +350,12 @@ void sim_economy(City *c)
                 c->industry_scaled[k] = 0;
         }
 
-        /*  $35B7C -- the labour market clears.  Every industry carries a
-         *  workforce; the total is compared against the jobs available
+        /*  $35B7C: the labor market clears.  Every industry carries a
+         *  workforce.  The total is compared against the jobs available
          *  and the difference shared out in proportion.  The fractional
-         *  part of each share is not rounded -- it is settled with a
-         *  die, so an industry owed 3.4 layoffs loses three, and a
-         *  fourth two times in five. */
+         *  part of each share is not rounded.  It is settled with a die,
+         *  so an industry owed 3.4 layoffs loses three, and a fourth two
+         *  times in five. */
         for (k = 0; k < 11; k++)
             workers_total += c->misc[MISC_IND_WORKERS + 3 * k];
 
@@ -389,14 +391,14 @@ void sim_economy(City *c)
     }
 
     /*  ---------------------------------------------------------------
-     *  $35CAE -- the two industry indices.  Neither is used by anything
+     *  $35CAE: the two industry indices.  Neither is used by anything
      *  in this file: they are read out in phase 2, where the pollution
      *  blur divides by 4 - MISC[1037] + the water-treatment flag.  A
      *  city whose industry is mostly clean gets -1 there, which is one
      *  MORE unit of division and so visibly less pollution, and a city
      *  running on the dirty six gets 0, 1 or 2, which is less division
      *  and more.  Missing this block does not move a single die, which
-     *  is exactly why it went unnoticed for so long -- the whole of the
+     *  is exactly why it went unnoticed for so long: the whole of the
      *  clock's dice matched while 1898's pollution ran ten per cent
      *  high.
      *
@@ -410,7 +412,7 @@ void sim_economy(City *c)
         uint32_t share;
         uint32_t worst = 0;
 
-        /*  $35CB4 -- industries 0, 1, 2 and 5 are the dirty ones. */
+        /*  $35CB4: industries 0, 1, 2 and 5 are the dirty ones. */
         share         = (uint32_t)(100 * (c->misc[MISC_IND_WORKERS + 3 * 0] +
                                           c->misc[MISC_IND_WORKERS + 3 * 1] +
                                           c->misc[MISC_IND_WORKERS + 3 * 2] +
@@ -418,8 +420,8 @@ void sim_economy(City *c)
                         base;
         c->misc[1037] = share < 20 ? -1 : ((int32_t)share - 20) / 30; /* $35CE4 */
 
-        /*  $35CFC -- and how concentrated the biggest single industry
-         *  is, on a five-point scale.  Only the newspaper reads it. */
+        /*  $35CFC: and how concentrated the biggest single industry is,
+         *  on a five-point scale.  Only the newspaper reads it. */
         for (k = 0; k < 11; k++)
         {
             uint32_t v =
@@ -429,8 +431,8 @@ void sim_economy(City *c)
         }
         c->misc[1036] = worst < 20 ? 0 : ((int32_t)worst - 20) / 5; /* $35D42 */
 
-        /*  $35D58 -- a city with nobody left in it stops here, and the
-         *  age pyramid is wiped rather than aged. */
+        /*  $35D58: a city with nobody left in it stops here, and the age
+         *  pyramid is wiped rather than aged. */
         if (c->population == 0)
         {
             int b;
@@ -445,18 +447,18 @@ void sim_economy(City *c)
     }
 
     /*  ---------------------------------------------------------------
-     *  $35DFA..$362F4 -- the age pyramid: mortality, ageing, births and
+     *  $35DFA..$362F4: the age pyramid: mortality, ageing, births and
      *  the migration that reconciles the pyramid with the population.
      *
      *  Three parallel twenty-entry arrays describe the city's people.
-     *  blk1EDE is a head count per five-year bracket; blk1EE2 and
+     *  blk1EDE is a head count per five-year bracket.  Blk1EE2 and
      *  blk1EE6 are sums over those same heads of two per-person
      *  quantities.  What those two quantities ARE is settled by how the
      *  code below uses them:
      *
      *    blk1EE6 is a LIFE EXPECTANCY in years.  $35EB4 divides it by
      *    the head count to get a per-person average and $35ED4 compares
-     *    that against the bracket's age -- bracket b is age b*5 -- and
+     *    that against the bracket's age.  Bracket b is age b*5.  And
      *    people start dying once the average falls below their age.
      *
      *    blk1EE2 is an EDUCATION QUOTIENT.  $3607A adds 35 per child who
@@ -465,7 +467,7 @@ void sim_economy(City *c)
      *
      *  Note what popIncrease/popDecrease turn out to mean: the pyramid
      *  does NOT set the city's population, it is slaved to it.  Deaths
-     *  open vacancies that $36204 fills with immigrants; surplus births
+     *  open vacancies that $36204 fills with immigrants.  Surplus births
      *  are pushed back out at $36314.  Population itself comes from the
      *  buildings on the map.  --------------------------------------- */
 #define HEADS(i) (c->misc[MISC_HIST_BASE + 3 * (i)])
@@ -473,19 +475,19 @@ void sim_economy(City *c)
 #define LIFE(i)  (c->misc[MISC_HIST_BASE + 3 * (i) + 2])
     {
         int      b;
-        uint32_t poll_per_head; /* a2 -- survives into the birth block  */
+        uint32_t poll_per_head; /* a2: survives into the birth block  */
         int32_t  hosp_cap;      /* -$60(a6) beds, in people             */
         int32_t  life_base;     /* -$64(a6) years a covered baby gets   */
-        int32_t  school_cap;    /* a3 -- desks, in people               */
-        int32_t  college_cap;   /* a4 -- places, in people              */
+        int32_t  school_cap;    /* a3: desks, in people               */
+        int32_t  college_cap;   /* a4: places, in people              */
 
-        /*  $35DFA -- hospital capacity.  census[0xD1] counts hospital
-         *  tiles, nine tiles to a building, and each building takes 25
+        /*  $35DFA: hospital capacity.  census[0xD1] counts hospital
+         *  tiles, nine tiles to a building.  Each building takes 25
          *  people scaled by what the health department is funded at. */
         hosp_cap = (int32_t)(c->census[0xD1] / 9) * 25;           /* $35E0E */
         hosp_cap = hosp_cap * c->dept[DEPT_HEALTH].funding / 100; /* $35E28 */
 
-        /*  $35E32 -- 85 years before any policy, then three health
+        /*  $35E32: 85 years before any policy, then three health
          *  ordinances worth five years each.  A fourth ordinance buys
          *  extra capacity out of the residential tax take instead. */
         life_base = 85;
@@ -521,7 +523,7 @@ void sim_economy(City *c)
             dead  = (int32_t)share / 100;                 /* $35EFE */
             rem   = (int32_t)share - dead * 100;          /* $35F12 */
             /*  the leftover hundredth of a person is settled by a die,
-             *  the same trick the labour market uses */
+             *  the same trick the labor market uses */
             if ((int32_t)((uint16_t)Random() % 100) < rem)
                 dead++; /* $35F32 */
             if ((uint32_t)dead > pool)
@@ -545,17 +547,17 @@ void sim_economy(City *c)
             c->pop_increase += dead; /* a vacancy to be filled */ /* $35FAC */
         }
 
-        /*  --- $35FBA: pollution per head, capped at three ----------
-         *  This is subtracted from the life expectancy that moves with
-         *  a cohort every time it ages up a bracket.  Pollution never
-         *  kills anyone directly; it shortens the lives of everyone who
-         *  ages through it, permanently. */
+        /*  --- $35FBA: pollution per head, capped at three ---------- It
+         *  comes off the life expectancy.  That moves with a cohort
+         *  every time it ages up a bracket.  Pollution never kills
+         *  anyone directly.  It shortens the lives of everyone who ages
+         *  through it, permanently. */
         poll_per_head = (uint32_t)c->pollution_tot /
                         (uint32_t)(c->population + 1 + c->accum8[7] * 10); /* $35FD6 */
         if ((int32_t)poll_per_head > 3)
             poll_per_head = 3; /* $35FE0 */
 
-        /*  $35D92 -- school and college capacity, in people.  These cap
+        /*  $35D92: school and college capacity, in people.  These cap
          *  how much of a cohort's education improves as it ages up. */
         school_cap  = (int32_t)(c->census[0xD6] / 9) * 15;               /* $35DA4 */
         school_cap  = school_cap * c->dept[DEPT_SCHOOL].funding / 100;   /* $35DC0 */
@@ -590,7 +592,7 @@ void sim_economy(City *c)
                 EDUQ(b - 1) = (int32_t)(eq - moved); /* $3606A */
 
                 /*  schooling.  The heads that fit in a school get 35
-                 *  points each added as they age up; the rest get
+                 *  points each added as they age up.  The rest get
                  *  nothing and carry the gap for life. */
                 if (b < 3) /* $3606E */
                 {
@@ -624,16 +626,16 @@ void sim_economy(City *c)
         }
 
         /*  --- $3612A: births ---------------------------------------
-         *  Brackets 4 through 8 -- ages 20 to 40 -- have children, one
+         *  Brackets 4 through 8, ages 20 to 40, have children, one
          *  per three hundred of them per month.  A baby the hospitals
-         *  can take gets the full life expectancy; a baby they cannot
+         *  can take gets the full life expectancy.  A baby they cannot
          *  gets 35 years.  Every baby starts at a fifth of the city's
          *  average education. */
         {
             int32_t fertile = HEADS(4) + HEADS(5) + HEADS(6) + HEADS(7) + HEADS(8);
             int32_t born    = fertile / 300; /* $3614E */
             /*  NOTE: the original subtracts poll_per_head * 300 here,
-             *  not born * 300 -- a2 is still holding the pollution term
+             *  not born * 300: a2 is still holding the pollution term
              *  from $35FE6.  The intent was plainly the remainder, and
              *  the effect is that the die at $3617E almost always fires
              *  and births round up.  Transcribed as written. */
@@ -661,7 +663,7 @@ void sim_economy(City *c)
          *  batches of a sixteenth of the shortfall, and keep going
          *  round until the shortfall is used up.  They arrive with a
          *  life expectancy of 65 minus their bracket and an education
-         *  of 90 minus it -- worse than a well-schooled native. */
+         *  of 90 minus it: worse than a well-schooled native. */
         if ((uint32_t)c->pop_increase > (uint32_t)c->pop_decrease) /* $361EC */
         {
             int32_t batch;
@@ -701,7 +703,7 @@ void sim_economy(City *c)
         /*  --- $36314: emigration ----------------------------------
          *  And if more were born than died, the surplus leaves.  Each
          *  bracket gives up its proportional share of the surplus,
-         *  computed in single-precision float; a bracket whose share
+         *  computed in single-precision float.  A bracket whose share
          *  rounds to nobody still loses one person one time in four,
          *  which is what stops small cities from never shedding anyone.
          *  The sweep repeats until the surplus is gone. */
@@ -745,18 +747,18 @@ void sim_economy(City *c)
         }
     }
 
-    /*  $3661A..$36694 -- the tail.  Three twenty-entry series
-     *  live interleaved in MISC[31..90]; brackets 4 through 10 -- the
-     *  working-age ones -- are summed, and the first sum then normalises the other two and
-     *  itself against the population.  Everything here is UNSIGNED
-     *  division, which matters: the series can go negative and the
-     *  original does not care. */
+    /*  $3661A..$36694: the tail.  Three twenty-entry series live
+     *  interleaved in MISC[31..90].  Brackets 4 through 10: the
+     *  working-age ones: are summed, and the first sum then normalises
+     *  the other two and itself against the population.  Everything here
+     *  is UNSIGNED division, which matters: the series can go negative
+     *  and the original does not care. */
     {
         int i;
 
-        /*  $3660A -- the three accumulators are cleared here every month
+        /*  $3660A: the three accumulators are cleared here every month
          *  before anything is summed into them.  They are running totals
-         *  over the brackets, not carried state; missing this clear is
+         *  over the brackets, not carried state.  Missing this clear is
          *  what made the tail wrong on ten of eighteen cities. */
         c->misc[MISC_AGE_W90]  = 0;
         c->misc[MISC_AGE_W65]  = 0;

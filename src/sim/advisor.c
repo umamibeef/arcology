@@ -1,14 +1,14 @@
-/*  advisor.c -- the board of advisors.  The lines are from Bob "BobServo"
+/*  advisor.c: the board of advisors.  The lines are from Bob "BobServo"
  *  Mackey's "The SimCity Board of Advisors" (Something Awful, 16 August
- *  2007).  They are quoted here as a joke layer over the reconstruction;
- *  they are his, not ours.  What IS ours is where each one fires.  Every
- *  trigger below is a point the original itself decides it has something to
- *  say -- the story ladder at $30E30, the disaster trigger at $310B0, the
- *  ordinance that passes itself at $2670A -- so the fire marshal turns up
- *  when something is actually alight and the transport man when the traffic
- *  has actually stopped.  Six of the thirty are left out: the four "Rape
- *  Street" ones, the Emancipation Proclamation one and the AIDS one.  Each
- *  is a single row if you want them back. */
+ *  2007).  They are quoted here as a joke layer over the reconstruction.
+ *  They are his, not ours.  What IS ours is where each one fires.  Every
+ *  trigger below is a point the original itself decides it has something
+ *  to say.  They are the story ladder at $30E30, the disaster trigger at
+ *  $310B0, the ordinance that passes itself at $2670A, so the fire
+ *  marshal turns up when something is actually alight and the transport
+ *  man when the traffic has actually stopped.  Six of the thirty are
+ *  left out: the four "Rape Street" ones, the Emancipation Proclamation
+ *  one and the AIDS one.  Each is a single row if you want them back. */
 #include "advisor.h"
 #include <string.h>
 
@@ -96,8 +96,8 @@ static const Line JOKE[] = {
 
 #define N_JOKE ((int)(sizeof JOKE / sizeof JOKE[0]))
 
-/*  The plain set.  Same triggers, no jokes -- what you want if the
- *  board is meant to be useful rather than funny. */
+/*  The plain set.  Same triggers, no jokes: what you want if the board
+ *  is meant to be useful rather than funny. */
 static const Line PLAIN[] = {
     {"Utilities",      ADV_STORY,     0,   "The grid is running past what it can make.  Something will go dark."},
     {"City Planning",  ADV_STORY,     1,   "Nobody is moving in.  Nobody at all."                               },
@@ -124,13 +124,13 @@ static int advisor_which = ADVISOR_JOKE;
 void advisor_set(int which) { advisor_which = which; }
 int  advisor_get_set(void) { return advisor_which; }
 
-/*  $30E30's ladder: which problem the city would lead with, or -1.
- *  The population gates are the original's, so a village is never told
- *  about things a village cannot have. */
+/*  $30E30's ladder: which problem the city would lead with.  -1.  The
+ *  population gates are the original's, so a village is never told about
+ *  things a village cannot have. */
 int advisor_topic(const City *c)
 {
     /*  $30E72 compares 98 against the meter and branches PAST the story
-     *  while 98 >= it, so the story is for a grid running over 98 per
+     *  while 98 >= it.  So the story is for a grid running over 98 per
      *  cent of what it can make. */
     if (c->power_pct > 0x62)
         return 0; /* $30E78 */

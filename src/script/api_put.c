@@ -1,8 +1,8 @@
-/*  api_put.c -- `arc.put`: the primitives a script builds a prop from.
+/*  api_put.c: `arc.put`: the primitives a script builds a prop from.
  *
- *  The same ones the C builds its own from, so a script's signal and the
- *  one it replaces are made of the same faces and go through the same
- *  emitter, the shape layer and the checks included.
+ *  They are the same ones the C builds its own from.  So a script's
+ *  signal and the one it replaces are made of the same faces.  They go
+ *  through the same emitter, the shape layer and the checks included.
  *
  *      arc.put.box(x, y, w, d, z0, z1, mat, phase)
  *          A box on the ground at (x, y), `w` by `d` across and from z0
@@ -25,7 +25,7 @@
  *          One cross-section of a ribbon to the next, cut on the tile
  *          folds.  `za`/`zb` are the two ends' heights, or -1 each for a
  *          band that lies on the drawn surface at every corner it is cut
- *          into.  This is the road surface itself.
+ *          into.  This is the line surface itself.
  *      arc.put.fan(cx, cy, t0, t1, r0, r1, across, mat, n, lift, slot)
  *          A fan of `n` wedges about (cx, cy), from angle t0 to t1 and
  *          radius r0 to r1: a junction's turn.
@@ -46,23 +46,25 @@
  *      arc.put.lamp(x, y, z, fx, fy, size, code, phase)
  *          One lamp face at (x, y), `z` over the ground, facing
  *          (fx, fy).  `code` picks the aspect the material draws.
- *      arc.mat.prop, arc.mat.lamp, arc.mat.road ...
+ *      arc.mat.prop, arc.mat.lamp, arc.mat.line ...
  *          The materials, by name.
  *
  *  Outside the window in which a prop is being drawn there is no mesh to
- *  draw into, and every one of them answers false rather than reaching
- *  for a mesh that is not there. */
+ *  draw into.  Every one of them answers false rather than reaching for
+ *  a mesh that is not there. */
 #include <math.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "script.h"
 
 
 #include "internal.h"
 #include "mesh/internal.h"
-#include "net/internal.h"
-#include "geo/model.h"
+#include "pipeline.h"
+#include "mesh/model.h"
 
-/*  The mesh a prop is being drawn into, and what it is drawn with.  Set
+/*  The world a prop is being drawn into, and what it is drawn with.  Set
  *  for the length of one rule call and cleared after it. */
 static RMesh       *s_m;
 static const RCity *s_c;
@@ -71,10 +73,125 @@ static float        s_order;
 static int          s_faces;
 
 /*  A script that asks for more faces than the thing it is composing
- *  could want has run away, and the mesh is finite: it is stopped rather
+ *  could want has run away.  The mesh is finite: it is stopped rather
  *  than the build.  A strip's whole ribbon comes through here, so the
  *  cap is a strip's worth and not a prop's. */
 #define PUT_MAX 65536
+
+/*  ---- THE DRAW QUEUE -----------------------------------------------------
+ *
+ *  A SCRIPT NEVER WRITES INTO A LIVE MESH.  `arc.put` RECORDS what it
+ *  was asked for.  Which primitive, its numbers, and the order it is
+ *  drawn at.  And the pipeline lays the record when the window closes.
+ *
+ *  This is the shape the rest of the pipeline already has.  A path is
+ *  cut by queueing the chain and reading the pieces back once the drive
+ *  has been round (the cut queue, mesh/fit.c).  The outline view's
+ *  hairlines are gathered with the shape each belongs to and laid at the
+ *  end (net_wires).  Every stage a family names is settled before
+ *  anything is built.  In each of them a script says WHAT it wants and
+ *  the pipeline decides WHEN it happens.
+ *
+ *  What that buys is not tidiness.  A stage that only describes needs no
+ *  mesh in its hand.  So no stage has to be refused a rule for want of
+ *  one: which is the whole reason a family still lends a primitive. */
+enum
+{
+    PUT_BOX = 1,
+    PUT_WIRE,
+    PUT_MODEL,
+    PUT_BAR,
+    PUT_QUAD,
+    PUT_TRI,
+    PUT_FAN,
+    PUT_PRISM,
+    PUT_CYL,
+    PUT_LAMP
+};
+
+#define PUT_ARGS 16
+
+typedef struct
+{
+    uint8_t kind;
+    int     n;     /* a fan's wedges.  A model's index and whether it is lit */
+    int     on;
+    float   order; /* the window's own, plus the call's slot */
+    float   a[PUT_ARGS];
+} PutRec;
+
+static PutRec *s_put;
+static int     s_n_put, s_put_cap;
+
+/*  One record kept.  Answers whether there was room: a queue that cannot
+ *  grow is a prop the script asked for and the world will not have.
+ *  This is what the caller is told. */
+static int put_add(int kind, float order, const float *a, int na, int n, int on)
+{
+    PutRec *r;
+    if (s_n_put >= s_put_cap)
+    {
+        int   cap = s_put_cap ? s_put_cap * 2 : 4096;
+        void *q   = realloc(s_put, (size_t)cap * sizeof *s_put);
+        if (!q)
+            return 0;
+        s_put = q, s_put_cap = cap;
+    }
+    r        = &s_put[s_n_put++];
+    r->kind  = (uint8_t)kind;
+    r->order = order;
+    r->n     = n;
+    r->on    = on;
+    memset(r->a, 0, sizeof r->a);
+    if (na > PUT_ARGS)
+        na = PUT_ARGS;
+    memcpy(r->a, a, (size_t)na * sizeof *a);
+    return 1;
+}
+
+/*  And the queue laid into the mesh, in the order it was asked for. */
+static void put_flush(void)
+{
+    int i;
+    for (i = 0; i < s_n_put && s_m; ++i)
+    {
+        const PutRec *r = &s_put[i];
+        const float  *a = r->a;
+        switch (r->kind)
+        {
+        case PUT_BOX: put_box(s_m, s_c, s_mask, r->order, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7]); break;
+        case PUT_WIRE: put_wire(s_m, s_c, s_mask, r->order, a[0], a[1], a[2], a[3], a[4], a[5], a[6]); break;
+        case PUT_MODEL:
+            net_model_put_on(r->n, s_m, s_c, s_mask, r->order, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[7], r->on);
+            break;
+        case PUT_BAR:
+            put_bar(s_m, s_c, s_mask, r->order, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8], a[9], a[10], a[11], a[12]);
+            break;
+        case PUT_QUAD:
+        {
+            float a0[2] = {a[0], a[1]}, a1[2] = {a[2], a[3]}, b0[2] = {a[4], a[5]}, b1[2] = {a[6], a[7]};
+            strip_quad_z(s_m, s_c, s_mask, r->order, a0, a1, b0, b1, a[8], a[9], a[10], a[11], a[12], a[13], a[14]);
+            break;
+        }
+        case PUT_TRI:
+        {
+            float t[3][3] = {{a[0], a[1], a[2]}, {a[3], a[4], a[5]}, {a[6], a[7], a[8]}};
+            float col[3]  = {a[9], a[10], a[11]};
+            float ref[3]  = {a[9], a[9], a[9]}, ref2[3] = {a[10], a[10], a[10]};
+            put_tri_ground(s_m, s_c, s_mask, r->order, (const float (*)[3])t, NULL, col, ref, ref2);
+            break;
+        }
+        case PUT_FAN: strip_fan_z(s_m, s_c, s_mask, r->order, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], r->n, a[8]); break;
+        case PUT_PRISM:
+            put_prism_clip_m(s_m, s_c, s_mask, r->order, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8], a[9], a[10], a[11]);
+            break;
+        case PUT_CYL: put_cyl(s_m, s_c, s_mask, r->order, a[0], a[1], a[2], a[3], a[4], a[5]); break;
+        case PUT_LAMP: put_lamp_face(s_m, r->order, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8], a[9] > 0.5f); break;
+        default: break;
+        }
+    }
+    s_n_put = 0;
+}
 
 void script_emit_open(void *mesh, const void *city, uint8_t mask_bit, float order)
 {
@@ -83,10 +200,14 @@ void script_emit_open(void *mesh, const void *city, uint8_t mask_bit, float orde
     s_mask  = mask_bit;
     s_order = order;
     s_faces = 0;
+    /*  The queue is NOT cleared here.  It is emptied by the flush at
+     *  close, and clearing it on open would throw away whatever an
+     *  outer window had already recorded. */
 }
 
 void script_emit_close(void)
 {
+    put_flush();
     s_m = NULL;
     s_c = NULL;
 }
@@ -103,7 +224,10 @@ static int l_box(lua_State *L)
         lua_pushboolean(L, 0);
         return 1;
     }
-    lua_pushboolean(L, put_box(s_m, s_c, s_mask, s_order, x, y, w, d, z0, z1, mat, ph) == 0);
+    {
+        float q[8] = {x, y, w, d, z0, z1, mat, ph};
+        lua_pushboolean(L, put_add(PUT_BOX, s_order, q, 8, 0, 0));
+    }
     return 1;
 }
 
@@ -120,12 +244,15 @@ static int l_wire(lua_State *L)
         lua_pushboolean(L, 0);
         return 1;
     }
-    lua_pushboolean(L, put_wire(s_m, s_c, s_mask, s_order, x0, y0, z0, x1, y1, z1, sag) == 0);
+    {
+        float q[7] = {x0, y0, z0, x1, y1, z1, sag};
+        lua_pushboolean(L, put_add(PUT_WIRE, s_order, q, 7, 0, 0));
+    }
     return 1;
 }
 
-/*  One model, by name, at a place of its own: a script builds a prop
- *  out of the ones already stored as easily as out of boxes. */
+/*  One model, by name, at a place of its own.  A script builds a prop
+ *  out of the ones already stored, as easily as out of boxes. */
 static int l_model(lua_State *L)
 {
     const char *name = luaL_checkstring(L, 1);
@@ -141,8 +268,10 @@ static int l_model(lua_State *L)
         lua_pushboolean(L, 0);
         return 1;
     }
-    lua_pushboolean(L, net_model_put_on(net_model_find(name), s_m, s_c, s_mask, s_order,
-                                        x, y, fx, fy, size, phase, group, g, g, on) == 0);
+    {
+        float q[8] = {x, y, fx, fy, size, phase, group, g};
+        lua_pushboolean(L, put_add(PUT_MODEL, s_order, q, 8, net_model_find(name), on));
+    }
     return 1;
 }
 
@@ -164,13 +293,16 @@ static int l_bar(lua_State *L)
         lua_pushboolean(L, 0);
         return 1;
     }
-    lua_pushboolean(L, put_bar(s_m, s_c, s_mask, s_order, x0, y0, z0, x1, y1, z1, fx, fy, w, d, mat, code, ph) == 0);
+    {
+        float q[13] = {x0, y0, z0, x1, y1, z1, fx, fy, w, d, mat, code, ph};
+        lua_pushboolean(L, put_add(PUT_BAR, s_order, q, 13, 0, 0));
+    }
     return 1;
 }
 
 /*  The strip's own quad: one cross-section of a ribbon to the next.
- *  The road surface, the footway's bands, a crossing's panel and a
- *  deck's deck are all this. */
+ *  The line surface, the margin's bands, a meet's panel and a
+ *  slab's slab are all this. */
 static int l_quad(lua_State *L)
 {
     float a0[2] = {(float)luaL_checknumber(L, 1), (float)luaL_checknumber(L, 2)};
@@ -180,14 +312,18 @@ static int l_quad(lua_State *L)
     float za = (float)luaL_checknumber(L, 9), zb = (float)luaL_checknumber(L, 10);
     float ac0 = (float)luaL_checknumber(L, 11), ac1 = (float)luaL_checknumber(L, 12);
     float al0 = (float)luaL_checknumber(L, 13), al1 = (float)luaL_checknumber(L, 14);
-    float mat = (float)luaL_optnumber(L, 15, (lua_Number)MAT_ROAD);
+    float mat = (float)luaL_optnumber(L, 15, (lua_Number)MAT_LINE);
     float slot = (float)luaL_optnumber(L, 16, 0.0);
     if (!s_m || ++s_faces > PUT_MAX)
     {
         lua_pushboolean(L, 0);
         return 1;
     }
-    lua_pushboolean(L, strip_quad_z(s_m, s_c, s_mask, s_order + slot, a0, a1, b0, b1, za, zb, ac0, ac1, al0, al1, mat) == 0);
+    {
+        float q[15] = {a0[0], a0[1], a1[0], a1[1], b0[0], b0[1], b1[0], b1[1],
+                       za, zb, ac0, ac1, al0, al1, mat};
+        lua_pushboolean(L, put_add(PUT_QUAD, s_order + slot, q, 15, 0, 0));
+    }
     return 1;
 }
 
@@ -195,10 +331,9 @@ static int l_quad(lua_State *L)
 static int l_tri(lua_State *L)
 {
     float t[3][3];
-    float mat = (float)luaL_optnumber(L, 10, (lua_Number)MAT_ROAD);
+    float mat = (float)luaL_optnumber(L, 10, (lua_Number)MAT_LINE);
     float al = (float)luaL_optnumber(L, 11, 0.0), ac = (float)luaL_optnumber(L, 12, 0.0);
     float slot = (float)luaL_optnumber(L, 13, 0.0);
-    float col[3], ref[3], ref2[3];
     int   i;
     for (i = 0; i < 3; ++i)
     {
@@ -211,10 +346,11 @@ static int l_tri(lua_State *L)
         lua_pushboolean(L, 0);
         return 1;
     }
-    col[0] = al, col[1] = ac, col[2] = mat;
-    ref[0] = ref[1] = ref[2] = al;
-    ref2[0] = ref2[1] = ref2[2] = ac;
-    lua_pushboolean(L, put_tri_ground(s_m, s_c, s_mask, s_order + slot, (const float (*)[3])t, NULL, col, ref, ref2) == 0);
+    {
+        float q[12] = {t[0][0], t[0][1], t[0][2], t[1][0], t[1][1], t[1][2],
+                       t[2][0], t[2][1], t[2][2], al, ac, mat};
+        lua_pushboolean(L, put_add(PUT_TRI, s_order + slot, q, 12, 0, 0));
+    }
     return 1;
 }
 
@@ -225,7 +361,7 @@ static int l_fan(lua_State *L)
     float t0 = (float)luaL_checknumber(L, 3), t1 = (float)luaL_checknumber(L, 4);
     float r0 = (float)luaL_checknumber(L, 5), r1 = (float)luaL_checknumber(L, 6);
     float ac = (float)luaL_optnumber(L, 7, 0.0);
-    float mat = (float)luaL_optnumber(L, 8, (lua_Number)MAT_ROAD);
+    float mat = (float)luaL_optnumber(L, 8, (lua_Number)MAT_LINE);
     int   n = (int)luaL_optinteger(L, 9, 8);
     float lift = (float)luaL_optnumber(L, 10, 0.0);
     float slot = (float)luaL_optnumber(L, 11, 0.0);
@@ -235,7 +371,10 @@ static int l_fan(lua_State *L)
         return 1;
     }
     s_faces += n;
-    lua_pushboolean(L, s_faces <= PUT_MAX && strip_fan_z(s_m, s_c, s_mask, s_order + slot, cx, cy, t0, t1, r0, r1, ac, mat, n, lift) == 0);
+    {
+        float q[9] = {cx, cy, t0, t1, r0, r1, ac, mat, lift};
+        lua_pushboolean(L, s_faces <= PUT_MAX && put_add(PUT_FAN, s_order + slot, q, 9, n, 0));
+    }
     return 1;
 }
 
@@ -255,7 +394,10 @@ static int l_prism(lua_State *L)
         lua_pushboolean(L, 0);
         return 1;
     }
-    lua_pushboolean(L, put_prism_clip_m(s_m, s_c, s_mask, s_order + slot, cx, cy, dx, dy, len, wid, zb, zf, z0, z1, paint, mat) == 0);
+    {
+        float q[12] = {cx, cy, dx, dy, len, wid, zb, zf, z0, z1, paint, mat};
+        lua_pushboolean(L, put_add(PUT_PRISM, s_order + slot, q, 12, 0, 0));
+    }
     return 1;
 }
 
@@ -272,7 +414,10 @@ static int l_cyl(lua_State *L)
         lua_pushboolean(L, 0);
         return 1;
     }
-    lua_pushboolean(L, put_cyl(s_m, s_c, s_mask, s_order + slot, cx, cy, r, z0, z1, mat) == 0);
+    {
+        float q[6] = {cx, cy, r, z0, z1, mat};
+        lua_pushboolean(L, put_add(PUT_CYL, s_order + slot, q, 6, 0, 0));
+    }
     return 1;
 }
 
@@ -291,16 +436,19 @@ static int l_lamp(lua_State *L)
         return 1;
     }
     g = surface_at_world(s_c, s_mask, x, y);
-    lua_pushboolean(L, put_lamp_face(s_m, s_order, x, y, g, z, fx, fy, sz, ph, cd) == 0);
+    {
+        float q[9] = {x, y, g, z, fx, fy, sz, ph, cd};
+        lua_pushboolean(L, put_add(PUT_LAMP, s_order, q, 9, 0, 0));
+    }
     return 1;
 }
 
-/*  A number as the MESH holds it.  Vertices are floats there, and a
+/*  A number as the MESH holds it.  Vertices are floats there.  A
  *  composition that works to more places than the mesh can keep lands a
- *  line a few millionths from where its neighbour thinks it is: the two
- *  then overlap by that hair instead of meeting along it.  A script that
- *  computes a shared edge narrows each step through this, and the two
- *  sides of the edge come out the same number. */
+ *  line wrongly.  It falls a few millionths from where its neighbor
+ *  thinks it is: the two then overlap by that hair instead of meeting
+ *  along it.  A script that computes a shared edge narrows each step
+ *  through this, and the two sides of the edge come out the same number. */
 static int l_f32(lua_State *L)
 {
     lua_pushnumber(L, (lua_Number)(float)luaL_checknumber(L, 1));
@@ -309,8 +457,8 @@ static int l_f32(lua_State *L)
 
 /*  The transcendentals as the MESH'S OWN arithmetic computes them.  A
  *  script works in doubles, and a sine narrowed from one is not always
- *  the float the pipeline would have reached: where a composition has to
- *  land on the same number as the C beside it, it takes these. */
+ *  the float the pipeline would have reached.  Where a composition has
+ *  to land on the same number as the C beside it, it takes these. */
 static int l_sqrtf(lua_State *L)
 {
     lua_pushnumber(L, (lua_Number)sqrtf((float)luaL_checknumber(L, 1)));
@@ -365,15 +513,15 @@ static int l_ground(lua_State *L)
  *
  *  A built-in material has a branch of its own in the shaders: water
  *  ripples, sediment is layered, a zebra is striped.  One a script
- *  declares cannot have that -- the shaders are built with the program --
- *  so it is shaded from PARAMETERS instead, which the frame hands the
- *  shader every pass.  A colour and a roughness is enough for a surface
- *  that is simply a surface, and that is most of what a new
- *  representation wants before it wants anything else. */
+ *  declares cannot have that.  The shaders are built with the program.
+ *  So it is shaded from PARAMETERS instead, which the frame hands the
+ *  shader every pass.  A color and a roughness is enough for a surface
+ *  that is simply a surface.  That is most of what a new representation
+ *  wants before it wants anything else. */
 static struct
 {
     char  name[32];
-    float rgba[4]; /* the colour, and roughness in the fourth */
+    float rgba[4]; /* the color, and roughness in the fourth */
 } s_script_mat[MAT_SCRIPT_MAX];
 static int s_n_script_mat;
 
@@ -388,9 +536,9 @@ int script_materials(const float **out)
     return s_n_script_mat;
 }
 
-/*  arc.mat.define{name = "...", colour = {r, g, b}, rough = 0..1}.
- *  Answers the number the material is known by, so a script can hold it
- *  and hand it to arc.put; declaring the same name twice answers the
+/*  arc.mat.define{name = "...", color = {r, g, b}, rough = 0..1}.
+ *  Answers the number the material is known by.  So a script can hold it
+ *  and hand it to arc.put.  Declaring the same name twice answers the
  *  same number and rewrites its parameters, which is what a reload of
  *  the scripts does. */
 static int l_mat_define(lua_State *L)
@@ -452,8 +600,8 @@ void api_put_open(lua_State *L)
     lua_pushcfunction(L, l_atan2f), lua_setfield(L, -2, "atan2");
     lua_setfield(L, -2, "put");
 
-    /*  arc.mat: every material by name, from the generated table, so the
-     *  list a script sees and the list the mesh writes are one list.
+    /*  arc.mat: every material by name, from the generated table.  So
+     *  the list a script sees and the list the mesh writes are one list.
      *  arc.mat.define adds one of the script's own. */
     lua_newtable(L);
     {

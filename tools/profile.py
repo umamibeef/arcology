@@ -6,7 +6,7 @@
 
 One panel per segment, tallest climb first: the ground under the band in
 brown, the height the band was given in yellow.  Where yellow runs above
-brown the road is on fill and carries an embankment; where it runs below,
+brown the line is on fill and carries an embankment; where it runs below,
 it is in a cut and the terrain is levelled to it behind retaining walls.
 This is how the grade smoothing is read (the user, 3 September 2026: "I
 want to see how the smoothing of grade is happening").

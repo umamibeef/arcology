@@ -1,10 +1,10 @@
---  rail_signal.lua -- a wayside colour-light signal (spec 5.6).
+--  thread_signal.lua -- a wayside colour-light signal (spec 5.6).
 --
 --  A mast with a hooded head on it, facing the train it stops.  The
 --  aspect it shows is the traffic's, drawn over this from
 --  rail_aspect_green or rail_aspect_red.
 
-arc.model.define("rail_signal", {
+arc.model.define("thread_signal", {
     p = {
         post  = 0.012,
         tall  = 0.62,

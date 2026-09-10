@@ -1,8 +1,8 @@
-/*  sim.h -- SimCity 2000 simulation, reconstructed from the 68k Macintosh
- *  binary (SimCity 2000(R) 1.2, 22 Jun 1995).  Every address in a comment
- *  like $3170E is a byte offset into the CODE 2 resource, which is where
- *  the whole game lives.  A5+0x1FC2 style comments give the original
- *  global's offset from the A5 world pointer. */
+/*  sim.h: SimCity 2000 simulation, reconstructed from the 68k Macintosh
+ *  binary (SimCity 2000(R) 1.2, 22 Jun 1995).  Every address in a
+ *  comment like $3170E is a byte offset into the CODE 2 resource, which
+ *  is where the whole game lives.  A5+0x1FC2 style comments give the
+ *  original global's offset from the A5 world pointer. */
 #ifndef ARC_SIM_H
 #define ARC_SIM_H
 
@@ -22,19 +22,19 @@
 #define QTR_H  32
 
 /* ------------------------------------------------------------------ *
- *  XBIT -- per-tile flag bits.
+ *  XBIT: per-tile flag bits.
  *
  *  Four of these are pinned by code that unambiguously reads or writes
- *  them; WATER is pinned by correlating a real city (0.998 against
- *  XTER != 0 in Manhattan).  The other three are honestly unknown --
+ *  them.  WATER is pinned by correlating a real city (0.998 against
+ *  XTER != 0 in Manhattan).  The other three are honestly unknown.
  *  see the comments.  Bit 3 is a scratch bit: both flood fills clear it
  *  before they run and set it as they visit.
  * ------------------------------------------------------------------ */
 enum
 {
-    XBIT_SALT           = 0x01, /* salt water -- $21968 vs $219EA          */
-    XBIT_UNK1           = 0x02, /* set on 0.4% of tiles; role unconfirmed    */
-    XBIT_WATER          = 0x04, /* water covered   -- 51 btst sites          */
+    XBIT_SALT           = 0x01, /* salt water: $21968 vs $219EA          */
+    XBIT_UNK1           = 0x02, /* set on 0.4% of tiles.  Role unconfirmed    */
+    XBIT_WATER          = 0x04, /* water covered, 51 btst sites          */
     XBIT_VISITED        = 0x08, /* flood-fill scratch  $20FC4 / $2156E       */
     XBIT_WATERED        = 0x10, /* supplied with water $2156E                */
     XBIT_CONDUCTS_WATER = 0x20, /* water network, tested at $21890       */
@@ -46,7 +46,7 @@ enum
  *  XZON packs two things into one byte.
  *
  *  Low nibble: the zone type.  High nibble: a corner mask for multi-tile
- *  buildings -- one bit per corner, so a building is simulated exactly
+ *  buildings: one bit per corner, so a building is simulated exactly
  *  once per pass, at whichever corner is nearest the viewer for the
  *  current rotation ($3173A picks the bit out of ROT_CORNER_MASK).
  *  Single-tile buildings carry all four bits (0xF0).
@@ -98,15 +98,15 @@ enum
     (((b) >= BLD_ZONE_FIRST && (b) < BLD_POWER_FIRST) || (b) >= 0xD0)
 
 /* ------------------------------------------------------------------ *
- *  City state.  This mirrors the game's A5 globals; the layer members
+ *  City state.  This mirrors the game's A5 globals.  The layer members
  *  are the arrays the row-pointer tables at those offsets point into.
  * ------------------------------------------------------------------ */
 #define MISC_LONGS 1200 /* the MISC chunk is 4800 bytes */
 
-/*  MISC indices.  0..13 come from the straight-line part of the builder
+/*  MISC indices. 0..13 come from the straight-line part of the builder
  *  at $2A186 and are unambiguous.  MISC_POPULATION was recovered the
- *  other way round -- by computing population from the map and finding
- *  the one slot that tracks it across all 103 shipped cities. */
+ *  other way round.  Population was computed from the map, and then the
+ *  one slot that tracks it across all 103 shipped cities. */
 enum
 {
     MISC_MAGIC      = 0, /* always 0x122            */
@@ -126,9 +126,9 @@ enum
                              *  in pump capacity)                     */
     MISC_ORDINANCES = 1000, /* A5+0x1E6E bitmask                      */
 
-    /*  The scenario block, MISC[1050..1066].  The resource fork seeds
-     *  it once at load; after that a save carries the whole thing, so
-     *  the goals can be checked without touching the resource fork. */
+    /*  The scenario block, MISC[1050..1066].  The resource fork seeds it
+     *  once at load.  After that a save carries the whole thing, so the
+     *  goals can be checked without touching the resource fork. */
     MISC_SCEN_ACTIVE  = 1050, /* A5+0x2C78 byte                         */
     MISC_SCEN_MONTHS  = 1051, /* A5+0x2C48 word, counts DOWN            */
     MISC_GOAL_POP     = 1052, /* A5+0x2C4A                              */
@@ -155,7 +155,7 @@ enum
     MISC_IND_LEVEL    = 91,   /* A5+0x1EEA, eleven industry levels, stride 3 */
     MISC_IND4_B       = 440,  /* A5+0x1ECA, its partner series, stride 4 */
     MISC_IND4_BASE    = 439,  /* A5+0x1ECE, four more indicators, stride 4 */
-    MISC_POP_INCREASE = 16,   /* A5+0x1E22 -- NOT 0x1E9A; the arrival
+    MISC_POP_INCREASE = 16,   /* A5+0x1E22, NOT 0x1E9A. the arrival
                                *  and departure counters are transient,
                                *  cleared by $33FD8, and never saved.    */
     MISC_ACCUM8       = 380,  /* A5+0x1EBA block, population per zone   */
@@ -177,7 +177,7 @@ enum
      *  $101AC is the only thing that writes it: $1114A stores what the
      *  loop accumulated.  Graph series 0 adds it to the head count
      *  ($223BE) and the three tax departments take a share of it
-     *  ($34602), so a city whose arcologies are not being counted has a
+     *  ($34602).  So a city whose arcologies are not being counted has a
      *  frozen population term and a frozen tax base. */
     MISC_ARCO_POP = 1032,
     MISC_2C98     = 1032, /* the older name, kept for the call sites */
@@ -187,7 +187,7 @@ enum
     MISC_POLICE_LOAD = 1038,
 
     /*  Two blocks rather than single slots.  The census is one word per
-     *  building id; the budget is 16 department records of 27 longs
+     *  building id.  The budget is 16 department records of 27 longs
      *  each, laid out amount, funding, accrued, then the twelve-month
      *  history of each of the first two. */
     MISC_CENSUS   = 124, /* .. 379, 256 words                      */
@@ -201,7 +201,7 @@ enum
  *  census, multiplies it by `funding` into `accrued`, and settles the
  *  year's accrual into the treasury each January.
  *
- *  Departments 0..3 are revenue and 4..15 are costs -- the sign is in
+ *  Departments 0..3 are revenue and 4..15 are costs: the sign is in
  *  DEPT_YEAR_DIVISOR rather than in the amounts.  The two the
  *  simulation reads back are police and fire, whose `funding` sets how
  *  far a station's coverage reaches ($23E0C, $23E6C).
@@ -218,7 +218,7 @@ enum
     DEPT_SCHOOL    = 8,
     DEPT_COLLEGE   = 9,
     DEPT_ROAD      = 10,
-    DEPT_HIGHWAY   = 11,
+    DEPT_BAND      = 11,
     DEPT_SUBWAY    = 12,
     DEPT_RAIL      = 13,
     DEPT_TRANSIT   = 14,
@@ -226,7 +226,7 @@ enum
 };
 
 /*  ------------------------------------------------------------------
- *  XGRP -- the graph history.
+ *  XGRP: the graph history.
  *
  *  $2D52E allocates one 3328-byte block and $2D54A hands out 0x34
  *  longs of it to each of sixteen series, storing the sixteen pointers
@@ -268,7 +268,7 @@ enum
 /* ------------------------------------------------------------------ *
  *  The seven things a citizen can complain about, in the order the
  *  poll at $3152A builds its weights.  Each weight is how much of the
- *  hundred-citizen sample that problem draws; whatever is left over
+ *  hundred-citizen sample that problem draws.  Whatever is left over
  *  after all seven is contentment, and land value alone supplies it.
  * ------------------------------------------------------------------ */
 enum
@@ -296,7 +296,7 @@ enum
 
 /* ------------------------------------------------------------------ *
  *  XMIC, the microsimulation table.  A5+0x2BC6 points at 150 records of
- *  eight bytes, one per special building on the map -- power plants,
+ *  eight bytes, one per special building on the map: power plants,
  *  the stations, the arcologies, the marina.  `$101AC` walks records 1
  *  to 149 once a year, at the January settlement, and dispatches on the
  *  type through a 58-entry table at `$1027C`.
@@ -304,7 +304,7 @@ enum
  *  The layout is read off what the arms write: byte 0 is the building
  *  id, byte 1 a per-type byte (a funding percentage on the stations, a
  *  count elsewhere), and then three big-endian words.  What the three
- *  MEAN is the type's business and nothing else's -- a power plant's
+ *  MEAN is the type's business and nothing else's: a power plant's
  *  word 0 is its age, a marina's is its boat count.
  * ------------------------------------------------------------------ */
 #define N_MICRO 150
@@ -334,11 +334,11 @@ enum
     ORD_NEIGHBOURHOOD_WATCH = 0x0800  /* $23D2E, +2 police per tile*/
 };
 
-/*  All five above came out of tools/miscmap2.py, which runs the MISC
+/*  All five above came out of tools/miscmap2.py.  This runs the MISC
  *  builder at $2A186 under a small 68k interpreter and records which A5
  *  global feeds each slot.  MISC_POPULATION was found independently by
- *  searching the shipped cities first; the emulator agreeing with that search is
- *  the reason to trust both. */
+ *  searching the shipped cities first.  The emulator agreeing with that
+ *  search is the reason to trust both. */
 
 typedef struct City
 {
@@ -376,12 +376,12 @@ typedef struct City
     int32_t traffic_tot;    /* A5+0x1E7E                        */
     int32_t pollution_tot;  /* A5+0x1E82  cleared by $2317E     */
     /*  The four map-overlay averages live in the graph history, not in
-     *  globals of their own: A5+0x2BEC, 0x2BF0, 0x2BF4 and 0x2BF8 are
-     *  entries 4 to 7 of the pointer table at A5+0x2BDC, and each
-     *  average is that series' newest sample.  Read them as
-     *  graph[GRAPH_TRAFFIC][0] and its three neighbours. */
+     *  globals of their own.  They are A5+0x2BEC, 0x2BF0, 0x2BF4 and
+     *  0x2BF8 are entries 4 to 7 of the pointer table at A5+0x2BDC.
+     *  Each average is that series' newest sample.  Read them as
+     *  graph[GRAPH_TRAFFIC][0] and its three neighbors. */
     int16_t developed;      /* A5+0x11D0  tiles that set the half-res
-                             *  developed mark at $2360E; the divisor
+                             *  developed mark at $2360E.  It is the divisor
                              *  three of the four averages use   */
     int32_t unemployment;   /* A5+0x2C82, also graph series 12   */
     int32_t power_pct;      /* A5+0x1E86  computed by $20FC4    */
@@ -398,8 +398,8 @@ typedef struct City
     int16_t weather2;      /* A5+0x1F02  MISC[26]              */
     int16_t weather_state; /* A5+0x1F03  MISC[27], 0..11     */
     /*  A5+0x2C86, MISC[912].  This is the city's WATER LEVEL: $128DE
-     *  compares a tile's altitude against it to decide land or water,
-     *  and writes it into ALTM bits 5..9 of every tile it drowns.  In
+     *  compares a tile's altitude against it to decide land or water.
+     *  Writes it into ALTM bits 5..9 of every tile it drowns.  In
      *  Charleston, Hollywood and Flint every single water tile carries
      *  exactly this value there.  It also feeds pump capacity, which is
      *  how it came to be called pump_term. */
@@ -418,20 +418,20 @@ typedef struct City
     /*  A5+0x2BDC -> a 0xD00-byte block, sixteen series of 52 longs.  This
      *  is the XGRP chunk.  See the note above the GRAPH_ names. */
     int32_t graph[N_GRAPH][GRAPH_SAMPLES];
-    /*  A5+0x2C1C -> sixteen longs (_NewPtr #$40), the vertical scale
-     *  the graph window draws each series against, kept as a running
-     *  maximum.  Series 0 to 3 share one scale and 4 to 7 share
-     *  another; series 13 borrows 14's when 14's is the larger.  Not
-     *  in the save file: it is rebuilt from the samples. */
+    /*  A5+0x2C1C -> sixteen longs (_NewPtr #$40), the vertical scale the
+     *  graph window draws each series against, kept as a running
+     *  maximum.  Series 0 to 3 share one scale and 4 to 7 share another.
+     *  Series 13 borrows 14's when 14's is the larger.  Not in the save
+     *  file: it is rebuilt from the samples. */
     int32_t graph_max[N_GRAPH];
     int16_t industry_level[11];  /* A5+0x1EEA, what it buys now */
     int32_t industry_scaled[11]; /* the pass's own working copy */
     int32_t industry_mix[11];    /* what the nation wants, $3551E */
-    /*  A5+0x1EBE -- three longs (_NewPtr #$c at $2DCA2), the residential,
+    /*  A5+0x1EBE: three longs (_NewPtr #$c at $2DCA2), the residential,
      *  commercial and industrial share of the head count.  They sum to
-     *  accum8[0], which is why graph series 0 equals the sum of series 1 to
-     *  3.  Index 2 is what the employment balance at $35B88 weighs the
-     *  workforce against.  Not saved. */
+     *  accum8[0], which is why graph series 0 equals the sum of series 1
+     *  to 3.  Index 2 is what the employment balance at $35B88 weighs
+     *  the workforce against.  Not saved. */
     int32_t rci_pop[3];
     int32_t years;           /* A5+0x1E38, cityDate / 300, $15268 */
     int16_t month;           /* A5+0x1E32  (date/25) % 12, $1523E */
@@ -452,14 +452,14 @@ typedef struct City
     int16_t flood_timer;     /* A5+0x1058  flood countdown    */
     int16_t burnt_other;     /* A5+0x2C94                     */
     int16_t burnt_road;      /* A5+0x2C96                     */
-    /*  A5+0x13AA, MISC[1024].  The player's "no disasters" switch;
+    /*  A5+0x13AA, MISC[1024].  The player's "no disasters" switch.
      *  $310A6 returns on it before anything is rolled. */
     int16_t disasters_off;
     /*  A5+0x13A0, MISC[28].  Which disaster the trigger at $3151C chose,
      *  as an index into the nineteen-way table.  The two weather-driven
      *  ones set it directly instead. */
     int16_t disaster_kind;
-    /*  A5-0x7982 and A5-0x7980, written by the scan at $23508 -- the
+    /*  A5-0x7982 and A5-0x7980, written by the scan at $23508: the
      *  listing prints the displacement as $867e, which is signed and so
      *  negative.  MISC[1030] and [1031].  The disasters that start near
      *  the middle of town read them. */
@@ -476,7 +476,7 @@ typedef struct City
 
     int16_t disaster_h;     /* A5+0x13A4  a Mac Point, h then v */
     int16_t disaster_v;     /* A5+0x13A2                     */
-    int16_t monster_count;  /* A5+0x12EA  at most one; while it
+    int16_t monster_count;  /* A5+0x12EA  at most one.  While it
                              *  is set no aeroplane will fly  */
     int16_t road_count;     /* A5+0x12EC                     */
     int16_t anim_phase;     /* A5+0x12F8  wraps past $3FF    */
@@ -520,7 +520,7 @@ typedef struct City
 size_t sc2_rle_decode(const uint8_t *in, size_t in_len, uint8_t *out, size_t out_cap);
 size_t sc2_rle_encode(const uint8_t *src, size_t size, uint8_t *dst); /* writeChunkRLE $293EC */
 /*  Scatter the raw MISC block into the named scalars.  city_load calls
- *  it, and so does the .arco reader, so a world loaded either way goes
+ *  it, and so does the .arco reader.  So a world loaded either way goes
  *  through the same code and the two cannot drift apart. */
 void city_misc_to_scalars(City *c);
 int  city_load(const char *path, City *c);
@@ -538,9 +538,9 @@ int sim_scenario_check(City *c); /* $0221A8 */
 
 /*  simTick $21EDE.  One phase of the 25-phase clock: the date advances,
  *  and the date modulo 25 selects the phase.  Returns one of the events
- *  the phase raised, or SIM_EV_NONE.  The interface work the phases do
- *  in the original -- dialogs, the newspaper, the graph windows -- is
- *  named in the code and left to the caller. */
+ *  the phase raised, or SIM_EV_NONE.  The phases do interface work in
+ *  the original.  Dialogs, the newspaper, the graph windows, is named in
+ *  the code and left to the caller. */
 enum
 {
     SIM_EV_NONE = 0,
@@ -599,10 +599,10 @@ void           sim_grow_footprint(City *c, int y, int x, int tier, int zone); /*
 void           sim_upgrade(City *c, int y, int x, int tier, int coin);        /* upgradeBuilding $33028 */
 void           sim_build_church(City *c, int y, int x);
 void           sim_rotate(City *c, int turns);
-const uint8_t *sim_rot_table(int layer);                                                                                                                                                           /* the art remap for one turn: 0 XBLD, 1 XTER, 2 XUND -- rotate.c */
-void           sim_rotate_thing(uint8_t *rec); /* one XTHG record, 12 bytes, turned a quarter in place -- rotate.c */ /* the map turned a quarter clockwise, `turns` times ($3AECA) -- rotate.c */ /* buildChurch $32830 */
-int            sim_trip(City *c, int y, int x, int zone, int tier, int budget);                                                                                                                    /* tripGenerate $245E8 */
-void           sim_growth_scan(City *c, int y0, int x0);                                                                                                                                           /* growthScan $3170E, phases 3-18 */
+const uint8_t *sim_rot_table(int layer);                                                                                                                                                       /* the art remap for one turn: 0 XBLD, 1 XTER, 2 XUND: rotate.c */
+void           sim_rotate_thing(uint8_t *rec); /* one XTHG record, 12 bytes, turned a quarter in place: rotate.c */ /* the map turned a quarter clockwise, `turns` times ($3AECA): rotate.c */ /* buildChurch $32830 */
+int            sim_trip(City *c, int y, int x, int zone, int tier, int budget);                                                                                                                /* tripGenerate $245E8 */
+void           sim_growth_scan(City *c, int y0, int x0);                                                                                                                                       /* growthScan $3170E, phases 3-18 */
 int32_t        sim_growth_unimplemented(void);
 int32_t        sim_growth_stub(int i);
 extern int     trip_mark_log;
@@ -613,9 +613,9 @@ void           sim_economy(City *c);          /* economyPass $34D04, phase 21 */
  *  map gets its turn.  budgetPass calls it from the January settlement,
  *  right after the departments are reconciled. */
 /*  $EEAE.  Give a newly placed special building its XMIC record and
- *  answer the marker XTXT carries for it (the slot plus 0x33), or 0 if
- *  the building keeps no record.  Exposed so tools/micro_alloc_check.py
- *  can drive it against the original. */
+ *  answer the marker XTXT carries for it (the slot plus 0x33).  0 if the
+ *  building keeps no record.  Exposed so tools/micro_alloc_check.py can
+ *  drive it against the original. */
 int sim_alloc_micro(City *c, int y, int x, int bld);
 
 void    sim_microsim(City *c);
@@ -630,9 +630,9 @@ uint16_t game_rand(uint16_t n); /* $20F30 LFSR, 34 call sites      */
 uint16_t lib_rand(uint16_t n);  /* $20EE6 THINK C rand()           */
 
 /*  The same shift register reduced by a mask instead of a divide.
- *  $20F4C..$20FAC are one routine repeated with a different andi.w;
- *  they all advance the shared state, so call order is part of the
- *  behaviour. */
+ *  $20F4C..$20FAC are one routine repeated with a different andi.w.
+ *  They all advance the shared state.  So call order is part of the
+ *  behavior. */
 uint16_t game_rand1(void);   /* $20F4C  & 1   */
 uint16_t game_rand3(void);   /* $20F64  & 3   */
 uint16_t game_rand15(void);  /* $20F7C  & 15  */
@@ -690,19 +690,19 @@ typedef struct
     uint8_t     pollution;  /* A5-0x3A12, read by the city scan         */
     uint8_t     population; /* A5-0x3982, read by the density pass      */
     /*  A5-0x1570.  One to four for the zone buildings it was written
-     *  for, but $31D2E indexes it by id - 0x70 for every id from $70
-     *  up, so ids $C6 and above read past its 86 entries into the
-     *  neighbouring A5 data.  A runway standing on an industrial zone
-     *  reads 514 that way, which is why this is a word.              */
+     *  for, but $31D2E indexes it by id - 0x70 for every id from $70 up.
+     *  So ids $C6 and above read past its 86 entries into the
+     *  neighboring A5 data.  A runway standing on an industrial zone
+     *  reads 514 that way, which is why this is a word. */
     int16_t tier;
     uint8_t tier_flag; /* A5-0x14C4, gates growth at $31DD0        */
     uint8_t size;      /* A5-0x1252, the footprint edge, $7694.  The
-                        *  original table starts at id $70; ids below
+                        *  original table starts at id $70.  Ids below
                         *  that are all one tile.                  */
     uint16_t dept;     /* which maintenance departments the tile is
                         *  charged to, one bit each.  The original
                         *  decides this with fifteen nested range
-                        *  tests at $2658C; ids from $70 up pay
+                        *  tests at $2658C.  Ids from $70 up pay
                         *  nothing.                                */
     int16_t power;     /* the plant's output in MW, from the switch
                         *  at $21174.  Two plants compute their own:
@@ -727,7 +727,7 @@ extern const int16_t WALK_DX[4];            /* A5-0x3924                */
 extern const int16_t NEIGHBOUR_ORDER[48];   /* A5-0x391C 24 {dx,dy}     */
 
 /*  What one ordinance does to the treasury: a signed fraction of a
- *  department's amount.  source 0..2 is a department, 3 is the
+ *  department's amount.  Source 0..2 is a department, 3 is the
  *  population term, -1 is free. */
 typedef struct
 {

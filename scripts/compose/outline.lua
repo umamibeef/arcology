@@ -11,12 +11,12 @@
 --                 held within a junction's own reach;
 --    the TRIMS    how far along each arm its strip starts, which is the
 --                 further of that arm's two corners;
---    the RETURNS  the kerb returns, which push the mouths further out
+--    the RETURNS  the lip returns, which push the mouths further out
 --                 still so a car has room to turn;
 --    the RING     the boundary itself, mouth to corner to mouth.
 --
 --  Every measurement is taken in the mesh's own precision (arc.f32): the
---  ring is what the asphalt, the footway and every strip that meets this
+--  ring is what the fill, the margin and every strip that meets this
 --  junction are cut against, so a boundary worked out to more places
 --  than the mesh can keep is a boundary they disagree about.
 
@@ -79,7 +79,7 @@ arc.rules.outline = function (o)
         local len = sqrt(f32(f32(vx * vx) + f32(vy * vy)))
         --  A pair of arms that leave almost together sends their corner
         --  to infinity; a junction is a tile wide and no more, so a
-        --  corner further out than that is pulled in and gets no kerb
+        --  corner further out than that is pulled in and gets no lip
         --  return.
         if len > d.far then
             o:clamped(len)
@@ -107,17 +107,17 @@ arc.rules.outline = function (o)
         trim[a.e] = t
     end
 
-    --  The kerb returns push the mouths out.  At a right angle the
+    --  The lip returns push the mouths out.  At a right angle the
     --  corner where two arms' edges meet IS the mouth line, so a lane
     --  turning there pivots on a point; a car needs room to sweep, which
-    --  puts the kerb at the return's tangent distance beyond the corner
+    --  puts the lip at the return's tangent distance beyond the corner
     --  along each edge.  Each arm's mouth moves out to its corner's
     --  tangent point, under the same cap, and the ring below rounds the
     --  corner with the arc between them.
     for i = 0, n - 1 do
         local a, b = arm[i], arm[(i + 1) % n]
         local x = corner[i]
-        if d.curbs and n >= 2 and met[i] then
+        if d.lips and n >= 2 and met[i] then
             local phi = arc.corner_angle(a.dx, a.dy, b.dx, b.dy)
             --  Asked with only the angle: there is no ring yet to
             --  measure against, and a corner the rule does not round
@@ -163,8 +163,8 @@ arc.rules.outline = function (o)
         --  that side leaves for the return.
         local nrx = f32(b.ox + f32(b.dx * trim[b.e]) - f32(pjx * d.half))
         local nry = f32(b.oy + f32(b.dy * trim[b.e]) - f32(pjy * d.half))
-        --  The mouth, right hand first: the road runs on through it and
-        --  no footway crosses it.
+        --  The mouth, right hand first: the line runs on through it and
+        --  no margin crosses it.
         o:point(mrx, mry, 1 + a.e)
         o:point(mlx, mly, 1 + a.e)
 
@@ -178,7 +178,7 @@ arc.rules.outline = function (o)
         if o:count() > 0 then back = o:back(x.x, x.y) end
         local vx, vy = f32(x.x - nrx), f32(x.y - nry)
         local fwd = sqrt(f32(f32(vx * vx) + f32(vy * vy)))
-        local k = (d.curbs and n >= 2 and met[i])
+        local k = (d.lips and n >= 2 and met[i])
                   and arc.rules.corner({col = d.col, row = d.row, phi = phi,
                                         grow = d.grow, width = d.half,
                                         room = math.min(ti, tj), back = back, fwd = fwd})

@@ -1,6 +1,6 @@
-/*  shape.c -- the shape table: what each shape is, what it is part of,
- *  and which triangles are its own.  See mesh/shape.h.  Nothing here
- *  draws; the emitter files its triangles through shape_claim. */
+/*  shape.c: the shape table: what each shape is, what it is part of, and
+ *  which triangles are its own.  See mesh/shape.h.  Nothing here draws.
+ *  The emitter files its triangles through shape_claim. */
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -158,7 +158,7 @@ static ShapeId shape_open_v(ShapeId parent, const char *where, const char *who, 
 
 /*  A shape ENTERED again: what is drawn now belongs to it, as though it
  *  had never been closed.  A producer that gathers its work and lays it
- *  later says which shape each piece was gathered for, so the inspector
+ *  later says which shape each piece was gathered for.  So the inspector
  *  still names the thing that made it rather than whatever the composer
  *  happened to have open. */
 void shape_use(ShapeId id)
@@ -175,8 +175,9 @@ void shape_close(ShapeId id)
     if (!s_on || s_sp <= 0 || id == SHAPE_NONE)
         return; /* a shape the grading pass never opened is never closed */
     /*  Closed in the order they were opened.  A producer that closes the
-     *  wrong one would leave the stack askew and file everything after it
-     *  under a shape that has finished, so unwind to the one it names. */
+     *  wrong one would leave the stack askew.  Everything after it would
+     *  then be filed under a shape that has finished, so unwind to the
+     *  one it names. */
     while (s_sp > 0)
     {
         int last = s_sp - 1;
@@ -350,7 +351,7 @@ int shape_built(ShapeId id)
     if (shape_get(id, &m, NULL, NULL) != 0)
         return 0;
     /*  The network materials and those alone.  Below them are the ground
-     *  and the water; at MAT_ZONE and above are the tints laid over the
+     *  and the water.  At MAT_ZONE and above are the tints laid over the
      *  ground, which cover the map and are not things. */
     if (m < -1.5f)
         return 0;

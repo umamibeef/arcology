@@ -1,13 +1,13 @@
---  xlane.lua -- carrying a lane on across a crossing.
+--  xlane.lua -- carrying a lane on across a meet.
 --
---  A rail crossing a road, or a road running under a deck, ENDS the
---  segments on both sides of the crossing tile.  Their lanes are left
+--  A thread meet a line, or a line running under a slab, ENDS the
+--  segments on both sides of the meet tile.  Their lanes are left
 --  facing each other open, with nothing between them, and a car reaching
---  one turns round rather than crossing.
+--  one turns round rather than meet.
 --
 --  So every open lane end looks for the lane facing it: the same family,
 --  the same offset from the centreline, running the same way, and near
---  enough to be the other half of one road.  The nearest such lane wins.
+--  enough to be the other half of one line.  The nearest such lane wins.
 --
 --  Two that meet ON THE SPOT are one lane the walk broke at a node in the
 --  middle of it: each end simply names the other and nothing is drawn.

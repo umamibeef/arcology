@@ -2,7 +2,7 @@
 --
 --  The fit lays a line through every run of the corridor, and then has
 --  to get from each line on to the next.  There are three ways: an arc
---  at the crossing, a biarc between them where they are parallel, and
+--  at the meet, a biarc between them where they are parallel, and
 --  the join walked tile by tile, which always works and always looks
 --  like it.  Which to try, and in what order, is arc.rules.join's; what
 --  lies after the far line, for the budget the join is given, is

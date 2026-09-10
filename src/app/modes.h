@@ -1,4 +1,4 @@
-/*  modes.h -- which of the binary's programs a command line asks for. */
+/*  modes.h: which of the binary's programs a command line asks for. */
 #ifndef ARC_MODES_H
 #define ARC_MODES_H
 #ifdef __cplusplus

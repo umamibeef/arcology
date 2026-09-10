@@ -1,9 +1,9 @@
-/*  soft.h -- the reference rasteriser.  Not a fallback.  This is the
+/*  soft.h: the reference rasteriser.  Not a fallback.  This is the
  *  renderer the GPU path is checked against: it has no driver, no shader
- *  compiler and no window, so it runs in CI on a machine with no display,
- *  and it is the only thing that can say whether a change to the fast path
- *  changed what is drawn.  At zoom 32, rotation 0, it must reproduce the
- *  original renderer pixel for pixel.  That is the test. */
+ *  compiler and no window.  So it runs in CI on a machine with no
+ *  display.  It is the only thing that can say whether a change to the
+ *  fast path changed what is drawn.  At zoom 32, rotation 0, it must
+ *  reproduce the original renderer pixel for pixel.  That is the test. */
 #ifndef R_SOFT_H
 #define R_SOFT_H
 
@@ -16,16 +16,16 @@ typedef struct
 {
     int32_t  w, h;
     uint8_t *rgb; /* w*h*3, 8 bits per channel            */
-    /*  The same picture as palette indices.  $19B76 -- the shadow pass --
-     *  READS the destination and only darkens it when it is already in the
-     *  dirt ramp, so the renderer has to know what index it painted, not
-     *  just the colour: index 104 shares its RGB with three entries in the
-     *  animated range. */
+    /*  The same picture as palette indices. $19B76, the shadow pass,
+     *  READS the destination and only darkens it when it is already in
+     *  the dirt spur.  So the renderer has to know what index it
+     *  painted, not just the color.  Index 104 shares its RGB with three
+     *  entries in the animated range. */
     uint8_t *idx; /* w*h                                   */
     /*  Which sprite painted each pixel: the tile id within its art set
-     *  (0..499; 0 is the background, which no sprite has) with
-     *  R_PROV_SHADOW set where $19B76 darkened it afterwards.  This is
-     *  the plane the 2.5D terrain is checked against: every pixel a
+     *  (0 to 499.  There 0 is the background, which no sprite paints)
+     *  with R_PROV_SHADOW set where $19B76 darkened it afterwards.  This
+     *  is the plane the 2.5D terrain is checked against: every pixel a
      *  non-terrain sprite painted must survive the mesh unchanged. */
     uint16_t *prov; /* w*h                                 */
 } RImage;
@@ -54,42 +54,42 @@ typedef enum
 
 typedef struct
 {
-    int32_t zoom;        /* 8, 16 or 32; which art set to draw with  */
-    int32_t view;        /* RView; tints flat land from a data layer */
+    int32_t zoom;        /* 8, 16 or 32.  Which art set to draw with  */
+    int32_t view;        /* RView.  Tints flat land from a data layer */
     int     underground; /* the pipes-and-subway view, $161DC      */
     /*  Debug: instead of drawing, print every blit as
      *      row col shape x y mirror
      *  with x,y in the game's own origin, so the list can be diffed
      *  against tools/render_oracle.py.  See tools/render_diff.py. */
     int dump_blits;
-    /*  Draw multi-tile buildings at the anchor's own y, with no footprint
-     *  drop -- what the game does once its shape-descriptor table is
-     *  zeroed.  For A/B comparison only. */
+    /*  Draw multi-tile buildings at the anchor's own y, with no
+     *  footprint drop: what the game does once its shape-descriptor
+     *  table is zeroed.  For A/B comparison only. */
     int no_drop;
     /*  Frame a preview on one tile: the renderer records where this tile
      *  landed on the canvas so the caller can crop around it.  A sprite
-     *  may stand far above its own tile -- an aircraft is drawn 120 px up
-     *  -- so cropping by tile and padding generously is the only way to
-     *  be sure the whole thing is in frame.  -1 for neither. */
+     *  may stand far above its own tile.  An aircraft is drawn 120 px
+     *  up.  So cropping by tile and padding generously is the only way
+     *  to be sure the whole thing is in frame.  -1 for neither. */
     int32_t focus_row, focus_col;
     int32_t x0, y0; /* top-left tile of the region to draw      */
     int32_t n;      /* region is n x n tiles                    */
     uint8_t sky[3]; /* the background                           */
     int     draw_things;
-    int     draw_traffic; /* the road cars and the vehicle things; off under the 3D networks, which carry their own */
+    int     draw_traffic; /* the road cars and the vehicle things.  Off under the 3D networks, which carry their own */
     int     draw_terrain;
     int     draw_buildings;
     /*  The 2.5D composition.  The terrain is drawn first, on its own, as
-     *  the geometry the sprites stand on, and it writes a depth plane
+     *  the geometry the sprites stand on.  It writes a depth plane
      *  holding the painter's index of the tile that owns each pixel.
-     *  Everything else is then drawn in the original's anti-diagonal order,
-     *  tested against that plane and never writing it.  A hill in front
-     *  hides the building behind it exactly as the sweep did, and
+     *  Everything else is then drawn in the original's anti-diagonal
+     *  order, tested against that plane and never writing it.  A hill in
+     *  front hides the building behind it exactly as the sweep did, and
      *  sprite-on-sprite order stays the sweep's.  Off, the single
      *  interleaved sweep of the original runs unchanged. */
     int mesh;
     /*  Debug: draw the terrain pass back to front, which must change
-     *  nothing -- the depth plane, not the loop, carries the ordering. */
+     *  nothing: the depth plane, not the loop, carries the ordering. */
     int mesh_reverse;
 } RSoftOpts;
 
@@ -114,10 +114,8 @@ typedef struct
     uint8_t  terrain;    /* ground the sprites stand on: the terrain pass    */
     uint8_t  under_flip; /* the road sprite's own mirror flag          */
     int16_t  row, col;   /* the emitting tile                               */
-    int16_t  alt;        /* and its altitude in levels, as the sweep drew it,
-                          *  so a camera off the original's own can put the
-                          *  sprite back where its tile went               */
-    int32_t under_shape, under_x, under_y; /* for a stencilled op: the road sprite it was stencilled onto, so a consumer that cannot read its destination can test that sprite's own texel instead; under_shape is 0 when there is none */
+    int16_t  alt;        /* and its altitude in levels, as the sweep drew it.  So a camera off the original's own can put the sprite back where its tile went               */
+    int32_t under_shape, under_x, under_y; /* for a stencilled op it is the line sprite it was stencilled onto.  So a consumer that cannot read its destination can test that sprite's own texel instead.  Under_shape is 0 when there is none */
 } ROp;
 
 typedef struct
@@ -138,9 +136,9 @@ typedef struct
 } RSweep;
 
 /*  The original's whole-map sweep as a list of ops, in the original's
- *  order.  `ops` starts empty or is reused; `info` is filled.  Returns 0,
- *  or -1 if the atlas has no level for the requested zoom or memory ran
- *  out.  The rasteriser below and the GPU path both consume this. */
+ *  order.  `ops` starts empty or is reused.  `info` is filled.  Returns
+ *  0, or -1 if the atlas has no level for the requested zoom or memory
+ *  ran out.  The rasteriser below and the GPU path both consume this. */
 int  soft_sweep(const RAtlas *a, const RCity *c, const RSoftOpts *o, ROpList *ops, RSweep *info);
 void ops_free(ROpList *ops);
 
@@ -150,9 +148,9 @@ int  soft_render(RImage *out, const RAtlas *a, const RCity *c, const RSoftOpts *
 void image_free(RImage *im);
 
 /*  CRC32 of the raw RGB buffer.  Comparing this with the same number
- *  computed in Python is the pixel-exactness test; comparing PNG bytes
- *  would only test that two deflate implementations agree, which they
- *  do not have to. */
+ *  computed in Python is the pixel-exactness test.  Comparing PNG bytes
+ *  would only test that two deflate implementations agree, which they do
+ *  not have to. */
 uint32_t image_crc(const RImage *im);
 
 /*  Where the --focus tile landed, valid after soft_render.  Returns 0

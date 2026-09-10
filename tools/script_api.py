@@ -40,7 +40,7 @@ SCRIPTS = os.path.join(ROOT, "scripts")
 #  A kind that answers more than one rule, and why it may.
 SHARED = {
     "strip":   ("strip", "curves", "walks"),      # a strip is asked three things
-    "footway": ("footway", "walk_curves"),        # and a footway two
+    "margin": ("margin", "walk_curves"),        # and a margin two
     "tile":    ("tile", "zone_tint"),             # and a tile its ground and its tint
 }
 
@@ -113,9 +113,34 @@ def main():
     for root, dirs, files in os.walk(SCRIPTS):
         for f in files:
             if f.endswith(".lua"):
-                defined |= set(re.findall(r"arc\.rules\.([a-z_0-9]+)\s*=",
-                                          open(os.path.join(root, f)).read()))
+                #  Lua writes a function two ways and a rule may be
+                #  declared either: `arc.rules.x = function ...` and
+                #  `function arc.rules.x(...)`.  Reading only the first
+                #  lets every rule written the second way past this check.
+                text = open(os.path.join(root, f)).read()
+                defined |= set(re.findall(r"arc\.rules\.([a-z_0-9]+)\s*=", text))
+                defined |= set(re.findall(r"function\s+arc\.rules\.([a-z_0-9]+)\s*\(", text))
     known = set(re.findall(r'\{"([a-z_0-9]+)",\s*"[^"]*"\s*\}', open(LINT).read()))
+    #  A family's STAGE may name a rule instead of a primitive, and the
+    #  linter learns those names from the declaration rather than from its
+    #  own list.  So a name a family names is known -- unless one of the
+    #  pipeline's own primitives answers to it, in which case it is no
+    #  rule at all and no script should define it.
+    prims = set()
+    for root, dirs, files in os.walk(os.path.join(ROOT, "src", "render")):
+        for f in files:
+            if f.endswith(".c"):
+                prims |= set(re.findall(r'net_hook_add\w*\(\s*NH_\w+\s*,\s*"([a-z_0-9]+)"',
+                                        open(os.path.join(root, f)).read()))
+    stages = set()
+    for f in sorted(os.listdir(os.path.join(SCRIPTS, "families"))):
+        if not f.endswith(".lua"):
+            continue
+        m = re.search(r"stages\s*=\s*\{(.*?)\}",
+                      open(os.path.join(SCRIPTS, "families", f)).read(), re.S)
+        if m:
+            stages |= set(re.findall(r'=\s*"([a-z_0-9]+)"', m.group(1)))
+    known |= stages - prims
     for r in sorted(defined - known):
         bad.append(("rules", "arc.rules.%s is defined and the linter does not know it" % r))
     for r in sorted(known - defined):

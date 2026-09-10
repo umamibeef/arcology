@@ -1,6 +1,8 @@
-/*  Stands in for the game when the build found no SDL3.  The developer
- *  modes are what ctest and the checkers in tools/ drive, and none of
- *  them needs a window, so the binary is still worth building. */
+/*  stub.c: the game, when the build found no SDL3.
+ *
+ *  This stands in for it.  The developer modes are what ctest and the
+ *  checkers in tools/ drive.  None of them needs a window, so the binary
+ *  is still worth building. */
 #include <stdio.h>
 
 int game_main(int argc, char **argv)

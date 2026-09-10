@@ -1,10 +1,10 @@
-/*  sim_thing.c -- the moving things: trains, boats, ships, helicopters and
- *  planes.  The XTHG slot table and everything that walks it -- allocating
- *  and freeing a slot, the per-kind step routines, and the two spawners the
- *  rest of the simulation calls when a station or a seaport wants one.
- *  Split out of sim.c, which is where the rest of the phase structure still
- *  lives; the same rules apply here as there, and the addresses in the
- *  comments still point into CODE 2. */
+/*  sim_thing.c, the moving things: trains, boats, ships, helicopters and
+ *  planes.  The XTHG slot table and everything that walks it.  It
+ *  allocates and frees a slot.  It holds the per-kind step routines.  It
+ *  also holds the two spawners the rest of the simulation calls, when a
+ *  station or a seaport wants one. sim.c holds the phase structure.  The
+ *  same rules apply here as there, and the addresses in the comments
+ *  still point into CODE 2. */
 #include "ext80.h"
 #include "sim.h"
 #include "sim_int.h"
@@ -36,7 +36,7 @@ static const int SHIP_DY[8] = {0, 3, 3, 3, 0, -3, -3, -3};
 static const int SHIP_DX[8] = {-3, -3, 0, 3, 3, 3, 0, -3};
 
 /*  A5-0x6102 and A5-0x60F2: the pixel step it actually takes.  The two
- *  differ -- the diagonals move four pixels on their long axis but the
+ *  differ: the diagonals move four pixels on their long axis but the
  *  lookahead is three tiles in every direction. */
 static const int SHIP_SUB_DY[8] = {0, 3, 4, 3, 0, -3, -4, -3};
 static const int SHIP_SUB_DX[8] = {-4, -3, 0, 3, 4, 3, 0, -3};
@@ -46,9 +46,9 @@ static const int SHIP_SUB_DX[8] = {-4, -3, 0, 3, 4, 3, 0, -3};
 static const int DOCK_DY[4] = {2, 0, -2, 0};
 static const int DOCK_DX[4] = {0, 2, 0, -2};
 
-/*  A5-0x615C and A5-0x614C: the order headings are tried in when the
- *  way ahead is shut -- clockwise and anticlockwise.  Both are nine
- *  long, and the ninth entry is not a continuation of the sweep. */
+/*  A5-0x615C and A5-0x614C: the order headings are tried in when the way
+ *  ahead is shut: clockwise and anticlockwise.  Both are nine long, and
+ *  the ninth entry is not a continuation of the sweep. */
 static const int TURN_CW[9]  = {0, 1, 2, 3, 4, 5, 6, 7, 0};
 static const int TURN_CCW[9] = {0, 7, 6, 5, 4, 3, 2, 1, 2};
 
@@ -57,7 +57,7 @@ static const int TURN_CCW[9] = {0, 7, 6, 5, 4, 3, 2, 1, 2};
 static const uint8_t SHIP_PASSABLE[9] = {0x51, 0x52, 0x54, 0x55, 0x58, 0x59, 0x5B, 0x5C, 0x6B};
 
 /*  A5-0x638A and A5-0x637A: a plain eight-way unit step.  A5-0x621E
- *  scales it -- the helicopter passes index 2, so four pixels a frame. */
+ *  scales it: the helicopter passes index 2, so four pixels a frame. */
 static const int STEP8_DY[8]   = {0, 1, 1, 1, 0, -1, -1, -1};
 static const int STEP8_DX[8]   = {-1, -1, 0, 1, 1, 1, 0, -1};
 static const int MOVE_SPEED[8] = {0, 8, 4, 2, 0, 8, 0, 0};
@@ -70,7 +70,7 @@ static const int HELI_DX[8] = {-3, -3, 0, 3, 3, 3, 0, -3};
  *  outward from the current one. */
 static const int HELI_SWEEP[7] = {1, 7, 2, 6, 3, 5, 4};
 
-/*  $9DDA  allocThing -- first free record, or 0 when the table is full. */
+/*  $9DDA  allocThing: first free record, or 0 when the table is full. */
 int alloc_thing(City *c)
 {
     int i;
@@ -84,7 +84,7 @@ int alloc_thing(City *c)
 
 uint8_t *thing(City *c, int slot) { return c->xthg + slot * THING_SZ; }
 
-/*  $9D7E  freeThing -- give a record back and clear the tile it held. */
+/*  $9D7E  freeThing: give a record back and clear the tile it held. */
 void free_thing(City *c, int slot)
 {
     uint8_t *r = thing(c, slot);
@@ -97,7 +97,7 @@ void free_thing(City *c, int slot)
 }
 
 /* ================================================================== *
- *  $38766  disasterTornado and $38574  disasterMonster -- disaster
+ *  $38766  disasterTornado and $38574  disasterMonster: disaster
  *  types 7 and 8.  Both put one record on the map at the disaster
  *  point and let the mover take it from there, and only one of each
  *  may exist at a time.
@@ -154,7 +154,7 @@ int spawn_disaster_thing(City *c, int kind)
     r[0x0A] = c->xtxt[y][x]; /* $388C4, after the record above went away */
     r[2]    = 0;
 
-    if (kind == 0x05) /* $386C6 -- in a scenario the monster is fixed */
+    if (kind == 0x05) /* $386C6: in a scenario the monster is fixed */
     {
         if ((uint8_t)c->misc[MISC_SCEN_ACTIVE])
             r[0x0B] = 0;
@@ -173,8 +173,8 @@ int spawn_disaster_thing(City *c, int kind)
 }
 
 /* ================================================================== *
- *  $DD7E  canTravel -- may a thing of this kind stand on this tile?
- *  A train wants rail; anything else wants the underground layer.  In
+ *  $DD7E  canTravel: may a thing of this kind stand on this tile?
+ *  A train wants rail.  Anything else wants the underground layer.  In
  *  both cases a tile already carrying a thing (XTXT >= $C9) is refused,
  *  which is what stops two trains sharing a tile.
  * ================================================================== */
@@ -187,7 +187,7 @@ static int can_travel(const City *c, int y, int x, int kind)
         return 0; /* $DDC0 */
 
     b = c->xbld[y][x];
-    if (kind == 0x0A) /* $DDE2 -- rail */
+    if (kind == 0x0A) /* $DDE2: rail */
     {
         if ((b >= 0x2C && b < 0x3F) || (b >= 0x45 && b < 0x49) ||
             (b >= 0x6C && b < 0x70))
@@ -206,14 +206,14 @@ static int can_travel(const City *c, int y, int x, int kind)
 }
 
 /* ================================================================== *
- *  $E18E  pickDirection -- which way should a new thing face?  Try the
+ *  $E18E  pickDirection: which way should a new thing face?  Try the
  *  four directions in one of two fixed orders, chosen by a coin flip,
  *  each rotated by `turn`, and take the first that is passable.
  *  Returns -1 when the thing is boxed in.
  * ================================================================== */
 int pick_direction(City *c, int y, int x, int turn, int kind)
 {
-    int flip = (int)lib_rand(2); /* $E19A -- THINK C rand(), not the LFSR */
+    int flip = (int)lib_rand(2); /* $E19A: THINK C rand(), not the LFSR */
     int i;
     for (i = 0; i < 4; i++) /* $E250 */
     {
@@ -232,7 +232,7 @@ int pick_direction(City *c, int y, int x, int turn, int kind)
     return -1; /* $E258 */
 }
 
-/*  $DEA6  derails -- is this tile something a train may NOT stand on?  Off
+/*  $DEA6  derails: is this tile something a train may NOT stand on?  Off
  *  the map counts as fine, which is what stops a train leaving the edge
  *  from being wrecked. */
 static int derails(const City *c, int y, int x)
@@ -256,11 +256,11 @@ static int derails(const City *c, int y, int x)
 
     b = c->xbld[y][x];
     if (b >= 0x6C && b <= 0x70)
-        return 0; /* $DF94 -- note <= here, unlike the < above */
+        return 0; /* $DF94: note <= here, unlike the < above */
     return 1;     /* $DF98 */
 }
 
-/*  $DF9E  copyCar -- move one car's whole state onto the car behind it,
+/*  $DF9E  copyCar: move one car's whole state onto the car behind it,
  *  demoting a locomotive to a carriage as it goes. */
 static void copy_car(City *c, int src, int dst)
 {
@@ -279,36 +279,36 @@ static void copy_car(City *c, int src, int dst)
         b[0] = 0x0D; /* $E072 */
 }
 
-/*  $E07E  reverseTrain -- the head and the tail change places and the
+/*  $E07E  reverseTrain: the head and the tail change places and the
  *  whole train faces the other way. */
 static void reverse_train(City *c, int head, int tail)
 {
     uint8_t  *h  = thing(c, head);
     uint8_t  *t  = thing(c, tail); /* a2, the record the reads come from */
     const int oy = t[3], ox = t[4], keep = t[0x0A];
-    int       dir = t[1]; /* $E0BE -- the TAIL's heading, not the head's */
+    int       dir = t[1]; /* $E0BE: the TAIL's heading, not the head's */
 
-    t[3]    = h[3]; /* $E0CA -- the tail takes the head's place */
+    t[3]    = h[3]; /* $E0CA: the tail takes the head's place */
     t[4]    = h[4];
     t[6]    = h[6];
     t[7]    = h[7];
     t[0x0A] = h[0x0A];
 
-    h[3]    = (uint8_t)oy; /* $E126 -- and the head takes the tail's */
+    h[3]    = (uint8_t)oy; /* $E126: and the head takes the tail's */
     h[4]    = (uint8_t)ox;
     h[6]    = (uint8_t)oy;
     h[7]    = (uint8_t)ox;
     h[0x0A] = (uint8_t)keep;
 
-    /*  $E15C -- both of these land on the HEAD's record, indexed by the
+    /*  $E15C: both of these land on the HEAD's record, indexed by the
      *  first argument, which is what makes the whole train face about. */
     dir  = ((dir & 0x0F) + 2) & 3;
     h[8] = (uint8_t)((dir + 4) & 7);
     h[1] = (uint8_t)dir;
 }
 
-/*  $BF96  spawnWreck -- what a derailed train leaves behind: one
- *  type-6 record on the tile it came off at. */
+/*  $BF96  spawnWreck: what a derailed train leaves behind: one type-6
+ *  record on the tile it came off at. */
 static void spawn_wreck(City *c, int y, int x)
 {
     uint8_t *t;
@@ -334,7 +334,7 @@ static void spawn_wreck(City *c, int y, int x)
 }
 
 /* ================================================================== *
- *  $D7DE  stepTrain -- types 10 and 12, and with them every carriage.
+ *  $D7DE  stepTrain: types 10 and 12, and with them every carriage.
  *
  *  A locomotive advances onto the tile it was already pointing at, the
  *  cars behind shuffle up one, and then a new tile ahead is chosen.
@@ -350,7 +350,7 @@ static void step_train(City *c, int slot)
     int      type = t[0];
     int      car2, car3, dir, nd, v, b;
 
-    /*  $D81C -- half the time a locomotive stops beside a station. */
+    /*  $D81C: half the time a locomotive stops beside a station. */
     if (type == 0x0A && game_rand1())
     {
         const int k = (t[1] & 1) ? (int)lib_rand(2) + 2 : (int)lib_rand(2);
@@ -367,7 +367,7 @@ static void step_train(City *c, int slot)
     car2 = t[2]; /* $D91C */
     car3 = thing(c, car2)[2];
 
-    if (derails(c, y, x)) /* $D92E -- the track under it has gone */
+    if (derails(c, y, x)) /* $D92E: the track under it has gone */
     {
         uint8_t *b2 = thing(c, car2), *b3 = thing(c, car3);
         t[0] = b2[0] = b3[0] = 0; /* $D944 */
@@ -381,8 +381,8 @@ static void step_train(City *c, int slot)
         return;
     }
 
-    /*  $DA1E -- is the tile ahead free?  Our own tail car does not
-     *  count, because it is about to move out of the way. */
+    /*  $DA1E: is the tile ahead free?  Our own tail car does not count,
+     *  because it is about to move out of the way. */
     v = c->xtxt[ay][ax];
     if (v >= 0xC9 && (v - 0xC9) != car3)
         return; /* $DA52 */
@@ -399,13 +399,13 @@ static void step_train(City *c, int slot)
         c->xtxt[ay][ax] = (uint8_t)(slot + 0xC9);       /* $DB26 */
     }
 
-    t[3] = t[6]; /* $DB3C -- the locomotive is now where it was pointing */
+    t[3] = t[6]; /* $DB3C: the locomotive is now where it was pointing */
     t[4] = t[7];
     dir  = t[1] & 0x0F;
     y    = t[3];
     x    = t[4];
 
-    /*  $DB92 -- a tunnel mouth flips the train between the two forms. */
+    /*  $DB92: a tunnel mouth flips the train between the two forms. */
     b = c->xbld[y][x];
     if (b >= 0x6C && b <= 0x70)
     {
@@ -413,7 +413,7 @@ static void step_train(City *c, int slot)
         type = t[0];
     }
 
-    /*  $DBD8 -- one turn in four is considered, left or right by a coin,
+    /*  $DBD8.  One turn in four is considered, left or right by a coin,
      *  and taken only if the track goes that way. */
     if (game_rand(4) == 0)
     {
@@ -421,10 +421,10 @@ static void step_train(City *c, int slot)
         if (can_travel(c, y + TRAIN_DY[nw], x + TRAIN_DX[nw], type))
             dir = nw; /* $DC50 */
 
-        /*  $DC54 -- and then it sounds the horn, one time in 256.  The
-         *  draw is taken either way and changes nothing, but it comes
+        /*  $DC54: and then it sounds the horn, one time in 256.  The
+         *  draw is taken either way and changes nothing.  But it comes
          *  from the Toolbox generator that the boats and ships also
-         *  read, so leaving it out is invisible in a city with only
+         *  read.  So leaving it out is invisible in a city with only
          *  trains and wrong in every other one. */
         if ((Random() & 0xFF) == 0)
             ; /* $DC64, sound $20C */
@@ -462,7 +462,7 @@ static void step_train(City *c, int slot)
 }
 
 /* ================================================================== *
- *  $E388  advanceSubtile -- move one step along the heading at +1.  The
+ *  $E388  advanceSubtile: move one step along the heading at +1.  The
  *  pixel offset at +6/+7 carries into the tile coordinate at +3/+4.
  *  Returns 0 only when the carry took the thing off the map, in which
  *  case the slot has been released.
@@ -527,7 +527,7 @@ static int advance_subtile(City *c, int slot)
 }
 
 /* ================================================================== *
- *  $E4DA  boatCanEnter -- may the boat move one step in `dir`?
+ *  $E4DA  boatCanEnter: may the boat move one step in `dir`?
  *
  *  Off the map counts as yes: $E388 makes its own bounds test and
  *  releases the slot there, so the two routines split the check between
@@ -560,11 +560,11 @@ static int boat_can_enter(City *c, int slot, int dir)
 }
 
 /* ================================================================== *
- *  $E262  stepBoat -- the sailboat, thing type 9.
+ *  $E262  stepBoat: the sailboat, thing type 9.
  *
  *  Four may be alive at once.  The counter is cleared by the driver
  *  every frame and rebuilt here, so the fifth boat reached in a pass is
- *  the one that gets released -- which boat that is depends on slot
+ *  the one that gets released: which boat that is depends on slot
  *  order, not on age.
  * ================================================================== */
 static void step_boat(City *c, int slot)
@@ -579,14 +579,14 @@ static void step_boat(City *c, int slot)
         return;
     }
 
-    if (t[2]) /* $E28E -- already sinking */
+    if (t[2]) /* $E28E: already sinking */
     {
         if (game_rand(5) == 0)
             free_thing(c, slot); /* $E2A4 */
         return;
     }
 
-    if (game_rand(4) != 0) /* $E2B4 -- three steps in four it just sails */
+    if (game_rand(4) != 0) /* $E2B4: three steps in four it just sails */
     {
         if (boat_can_enter(c, slot, t[1]))
             advance_subtile(c, slot); /* $E2DE */
@@ -604,14 +604,14 @@ static void step_boat(City *c, int slot)
         t[2] = 1; /* $E338, it starts to sink */
         /*  $E342 reports it, which only makes a sound. */
     }
-    /*  $E35A -- turn by -1, 0 or +1, from the Toolbox generator rather
+    /*  $E35A: turn by -1, 0 or +1, from the Toolbox generator rather
      *  than the game's own.  This is the only draw in the routine that
      *  does not come from the shift register. */
     dir  = t[1] + (int)((uint16_t)Random() % 3) - 1;
     t[1] = (uint8_t)(dir & 3);
 }
 
-/*  $EA0E  shipWater -- is this tile navigable? */
+/*  $EA0E  shipWater: is this tile navigable? */
 static int ship_water(City *c, int y, int x)
 {
     const int b = c->xbld[y][x];
@@ -633,9 +633,9 @@ static int ship_water(City *c, int y, int x)
     return 0;
 }
 
-/*  $E978  shipCanEnter -- may the ship head that way?  Off the map
- *  counts as yes, and an XTXT of $C9 or more means another record is
- *  already there, so ships never stack. */
+/*  $E978  shipCanEnter: may the ship head that way?  Off the map counts
+ *  as yes, and an XTXT of $C9 or more means another record is already
+ *  there, so ships never stack. */
 static int ship_can_enter(City *c, int slot, int dir)
 {
     const uint8_t *t = thing(c, slot);
@@ -649,9 +649,9 @@ static int ship_can_enter(City *c, int slot, int dir)
     return c->xtxt[y][x] >= 0xC9 ? 0 : 1; /* $E9F8 */
 }
 
-/*  $EAC2  shipAdvance -- the ship's version of $E388.  Two differences
- *  from the boat's: the bounds are $80 rather than $7F, and the tile it
- *  is standing on is saved in +$0A and put back when it leaves. */
+/*  $EAC2  shipAdvance: the ship's version of $E388.  Two differences
+ *  from the boat's: the bounds are $80 rather than $7F.  The tile it is
+ *  standing on is saved in +$0A and put back when it leaves. */
 static int ship_advance(City *c, int slot)
 {
     uint8_t  *t   = thing(c, slot);
@@ -699,7 +699,7 @@ static int ship_advance(City *c, int slot)
 
     if (ny < 0 || nx < 0 || ny >= MAP_H || nx >= MAP_W)
     {
-        /*  $EBD8 -- and note $9D7E then zeroes the tile that was just
+        /*  $EBD8: and note $9D7E then zeroes the tile that was just
          *  restored, because the record still holds the old position. */
         free_thing(c, slot);
         return 0;
@@ -711,9 +711,9 @@ static int ship_advance(City *c, int slot)
     return 1;
 }
 
-/*  $B4CC  bearing -- the compass direction from one tile to another,
- *  0..7 matching SHIP_DY/SHIP_DX.  A half-step of slack on each axis
- *  decides whether a heading counts as straight or diagonal. */
+/*  $B4CC  bearing: the compass direction from one tile to another, 0..7
+ *  matching SHIP_DY/SHIP_DX.  A half-step of slack on each axis decides
+ *  whether a heading counts as straight or diagonal. */
 static int bearing(int y0, int x0, int y1, int x1)
 {
     const int dy = y1 - y0, dx = x1 - x0;
@@ -727,10 +727,10 @@ static int bearing(int y0, int x0, int y1, int x1)
     return (ay + 1) / 2 > ax ? 2 : (dx < 0 ? 1 : 3);
 }
 
-/*  $B3D8  turnToward -- one step round the compass toward `want`, the
+/*  $B3D8  turnToward: one step round the compass toward `want`, the
  *  short way.  It ALWAYS moves: given cur == want it takes the second
- *  arm, finds a difference of zero, and still steps one.  $B46A below
- *  is the same routine with that case guarded. */
+ *  arm, finds a difference of zero, and still steps one.  $B46A below is
+ *  the same routine with that case guarded. */
 static int turn_toward(int cur, int want)
 {
     if (want < cur)
@@ -740,8 +740,8 @@ static int turn_toward(int cur, int want)
     return cur & 7;
 }
 
-/*  $B46A  steerToward -- bearing, then one step toward it, holding
- *  still when it is already right. */
+/*  $B46A  steerToward: bearing, then one step toward it, holding still
+ *  when it is already right. */
 static int steer_toward(int cur, int y0, int x0, int y1, int x1)
 {
     const int want = bearing(y0, x0, y1, x1); /* $B486 */
@@ -751,7 +751,7 @@ static int steer_toward(int cur, int y0, int x0, int y1, int x1)
 }
 
 /* ================================================================== *
- *  $E5C8  stepShip -- thing type 3.
+ *  $E5C8  stepShip: thing type 3.
  * ================================================================== */
 static void step_ship(City *c, int slot)
 {
@@ -766,8 +766,8 @@ static void step_ship(City *c, int slot)
 
     if (!(c->xbit[y][x] & XBIT_WATER)) /* $E630 */
     {
-        /*  Aground.  The record is not released -- it turns into a
-         *  type 6 where it stands. */
+        /*  Aground.  The record is not released: it turns into a type 6
+         *  where it stands. */
         t[0]    = 6; /* $E63E */
         t[2]    = 0; /* $E64C */
         t[0x0B] = 0; /* $E658 */
@@ -779,7 +779,7 @@ static void step_ship(City *c, int slot)
 
     switch (t[2]) /* $E688 */
     {
-        case 0:                     /* $E696 -- under way */
+        case 0:                     /* $E696: under way */
             if (game_rand(10) == 0) /* $E69A */
             {
                 d6 = steer_toward(t[1], y, x, ty, tx); /* $E6C2 */
@@ -791,10 +791,10 @@ static void step_ship(City *c, int slot)
             else
                 t[2] = 1; /* $E718 */
 
-            /*  $E71E -- either way, look two tiles out in four
-             *  directions.  A wharf beside the ship sends it to the
-             *  waiting state.  The scan uses the position the ship had
-             *  when the routine started, not where it just moved to. */
+            /*  $E71E: either way, look two tiles out in four directions.
+             *  A wharf beside the ship sends it to the waiting state.
+             *  The scan uses the position the ship had when the routine
+             *  started, not where it just moved to. */
             for (i = 0; i < 4; i++)
             {
                 const int ny = y + DOCK_DY[i]; /* $E72C */
@@ -806,7 +806,7 @@ static void step_ship(City *c, int slot)
             }
             break;
 
-        case 1:                                    /* $E788 -- lining up on the target */
+        case 1:                                    /* $E788: lining up on the target */
             d6   = bearing(y, x, ty, tx);          /* $E794 */
             t[1] = (uint8_t)turn_toward(t[1], d6); /* $E7AC */
             if (d6 != t[1])
@@ -814,7 +814,7 @@ static void step_ship(City *c, int slot)
             t[2] = ship_can_enter(c, slot, d6) ? 0 : 2; /* $E7EC/$E7FC */
             break;
 
-        case 2: /* $E806 -- boxed in, sweep for any way out */
+        case 2: /* $E806: boxed in, sweep for any way out */
             d6 = t[1];
             if (game_rand(2) != 0) /* $E818 */
             {
@@ -835,7 +835,7 @@ static void step_ship(City *c, int slot)
                 }
             }
             /*  $E87E tests for exactly 8, so the ship is released when
-             *  the ninth heading is the one that worked -- but NOT when
+             *  the ninth heading is the one that worked: but NOT when
              *  the sweep ran out with nothing, which leaves the loop at
              *  9.  The two writes below then land on a freed slot. */
             if (i == 8)
@@ -844,27 +844,27 @@ static void step_ship(City *c, int slot)
             t[2] = 0;                /* $E8A0 */
             break;
 
-        case 3: /* $E8A8 -- tied up, one chance in thirty of leaving */
+        case 3: /* $E8A8: tied up, one chance in thirty of leaving */
             if (game_rand(0x1E) != 0)
                 break;
             t[2] = 4; /* $E8C2 */
             /*  $E8CC sounds the horn again. */
             /*  $E8DE/$E8EA take the LOW BYTE of the seaport position at
-             *  A5+0x12F4 and 0x12F6 -- the odd addresses, not the even
-             *  ones -- and make that the new target. */
+             *  A5+0x12F4 and 0x12F6, the odd addresses, not the even
+             *  ones, and make that the new target. */
             t[8] = (uint8_t)c->ship_y;
             t[9] = (uint8_t)c->ship_x;
             break;
 
-        case 4:                                /* $E8F4 -- running for the seaport */
+        case 4:                                /* $E8F4: running for the seaport */
             if (ship_can_enter(c, slot, t[1])) /* $E906 */
             {
                 ship_advance(c, slot); /* $E914 */
                 break;
             }
             d6 = t[1];
-            /*  $E930 -- the sweep starts at 0 or 1, so the ship
-             *  sometimes skips its own heading before looking. */
+            /*  $E930: the sweep starts at 0 or 1, so the ship sometimes
+             *  skips its own heading before looking. */
             for (i = (int)game_rand(2); i < 9; i++)
             {
                 d5 = (d6 + TURN_CW[i]) & 7;
@@ -879,7 +879,7 @@ static void step_ship(City *c, int slot)
     }
 }
 
-/*  $A6E4 -- Manhattan distance. */
+/*  $A6E4: Manhattan distance. */
 static int manhattan(int y0, int x0, int y1, int x1)
 {
     const int dy = y1 - y0, dx = x1 - x0;
@@ -887,13 +887,13 @@ static int manhattan(int y0, int x0, int y1, int x1)
 }
 
 /*  What _TickCount answers.  $C928 is the only place the simulation
- *  reads the clock, and the interpreter feeds it a counter rather than
- *  a real one, so the reconstruction does the same. */
+ *  reads the clock.  The interpreter feeds it a counter rather than a
+ *  real one, so the reconstruction does the same. */
 static int32_t tick_count(City *c) { return (c->ticks += 64); }
 
-/*  $CBFE  heliBlocked -- NOTE THE SENSE.  This returns NONZERO when the
+/*  $CBFE  heliBlocked: NOTE THE SENSE.  This returns NONZERO when the
  *  tile three steps out is blocked, the opposite of the ship's $E978.
- *  Off the map is not blocked, so a helicopter will fly off the edge. */
+ *  Off the map is not blocked.  So a helicopter will fly off the edge. */
 static int heli_blocked(City *c, int slot, int dir)
 {
     const uint8_t *t = thing(c, slot);
@@ -905,8 +905,8 @@ static int heli_blocked(City *c, int slot, int dir)
     return c->xbld[y][x] >= 0xFB ? 1 : 0; /* $CC68 */
 }
 
-/*  $CB86 -- hold the heading while it is clear, otherwise take the
- *  first of seven alternatives that is. */
+/*  $CB86: hold the heading while it is clear, otherwise take the first
+ *  of seven alternatives that is. */
 static void heli_avoid(City *c, int slot)
 {
     uint8_t *t = thing(c, slot);
@@ -924,7 +924,7 @@ static void heli_avoid(City *c, int slot)
 }
 
 /* ================================================================== *
- *  $B568  advanceSpeed -- the general sub-tile advance, scaled by a
+ *  $B568  advanceSpeed: the general sub-tile advance, scaled by a
  *  speed index, and the only one of the three that will walk more than
  *  one tile in a frame: landing on an occupied tile makes it step again
  *  in the same direction until it finds a free one or leaves the map.
@@ -983,7 +983,7 @@ static void advance_speed(City *c, int speed_idx, int slot, int dir)
                                  : 0;
         if (!occupied)
             break;
-        /*  $B68C -- it moves onto the occupied tile anyway and tries
+        /*  $B68C.  It moves onto the occupied tile anyway and tries
          *  again one further on. */
         t[3] = (uint8_t)ny;
         t[4] = (uint8_t)nx;
@@ -1007,7 +1007,7 @@ static void advance_speed(City *c, int speed_idx, int slot, int dir)
 }
 
 /* ================================================================== *
- *  $C7A4  stepHeli -- thing type 2.
+ *  $C7A4  stepHeli: thing type 2.
  * ================================================================== */
 static void step_heli(City *c, int slot)
 {
@@ -1031,7 +1031,7 @@ static void step_heli(City *c, int slot)
 
     switch (t[2]) /* $C838 */
     {
-        case 0: /* $C848 -- climbing away */
+        case 0: /* $C848: climbing away */
             t[1] = (uint8_t)((dir + 1) & 7);
             if (t[5] < 10)
                 t[5]++; /* $C874 */
@@ -1039,10 +1039,10 @@ static void step_heli(City *c, int slot)
                 t[2] = 2; /* $C880 */
             break;
 
-        case 1: /* $CB7E -- state 1 does nothing at all */
+        case 1: /* $CB7E: state 1 does nothing at all */
             break;
 
-        case 2: /* $C88A -- cruising */
+        case 2: /* $C88A: cruising */
             {
                 const int td = manhattan(t[3], t[4], t[8], t[9]);
 
@@ -1050,9 +1050,10 @@ static void step_heli(City *c, int slot)
                 heli_avoid(c, slot);                                       /* $C8CA */
                 advance_speed(c, 2, slot, t[1]);                           /* $C8E6 */
 
-                /*  $C91C -- the traffic report.  XTRF is at half the map's
-                 *  resolution, and the report is rate-limited by the clock
-                 *  rather than by the simulation: five thousand ticks. */
+                /*  $C91C: the traffic report.  XTRF is at half the map's
+                 *  resolution, and the report is rate-limited by the
+                 *  clock rather than by the simulation: five thousand
+                 *  ticks. */
                 if (c->xtrf[t[3] / 2][t[4] / 2] >= 0xAA &&
                     tick_count(c) > c->heli_timer)
                 {
@@ -1082,11 +1083,11 @@ static void step_heli(City *c, int slot)
                     break; /* $CA6E */
                 if (c->xter[t[3]][t[4]] != 0)
                     break; /* $CA88 */
-                t[2] = 3;  /* $CA8E, bare ground -- go down */
+                t[2] = 3;  /* $CA8E, bare ground: go down */
                 break;
             }
 
-        case 3: /* $CA98 -- descending */
+        case 3: /* $CA98: descending */
             t[1] = (uint8_t)((dir + 1) & 7);
             if (t[5] > 2)
                 t[5]--; /* $CAC4 */
@@ -1094,13 +1095,13 @@ static void step_heli(City *c, int slot)
                 t[2] = 4; /* $CAD0 */
             break;
 
-        case 4: /* $CADA -- on the ground, one chance in twenty of going */
+        case 4: /* $CADA: on the ground, one chance in twenty of going */
             if ((uint16_t)Random() % 0x14 != 0)
                 break;
             t[2] = 0; /* $CAF8 */
             break;
 
-        case 5: /* $CB00 -- going down hard */
+        case 5: /* $CB00: going down hard */
             t[1] = (uint8_t)((dir + 2) & 7);
             if (t[5] == 4)
                 ; /* $CB2C sounds the crash, $203 */
@@ -1120,7 +1121,7 @@ static void step_heli(City *c, int slot)
     }
 }
 
-/*  $B418 -- the coarse bearing, decided by the sign of each delta alone
+/*  $B418: the coarse bearing, decided by the sign of each delta alone
  *  rather than by $B4CC's half-step slack. */
 static int bearing_coarse(int y0, int x0, int y1, int x1)
 {
@@ -1133,7 +1134,7 @@ static int bearing_coarse(int y0, int x0, int y1, int x1)
     return dx < 0 ? 0 : 4; /* $B45C */
 }
 
-/*  $B394 -- one chance in n of drifting a point either way. */
+/*  $B394: one chance in n of drifting a point either way. */
 static int wander(int dir, int n)
 {
     if ((uint16_t)Random() % (uint16_t)n != 0)
@@ -1142,7 +1143,7 @@ static int wander(int dir, int n)
 }
 
 /* ================================================================== *
- *  $C1E6  stepPlane -- thing type 1.
+ *  $C1E6  stepPlane: thing type 1.
  * ================================================================== */
 static void step_plane(City *c, int slot)
 {
@@ -1153,8 +1154,8 @@ static void step_plane(City *c, int slot)
 
     c->plane_count++; /* $C1F2 */
 
-    /*  $C23C -- anything over $70 is a real building, and an aeroplane
-     *  low enough is going to hit it.  A zone nibble of exactly 8 is the
+    /*  $C23C: anything over $70 is a real building, and an aeroplane low
+     *  enough is going to hit it.  A zone nibble of exactly 8 is the
      *  airport, which it is allowed to be over. */
     if (b > 0x70 && (c->xzon[t[3]][t[4]] & 0x0F) != 8)
     {
@@ -1162,13 +1163,13 @@ static void step_plane(City *c, int slot)
         {
             t[0] = 6; /* $C270 */
             t[2] = 5; /* $C27E */
-            /*  $C288 -- one crash in sixteen leaves the flag set. */
+            /*  $C288.  One crash in sixteen leaves the flag set. */
             t[0x0B] = (uint8_t)(game_rand(0x10) == 0 ? 1 : 0);
             t[1]    = 0; /* $C2B8 */
             return;
         }
-        /*  $C2DA -- the building's shape height over three.  Flying
-         *  lower than that is flying into it. */
+        /*  $C2DA: the building's shape height over three.  Flying lower
+         *  than that is flying into it. */
         if (BUILDING[b].sprite_h / 3 > t[5])
         {
             t[0]    = 6; /* $C2EE */
@@ -1183,7 +1184,7 @@ static void step_plane(City *c, int slot)
 
     switch (state) /* $C332 */
     {
-        case 0:                              /* $C346 -- climbing out */
+        case 0:                              /* $C346: climbing out */
             advance_speed(c, 1, slot, t[1]); /* $C35C */
             if (t[5] == 0)
                 ; /* $C378 sounds the engine, $206 */
@@ -1193,7 +1194,7 @@ static void step_plane(City *c, int slot)
                 t[2] = 2; /* $C39E */
             break;
 
-        case 1: /* $C3A8 -- on the ground, rolling out */
+        case 1: /* $C3A8: on the ground, rolling out */
             advance_speed(c, 1, slot, t[1]);
             /*  $C3EC computes the distance to the target here and never
              *  looks at it. */
@@ -1207,13 +1208,13 @@ static void step_plane(City *c, int slot)
             free_thing(c, slot);           /* $C45E */
             break;
 
-        case 2:                              /* $C468 -- cruising */
+        case 2:                              /* $C468: cruising */
             t[1] = (uint8_t)wander(t[1], 5); /* $C47C */
             heli_avoid(c, slot);             /* $C490, shared with the helicopter */
             advance_speed(c, 1, slot, t[1]); /* $C4AC */
             break;
 
-        case 3:                                                     /* $C4B8 -- turning onto the approach */
+        case 3:                                                     /* $C4B8: turning onto the approach */
             t[1] = (uint8_t)bearing_coarse(t[3], t[4], t[8], t[9]); /* $C4E2 */
             heli_avoid(c, slot);                                    /* $C4F6 */
             advance_speed(c, 1, slot, t[1]);                        /* $C512 */
@@ -1223,8 +1224,8 @@ static void step_plane(City *c, int slot)
             runway = t[2] >> 4;                          /* $C564 */
             t[1]   = (uint8_t)turn_toward(t[1], runway); /* $C56A */
             t[2]   = (uint8_t)((runway << 4) + 4);       /* $C57C */
-            /*  $C58E -- back the target off six tiles along the runway,
-             *  so the aeroplane flies past the threshold and turns in. */
+            /*  $C58E: back the target off six tiles along the runway, so
+             *  the aeroplane flies past the threshold and turns in. */
             switch (runway)
             {
                 case 1:
@@ -1244,7 +1245,7 @@ static void step_plane(City *c, int slot)
             }
             break;
 
-        case 4:                                                         /* $C5EC -- flying the approach */
+        case 4:                                                         /* $C5EC: flying the approach */
             t[1] = (uint8_t)steer_toward(t[1], t[3], t[4], t[8], t[9]); /* $C61E */
             advance_speed(c, 1, slot, t[1]);                            /* $C638 */
             if (manhattan(t[3], t[4], t[8], t[9]) >= 2)
@@ -1253,16 +1254,16 @@ static void step_plane(City *c, int slot)
             runway = t[2] >> 4; /* $C690 */
             t[1]   = (uint8_t)runway;
             t[2]   = 1; /* $C69E, down to state 1 */
-            t[6]   = 8; /* $C6AC, centre it in the tile */
+            t[6]   = 8; /* $C6AC, center it in the tile */
             t[7]   = 8;
-            /*  $C6C0 -- and snap the axis it is landing along. */
+            /*  $C6C0: and snap the axis it is landing along. */
             if (runway == 1 || runway == 5)
                 t[3] = t[8]; /* $C6E6 */
             else if (runway == 3 || runway == 7)
                 t[4] = t[9]; /* $C700 */
             break;
 
-        case 7: /* $C70A -- going down */
+        case 7: /* $C70A: going down */
             if (t[5] == 0)
             {
                 t[0]    = 6; /* $C76E */
@@ -1289,7 +1290,7 @@ static void step_plane(City *c, int slot)
 }
 
 /* ================================================================== *
- *  $09E0A  stepThings -- one pass over the forty records.
+ *  $09E0A  stepThings: one pass over the forty records.
  * ================================================================== */
 void sim_step_things(City *c)
 {
@@ -1299,16 +1300,16 @@ void sim_step_things(City *c)
     if (c->anim_phase > 0x3FF)
         c->anim_phase = 0;
 
-    /*  $9E56 -- the game does not trust an incremented count.  Every
+    /*  $9E56: the game does not trust an incremented count.  Every
      *  per-type total is cleared here and rebuilt by the steppers.
      *
-     *  $9E76 -- two ambient sounds, a traffic one and a police siren.
+     *  $9E76: two ambient sounds, a traffic one and a police siren.
      *  Neither changes any state, but each rolls a Toolbox random every
-     *  frame it is eligible, and the steppers draw from that same stream.
-     *  So the rolls have to happen even though the sound does not: skipping
-     *  one shifts every later draw in the pass.  Both averages come from
-     *  the statistics pass at $224DA, which is not reconstructed, so in
-     *  practice neither gate opens yet. */
+     *  frame it is eligible.  The steppers draw from that same stream.
+     *  So the rolls have to happen even though the sound does not:
+     *  skipping one shifts every later draw in the pass.  Both averages
+     *  come from the statistics pass at $224DA, which is not
+     *  reconstructed, so in practice neither gate opens yet. */
     if (c->graph[GRAPH_TRAFFIC][0] > 0x23 && (Random() & 0xFF) == 0)
         ;                       /* $9E90 sound $209 */
     if (c->census[0xD2] != 0 && /* a police station exists */
@@ -1320,11 +1321,11 @@ void sim_step_things(City *c)
     c->road_count = c->tornado_count = 0;
 
     /*  A save without an XTHG segment has no slot table at all, and the
-     *  original never met one: it always had the table its own new-city
+     *  original never met one.  It always had the table its own new-city
      *  code laid out.  The guard is around the LOOP and not the function
-     *  on purpose -- everything above draws from the Toolbox random
-     *  stream, and skipping those rolls would shift every later draw in
-     *  the pass. */
+     *  on purpose: everything above draws from the Toolbox random
+     *  stream.  Skipping those rolls would shift every later draw in the
+     *  pass. */
     if (!c->xthg)
         return;
 
@@ -1357,8 +1358,8 @@ void sim_step_things(City *c)
                 break;
             default:
                 /*  types 5, 6, 15 and 16 have steppers that are not
-                 *  reconstructed yet -- none of them occurs in any
-                 *  shipped city.  7 and 8 reach empty ones. */
+                 *  reconstructed yet: none of them occurs in any shipped
+                 *  city.  7 and 8 reach empty ones. */
                 break;
         }
     }
@@ -1489,7 +1490,7 @@ void spawn_plane(City *c, int y, int x, int kind)
 }
 
 /* ================================================================== *
- *  $B4CC  headingToward -- an eight point compass from one tile to
+ *  $B4CC  headingToward: an eight point compass from one tile to
  *  another.  A direction counts as diagonal only when the two spans
  *  are within a factor of two of each other.
  * ================================================================== */
@@ -1514,7 +1515,7 @@ static int heading_toward(int fy, int fx, int ty, int tx)
 }
 
 /* ================================================================== *
- *  $BBB0  seaportShip -- send a ship in from the edge of the map.
+ *  $BBB0  seaportShip: send a ship in from the edge of the map.
  *
  *  The dice choose one of the four edges, then the whole edge is
  *  scanned for water.  The LAST water tile found wins, because the scan

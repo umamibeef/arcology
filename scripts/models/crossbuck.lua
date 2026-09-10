@@ -1,6 +1,6 @@
---  crossbuck.lua -- a level crossing's crossbuck (spec 6.1).
+--  crossbuck.lua -- a level meet's crossbuck (spec 6.1).
 --
---  A post with two blades crossed on it, facing the road.  Each blade
+--  A post with two blades crossed on it, facing the line.  Each blade
 --  carries its own two heights: reading one from the other moves both
 --  when only one was meant to move.
 

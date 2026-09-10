@@ -1,8 +1,9 @@
-/*  sim_growth.c -- whether a zone grows, and into what.  The trip walk that
- *  decides whether a tile can reach work -- the original's own lossy
- *  breadth-first search, ring and all -- and the scan that walks the map
+/*  sim_growth.c.  Whether a zone grows, and into what.  The trip walk
+ *  that decides whether a tile can reach work.  The original's own lossy
+ *  breadth-first search, ring and all: and the scan that walks the map
  *  asking it, tier by tier.  This is the phase the city's shape actually
- *  comes out of.  Split out of sim.c; addresses still point into CODE 2. */
+ *  comes out of.  Addresses still point into CODE
+ *  2. */
 #include "ext80.h"
 #include "sim.h"
 #include "sim_int.h"
@@ -33,15 +34,15 @@ static int start_mode(uint8_t t)
 }
 
 /* ================================================================== *
- *  $247EC  walkStep -- one step of a trip.
+ *  $247EC  walkStep: one step of a trip.
  *
  *  A trip walks the transport network from a zoned tile and looks for a
  *  zone that satisfies it.  The mode says what the traveller is on now.
- *  The cost is travel time, and it is charged against a budget of 100.
+ *  The cost is travel time.  It is charged against a budget of 100.
  *  When the cost reaches the budget the trip fails.
  *
  *  The cost per tile IS the traffic model:
- *      road        3        highway     1
+ *      road        3        band     1
  *      rail        1        subway      1
  *      board a bus, a train or a subway        4, once
  *  A road-only city spends the whole budget in about 25 tiles.  The
@@ -50,10 +51,10 @@ static int start_mode(uint8_t t)
  *  capacity.
  *
  *  Modes 0 to 3 and modes 4 to 7 are the same four states twice.  The
- *  second set means "this trip has used a bus".  A bus makes every
- *  later road tile cost 2 instead of 3.
+ *  second set means "this trip has used a bus".  A bus makes every later
+ *  road tile cost 2 instead of 3.
  *
- *      0/4  road      1/5  highway    2/6  bridge or tunnel
+ *      0/4  road      1/5  band    2/6  bridge or tunnel
  *      3/7  a second road family      8/9  on a bus
  *      10   board a train             12   on a train
  *      11   board a subway            13   in a subway
@@ -142,7 +143,7 @@ static WalkStep walk_step(const City *c, int mode, int y, int x)
         return NO;
     }
 
-    /*  $24A78 and $24AD0.  On a highway.  A highway costs 1 a tile, so
+    /*  $24A78 and $24AD0.  On a band.  A band costs 1 a tile, so
      *  it carries a trip three times as far as a road. */
     if (mode == 1 || mode == 5)
     {
@@ -309,7 +310,7 @@ int sim_trip(City *c, int y, int x, int zone, int tier, int budget)
     int            used_bus = 0, used_rail = 0, used_subway = 0;
     int            i;
 
-    /*  $24602 -- the first transport tile in the search order starts the
+    /*  $24602: the first transport tile in the search order starts the
      *  trip, and its kind picks the starting mode.  Order matters: the
      *  loop stops at the first hit. */
     for (i = 0; i < 24; i++)
@@ -352,9 +353,9 @@ int sim_trip(City *c, int y, int x, int zone, int tier, int budget)
             nx = cx + WALK_DX[dir];
             if (ny < 0 || ny >= MAP_H || nx < 0 || nx >= MAP_W)
             {
-                /*  Walked off the map.  $247C0: if the tile we are
-                 *  standing on is marked 0xFA in XTXT the road leaves
-                 *  for a neighbouring city, and that counts as arriving. */
+                /*  Walked off the map.  At $247C0, if the tile it stands
+                 *  on is marked 0xFA in XTXT, the road leaves for a
+                 *  neighboring city, and that counts as arriving. */
                 if (c->xtxt[cy][cx] == 0xFA)
                 {
                     moved   = 1;
@@ -363,25 +364,25 @@ int sim_trip(City *c, int y, int x, int zone, int tier, int budget)
                 continue;
             }
             {
-                /*  $247EC -- the fourteen-case switch, transcribed above
+                /*  $247EC: the fourteen-case switch, transcribed above
                  *  as walk_step and not as a generated [mode][tile]
                  *  table, which cannot express three of the fourteen
                  *  arms.  The subway modes read the underground layer. */
                 WalkStep        step = walk_step(c, mode, ny, nx);
                 const WalkStep *w    = &step;
 
-                /*  $24848 -- arriving is decided first, and by the zone
+                /*  $24848: arriving is decided first, and by the zone
                  *  the trip started in rather than by the table.  Modes
                  *  0, 4, 8 and 9 test for it ($2483C, $2496A, $24EE0 and
                  *  $24F88): a trip riding a bus can still get off at its
-                 *  destination; one in a tunnel or on the subway cannot. */
+                 *  destination.  One in a tunnel or on the subway cannot. */
                 if (mode == 0 || mode == 4 || mode == 8 || mode == 9)
                 {
                     int z = XZON_TYPE(c->xzon[ny][nx]);
                     if (ZONE_ATTRACTS[zone] & (1 << z))
                     {
-                        /*  $24850 sets the two flags and nothing else:
-                         *  arriving does not advance the position, so
+                        /*  $24850 sets the two flags and nothing else.
+                         *  Arriving does not advance the position, so
                          *  the route on the queue stops one short of the
                          *  destination. */
                         moved   = 1;
@@ -403,7 +404,7 @@ int sim_trip(City *c, int y, int x, int zone, int tier, int budget)
 
         if (!moved)
         {
-            /*  $250F8 -- dead end, so unwind to the last junction that
+            /*  $250F8: dead end, so unwind to the last junction that
              *  still has an untried direction. */
             do
             {
@@ -431,10 +432,10 @@ int sim_trip(City *c, int y, int x, int zone, int tier, int budget)
             mask = 0xF;
         else
             mask = WALK_TURN_MASK[dir];
-        /*  $251CE..$251E8 -- all three stacks are written at the
-         *  CURRENT sp and only then is sp incremented.  The mode goes in
-         *  last but still at the old index: the compiler kept it in d0
-         *  across the increment. */
+        /*  $251CE..$251E8: all three stacks are written at the CURRENT
+         *  sp and only then is sp incremented.  The mode goes in last
+         *  but still at the old index: the compiler kept it in d0 across
+         *  the increment. */
         mask_st[sp] = (uint8_t)mask;
         len_st[sp]  = (uint8_t)len;
         mode_st[sp] = (uint8_t)mode;
@@ -444,13 +445,13 @@ int sim_trip(City *c, int y, int x, int zone, int tier, int budget)
     if (trip_mark_log)
         fprintf(stderr, "TRIP %d %d zone=%d tier=%d arrived=%d len=%d sp=%d\n", y, x, zone, tier, arrived, len, sp);
 
-    /*  $25204 -- a journey that failed leaves no traffic behind: the
-     *  route is only drained and stamped when the trip arrived. */
+    /*  $25204: a journey that failed leaves no traffic behind: the route
+     *  is only drained and stamped when the trip arrived. */
     if (!arrived || tier <= 0)
         return arrived != 0;
 
-    /*  $25216 -- walk the route back out.  Only the surface modes leave
-     *  traffic; riding the subway does not put cars on the road. */
+    /*  $25216: walk the route back out.  Only the surface modes leave
+     *  traffic.  Riding the subway does not put cars on the road. */
     while (!q_empty())
     {
         int py, px, m;
@@ -484,11 +485,11 @@ int sim_trip(City *c, int y, int x, int zone, int tier, int budget)
 }
 
 /* ================================================================== *
- *  growFootprint ($32998) -- grow a zone into a bigger building.
+ *  growFootprint ($32998): grow a zone into a bigger building.
  *
  *  An empty lot just gets a one-tile building.  Growing a one-tile
  *  building into a 2x2 needs three free tiles beside it, and there are
- *  four ways round that can fall; the game tries them in a fixed order
+ *  four ways round that can fall.  The game tries them in a fixed order
  *  and takes the first that fits, so a block grows down and to the
  *  right by preference.
  * ================================================================== */
@@ -549,7 +550,7 @@ void sim_grow_footprint(City *c, int y, int x, int tier, int zone)
         sim_place(c, y - 1, x, 2, 3); /* $32BC6, up and left */
 }
 
-/*  $324B8 -- is this tile, or one of its four neighbours, powered?  Reads
+/*  $324B8: is this tile, or one of its four neighbors, powered?  Reads
  *  only XBIT bit 6, and stops at the first hit. */
 static int powered_near(const City *c, int y, int x)
 {
@@ -577,10 +578,10 @@ static int is_transport(uint8_t t)
     return t == 0xE9 || t == 0xEC || t == 0xED;
 }
 
-/*  $24530 -- can a zone here develop?  True when some transport tile
- *  lies within an L1 distance of 3, centre excluded.  The offset list
- *  in the binary is exactly that diamond: all 24 cells, confirmed by
- *  probing every offset in a 7x7 box. */
+/*  $24530: can a zone here develop?  True when some transport tile lies
+ *  within an L1 distance of 3, center excluded.  The offset list in the
+ *  binary is exactly that diamond: all 24 cells, confirmed by probing
+ *  every offset in a 7x7 box. */
 static int near_transport(const City *c, int y, int x)
 {
     int dy, dx;
@@ -628,14 +629,14 @@ void sim_growth_scan(City *c, int y0, int x0)
                 if (bld < 0x1D)
                     continue; /* $317B8 */
 
-                /*  $317C0 -- one tile in 128 is considered for decay.  The
-                 *  department that pays for it is the same one the budget
-                 *  charges, and the ranges are tested in a fixed order, so
-                 *  a tile owned by two departments decays against the first
-                 *  of them. */
+                /*  $317C0.  One tile in 128 is considered for decay.
+                 *  The department that pays for it is the same one the
+                 *  budget charges.  The ranges are tested in a fixed
+                 *  order, so a tile owned by two departments decays
+                 *  against the first of them. */
                 if (game_rand127() == 0)
                 {
-                    static const int ORDER[5] = {DEPT_ROAD, DEPT_RAIL, DEPT_SUBWAY, DEPT_POWER, DEPT_HIGHWAY};
+                    static const int ORDER[5] = {DEPT_ROAD, DEPT_RAIL, DEPT_SUBWAY, DEPT_POWER, DEPT_BAND};
                     uint16_t         m        = BUILDING[bld].dept;
                     int              k, done = 0;
 
@@ -649,11 +650,11 @@ void sim_growth_scan(City *c, int y0, int x0)
                             break; /* $31804 */
                         if (((uint16_t)Random() % 100) < (uint16_t)c->dept[d].funding)
                             break; /* $3181C, it survives */
-                        if (d == DEPT_POWER || d == DEPT_HIGHWAY)
+                        if (d == DEPT_POWER || d == DEPT_BAND)
                         {
                             /*  Power lines are removed through $5FAA and
-                             *  highways through an eight-tile teardown;
-                             *  neither is reconstructed. */
+                             *  bands through an eight-tile teardown.
+                             *  Neither is reconstructed. */
                             growth_todo++, growth_stub[2]++;
                             break;
                         }
@@ -664,11 +665,11 @@ void sim_growth_scan(City *c, int y0, int x0)
                         continue; /* went to the next tile */
                 }
 
-                /*  $31B30 -- the automatic builds.  Reached whether or
-                 *  not the decay roll above fired.  A rail station or a
+                /*  $31B30: the automatic builds.  Reached whether or not
+                 *  the decay roll above fired.  A rail station or a
                  *  marina with power will, one time in four, put another
-                 *  of itself nearby -- but only while the city wants
-                 *  more of them than have been placed this cycle. */
+                 *  of itself nearby: but only while the city wants more
+                 *  of them than have been placed this cycle. */
                 if (y == 36 && x == 101)
                     if (bld < 0xED)
                         continue; /* $31B34 */
@@ -689,12 +690,12 @@ void sim_growth_scan(City *c, int y0, int x0)
                         auto_marina(c, y, x);    /* $31BC4 */
                     continue;
                 }
-                /*  $31BD0 -- an arcology scores its own quality of
-                 *  life once a cycle, 0 to 12.  Crime and pollution
-                 *  take from it and land value adds to it, each scaled
-                 *  down by 32.  Losing power halves the score.  Losing
-                 *  water halves it again.  The score lives in byte 1 of
-                 *  the arcology's XMIC record. */
+                /*  $31BD0: an arcology scores its own quality of life
+                 *  once a cycle, 0 to 12.  Crime and pollution take from
+                 *  it and land value adds to it, each scaled down by 32.
+                 *  Losing power halves the score.  Losing water halves
+                 *  it again.  The score lives in byte 1 of the
+                 *  arcology's XMIC record. */
                 if (bld >= 0xFB && bld <= 0xFE)
                 {
                     int slot, rec, score;
@@ -733,15 +734,15 @@ void sim_growth_scan(City *c, int y0, int x0)
             /* ---- zoned --------------------------------------------- */
             if (zone > 6)
             {
-                /*  $31FDA -- a military base, airport or seaport grows
-                 *  its own furniture rather than zone buildings, and
-                 *  only one time in four.  The placement itself goes
-                 *  through $333C8, which is not reconstructed; the dice
-                 *  are reproduced here so the tiles after this one still
-                 *  see the sequence the original gave them. */
+                /*  $31FDA: a military base, airport or seaport grows its
+                 *  own furniture rather than zone buildings, and only
+                 *  one time in four.  The placement itself goes through
+                 *  $333C8, which is not reconstructed.  The dice are
+                 *  reproduced here so the tiles after this one still see
+                 *  the sequence the original gave them. */
                 if (zone == 7)
                 {
-                    /*  $31FE2 -- which stage the base has reached picks
+                    /*  $31FE2: which stage the base has reached picks
                      *  which building it wants next.  Every stage but
                      *  the last rolls one time in four first. */
                     int stage = (uint8_t)c->misc[MISC_MIL_MODE]; /* $1FC0 */
@@ -769,7 +770,7 @@ void sim_growth_scan(City *c, int y0, int x0)
                             want = 0xE3; /* $32046 */
                         else
                             want = 0xF2; /* $3204C */
-                        /*  the big one first; if the map will not take
+                        /*  the big one first.  If the map will not take
                          *  it, settle for the small one */
                         if (!sim_place_special(c, y, x, want, 7)) /* $32058 */
                             sim_place_special(c, y, x, 0xE3, 7);  /* $32070 */
@@ -783,7 +784,7 @@ void sim_growth_scan(City *c, int y0, int x0)
                             sim_place_special(c, y, x, 0xE8, 7);  /* $320CC */
                         continue;
                     }
-                    { /* stage 3, $320E6 -- a seven-way ladder, no fallback */
+                    { /* stage 3, $320E6: a seven-way ladder, no fallback */
                         int n = (uint16_t)(c->infra[1] + c->infra[2]) / 5;
                         if ((uint16_t)c->infra[3] >> 2 >= n)
                             want = 0xDD;
@@ -810,7 +811,7 @@ void sim_growth_scan(City *c, int y0, int x0)
                     int want;
                     if ((Random() & 3) != 0)
                     {
-                        /*  $321C6 -- not this tile's turn; a pier may
+                        /*  $321C6: not this tile's turn.  A pier may
                          *  still launch a boat, which needs the moving
                          *  object system. */
                         if (bld != 0xE0)
@@ -840,7 +841,7 @@ void sim_growth_scan(City *c, int y0, int x0)
                     int want, n;
                     if ((Random() & 3) != 0)
                     {
-                        /*  $3226E -- the runway spawns aircraft, which
+                        /*  $3226E: the runway spawns aircraft, which
                          *  need the moving object system. */
                         if (bld != 0xDD)
                             continue;
@@ -848,10 +849,10 @@ void sim_growth_scan(City *c, int y0, int x0)
                             continue;
                         if (!(c->xbit[y][x] & XBIT_POWERED))
                             continue; /* $3229E */
-                        /*  $322A6 -- four times in ten a helicopter
-                         *  leaves the airport.  Otherwise a plane does,
-                         *  and the map rotation together with XBIT bit
-                         *  1 picks which of the two plane kinds. */
+                        /*  $322A6: four times in ten a helicopter leaves
+                         *  the airport.  Otherwise a plane does, and the
+                         *  map rotation together with XBIT bit 1 picks
+                         *  which of the two plane kinds. */
                         if ((uint16_t)Random() % 10 < 4)
                             spawn_helicopter(c, y, x); /* $322BC */
                         else if (c->rotation & 1)      /* $322CC */
@@ -860,7 +861,7 @@ void sim_growth_scan(City *c, int y0, int x0)
                             spawn_plane(c, y, x, (c->xbit[y][x] & 0x02) ? 2 : 0);
                         continue;
                     }
-                    /*  $32352 -- the same seven-way ladder the military
+                    /*  $32352: the same seven-way ladder the military
                      *  uses at stage 3, against the building census. */
                     n = (uint16_t)(c->census[0xDD] + c->census[0xDE]) / 5;
                     if ((uint16_t)c->census[0xEE] >> 2 >= n)
@@ -903,9 +904,9 @@ void sim_growth_scan(City *c, int y0, int x0)
                     tier = 0;
                 }
 
-                /*  $31D5C -- a tile with no power nearby, or from
-                 *  which no journey can be made, has no demand at all
-                 *  and the whole 4000 of headroom. */
+                /*  $31D5C: a tile with no power nearby.  From which no
+                 *  journey can be made, has no demand at all and the
+                 *  whole 4000 of headroom. */
                 if (!powered_near(c, y, x) || !sim_trip(c, y, x, zone, tier, 100))
                 {
                     demand = 0;
@@ -917,28 +918,28 @@ void sim_growth_scan(City *c, int y0, int x0)
                     head   = 4000 - demand;
                 }
 
-                /*  $31DCC -- the population accumulator.  This runs
+                /*  $31DCC: the population accumulator.  This runs
                  *  whichever way the branch above went, which is why it
                  *  can be reconstructed before the placement engine. */
                 if (tier > 0 && BUILDING[bld].tier_flag == 0)
                 {
                     c->accum8[zone] += GROWTH_TABLE[tier];
-                    /*  $31E0A -- roll for growth against the headroom
-                     *  this tier still has. */
+                    /*  $31E0A: roll for growth against the headroom this
+                     *  tier still has. */
                     if ((int32_t)(uint16_t)Random() < head / tier)
                     {
-                        /* $31E1A -- grow into the next tier */
+                        /* $31E1A: grow into the next tier */
                         sim_upgrade(c, y, x, tier, Random() & 1);
                         continue;
                     }
                 }
                 if (BUILDING[bld].tier_flag == 1)
                 { /* $31E38 */
-                    /*  The tier divides here.  A tier of zero would
-                     *  trap the original outright and no shipped city
-                     *  reaches one, so the guard is defensive rather
-                     *  than faithful: it draws the die either way, which
-                     *  is what keeps the stream in step. */
+                    /*  The tier divides here.  A tier of zero would trap
+                     *  the original outright and no shipped city reaches
+                     *  one.  So the guard is defensive rather than
+                     *  faithful: it draws the die either way, which is
+                     *  what keeps the stream in step. */
                     if ((uint16_t)Random() < (uint16_t)(tier ? 0x4000 / tier : 0))
                     {
                         if (church_pressure && (tier & 2) && zone < 3)
@@ -955,10 +956,10 @@ void sim_growth_scan(City *c, int y0, int x0)
                         sim_place(c, y, x, tier, (zone - 1) / 2); /* $31EFE */
                     continue;
                 }
-                /*  $31F0A -- an empty or under-built zone grows into
-                 *  the next tier, but only where the land is worth it:
-                 *  each tier has a land-value floor, and industry is
-                 *  exempt from all of them. */
+                /*  $31F0A: an empty or under-built zone grows into the
+                 *  next tier.  But only where the land is worth it: each
+                 *  tier has a land-value floor, and industry is exempt
+                 *  from all of them. */
                 if (tier == 4)
                     continue;
                 if ((zone & 1) && tier > 0)

@@ -1,9 +1,9 @@
-/*  clock.c -- the city's clock, as the original paces it.  TickCount is 60
+/*  clock.c: the city's clock, as the original paces it.  TickCount is 60
  *  Hz and the speed's delay per phase is a word table indexed by
- *  MISC[1019]; speeds 0 and 1 never tick, 2 to 4 wait for their deadline,
- *  and 5 runs a phase every time round the loop.  The simulation itself
- *  knows none of this -- sim_tick is one switch on the date -- so the
- *  pacing lives here. */
+ *  MISC[1019].  Speeds 0 and 1 never tick, 2 to 4 wait for their
+ *  deadline, and 5 runs a phase every time round the loop.  The
+ *  simulation itself knows none of this.  Sim_tick is one switch on the
+ *  date.  So the pacing lives here. */
 #include "internal.h"
 #include "project.h"
 #include "adapt.h"
@@ -61,8 +61,8 @@ void run_phase(App *a)
         sound_play(a->snd, R_SND_BOOS);
     }
     a->dirty = 1;
-    /*  Terrain only moves in a disaster or under the player's tools; the
-     *  sim's own phases never write ALTM or XTER.  The mesh stays. */
+    /*  Terrain only moves in a disaster or under the player's tools.
+     *  The sim's own phases never write ALTM or XTER.  The mesh stays. */
 }
 
 /*  ==================================================================
@@ -71,10 +71,10 @@ void run_phase(App *a)
  *  Loading a save, naming it, and running the phases at the chosen
  *  speed.
  *  ================================================================== */
-/*  What a load brought in, for the log: the file and its shape, then
- *  the city the file describes.  Both load paths call this, so a city
- *  picked from the menu reports exactly what one named on the command
- *  line does.  ms is the time the load took. */
+/*  What a load brought in, for the log: the file and its shape, then the
+ *  city the file describes.  Both load paths call this, so a city picked
+ *  from the menu reports exactly what one named on the command line
+ *  does.  Ms is the time the load took. */
 void log_city_loaded(const City *c, const char *path, double ms)
 {
     const char *base  = strrchr(path, '/');

@@ -1,13 +1,17 @@
-/*  Junctions: the outline a node takes from its arms (the trims it hands
- *  back), and the box built on it; the drawing of a road's box is
- *  road.c's, a rail's rail.c's. */
+/*  node.c: A NODE'S OUTLINE AND ITS BOX, as stores and fans.
+ *
+ *  The outline a node takes from its arms and the trims it hands back.
+ *  The control and meet asks the script answers.  The lofts a box files.
+ *  What the box then LAYS is the script's.  Arc.rules.junction for the
+ *  fill, arc.rules.turns for the pattern its lanes make,
+ *  arc.rules.corner for what its outline does where two arms meet. */
 #include <math.h>
 #include <string.h>
 
 #include "dump.h"
 #include "mesh/internal.h"
 #include "log.h"
-#include "net/internal.h"
+#include "pipeline.h"
 #include "script.h"
 #include "opt.h"
 
@@ -23,16 +27,16 @@ float   s_xwalk[2][R_MAP * R_MAP * 4];
 RArm    s_arm[2][R_MAP * R_MAP * 4];
 
 /*  Walk one segment of a family from a node tile out through link `e`,
- *  collect its centreline, straighten, fillet and loft it.  `visited`
+ *  collect its centerline, straighten, fillet and loft it.  `visited`
  *  marks (tile, link) so each segment is walked once, from either end. */
 /*  Which way a run leaves a junction, measured over a real baseline
  *  rather than from the tangent of its first piece.  How long a piece
- *  must be to give its own tangent, and how far along a shorter run the
+ *  must be to give its own tangent.  How far along a shorter run the
  *  heading is measured, are arc.geo's (arm_own, arm_base). */
 
 void arm_heading(const Piece *pc, int np, float total, int from_end, V2 *pos, V2 *dir)
 {
-    const ScriptFamily *fr    = net_family_rules(F_ROAD);
+    const ScriptFamily *fr    = net_line_rules();
     const float         base  = total < 1.0f ? total * 0.5f : fr->arm_base;
     const Piece        *first = from_end ? &pc[np - 1] : &pc[0];
     if (first->len >= fr->arm_own)
@@ -72,8 +76,9 @@ void arm_heading(const Piece *pc, int np, float total, int from_end, V2 *pos, V2
         acc += pc[i].len;
     }
     /*  The tangent where the run has gone far enough to mean it, rather
-     *  than the chord to there: a chord over half a tile turns a curving
-     *  approach into a straight one and moves the junction with it. */
+     *  than the chord to there.  A chord over half a tile turns a
+     *  curving approach into a straight one and moves the junction with
+     *  it. */
     if (from_end)
     {
         dir->x = -dir->x;
@@ -96,22 +101,25 @@ void arm_heading(const Piece *pc, int np, float total, int from_end, V2 *pos, V2
     }
 }
 
-/*  The ground under a junction box's outline point: the highest of the
- *  box's own plane, the ground where the point is, and the junction tile's
- *  ground at the nearest spot inside it.  Each of the three has been the
- *  one that mattered: - the box's plane: a spot of the junction tile the
- *  corridor never graded reads the raw ground a hair under the shelf, and
- *  the outline sloping down to it cut under the shelf between two samples
- *  (Atlanta 98,56 and 102,85, 0.02); - the ground where it is: an arm's
- *  outline reaching PAST the tile into a neighbour whose shelf stands
- *  higher (Four Cities 42,108, River5 57,19: pinned to the junction tile it
- *  cut 0.04 under); - the tile's own ground inside: a point ON the edge
- *  read the neighbour's raw ground and tilted that side of the box 0.03
- *  under its own tile (Atlanta 90,80's kin); and a point past the edge into
- *  a LOWER neighbour let the fan's spoke dip under the junction tile's own
- *  edge on the way out (River5 29,47, a sloped junction with a 0.08 wall to
- *  the south).  Uphill the box follows the ground; downhill it stays level
- *  and hovers the hair, as the old +0.05 outline did everywhere. */
+/*  The ground under a junction box's outline point.
+ *
+ *      The highest of the box's own plane.
+ *      The ground where the point is.
+ *      The junction tile's ground at the nearest spot inside it.
+ *
+ *  Each of the three has been the one that mattered: - the box's plane:
+ *  a spot of the junction tile the corridor never graded reads the raw
+ *  ground a hair under the shelf, and the outline sloping down to it cut
+ *  under the shelf between two samples.
+ *  - the ground where it is: an arm's outline reaching PAST the tile
+ *  into a neighbor whose shelf stands higher (Four Cities 42,108, River5
+ *  57,19: pinned to the junction tile it cut 0.04 under).  - the tile's
+ *  own ground inside: a point ON the edge read the neighbor's raw ground
+ *  and tilted that side of the box 0.03 under its own tile.  And a point past the edge into a LOWER neighbor let
+ *  the fan's spoke dip under the junction tile's own edge on the way out
+ *  (River5 29,47, a sloped junction with a 0.08 wall to the south).
+ *  Uphill the box follows the ground.  Downhill it stays level and
+ *  hovers the hair, as the old +0.05 outline did everywhere. */
 float junc_surface(Family f, const RCity *c, uint8_t mask_bit, int col, int row, float x, float y, float zj)
 {
     const float in = net_family_rules(f)->junc_inset;
@@ -141,8 +149,12 @@ typedef struct
 } JArm;
 
 /*  One junction outline's working state, handed to the stages below so
- *  each can be read on its own: the arms by angle, the corners between
- *  them, the trims, and the outline being built. */
+ *  each can be read on its own.
+ *
+ *      The arms by angle.
+ *      The corners between them.
+ *      The trims.
+ *      The outline being built. */
 typedef struct
 {
     const RCity *c;
@@ -160,7 +172,7 @@ typedef struct
     int          na, i, e, n;
 } Junc;
 
-/*  The arms: each linked edge's own ray -- where its path starts and the way it leaves -- from the fit the drawing pass will repeat. */
+/*  The arms: each linked edge's own ray.  Where its path starts and the way it leaves.  From the fit the drawing pass will repeat. */
 static int jp_arms(Junc *jx)
 {
     Family  f     = jx->f;
@@ -177,21 +189,21 @@ static int jp_arms(Junc *jx)
     {
         const RArm *a = &s_arm[FAMX(f)][(row * R_MAP + col) * 4 + e];
         V2          d, o;
-        int         rampside = net_family(f)->ramps && lane_ramp_tile(col + (int32_t)lroundf(ROAD_DU[e]), row + (int32_t)lroundf(ROAD_DV[e])) != NULL;
-        if (!(links & (1 << e)) && !rampside)
-            continue; /* a ramp tile returns no road link, and is an arm all the same */
+        int         spurside = net_family(f)->spurs && lane_spur_tile(col + (int32_t)lroundf(SIDE_DU[e]), row + (int32_t)lroundf(SIDE_DV[e])) != NULL;
+        if (!(links & (1 << e)) && !spurside)
+            continue; /* a spur tile returns no line link, and is an arm all the same */
         /*  The arm's own ray: where its path starts and the way it
          *  leaves.  Both come from the fit the drawing pass will repeat
-         *  exactly, so the mouth this cuts is a point ON that path and
+         *  exactly.  So the mouth this cuts is a point ON that path and
          *  the strip leaves it square. */
-        d = a->have ? (V2){a->dx, a->dy} : (V2){ROAD_DU[e], ROAD_DV[e]};
+        d = a->have ? (V2){a->dx, a->dy} : (V2){SIDE_DU[e], SIDE_DV[e]};
         o = a->have ? (V2){a->ax, a->ay}
-                    : (V2){cx + ROAD_DU[e] * w, cy + ROAD_DV[e] * w};
-        /*  A ramp arm has no fitted segment, but its foot is at the tile
-         *  edge's middle: the box reaches it, or grass shows between the
-         *  box and the ramp. */
-        if (!a->have && rampside)
-            o = (V2){cx + ROAD_DU[e] * 0.5f, cy + ROAD_DV[e] * 0.5f};
+                    : (V2){cx + SIDE_DU[e] * w, cy + SIDE_DV[e] * w};
+        /*  A spur arm has no fitted segment.  But its foot is at the
+         *  tile edge's middle: the box reaches it, or grass shows
+         *  between the box and the spur. */
+        if (!a->have && spurside)
+            o = (V2){cx + SIDE_DU[e] * 0.5f, cy + SIDE_DV[e] * 0.5f};
         arm[na].d   = d;
         arm[na].o   = o;
         arm[na].ang = atan2f(d.y, d.x);
@@ -210,22 +222,22 @@ static int jp_arms(Junc *jx)
 }
 
 /*  The outline itself is the SCRIPT'S (arc.rules.outline): the arms are
- *  read off the map above, and everything worked out from them -- their
+ *  read off the map above, and everything worked out from them.  Their
  *  order round the junction, the corner between each pair, how far each
- *  mouth is cut back, the kerb returns and the ring itself -- is
+ *  mouth is cut back, the lip returns and the ring itself.  Is
  *  transcribed in scripts/compose/outline.lua.  With no rule a junction
  *  has no outline and nothing is drawn on it. */
 /*  THE RINGS, worked out once a pass and kept.
  *
- *  A junction's outline is the script's, and the script is asked for it
- *  in a pass of its own (scripts/compose/world.lua) between the measure
+ *  A junction's outline is the script's.  The script is asked for it in
+ *  a pass of its own (scripts/compose/world.lua).  Between the measure
  *  that fills the arm table and the trims that read the ring.  Nothing
  *  in the pipeline asks for one: it looks the answer up.
  *
- *  Keeping them is what lets the ring be worked out once and read twice
- *  -- the trims want it, and so does the box drawn later -- and it is
- *  what makes the ask a pass rather than a call from inside three
- *  different phases. */
+ *  Keeping them is what lets the ring be worked out once and read twice.
+ *  The trims want it, and so does the box drawn later.  And it is what
+ *  makes the ask a pass rather than a call from inside three different
+ *  phases. */
 #define RINGS_MAX 4096
 static struct
 {
@@ -292,7 +304,7 @@ void junction_ring_keep(const OutlineFan *o)
         if (s_n_ring >= RINGS_MAX)
         {
             /*  A junction whose ring is not kept has no outline and
-             *  nothing drawn on it, which is a hole in the city and not
+             *  nothing drawn on it.  This is a hole in the city and not
              *  a thing to pass over quietly. */
             R_ERR("net", "no room for the ring at %d,%d: %d junctions is the most kept",
                   (int)o->col, (int)o->row, RINGS_MAX);
@@ -320,10 +332,10 @@ void junction_ring_keep(const OutlineFan *o)
 /*  ------------------------------------------------------------------
  *  What stage three measured, held for the drive
  *
- *  A junction's control and a mouth's crosswalk depth are both the
+ *  A junction's control and a mouth's stripe depth are both the
  *  scripts', and both are settled before any of the geometry that reads
- *  them is laid.  Stage three measures them and keeps the measurements;
- *  the drive walks what it kept, asks the rules, and hands each answer
+ *  them is laid.  Stage three measures them and keeps the measurements.
+ *  The drive walks what it kept, asks the rules, and hands each answer
  *  straight back.  Nothing between the two decides anything.
  *  ------------------------------------------------------------------ */
 #define ASKS_MAX 16384
@@ -356,7 +368,7 @@ void net_xwalk_asks_reset(void)
 }
 
 /*  One junction's control, to be answered.  `cls` and `traf` are what a
- *  family's own primitive read off the map; a family whose control is a
+ *  family's own primitive read off the map.  A family whose control is a
  *  rule and nothing else passes neither. */
 void net_control_ask(const char *rule, int32_t col, int32_t row, int links,
                      const int *cls, const int *traf, int busy)
@@ -409,16 +421,19 @@ void net_control_is(int i, int ctrl)
         s_junc_ctrl[s_ctrl_ask[i].row * R_MAP + s_ctrl_ask[i].col] = (uint8_t)ctrl;
 }
 
-/*  One mouth's crosswalk, to be answered: what the outline asked for,
- *  the road there is to give up, how much of it runs straight from the
- *  mouth, and the most of that road a band may take. */
+/*  One mouth's stripe, to be answered.
+ *
+ *      What the outline asked for.
+ *      The line there is to give up.
+ *      How much of it runs straight from the mouth.
+ *      The most of that line a band may take. */
 void net_xwalk_ask(int32_t col, int32_t row, int e, int fx, int ctrl,
                    float want, float room, float straight, float cap)
 {
     int k;
     if (s_n_xw_ask >= ASKS_MAX)
     {
-        R_ERR("net", "no room for the crossing at %d,%d: %d mouths is the most measured",
+        R_ERR("net", "no room for the meet at %d,%d: %d mouths is the most measured",
               (int)col, (int)row, ASKS_MAX);
         return;
     }
@@ -445,7 +460,7 @@ int net_xwalk_ask_at(int i, int32_t *col, int32_t *row, int *e, int *ctrl,
     return 1;
 }
 
-/*  The depth the rule answered, held to the road so one crossing can
+/*  The depth the rule answered, held to the line so one meet can
  *  never eat the segment.  A mouth the rule leaves unanswered keeps no
  *  band at all. */
 void net_xwalk_deep(int i, float d)
@@ -462,8 +477,8 @@ void net_xwalk_deep(int i, float d)
 /*  ------------------------------------------------------------------
  *  The strips a box lofts, held for the drive
  *
- *  A rail junction's box is its tracks, and each of them is lofted as a
- *  segment's strip is.  The box gathers them and draws none; the drive
+ *  A thread junction's box is its threads, and each of them is lofted as a
+ *  segment's strip is.  The box gathers them and draws none.  The drive
  *  lofts each in turn and composes it, which is what keeps the strip's
  *  composition in one place instead of inside whichever box made it.
  *  ------------------------------------------------------------------ */
@@ -557,7 +572,7 @@ static void jp_fill(const Junc *jx, OutlineFan *o)
     o->cx = jx->cx, o->cy = jx->cy;
     o->w = jx->w, o->far = jx->far, o->gro = jx->gro;
     o->cap   = s_tune.trim_cap;
-    o->curbs = net_family(jx->f)->curbs;
+    o->lips = net_family(jx->f)->lips;
     o->na    = jx->na;
     for (i = 0; i < jx->na && i < 4; ++i)
     {
@@ -597,26 +612,26 @@ static int jp_ring(Junc *jx)
  *  one, and both come from the same place: a corner that falls almost on
  *  top of a mouth.
  *
- *  A SPUR is a vertex where the ring turns back on itself -- out and
- *  straight back along its own path.  Its two edges face opposite ways,
- *  so the inward side of one of them points OUT of the junction, and
- *  everything taken from the outline afterwards inherits that: the
- *  footway offset lands outside, and the asphalt drawn inside the footway
+ *  A SPUR is a vertex where the ring turns back on itself: out and
+ *  straight back along its own path.  Its two edges face opposite ways.
+ *  So the inward side of one of them points OUT of the junction.
+ *  Everything taken from the outline afterwards inherits that: the
+ *  margin offset lands outside.  The fill drawn inside the margin
  *  crosses itself and covers the band it was meant to stop at.
  *
- *  A CROSSING is two edges of the ring meeting away from their shared
- *  vertex.  A ring that crosses itself has no inside, so a fan drawn from
- *  its middle paints outside it.
+ *  A MEET is two edges of the ring meeting away from their shared
+ *  vertex.  A ring that crosses itself has no inside, so a fan drawn
+ *  from its middle paints outside it.
  *
- *  Neither may exist.  They are counted for every junction the build lays
- *  and reported by the mesh check. */
+ *  Neither may exist.  They are counted for every junction the build
+ *  lays and reported by the mesh check. */
 static int s_out_n, s_out_spur, s_out_cross, s_out_bad;
 static int s_out_worst_c, s_out_worst_r;
 static float s_out_worst;
 
 /*  How many corners the script pulled in for standing further out than a
- *  junction reaches, and how far the furthest stood: the outline
- *  report's own count. */
+ *  junction reaches.  It also gives how far the furthest stood: the
+ *  outline report's own count. */
 static int   s_clamped;
 static float s_clamped_far;
 
@@ -645,8 +660,8 @@ static int seg_cross(V2 a, V2 b, V2 c, V2 d)
 }
 
 /*  Check one finished outline.  `turn_max` is how far a ring may turn at
- *  a vertex before it counts as doubling back: a mouth corner turns a
- *  right angle and a kerb return a little at a time, so anything past
+ *  a vertex before it counts as doubling back.  A mouth corner turns a
+ *  right angle and a lip return a little at a time.  So anything past
  *  150 degrees is the boundary reversing, not a corner. */
 static void junction_outline_check(const Junc *jx)
 {
@@ -696,7 +711,7 @@ static void junction_outline_check(const Junc *jx)
 
 void junction_outline_print(void)
 {
-    dumpf("outlines  %d junctions; %d spurs, %d self-crossings, on %d of them; the sharpest turn is %.0f degrees at %d,%d\n",
+    dumpf("outlines  %d junctions; %d spurs, %d self-meets, on %d of them; the sharpest turn is %.0f degrees at %d,%d\n",
           s_out_n, s_out_spur, s_out_cross, s_out_bad, (double)s_out_worst, s_out_worst_c, s_out_worst_r);
     dumpf("outlines    %d corners pulled in for standing further out than a junction reaches, the furthest at %.3f tiles from the middle\n",
           s_clamped, (double)s_clamped_far);
@@ -719,20 +734,20 @@ int junction_poly(const RCity *c, Family f, int32_t col, int32_t row, int links,
     x.cy = (float)row + 0.5f;
     x.w  = *net_family(f)->width * 0.5f;
     /*  The junction is sized by the band that runs through it, not by a
-     *  fixed number of tiles.  A wider road needs its mouth pushed further
-     *  out -- otherwise the arms fatten while the intersection stays put
-     *  and the strips overhang it.  Everything below is written against the
-     *  family's own default half-width, so at the shipped widths the
-     *  numbers are the ones that were tuned by eye, and only moving a width
-     *  moves them. */
+     *  fixed number of tiles.  A wider line needs its mouth pushed
+     *  further out: otherwise the arms fatten while the intersection
+     *  stays put and the strips overhang it.  Everything below is
+     *  written against the family's own default half-width, so at the
+     *  shipped widths the numbers are the ones that were tuned by eye.
+     *  Only moving a width moves them. */
     x.ref = net_family(f)->ref_width * 0.5f;
     x.gro = g_dev.noscale ? 1.0f : x.w / x.ref; /* for before/after shots */
     /*  How far from its middle a junction's corner may stand.  Two arms
-     *  leaving at a shallow angle meet a long way out, and pulling that
-     *  corner in costs it its kerb return: the boundary then turns the
-     *  whole angle at a point.  A junction of a diagonal road wants the
-     *  room, and the widest corner any shipped city asks for is under
-     *  0.8 of a tile from the middle. */
+     *  leaving at a shallow angle meet a long way out.  Pulling that
+     *  corner in costs it its lip return: the boundary then turns the
+     *  whole angle at a point.  A junction of a diagonal line wants the
+     *  room.  The widest corner any shipped city asks for is under 0.8
+     *  of a tile from the middle. */
     x.far = net_family_rules(f)->junc_far * x.gro;
     /*  Two stages: the arms this junction has, read off the map, and
      *  the ring the script walks from them. */
@@ -748,9 +763,11 @@ int junction_poly(const RCity *c, Family f, int32_t col, int32_t row, int links,
             dumpf(" %.3f,%.3f,%.3f,%.3f", (double)x.arm[i].d.x, (double)x.arm[i].d.y, (double)trim[x.arm[i].e], (double)x.w);
         dumpf("\n");
     }
-    /*  Each arm's mouth, before the hull has its way with the outline:
-     *  the middle of the cut, at the trim the ring asked for, and the way
-     *  the arm leaves. */
+    /*  Each arm's mouth, before the hull has its way with the outline.
+     *
+     *      The middle of the cut.
+     *      At the trim the ring asked for.
+     *      The way the arm leaves. */
     if (arms)
         for (i = 0; i < x.na; ++i)
         {
@@ -779,12 +796,13 @@ static int build_junction_body(RMesh *m, const RCity *c, uint8_t mask_bit, Famil
 
 /*  The junction, and who asked for it (as loft_at does for a strip). */
 /*  The box being built, held between its two halves: the drive lays the
- *  asphalt on the outline the first half gathered, and the second half
- *  takes up the footway, the signs and the corners.  The shape stays
- *  open across the pair, so everything drawn belongs to the junction. */
+ *  fill on the outline the first half gathered.  The second half takes
+ *  up the margin, the signs and the corners.  The shape stays open
+ *  across the pair, so everything drawn belongs to the junction. */
 static JBox    s_jbox;
 static ShapeId s_jbox_sh;
-static int     s_jbox_stop; /* the grading pass: the box grades nothing past its own tracks */
+static int     s_jbox_stop;  /* the grading pass: the box grades nothing past its own threads */
+static int     s_jbox_grade; /* ... except a turnout's, which it grades the ground under */
 
 int build_junction_at(const char *where, const char *who, RMesh *m, const RCity *c, uint8_t mask_bit, Family f, int32_t col, int32_t row, int links, float order)
 {
@@ -794,10 +812,29 @@ int build_junction_at(const char *where, const char *who, RMesh *m, const RCity 
 
 int build_junction_done(void)
 {
-    int rc = s_jbox_stop ? 0 : net_family_box_done(net_family(s_jbox.f), &s_jbox);
     shape_close(s_jbox_sh);
     s_jbox_sh = SHAPE_NONE;
-    return rc;
+    return 0;
+}
+
+/*  The box in hand, and the two questions the drive asks about it: is it
+ *  being COMPOSED this pass.  The grading pass stops at a box unless the
+ *  family lofts strips of its own.  And is it being FINISHED, which the
+ *  grading pass never does.  What the box then draws is the script's:
+ *  world.lua calls w:box_paving and w:node_threads between these. */
+JBox *net_junction_box_now(void)
+{
+    return &s_jbox;
+}
+
+int net_junction_composing(void)
+{
+    return !s_jbox_stop || s_jbox_grade;
+}
+
+int net_junction_finishing(void)
+{
+    return !s_jbox_stop;
 }
 
 static int build_junction_body(RMesh *m, const RCity *c, uint8_t mask_bit, Family f, int32_t col, int32_t row, int links, float order)
@@ -805,8 +842,9 @@ static int build_junction_body(RMesh *m, const RCity *c, uint8_t mask_bit, Famil
     JBox             x;
     const NetFamily *fam = net_family(f);
     memset(&x, 0, sizeof x);
-    s_jbox_stop = 0;
+    s_jbox_stop = s_jbox_grade = 0;
     net_box_lofts_reset();
+    net_cut_reset(); /* this box's connectors, and nothing left from the last */
     x.m = m, x.c = c, x.mask_bit = mask_bit, x.f = f, x.col = col, x.row = row, x.links = links, x.order = order;
     x.hw           = *fam->width * 0.5f;
     x.mat          = fam->mat;
@@ -816,47 +854,54 @@ static int build_junction_body(RMesh *m, const RCity *c, uint8_t mask_bit, Famil
     x.cx           = (float)col + 0.5f;
     x.cy           = (float)row + 0.5f;
     x.h            = x.hw;
-    x.sw           = x.h * net_family_rules(f)->at_junction; /* the curb return's radius: the sidewalk's width */
-    x.lw           = x.h * net_family_rules(f)->at_junction; /* the sidewalk along a free side, across 0.8..1  */
+    x.sw           = x.h * net_family_rules(f)->at_junction; /* the lip return's radius: the margin's width */
+    x.lw           = x.h * net_family_rules(f)->at_junction; /* the margin along a free side, across 0.8..1  */
     x.a0[0] = x.cx - x.h, x.a0[1] = x.cy - x.h;
     x.a1[0] = x.cx + x.h, x.a1[1] = x.cy - x.h;
     x.b0[0] = x.cx - x.h, x.b0[1] = x.cy + x.h;
     x.b1[0] = x.cx + x.h, x.b1[1] = x.cy + x.h;
-    /*  The box stands FLUSH on the graded surface, no hair: the ground
-     *  under a junction is graded to the road's line like the ground
+    /*  The box stands FLUSH on the graded surface, no hair.  The ground
+     *  under a junction is graded to the line's line like the ground
      *  under its arms, and the arms lie flush on that.  A hair here, or
      *  0.05 at the outline, stands every box 0.03 to 0.05 above its
-     *  roads (Atlanta 90,80: box 5.08, arms 5.03). */
+     *  lines. */
     x.zj           = surface_at_world(c, mask_bit, x.cx, x.cy);
     shelf_node(col, row); /* a node of the graph: every edge that meets here is at one level */
     x.comp         = net_compensate();
-    m->strip_class = 0.0f; /* the box is plain asphalt; a median ends at the junction */
-    /*  The control -- which arms carry a signal or a stop sign -- is
-     *  stage three's, worked out with the trims and the crossings that
-     *  turn on it (walk.c net_stage_three); the box only reads it.
-     *  The grading pass stops here: a box grades nothing. */
+    m->strip_class = 0.0f; /* the box is plain fill.  A median ends at the junction */
+    /*  The control.  Which arms carry a signal or a stop sign is stage
+     *  three's.  It is worked out with the trims and the laps that turn
+     *  on it (walk.c net_stage_three).  The box only reads it.  The
+     *  grading pass stops here: a box grades nothing. */
     if (grade_only(g_dev.grade_junc))
     {
-        /*  a turnout's tracks are lofted (rail.c): the grading pass
-         *  grades their ground as a segment's */
-        s_jbox_stop = 1;
-        s_jbox      = x;
-        return fam->turnout > 0.0f ? net_family_box(fam, &s_jbox) : 0;
+        /*  a turnout's threads are lofted (thread.c): the grading pass
+         *  grades their ground as a segment's.  So it asks for the same
+         *  paths and the drive cuts them the same way */
+        s_jbox_stop  = 1;
+        s_jbox_grade = fam->turnout > 0.0f;
+        s_jbox       = x;
+        return 0;
     }
-    /*  The stages: a rail junction is its own thing and done; a road's
-     *  gets its lanes' connectors, the asphalt, the sides, the corners.
-     *  The connectors run from every inbound lane to every outbound lane
-     *  of the other arms (lane.c), a rail junction's included, so that
-     *  every port its box draws is served (Atlanta 9,12). */
+    /*  The stages: a thread junction is its own thing and done.  A
+     *  line's gets its lanes' connectors, the fill, the sides, the
+     *  corners.  The connectors run from every inbound lane to every
+     *  outbound lane of the other arms (lane.c), a thread junction's
+     *  included.  So that every port its box draws is served. */
+    s_jbox = x;
+    lane_junction_ask(m, c, mask_bit, f, col, row, links);
+    return 0;
+}
+
+/*  The connectors taken from the pieces the drive cut, and then the
+ *  family's own drawing on the outline: line.c's, thread.c's. */
+int build_junction_lanes(void)
+{
     double tp = prof_now();
-    if (lane_junction(m, c, mask_bit, f, col, row, links) != 0)
+    if (s_jbox_stop)
+        return 0;
+    if (lane_junction_take() != 0)
         return -1;
-    net_prof_add(NET_PROF_JUNC_LANES, prof_now() - tp), tp = prof_now();
-    {
-        int rc;
-        s_jbox = x;
-        rc     = net_family_box(fam, &s_jbox); /* the family's drawing on the outline: road.c's, rail.c's */
-        net_prof_add(NET_PROF_JUNC_BOX, prof_now() - tp);
-        return rc;
-    }
+    net_prof_add(NET_PROF_JUNC_LANES, prof_now() - tp);
+    return 0;
 }

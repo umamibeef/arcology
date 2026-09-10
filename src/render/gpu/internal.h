@@ -1,9 +1,9 @@
-/*  gpu/internal.h -- what the device and the frame both need. gpu.c makes
- *  the device and puts data on it; gpu/frame.c draws with it.  The file
- *  always knew where that line fell -- it carried a forward declaration of
- *  view_factor with the note "Defined with the frame" -- and this is that
- *  line, made into a file boundary.  Nothing here is public: gpu.h is what
- *  the rest of the renderer sees. */
+/*  gpu/internal.h: what the device and the frame both need. gpu.c makes
+ *  the device and puts data on it.  Gpu/frame.c draws with it.  The file
+ *  always knew where that line fell, it carried a forward declaration of
+ *  view_factor with the note "Defined with the frame".  This is that
+ *  line, made into a file boundary.  Nothing here is public: gpu.h is
+ *  what the rest of the renderer sees. */
 #ifndef R_GPU_INT_H
 #define R_GPU_INT_H
 
@@ -11,10 +11,11 @@
 
 #include <SDL3/SDL.h>
 
-/*  One instance = one op.  The layout is the vertex input state below and
- *  the attributes in sprite.vert, in that order.  `under` is the road a
- *  car is stencilled onto for a stencil op, and the tile's diamond origin
- *  and grid position for every other op, which the water shader reads. */
+/*  One instance = one op.  The layout is the vertex input state below
+ *  and the attributes in sprite.vert, in that order.  `under` is the
+ *  line a car is stencilled onto for a stencil op.  The tile's diamond
+ *  origin and grid position for every other op, which the water shader
+ *  reads. */
 /*  A slot of the mesh buffer: one chunk range's vertices, with room to grow. */
 typedef struct
 {
@@ -25,8 +26,8 @@ typedef struct
 {
     int32_t dst[4];   /* canvas x, y, w, h                     */
     int32_t src[4];   /* atlas x, y, flip, stencil             */
-    int32_t under[4]; /* road atlas x, y, canvas x, y          */
-    float   misc[4];  /* depth, road w, road flip, road h      */
+    int32_t under[4]; /* line atlas x, y, canvas x, y          */
+    float   misc[4];  /* depth, line w, line flip, line h      */
 } RInst;
 
 enum
@@ -39,24 +40,21 @@ enum
     K_WATER_COL  = 5,  /* the water column stacked at the map edge, 284    */
     K_UG_LATTICE = 7,  /* the underground view's empty-tile lattice, 318..331 */
     K_WATER_EDGE = 8,  /* water art on a cut edge: the mesh draws the surface  */
-    K_CAR        = 10, /* a car, $19004's stencilled traffic sprite; off with the road mesh */
-    K_TRAIN      = 11, /* a train car, thing types 10 and 11, shapes 374..378; off with the road mesh */
+    K_CAR        = 10, /* a car, $19004's stencilled traffic sprite.  Off with the line mesh */
+    K_TRAIN      = 11, /* a train car, thing types 10 and 11, shapes 374..378.  Off with the line mesh */
     K_LANDMARK   = 12, /* a structure the player placed, XBLD 0xC6 and up: the plants, the civic buildings, the ports and the landmarks.  The one kind of sprite the map view keeps, drawn over the tint on its own tile */
-    /*  K_ROAD_ART is not a label, it is the SUPPRESSION LIST.  With the
-     *  mesh on, a K_ROAD_ART sprite is dropped because the geometry stands
-     *  in for it; an id outside the ranges keeps its sprite, which is then
-     *  drawn over the mesh at the sprite's own height -- a piece of track
-     *  hanging in the air above a surface that is already there.
+    /*  K_LINE_ART is not a label.  It is the SUPPRESSION LIST.  With the
+     *  mesh on, a K_LINE_ART sprite is dropped because the geometry
+     *  stands in for it.  A tile left out keeps its sprite.  This is
+     *  then drawn over the mesh at the sprite's own height.  A piece of
+     *  thread hanging in the air above a surface that is already there.
      *
-     *  So the ranges must cover EXACTLY what the mesh draws as a strip:
-     *  XBLD 0x0E..0x50, the road, rail and crossing pieces and the eight
-     *  highway DECK ids, and a second run 0x61..0x68, the four RAMP ids
-     *  and the four CURVE blocks the band walk lofts as part of the deck.
-     *  What lies between, 0x51..0x60 -- the long inclines, the bridges and
-     *  the corner fills beside a curve -- is still sprites, and must stay
-     *  outside these ranges until something draws it.  --mesh-only is how
-     *  you check. */
-    K_ROAD_ART   = 9
+     *  Which tiles those are is the SCRIPT'S: `meshed_tiles` in
+     *  scripts/ground_tiles.lua, declared beside the other tile tables.
+     *  It must name exactly what the mesh draws as a strip.  A piece the
+     *  mesh learns to draw is then enabled by editing that table and
+     *  nothing else.  --mesh-only checks what the mesh has. */
+    K_LINE_ART   = 9
 };
 
 struct RGpu
@@ -86,11 +84,11 @@ struct RGpu
     SDL_GPUBuffer         *ibuf;
     SDL_GPUTransferBuffer *itb;
     uint32_t               ibuf_cap; /* instances */
-    /*  The mesh, in slots: one per range -- chunk k's terrain at 2k, its
-     *  networks at 2k+1, its water at 2*MESH_CHUNKS + k -- each with room
-     *  to grow, so an edit's build uploads only the ranges it changed and
-     *  the rest stay where they are.  The buffer is laid out again, whole,
-     *  only when a range outgrows its slot. */
+    /*  The mesh, in slots, one per range.  Chunk k's terrain is at 2k,
+     *  its networks at 2k+1, and its water at 2*MESH_CHUNKS + k.  Each
+     *  with room to grow, so an edit's build uploads only the ranges it
+     *  changed and the rest stay where they are.  The buffer is laid out
+     *  again, whole, only when a range outgrows its slot. */
     SDL_GPUBuffer         *mbuf;
     uint32_t               mbuf_cap; /* vertices */
     GpuSlot                slot[3 * MESH_CHUNKS];
@@ -121,7 +119,7 @@ struct RGpu
 };
 
 /*  Canvas pixels to screen pixels: the integer pixel scale times the
- *  continuous zoom.  The frame defines it; the device uses it too. */
+ *  continuous zoom.  The frame defines it.  The device uses it too. */
 float view_factor(const RGpuView *v);
 
 /*  The device's own growable resources.  The frame asks for them by size

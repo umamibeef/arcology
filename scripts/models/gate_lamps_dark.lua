@@ -1,4 +1,4 @@
---  gate_lamps_dark.lua -- a level crossing's flashers, both out.
+--  gate_lamps_dark.lua -- a level meet's flashers, both out.
 --
 --  The same pair as gate_lamps_lit in the same places, drawn while the
 --  arm stands at its rest and no train is near.

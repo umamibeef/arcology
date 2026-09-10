@@ -3,7 +3,7 @@
 --  When the tuning window asks to see them: a hairline down the middle
 --  of the band through every station, so the curve the fit produced can
 --  be read against the ribbon that came out of it; the band's two edges
---  beside it, so the carriageway can be read against the corridor it
+--  beside it, so the way can be read against the corridor it
 --  sits in; and a mark at every piece boundary -- where a straight hands
 --  over to an arc and back -- so the curve's extent is visible and not
 --  just its shape.  Blue where an arc begins, red where the line is

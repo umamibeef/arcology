@@ -1,14 +1,14 @@
-/*  sane.c -- the _FP68K trap ($A9EB), reduced to what SimCity 2000 uses.
+/*  sane.c: the _FP68K trap ($A9EB), reduced to what SimCity 2000 uses.
  *  The 68k calling convention is Pascal: push a pointer to the source, then
- *  a pointer to the destination, then the opword, then trap -- so the
+ *  a pointer to the destination, then the opword, then trap: so the
  *  destination ends up NEAREST the stack pointer.  The destination is
  *  read-modify-written for the arithmetic operations and written for the
- *  conversions, so the call sites read like pea  src ; pea dst ; move.w
- *  #$0804,-(sp) ; _FP68K which is "dst = dst * src, operands in double".
+ *  conversions, so the call sites read like pea  src .  Pea dst .  Move.w
+ *  #$0804,-(sp) .  _FP68K which is "dst = dst * src, operands in double".
  *  Getting the two the wrong way round still runs, and still terminates,
  *  and quietly computes the reciprocal of what was meant.  Transcribing
  *  $34D04 is then mechanical: each four-instruction group becomes one
- *  fp68k().  Only the 21 opwords that actually occur are handled; anything
+ *  fp68k().  Only the 21 opwords that actually occur are handled.  Anything
  *  else is a bug in the transcription rather than a missing feature, so it
  *  is reported rather than silently ignored. */
 #include "ext80.h"

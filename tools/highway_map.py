@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""What each highway tile id actually is, read off the shipped cities.
+"""What each band tile id actually is, read off the shipped cities.
 
-Part 7 of the road spec is engine-agnostic: it describes decks, ramps and
+Part 7 of the line spec is engine-agnostic: it describes slabs, spurs and
 interchanges without saying which XBLD byte is which.  This answers that,
 and it answers it from the shipped cities rather than from the sprite sheet,
 because a sprite tells you what a tile LOOKS like and the neighbours tell
@@ -10,16 +10,16 @@ you what it IS.
 For every id in 0x49..0x60 it reports:
 
   n          how many tiles carry it
-  block      how often the tile sits in a 2x2 square of highway -- the
-             spec's segment; a deck tile is always in one
-  axis       which orthogonal neighbours are highway, as a mask: a deck
+  block      how often the tile sits in a 2x2 square of band -- the
+             spec's segment; a slab tile is always in one
+  axis       which orthogonal neighbours are band, as a mask: a slab
              tile running north-south joins N and S
-  joins      the OTHER families it touches: road, rail, power.  This is
-             what separates a ramp (touches road) from a crossing
-             (touches rail) from plain deck (touches neither)
+  joins      the OTHER families it touches: line, thread, power.  This is
+             what separates a spur (touches line) from a meet
+             (touches thread) from plain slab (touches neither)
   altm       the ALTM high byte, which carries the bridge/tunnel flags
 
-usage: highway_map.py [--csv]
+usage: band_map.py [--csv]
 """
 import collections
 import glob
@@ -31,8 +31,8 @@ from runsim import Sim  # noqa: E402
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 HW = set(range(0x49, 0x61))
-FAM = {"road": set(range(0x1D, 0x2C)) | {0x43, 0x44, 0x45, 0x46},
-       "rail": set(range(0x2C, 0x3F)) | {0x47, 0x48},
+FAM = {"line": set(range(0x1D, 0x2C)) | {0x43, 0x44, 0x45, 0x46},
+       "thread": set(range(0x2C, 0x3F)) | {0x47, 0x48},
        "power": set(range(0x0E, 0x1D))}
 
 
@@ -40,7 +40,7 @@ def family(v):
     for k, s in FAM.items():
         if v in s:
             return k
-    return "highway" if v in HW else None
+    return "band" if v in HW else None
 
 
 def main():
@@ -61,7 +61,7 @@ def main():
             r, c = divmod(i, 128)
             n[v] += 1
             altm[v][((a[i * 2] << 8) | a[i * 2 + 1]) >> 8 & 0xFF] += 1
-            #  in a 2x2 square of highway, any of the four positions
+            #  in a 2x2 square of band, any of the four positions
             for dr in (-1, 0):
                 for dc in (-1, 0):
                     q = [(r + dr + y, c + dc + x) for y in (0, 1) for x in (0, 1)]
@@ -78,7 +78,7 @@ def main():
                 if not (0 <= rr < 128 and 0 <= cc < 128):
                     continue
                 f = family(b[rr * 128 + cc])
-                if f == "highway":
+                if f == "band":
                     m |= 1 << bit
                 elif f:
                     joins[v][f] += 1

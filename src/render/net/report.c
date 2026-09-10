@@ -1,8 +1,10 @@
-/*  The debug report of an area.  It says what the city holds on every tile
- *  of the area, in the two-letter map used when the highways were argued
- *  over, and what the networks made of them: the bands with their fitted
- *  nodes and stations, the segments, the on-ramps with the stage that lost
- *  them, the junctions' controls. */
+/*  The debug report of an area.  It says what the city holds on every
+ *  tile of the area.  It uses the two-letter map from when the bands
+ *  were argued over, and what the networks made of them.
+ *
+ *      The bands with their fitted nodes and stations.  The segments.
+ *      The on-spurs with the stage that lost them.  The junctions'
+ *      controls. */
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -11,7 +13,7 @@
 
 #include "mesh/internal.h"
 #include "mesh/mesh.h"
-#include "net/internal.h"
+#include "pipeline.h"
 #include "net/report.h"
 
 typedef struct
@@ -48,7 +50,7 @@ static int text_printf(Text *t, const char *fmt, ...)
     return 0;
 }
 
-/*  A tile's two-letter mark: a highway piece by its id, the rest by kind. */
+/*  A tile's two-letter mark: a band piece by its id, the rest by kind. */
 static void tile_mark(const RCity *c, int32_t col, int32_t row, char out[3])
 {
     uint8_t b = c->xbld[row * R_MAP + col];
@@ -79,31 +81,31 @@ static const char *tile_kind(uint8_t b)
     if (b <= 0x1Cu)
         return "trees or rubble";
     if (b <= 0x2Bu)
-        return "road";
+        return "line";
     if (b <= 0x3Au)
-        return "rail";
+        return "thread";
     if (b <= 0x42u)
         return "power line";
     if (b <= 0x48u)
-        return "level crossing";
+        return "level meet";
     if (b == 0x49u)
-        return "highway straight, east-west";
+        return "band straight, east-west";
     if (b == 0x4Au)
-        return "highway straight, north-south";
+        return "band straight, north-south";
     if (b <= 0x50u)
-        return "highway over a road or rail";
+        return "band over a line or thread";
     if (b <= 0x5Cu)
-        return "highway piece";
+        return "band piece";
     if (b <= 0x60u)
-        return "on-ramp";
+        return "on-spur";
     if (b <= 0x64u)
-        return "highway section (0x61-0x64)";
+        return "band section (0x61-0x64)";
     if (b <= 0x68u)
-        return "highway curve block";
+        return "band curve block";
     if (b == 0x69u)
-        return "highway interchange";
+        return "band interchange";
     if (b <= 0x6Bu)
-        return "highway piece";
+        return "band piece";
     return "building";
 }
 
@@ -134,8 +136,8 @@ int net_area_report(const RCity *c, int32_t c0, int32_t r0, int32_t c1, int32_t 
                                      : r1;
     text_printf(&t, "area  %s  cols %d..%d  rows %d..%d  (%d x %d tiles)  rotation %d\n", c->name[0] ? c->name : "(unnamed)", (int)c0, (int)c1, (int)r0, (int)r1, (int)(c1 - c0 + 1), (int)(r1 - r0 + 1), (int)c->rotation);
     text_printf(&t, "  north is decreasing row, east is decreasing col; a label is col,row\n");
-    /*  The map: the marks used when the highways were argued over. */
-    text_printf(&t, "tiles  (.. ground  ,, trees or rubble  ~~ water  rr road  tt rail  pp power  xx crossing  bb building; a highway piece by its id)\n     ");
+    /*  The map: the marks used when the bands were argued over. */
+    text_printf(&t, "tiles  (.. ground  ,, trees or rubble  ~~ water  rr line  tt thread  pp power  xx meet  bb building; a band piece by its id)\n     ");
     for (col = c0; col <= c1; ++col)
         text_printf(&t, " %3d", (int)col);
     text_printf(&t, "\n");
@@ -162,9 +164,9 @@ int net_area_report(const RCity *c, int32_t c0, int32_t r0, int32_t c1, int32_t 
             mesh_query(c, col, row, buf, sizeof buf);
             text_printf(&t, "  %3d,%-3d xbld 0x%02x %-30s alt %2d  xter 0x%02x  %s\n", (int)col, (int)row, (unsigned)b, tile_kind(b), (int)rcity_alt_ground(c->altm[idx]), (unsigned)c->xter[idx], buf);
         }
-    /*  The highway bands over the area: their tiles here, their fitted
+    /*  The band bands over the area: their tiles here, their fitted
      *  nodes near here, their stations here. */
-    n = hiway_band_count();
+    n = band_count();
     for (i = 0; i < n; ++i)
     {
         const int32_t *bt;
@@ -172,7 +174,7 @@ int net_area_report(const RCity *c, int32_t c0, int32_t r0, int32_t c1, int32_t 
         const RSeg    *r;
         const V2      *q;
         const float   *rad;
-        if (hiway_band_get(i, &bt, &nb) != 0)
+        if (band_get(i, &bt, &nb) != 0)
             continue;
         for (k = 0; k < nb; ++k)
             if (in_area(bt[k] % R_MAP, bt[k] / R_MAP, c0, r0, c1, r1))
@@ -181,7 +183,7 @@ int net_area_report(const RCity *c, int32_t c0, int32_t r0, int32_t c1, int32_t 
             continue;
         idx = seg_table_band_index(i);
         r   = idx >= 0 ? seg_table_entry(idx) : NULL;
-        text_printf(&t, "highway band %d%s: %d of its %d tiles are in the area\n", i, r ? "" : " (not in the table)", here, nb);
+        text_printf(&t, "band band %d%s: %d of its %d tiles are in the area\n", i, r ? "" : " (not in the table)", here, nb);
         if (r)
             text_printf(&t, "  walked from %d,%d, %d fitted nodes, %d pieces\n", (int)r->col, (int)r->row, r->nk, r->np);
         if (r && seg_table_nodes(idx, &q, &rad, &nk) == 0)
@@ -208,9 +210,9 @@ int net_area_report(const RCity *c, int32_t c0, int32_t r0, int32_t c1, int32_t 
             ++nst;
         }
         if (nst)
-            text_printf(&t, "deck stations in the area: %d (the loft's band %d), first (%.2f,%.2f) s %.2f z %.2f, last (%.2f,%.2f) s %.2f z %.2f\n", nst, band, (double)s_hw_st[first].pos.x, (double)s_hw_st[first].pos.y, (double)s_hw_st[first].s, (double)s_hw_st[first].z, (double)s_hw_st[last].pos.x, (double)s_hw_st[last].pos.y, (double)s_hw_st[last].s, (double)s_hw_st[last].z);
+            text_printf(&t, "slab stations in the area: %d (the loft's band %d), first (%.2f,%.2f) s %.2f z %.2f, last (%.2f,%.2f) s %.2f z %.2f\n", nst, band, (double)s_hw_st[first].pos.x, (double)s_hw_st[first].pos.y, (double)s_hw_st[first].s, (double)s_hw_st[first].z, (double)s_hw_st[last].pos.x, (double)s_hw_st[last].pos.y, (double)s_hw_st[last].s, (double)s_hw_st[last].z);
     }
-    /*  The road and rail segments over the area. */
+    /*  The line and thread segments over the area. */
     n = seg_table_count();
     for (i = 0; i < n; ++i)
     {
@@ -224,17 +226,17 @@ int net_area_report(const RCity *c, int32_t c0, int32_t r0, int32_t c1, int32_t 
             if (in_area(tc[k], tr[k], c0, r0, c1, r1))
                 ++here;
         if (here)
-            text_printf(&t, "%s segment %d from %d,%d to %d,%d: %d of its %d tiles are in the area, %d pieces, %d fitted nodes\n", r->f == F_RAIL ? "rail" : "road", i, (int)col0, (int)row0, (int)cc, (int)cr, here, nt, r->np, r->nk);
+            text_printf(&t, "%s segment %d from %d,%d to %d,%d: %d of its %d tiles are in the area, %d pieces, %d fitted nodes\n", r->f == net_thread->f ? "thread" : "line", i, (int)col0, (int)row0, (int)cc, (int)cr, here, nt, r->np, r->nk);
     }
-    /*  The on-ramps, with the stage that lost any. */
-    for (i = 0; i < s_hw_nramps; ++i)
+    /*  The on-spurs, with the stage that lost any. */
+    for (i = 0; i < s_hw_nspurs; ++i)
     {
-        const HwRamp *rp = &s_hw_ramps[i];
+        const HwSpur *rp = &s_hw_spurs[i];
         const char   *lost;
         if (!in_area(rp->rc, rp->rr, c0, r0, c1, r1))
             continue;
-        lost = hiway_ramp_lost(rp->rc, rp->rr);
-        text_printf(&t, "on-ramp %d,%d: %s, on the deck's centreline at %.2f,%.2f, along %.0f,%.0f, toward the deck %.0f,%.0f, %d tiles of lane drop%s%s\n", (int)rp->rc, (int)rp->rr, rp->off ? "OFF the deck" : "ON to the deck", (double)rp->c0.x, (double)rp->c0.y, (double)rp->along.x, (double)rp->along.y, (double)rp->toward.x, (double)rp->toward.y, rp->len, lost ? " -- LOST: " : "", lost ? lost : "");
+        lost = band_spur_lost(rp->rc, rp->rr);
+        text_printf(&t, "on-spur %d,%d: %s, on the slab's centreline at %.2f,%.2f, along %.0f,%.0f, toward the slab %.0f,%.0f, %d tiles of lane drop%s%s\n", (int)rp->rc, (int)rp->rr, rp->off ? "OFF the slab" : "ON to the slab", (double)rp->c0.x, (double)rp->c0.y, (double)rp->along.x, (double)rp->along.y, (double)rp->toward.x, (double)rp->toward.y, rp->len, lost ? " -- LOST: " : "", lost ? lost : "");
     }
     /*  The junctions' controls. */
     for (row = r0; row <= r1; ++row)
@@ -251,16 +253,16 @@ int net_area_report(const RCity *c, int32_t c0, int32_t r0, int32_t c1, int32_t 
     return t.s ? 0 : -1;
 }
 
-/*  The component under a tile, for the inspector: an intersection's own
- *  outline where the tile is a junction, else the band of the road or
- *  railway that runs through it.  The polygon comes back in world
- *  coordinates, closed, and `label` names the thing.  Returns 0, or -1 when
- *  nothing of ours is there. */
+/*  The component under a tile, for the inspector.  It is an
+ *  intersection's own outline where the tile is a junction.  Otherwise
+ *  it is the band of the line or line that runs through it.  The polygon
+ *  comes back in world coordinates, closed, and `label` names the thing.
+ *  Returns 0, or -1 when nothing of ours is there. */
 int net_component_at(const RCity *c, const RAtlasLevel *l, int32_t col, int32_t row, float *poly_xy, int max_pts, int *n, char *label, size_t lab)
 {
     V2 *poly = (V2 *)poly_xy; /* pairs of floats, laid out as the points are */
     int max  = max_pts;
-    static const Family fams[2] = {F_ROAD, F_RAIL};
+    const Family fams[2] = {net_line->f, net_thread->f};
     int                 fi, i, cnt = seg_table_count();
     if (!poly_xy || max < 8 || !n || col < 0 || row < 0 || col >= R_MAP || row >= R_MAP)
         return -1;
@@ -280,11 +282,11 @@ int net_component_at(const RCity *c, const RAtlasLevel *l, int32_t col, int32_t 
         if (np < 3)
             continue;
         *n = np;
-        snprintf(label, lab, "%s junction at %d,%d", f == F_RAIL ? "rail" : "road", (int)col, (int)row);
+        snprintf(label, lab, "%s junction at %d,%d", f == net_thread->f ? "thread" : "line", (int)col, (int)row);
         return 0;
     }
-    /*  A ramp next: it is a lane and nothing else -- no segment holds it --
-     *  so the lane table is the only place to find it. */
+    /*  A spur next: it is a lane and nothing else.  No segment holds it.
+     *  So the lane table is the only place to find it. */
     {
         int nl = lane_table_count();
         for (i = 0; i < nl; ++i)
@@ -293,7 +295,7 @@ int net_component_at(const RCity *c, const RAtlasLevel *l, int32_t col, int32_t 
             const Piece *pc;
             float        w, total = 0.0f, step;
             V2           pos, dir;
-            if (lane_table_get(i, &cls, &fam, &pc, &np, &w) != 0 || cls != LANE_CLS_RAMP || np < 1)
+            if (lane_table_get(i, &cls, &fam, &pc, &np, &w) != 0 || cls != LANE_CLS_SPUR || np < 1)
                 continue;
             for (k = 0; k < np; ++k)
                 total += pc[k].len;
@@ -321,12 +323,15 @@ int net_component_at(const RCity *c, const RAtlasLevel *l, int32_t col, int32_t 
                     poly[*n].y = pos.y - dir.x * (side ? -w : w);
                     ++*n;
                 }
-            snprintf(label, lab, "ramp lane %d", i);
+            snprintf(label, lab, "spur lane %d", i);
             return 0;
         }
     }
-    /*  Else the band that runs through the tile: its two edges, out along
-     *  one and back along the other, at the half width it was lofted at. */
+    /*  Else the band that runs through the tile.
+     *
+     *      Its two edges.
+     *      Out along one and back along the other.
+     *      At the half width it was lofted at. */
     for (i = 0; i < cnt; ++i)
     {
         const RSeg    *r = seg_table_entry(i);
@@ -337,7 +342,7 @@ int net_component_at(const RCity *c, const RAtlasLevel *l, int32_t col, int32_t 
         int            k, side, steps;
         float          total = 0.0f, step;
         if (!r || r->np < 1)
-            continue; /* a highway band is walked whole and its tiles are not its own: the report skips it too */
+            continue; /* a band band is walked whole and its tiles are not its own: the report skips it too */
         seg_table_arenas(r, &pc, &q, &rad, &tlim, &tc, &tr);
         for (k = 0; k < r->nt; ++k)
             if (tc[k] == col && tr[k] == row)
@@ -366,7 +371,7 @@ int net_component_at(const RCity *c, const RAtlasLevel *l, int32_t col, int32_t 
                 poly[*n].y = pos.y - dir.x * (side ? -r->hw : r->hw);
                 ++*n;
             }
-        snprintf(label, lab, "%s %d, %d,%d to %d,%d", r->band ? "highway band" : (r->f == F_RAIL ? "rail segment" : "road segment"), i, (int)r->col, (int)r->row, (int)r->cc, (int)r->cr);
+        snprintf(label, lab, "%s %d, %d,%d to %d,%d", r->band ? "band band" : (r->f == net_thread->f ? "thread segment" : "line segment"), i, (int)r->col, (int)r->row, (int)r->cc, (int)r->cr);
         return 0;
     }
     return -1;

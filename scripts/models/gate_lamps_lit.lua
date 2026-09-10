@@ -1,4 +1,4 @@
---  gate_lamps_lit.lua -- a level crossing's flashers, alternating.
+--  gate_lamps_lit.lua -- a level meet's flashers, alternating.
 --
 --  The pair either side of the mast, drawn while the arm is off its
 --  rest.  The two lamp codes are the two halves of the alternation the

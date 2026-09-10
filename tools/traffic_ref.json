@@ -1,0 +1,32 @@
+{
+ "atlanta": {
+  "cars": 1478,
+  "digest": "99d0edc731a885d6",
+  "trains": 4,
+  "vertices": 99696
+ },
+ "chicago": {
+  "cars": 1168,
+  "digest": "a755ea8a2f647c37",
+  "trains": 6,
+  "vertices": 81468
+ },
+ "flint": {
+  "cars": 1097,
+  "digest": "6a4717b846edc3cd",
+  "trains": 4,
+  "vertices": 77724
+ },
+ "tokyo": {
+  "cars": 1357,
+  "digest": "05bf5d8b40188841",
+  "trains": 7,
+  "vertices": 93558
+ },
+ "toronto": {
+  "cars": 2500,
+  "digest": "b1dd22e3752635cb",
+  "trains": 7,
+  "vertices": 172038
+ }
+}

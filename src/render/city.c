@@ -1,8 +1,8 @@
-/*  city.c -- the .SC2 reader, independent of the simulation's own.  IFF:
- *  "FORM" <len> "SCDH", then chunks of <tag><len><payload>.  Every chunk is
- *  RLE'd except CNAM and ALTM.  The codec is the one at $293EC: a byte
- *  under 128 introduces that many literal bytes, a byte of 128 or more
- *  repeats the next byte (c - 127) times. */
+/*  city.c: the .SC2 reader, independent of the simulation's own.  IFF
+ *  holds "FORM" <len> "SCDH".  Then come chunks of <tag><len><payload>.
+ *  Every chunk is RLE'd except CNAM and ALTM.  The codec is the one at
+ *  $293EC: a byte under 128 introduces that many literal bytes, a byte
+ *  of 128 or more repeats the next byte (c - 127) times. */
 #include "city.h"
 
 #include <stdio.h>
@@ -196,9 +196,10 @@ int rcity_load(RCity *c, const char *path)
 
 uint8_t city_corner_mask(int32_t rotation)
 {
-    /*  ROT_CORNER_MASK.  The array turns under the corner nibble -- rotating
-     *  a city moves the bytes but leaves XZON's high nibble alone -- so the
-     *  bit that means "nearest the viewer" changes with the rotation. */
+    /*  ROT_CORNER_MASK.  The array turns under the corner nibble.
+     *  Rotating a city moves the bytes but leaves XZON's high nibble
+     *  alone.  So the bit that means "nearest the viewer" changes with
+     *  the rotation. */
     static const uint8_t mask[4] = {0x80, 0x10, 0x20, 0x40};
     return mask[rotation & 3];
 }

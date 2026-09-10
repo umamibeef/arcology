@@ -1,10 +1,10 @@
 /* ==================================================================== *
- *  .arco -- Arcology's own world format.
+ *  .arco: Arcology's own world format.
  *
  *  The 1995 save is an IFF file: big-endian chunks, a bespoke run-length
- *  codec, a 4800-byte block of unnamed longs, and a map that is 128 by
- *  128 because the code says so.  Arcology reads and writes it exactly,
- *  and will go on doing so -- it is the import path and the reference
+ *  codec, a 4800-byte block of unnamed longs.  A map that is 128 by 128
+ *  because the code says so.  Arcology reads and writes it exactly, and
+ *  will go on doing so.  It is the import path and the reference
  *  baseline.  It is not a format to build a bigger game on.
  *
  *  .arco is that format.  It is a ZIP archive.  That one decision buys
@@ -21,17 +21,17 @@
  *
  *  Inside:
  *
- *      world.json              dimensions, chunk size, the city list
- *      chunks/<cx>_<cy>/       the terrain and content layers
- *      cities/<id>.json        one city's treasury, budget, graphs, clock
- *      cities/<id>/mask.bin    which tiles that city owns
+ *      world.json   dimensions, chunk size, the city list
+ *      chunks/<cx>_<cy>/  the terrain and content layers
+ *      cities/<id>.json  one city's treasury, budget, graphs, clock
+ *      cities/<id>/mask.bin  which tiles that city owns
  *
  *  Three things the format allows that the original cannot express, and
  *  which are why it exists:
  *
  *    - **The world is chunked and unbounded.**  Chunk size is in the
  *      manifest, not in the code.  An imported 1995 save is a 128x128
- *      patch written into whatever chunks it spans; nothing about it has
+ *      patch written into whatever chunks it spans.  Nothing about it has
  *      to stay 128 afterwards.
  *    - **A city is a mask, not a rectangle.**  `cities/<id>/mask.bin`
  *      gives an owner per tile, so a city's limits can follow its
@@ -52,7 +52,7 @@
 #include "sim.h"
 
 /*  The version in world.json.  Bump only for a change a reader from the
- *  previous version could not survive; adding a file or a manifest key
+ *  previous version could not survive.  Adding a file or a manifest key
  *  is not one of those. */
 #define ARCO_VERSION 1
 
@@ -64,9 +64,9 @@
 /*  Write `c` as a .arco world with one city in it.  0 on success. */
 int arco_save(const char *path, const City *c);
 
-/*  Read a .arco world.  Only its first city is loaded into `c`, which
- *  is what the game does today; the container already holds more.
- *  0 on success. */
+/*  Read a .arco world.  Only its first city is loaded into `c`, which is
+ *  what the game does today.  The container already holds more. 0 on
+ *  success. */
 int arco_load(const char *path, City *c);
 
 /*  Does this file start with a ZIP local header, i.e. is it .arco

@@ -19,7 +19,7 @@ definition in neither is a leak, and the fix is almost always to put
 
 The declaration must be in a header, not merely somewhere: an `extern`
 written at the top of the .c that calls it would satisfy the compiler
-and defeat the point, which is that every crossing is written down in
+and defeat the point, which is that every meet is written down in
 one place a reader can go and count.
 """
 import pathlib
@@ -83,7 +83,7 @@ def main():
               "the program) or sim_int.h (what its own files ask of each other).")
         return 1
     print("layer_check: every function in src/sim is either static or declared in "
-          "a header; sim_int.h carries %d of the crossings"
+          "a header; sim_int.h carries %d of the meets"
           % sum(1 for _ in re.finditer(r'\b[A-Za-z_]\w*\s*\([^;{]*\)\s*;',
                                        strip_comments((SIM / "sim_int.h").read_text()))))
     return 0

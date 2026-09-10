@@ -130,9 +130,9 @@ if(SDL3_FOUND)
         ../script/script.c ../script/lint.c  # the scripting layer, or its stubs where Lua is off
         mesh/shape.c
         walk/walk.c walk/piece.c walk/walkway.c
-        geo/fit.c geo/grade.c geo/loft.c geo/junction.c geo/lane.c geo/sidewalk.c
-        geo/furniture.c geo/marking.c geo/model.c
-        net/table.c net/geo.c net/family.c net/road.c net/rail.c net/hiway.c net/power.c
+        mesh/fit.c mesh/surface.c mesh/loft.c mesh/piece.c
+        mesh/model.c
+        net/table.c net/lane.c net/station.c net/box.c net/meet.c net/band.c net/network.c net/drive.c net/geo.c net/family.c net/spur.c net/shelf.c net/margin.c net/node.c net/cut.c net/loft.c
         net/traffic.c net/report.c
         atlas/dump.c soft/main.c)       # --atlas and --soft
     #  arc_dev links arc_core PUBLIC, so naming both here would put the
@@ -141,7 +141,7 @@ if(SDL3_FOUND)
         SDL3::SDL3 spdlog::spdlog arc_warnings)
     #  Lua: the scripting layer.  The numbers the geometry is tuned with
     #  and the rules it is drawn by -- which of a junction's mouths carry
-    #  a crossing, how its arms are controlled, how tight a kerb return
+    #  a meet, how its arms are controlled, how tight a lip return
     #  turns -- are reachable from a script that the running program
     #  watches, so changing one is a file save rather than a compile.
     #  Upstream ships no CMake, so the library's own sources are named
@@ -172,7 +172,7 @@ if(SDL3_FOUND)
         target_compile_definitions(arc_lua PRIVATE LUA_USE_LINUX)
     endif()
     target_sources(arcology PRIVATE
-        ../script/api_tune.c ../script/api_rules.c ../script/api_world.c ../script/api_put.c ../script/api_model.c ../script/api_object.c ../script/api_tile.c ../script/api_family.c ../script/api_data.c)
+        ../script/api_tune.c ../script/api_rules.c ../script/api_world.c ../script/api_put.c ../script/api_model.c ../script/api_object.c ../script/api_tile.c ../script/api_family.c ../script/api_data.c ../script/api_fit.c)
     target_link_libraries(arcology PRIVATE arc_lua)
     if(ARC_IMGUI)
         include(FetchContent)
@@ -261,17 +261,17 @@ if(EXISTS "${ARC_ASSETS}/atlas.json")
     #  until the corpus is at zero.
     add_test(NAME no_broken_segments COMMAND ${Python3_EXECUTABLE}
              "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/corner_check.py" --binary $<TARGET_FILE:arcology>)
-    #  Nothing of a road may be laid under its own footway: a junction's
-    #  asphalt beneath the junction's own pavement, or a strip's
-    #  carriageway beneath its own, means the two were never made to meet.
+    #  Nothing of a line may be laid under its own margin: a junction's
+    #  fill beneath the junction's own margin, or a strip's
+    #  way beneath its own, means the two were never made to meet.
     #  A ratchet against tools/buried_baseline.json until the corpus is at
     #  zero.
-    add_test(NAME no_buried_footway COMMAND ${Python3_EXECUTABLE}
+    add_test(NAME no_buried_margin COMMAND ${Python3_EXECUTABLE}
              "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/buried_check.py" --binary $<TARGET_FILE:arcology>)
     #  A junction's outline must be a simple ring: no vertex where it
-    #  doubles back on itself, no two edges crossing.  A spur's inward
-    #  side points OUT of the junction, so the footway offset from it
-    #  lands outside and the asphalt drawn inside the footway covers it.
+    #  doubles back on itself, no two edges meet.  A spur's inward
+    #  side points OUT of the junction, so the margin offset from it
+    #  lands outside and the fill drawn inside the margin covers it.
     #  Zero, on every city that ships with the repository.
     foreach(city "atlanta" "toronto" "manhattan")
         if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../cities/${city}.sc2")
@@ -310,6 +310,92 @@ if(EXISTS "${ARC_ASSETS}/atlas.json")
                  "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/lua_check.py"
                  --binary $<TARGET_FILE:arcology>)
     endif()
+    #  The band's interchanges are joined by a script and by nothing
+    #  else: which slab lane goes on to which -- another band's round a
+    #  loop, the line's where the slab comes down, or the inner lane of
+    #  its own band -- is arc.rules.links's.  Clearing it leaves every
+    #  band end unjoined.
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../cities/tokyo.sc2")
+        add_test(NAME interchange COMMAND ${Python3_EXECUTABLE}
+                 "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/interchange_check.py"
+                 --binary $<TARGET_FILE:arcology>)
+        set_tests_properties(interchange PROPERTIES TIMEOUT 900)
+    endif()
+    #  The moving world, hashed.  A headless frame does not draw the
+    #  movers, so the pixel battery says nothing about the traffic at
+    #  all: this advances the world and hashes what moved and what was
+    #  drawn, against a recorded reference.
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../cities/atlanta.sc2")
+        add_test(NAME moving_world COMMAND ${Python3_EXECUTABLE}
+                 "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/traffic_check.py"
+                 --binary $<TARGET_FILE:arcology>)
+        set_tests_properties(moving_world PROPERTIES TIMEOUT 900)
+    endif()
+    #  Each interpretation is swappable: the sweep of a line through its
+    #  corridor, an on-spur's climb, the pattern an intersection draws
+    #  and what a line carries, each replaced by a DIFFERENT ALGORITHM in
+    #  a Lua file and nothing else.  The mesh is compared as a hash of
+    #  its triangles, sorted, so a surface that moved without changing
+    #  the count is caught too.
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../cities/atlanta.sc2")
+        add_test(NAME swappable COMMAND ${Python3_EXECUTABLE}
+                 "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/swap_check.py"
+                 --binary $<TARGET_FILE:arcology>)
+        set_tests_properties(swappable PROPERTIES TIMEOUT 900)
+    endif()
+    #  The network is the SCRIPT'S: taking arc.rules.network away takes
+    #  every line, railway and power line with it, a rule of the script's
+    #  own making draws a different network, and every run the shipped
+    #  rule hands over is checked against the planes it was given.
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../cities/atlanta.sc2")
+        add_test(NAME network_discovery COMMAND ${Python3_EXECUTABLE}
+                 "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/network_check.py"
+                 --binary $<TARGET_FILE:arcology>)
+        set_tests_properties(network_discovery PROPERTIES TIMEOUT 600)
+    endif()
+    #  WHAT A LANE MUST BE for a car to drive it, and what geometry
+    #  COLLIDES.  Both are ratchets over the whole corpus: they carry the
+    #  numbers as they stand and fail when one RISES, because neither is
+    #  at zero and a check that fails on the state of the world is a
+    #  check somebody turns off.
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../cities/atlanta.sc2")
+        add_test(NAME lane_quality COMMAND ${Python3_EXECUTABLE}
+                 "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/lane_check.py"
+                 --binary $<TARGET_FILE:arcology>)
+        set_tests_properties(lane_quality PROPERTIES TIMEOUT 900)
+        add_test(NAME no_collisions COMMAND ${Python3_EXECUTABLE}
+                 "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/collide_check.py"
+                 --binary $<TARGET_FILE:arcology>)
+        set_tests_properties(no_collisions PROPERTIES TIMEOUT 900)
+    endif()
+    #  The loft is a service: a path the SCRIPT invented, swept along a
+    #  cross-section the script wrote out as numbers, read back out of
+    #  the mesh -- the face count, the height, the shape and the ground
+    #  it follows.  A build with no arc.rules.invent draws none of it.
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../cities/atlanta.sc2")
+        add_test(NAME loft_service COMMAND ${Python3_EXECUTABLE}
+                 "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/loft_check.py"
+                 --binary $<TARGET_FILE:arcology>)
+        set_tests_properties(loft_service PROPERTIES TIMEOUT 600)
+    endif()
+    #  The fit is a service: a path the SCRIPT invented, fitted through
+    #  arc.fit, and the pieces that come back checked in Python -- ends,
+    #  chain, arc, tangency, radius and budget.  Not the fit compared
+    #  against another copy of itself.
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../cities/atlanta.sc2")
+        add_test(NAME fit_service COMMAND ${Python3_EXECUTABLE}
+                 "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/fit_check.py"
+                 --binary $<TARGET_FILE:arcology>)
+    endif()
+    #  What a script reads off the map is what is in the city file.  The
+    #  city is decoded a second time in Python, so this is not the
+    #  renderer agreeing with itself: every layer, every cell, read three
+    #  ways -- the whole plane, a call a cell, and the four neighbours.
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../cities/atlanta.sc2")
+        add_test(NAME map_read COMMAND ${Python3_EXECUTABLE}
+                 "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/map_read.py"
+                 --binary $<TARGET_FILE:arcology>)
+    endif()
     #  Two checks the compiler cannot make.  The analyser walks paths
     #  through a function and reports what only a path can show -- a
     #  pointer that may be null where it is read, a value stored and
@@ -337,14 +423,14 @@ if(EXISTS "${ARC_ASSETS}/atlas.json")
         add_test(NAME lua_compose COMMAND sh
                  "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/strip_check.sh" $<TARGET_FILE:arcology>)
     endif()
-    #  A crosswalk is painted between two pavements.  Every crossing the
-    #  network marks must therefore reach a footway at both of its ends,
+    #  A crosswalk is painted between two margins.  Every meet the
+    #  network marks must therefore reach a margin at both of its ends,
     #  and the same run fails outright on one that does not.
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../cities/atlanta.sc2")
-        add_test(NAME crossings_reach_a_pavement
+        add_test(NAME meets_reach_a_margin
                  COMMAND arcology "${CMAKE_CURRENT_SOURCE_DIR}/../../cities/atlanta.sc2" --mute --mesh-check)
-        set_tests_properties(crossings_reach_a_pavement PROPERTIES
-            PASS_REGULAR_EXPRESSION "0 reaching no pavement")
+        set_tests_properties(meets_reach_a_margin PROPERTIES
+            PASS_REGULAR_EXPRESSION "0 reaching no margin")
     endif()
     set_tests_properties(atlas_loads PROPERTIES
         PASS_REGULAR_EXPRESSION "1448 tiles across 3 levels")
@@ -380,7 +466,7 @@ endif()
 #  The terrain mesh must be watertight: no edge of any triangle may be
 #  free.  mesh_check counts them; the build fails the test on the first.
 #  With --roads3d the same run also checks that no terrain face rises
-#  above a road (mesh_check_roads).  ARC_CITIES is the game folder,
+#  above a line (mesh_check_clip).  ARC_CITIES is the game folder,
 #  whose cities are under Cities/, or the Cities folder itself.
 if(TARGET arcology AND ARC_CITIES AND EXISTS "${ARC_ASSETS}/atlas.json")
     foreach(city "Bayview" "Cape Wells" "Egypt Falls" "Felsenschloss")

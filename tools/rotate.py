@@ -11,8 +11,8 @@ bounds at $3B34E..$3B35E:
     new[y][x] = old[N-1-x][y]
 
 Three of the layers also pass every byte through a translation table,
-because their ids encode a direction: a road running north-south has a
-different id from the same road running east-west.
+because their ids encode a direction: a line running north-south has a
+different id from the same line running east-west.
 
     XBLD  A5-0xEE2      XTER  A5-0xDE2      XUND  A5-0xD9C
 

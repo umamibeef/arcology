@@ -1,26 +1,29 @@
---  profile.lua -- how high a highway strip rides, station by station.
+--  profile.lua -- how high a band strip rides, station by station.
 --
 --  Two quite different things use this.
 --
---  A RAMP is one straight line in elevation, from the ground at its road
---  end to the ground at its deck end.  It does NOT follow the bumps
---  under it, and the deck's grade limiter below would let one dip under
+--  A SPUR is one straight line in elevation, from the ground at its line
+--  end to the ground at its slab end.  It does NOT follow the bumps
+--  under it, and the slab's grade limiter below would let one dip under
 --  a rising verge.  A lane drop's turn-out carries the last of the
---  descent instead: its deck end sits where the strip left off, the
---  deck's own height above the ground there, and eases down to the road.
---  Either way a ramp is never under the ground it crosses -- a bump
+--  descent instead: its slab end sits where the strip left off, the
+--  slab's own height above the ground there, and eases down to the line.
+--  Either way a spur is never under the ground it crosses -- a bump
 --  lifts it, a hollow does not drop it.
 --
---  A DECK is stiff.  The ground's upper envelope may rise or fall no
---  faster than the deck grade; then a closing over the stiffness window
+--  A SLAB is stiff.  The ground's upper envelope may rise or fall no
+--  faster than the slab grade; then a closing over the stiffness window
 --  -- the running greatest height over the window, and the running mean
---  of that over the same window -- which holds the deck level across
+--  of that over the same window -- which holds the slab level across
 --  dips shorter than the window and rounds every crest and sag while
 --  never dipping below the envelope.  It is faded out over a window's
---  length at each end, where the deck has to meet the ground.
+--  length at each end, where the slab has to meet the ground.
 --
---  Both then take the lift, tapered over the ramp cells at each end so a
---  ramp is a ramp and not a carriageway ending in mid-air.
+--  A strip of two stations or fewer is TOO SHORT TO SHAPE: neither
+--  reading has anything to work on, so it takes the lift alone.
+--
+--  All three then take the lift, tapered over the spur cells at each end
+--  so a spur is a spur and not a way ending in mid-air.
 
 local f32 = arc.put.f32
 
@@ -33,11 +36,13 @@ arc.rules.profile = function (p)
     local s, z = {}, {}
     for i = 0, n - 1 do s[i], z[i] = p:at(i) end
 
-    if d.ramp then
-        --  A lane drop's turn-out meets the deck where the strip left
-        --  off; a plain ramp meets the ground at both ends.
-        local z0 = f32(z[0] + ((d.lane_piece and not d.lane_off) and 0.0 or d.deck_above))
-        local z1 = f32(z[n - 1] + ((d.lane_piece and d.lane_off) and 0.0 or d.deck_above))
+    if n <= 2 then
+        --  Too short to shape: the lift below is the whole of it.
+    elseif d.spur then
+        --  A lane drop's turn-out meets the slab where the strip left
+        --  off; a plain spur meets the ground at both ends.
+        local z0 = f32(z[0] + ((d.lane_piece and not d.lane_off) and 0.0 or d.slab_above))
+        local z1 = f32(z[n - 1] + ((d.lane_piece and d.lane_off) and 0.0 or d.slab_above))
         for i = 0, n - 1 do
             local t = d.total > 1e-6 and f32(s[i] / d.total) or 0.0
             local lin
@@ -85,7 +90,7 @@ arc.rules.profile = function (p)
                 for k = a, b - 1 do sum = sum + zmax[k] end
                 zsm[i] = f32(sum / (b - a))
             end
-            --  Faded in over a window at each end, where the deck has to
+            --  Faded in over a window at each end, where the slab has to
             --  meet the ground.
             for i = 0, n - 1 do
                 local edge = s[i] < f32(d.total - s[i]) and s[i] or f32(d.total - s[i])
@@ -96,7 +101,7 @@ arc.rules.profile = function (p)
         end
     end
 
-    --  The lift, tapered over the ramp cells at each end.
+    --  The lift, tapered over the spur cells at each end.
     for i = 0, n - 1 do
         local lift = d.flat and 0.0 or 1.0
         if d.taper0 > 0.0 and s[i] < d.taper0 then lift = f32(s[i] / d.taper0) end

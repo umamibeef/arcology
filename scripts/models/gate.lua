@@ -1,7 +1,7 @@
---  gate.lua -- a level crossing's gate, standing parts (spec 3.15).
+--  gate.lua -- a level meet's gate, standing parts (spec 3.15).
 --
---  The base junction box, the flasher bar, the "2 TRACKS" plaque and the
---  mechanism's case beside the mast on the road side.  The flashers'
+--  The base junction box, the flasher bar, the "2 THREADS" plaque and the
+--  mechanism's case beside the mast on the line side.  The flashers'
 --  lamps and the arm itself are the traffic's, rebuilt every frame from
 --  gate_lamps_lit, gate_lamps_dark and arc.rules.gate_arm.
 
@@ -13,7 +13,7 @@ arc.model.define("gate", {
         flashw = 0.015,
         flash0 = 0.25,
         flash1 = 0.31,
-        plaque = 0.1,    --  the "2 TRACKS" plaque above it
+        plaque = 0.1,    --  the "2 THREADS" plaque above it
         plaq0  = 0.285,
         plaq1  = 0.3,
         case   = 0.03,   --  the mechanism's case, beside the mast

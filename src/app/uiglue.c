@@ -1,10 +1,11 @@
-/*  uiglue.c -- the two crossings between the app and its interface.
+/*  uiglue.c: the two joins between the app and its interface.
  *
  *  ui.h's contract is that the app fills what the windows SHOW once a
- *  frame, the windows edit switches in place and raise commands, and the
- *  app applies them and clears them.  Those two directions are ui_fill and
- *  ui_apply, and they are the only places either side touches the other;
- *  the tool in hand is applied here for the same reason. */
+ *  frame.  The windows edit switches in place and raise commands, and
+ *  the app applies them and clears them.  Those two directions are
+ *  ui_fill and ui_apply, and they are the only places either side
+ *  touches the other.  The tool in hand is applied here for the same
+ *  reason. */
 #include "adapt.h"
 #include "internal.h"
 #include "script.h"
@@ -30,12 +31,12 @@
  *  into the app itself.
  *  ================================================================== */
 /*  The four projected corners of a tile, put in order around their own
- *  middle.  They are computed in the grid's order -- NW, NE, SE, SW -- and
- *  in the map view that order happens to trace the tile's boundary; under
- *  the game's own camera the yaw turns which corner lands where on screen,
- *  the fixed order crosses itself, and the outline came out a thin dart
- *  instead of a tile.  Sorting by angle costs nothing and holds at any
- *  camera. */
+ *  middle.  They are computed in the grid's order, NW, NE, SE, SW, and
+ *  in the map view that order happens to trace the tile's boundary.
+ *  Under the game's own camera the yaw turns which corner lands where on
+ *  screen.  The fixed order then crosses itself, and the outline came
+ *  out a thin dart instead of a tile.  Sorting by angle costs nothing
+ *  and holds at any camera. */
 static void poly_wind(float p[4][2])
 {
     float cx = 0.25f * (p[0][0] + p[1][0] + p[2][0] + p[3][0]);
@@ -54,9 +55,9 @@ static void poly_wind(float p[4][2])
 }
 
 /*  What the UI shows this frame. */
-/*  The pointer inside a triangle as the camera projects it, by the sign of
- *  the three edge tests; `z` comes back as the triangle's highest corner,
- *  which is what decides between two that overlap. */
+/*  The pointer inside a triangle as the camera projects it, by the sign
+ *  of the three edge tests.  `z` comes back as the triangle's highest
+ *  corner, which is what decides between two that overlap. */
 static int inspect_hit(const App *a, uint32_t tri, float f, float dens, float *z, uint32_t *comp)
 {
     float p3[3][3], sx[3], sy[3], d1, d2, d3, area;
@@ -70,11 +71,11 @@ static int inspect_hit(const App *a, uint32_t tri, float f, float dens, float *z
         sy[v] = (cy - (float)a->gv.scroll_y) * f / dens;
     }
     /*  A triangle with no area on screen covers no point.  It has to be
-     *  turned away here, before the edge tests: a face seen edge on
+     *  turned away here, before the edge tests.  A face seen edge on
      *  projects to a line, the pointer is then on one side of all three
-     *  of its edges wherever it is, and the tests below answer YES to
-     *  the whole window.  The oblique camera makes such faces of every
-     *  wall and skirt that runs along the view, so one of them, standing
+     *  of its edges wherever it is.  The tests below answer YES to the
+     *  whole window.  The oblique camera makes such faces of every wall
+     *  and skirt that runs along the view.  So one of them, standing
      *  higher than the thing under the pointer, wins the pick and the
      *  outline lands somewhere the pointer never was. */
     area = (sx[1] - sx[0]) * (sy[2] - sy[0]) - (sx[2] - sx[0]) * (sy[1] - sy[0]);
@@ -144,9 +145,10 @@ void inspect_copy(App *a)
 
 void ui_fill(App *a)
 {
-    /*  --inspect: the inspector on from the start.  Once, before the frame
-     *  reads the switch -- applied further down it took a frame to arrive,
-     *  and applied every frame it could never be switched off again. */
+    /*  --inspect: the inspector on from the start.  Once, before the
+     *  frame reads the switch.  Applied further down it took a frame to
+     *  arrive.  Applied every frame it could never be switched off
+     *  again. */
     static int inspect_flag_applied;
     RUiState   *s = &a->us;
     const City *c = a->city;
@@ -195,14 +197,14 @@ void ui_fill(App *a)
         s->dept_funding[k] = c->dept[k].funding;
         s->dept_accrued[k] = c->dept[k].accrued;
     }
-    /*  The inspector points at the MESH. The triangles near the pointer are
-     *  projected the way the camera projects them and the one under the
-     *  pointer is found; through it comes the component that drew it, and
-     *  the component's silhouette is the outline.  A tile is only how the
-     *  search is narrowed.  The ground is not a thing to inspect -- the
-     *  query tool says what a tile is -- so the ground, its banks, walls
-     *  and water are passed over, and what is built on them is what the
-     *  pointer finds. */
+    /*  The inspector points at the MESH.  The triangles near the pointer
+     *  are projected the way the camera projects them.  The one under
+     *  the pointer is found.  Through it comes the component that drew
+     *  it, and the component's silhouette is the outline.  A tile is
+     *  only how the search is narrowed.  The ground is not a thing to
+     *  inspect.  The query tool says what a tile is.  So the ground, its
+     *  banks, walls and water are passed over, and what is built on them
+     *  is what the pointer finds. */
     s->outline      = mesh_tune()[9] > 0.5f;
     s->show_inspect = a->inspect;
     s->comp_ok = s->comp_n = s->comp_box_ok = 0;
@@ -219,10 +221,11 @@ void ui_fill(App *a)
         int      best      = -1;
         float    best_z    = -1e9f;
         uint32_t best_comp = 0;
-        /*  Every thing the pointer is over, not only the topmost: the one
-         *  in front tells you what you clicked, and the rest tell you what
-         *  it is drawn over.  Where two of them meet at one height the
-         *  surfaces overlap, and no outline of either can show that. */
+        /*  Every thing the pointer is over, not only the topmost.  The
+         *  one in front tells you what you clicked, and the rest tell
+         *  you what it is drawn over.  Where two of them meet at one
+         *  height the surfaces overlap, and no outline of either can
+         *  show that. */
         enum
         {
             MAX_ALSO = 16
@@ -232,18 +235,20 @@ void ui_fill(App *a)
         int      n_also = 0;
         /*  Every tile whose geometry could be under the pointer, not a
          *  patch of tiles around the GROUND tile.  A deck stands over a
-         *  metre of air, and in this projection height moves a thing up
-         *  the screen: the tile a deck belongs to is three or four tiles
-         *  from the ground the pointer lands on -- further than any fixed
-         *  patch reaches, and the pick found the road underneath instead.
+         *  meter of air.  In this projection height moves a thing up the
+         *  screen.  The tile a slab belongs to is three or four tiles
+         *  from the ground the pointer lands on.  That is further than
+         *  any fixed patch reaches, and the pick found the road
+         *  underneath instead.
          *
-         *  For a fixed window point the difference row - col is settled,
-         *  and only the sum grows with altitude, so the candidates lie
-         *  along a diagonal: walk the altitude from under the ground to
-         *  above anything built, take the tile at each step and its
-         *  neighbours, and test each tile's triangles as it is reached --
-         *  no shared budget, so the densest place on the map, a deck with
-         *  its ramps, cannot spend it before its own tile is looked at. */
+         *  For a fixed window point the difference row - col is settled.
+         *  Only the sum grows with altitude, so the candidates lie along
+         *  a diagonal.  Walk the altitude from under the ground to above
+         *  anything built.  Take the tile at each step and its
+         *  neighbors.  Test each tile's triangles as it is reached.
+         *  There is no shared budget.  So the densest place on the map,
+         *  a slab with its spurs, cannot spend it before its own tile is
+         *  looked at. */
         {
             static int32_t stamp[R_MAP * R_MAP];
             static int32_t gen;
@@ -310,9 +315,9 @@ void ui_fill(App *a)
             static double   seg_ms;
             int             ns;
             {
-                /*  What it is part of, all the way up: a footway belongs to
-                 *  its junction, and the junction to nothing, so the chain
-                 *  reads from the nearest owner outwards. */
+                /*  What it is part of, all the way up: a margin belongs
+                 *  to its junction, and the junction to nothing.  So the
+                 *  chain reads from the nearest owner outwards. */
                 ShapeId par   = shape_parent(best_comp);
                 size_t  used  = 0;
                 int     depth = 0;
@@ -397,10 +402,11 @@ void ui_fill(App *a)
                     ++s->comp_n_also;
                 }
             }
-            /*  The outline is the same for as long as the pointer stays on the
-             *  THING -- a deck's slab, gores and columns share one -- and it
-             *  is a walk of every triangle of the thing, so it is computed
-             *  when the thing under the pointer changes and kept. */
+            /*  The outline is the same for as long as the pointer stays
+             *  on the THING, a deck's slab, gores and columns share one.
+             *  It is a walk of every triangle of the thing.  So it is
+             *  computed when the thing under the pointer changes and
+             *  kept. */
             {
                 uint32_t key = best_comp;
                 if (key != seg_key || a->mesh.n_land != seg_land)
@@ -435,9 +441,9 @@ void ui_fill(App *a)
                 s->comp_n  = out;
                 s->comp_ok = out >= 2;
             }
-            /*  One line when the component under the pointer changes, and
-             *  never once a frame: it is a message, so it goes through the
-             *  log like every other. */
+            /*  One line when the component under the pointer changes,
+             *  and never once a frame: it is a message.  So it goes
+             *  through the log like every other. */
             if (g_dev.inspect && best_comp != a->inspect_comp)
             {
                 a->inspect_comp = best_comp;
@@ -468,12 +474,12 @@ void ui_fill(App *a)
         if (mesh_query(a->view, x, y, s->q_mesh, sizeof s->q_mesh) != 0)
             s->q_mesh[0] = 0;
         /*  The footprint the cell belongs to, as the original finds it
-         *  ($763A): its edge n and its north-east tile, so it covers rows
-         *  oy..oy+n-1 and columns ox-n+1..ox.  The highlight outlines the
-         *  whole footprint, on the surface the mesh draws -- a building's
-         *  pad is flat, a lone cell follows its own plane -- or, in the
-         *  underground view, on the ground drawn there, the seabed under
-         *  water. */
+         *  ($763A).  It gives its edge n and its north-east tile, so it
+         *  covers rows oy..oy+n-1 and columns ox-n+1..ox.  The highlight
+         *  outlines the whole footprint, on the surface the mesh draws.
+         *  A building's pad is flat, a lone cell follows its own plane.
+         *  Or, in the underground view, on the ground drawn there, the
+         *  seabed under water. */
         {
             int n, x0, y0;
             s->q_orow = y; /* $763A moves the cell's own coordinates to the origin */
@@ -529,19 +535,20 @@ void ui_fill(App *a)
         }
     }
     /*  The area selection (Shift-drag in the map view, app.c) and, after
-     *  the release, the confirmation of what was written: the rectangle's
-     *  four corners projected as the query outline's are, and a caption. */
+     *  the release, the confirmation of what was written.  The
+     *  rectangle's four corners projected as the query outline's are,
+     *  and a caption. */
     s->sel_ok = 0;
     {
-        /*  After the release the rectangle blinks twice over half a second
-         *  and goes; what was written is the log's to say. */
+        /*  After the release the rectangle blinks twice over half a
+         *  second and goes.  What was written is the log's to say. */
         uint64_t now   = SDL_GetTicksNS();
         int      flash = now < a->sel_flash_until && (((a->sel_flash_until - now) / 120000000ull) & 1u) == 1u;
-        /*  And before the drag: with Shift held, the tile under the cursor
-         *  shows in the same tint, so the drag's start is seen.  The tile's
-         *  outline belongs to this Shift-drag, which picks an AREA; the
-         *  inspector outlines the component instead, and while it is on no
-         *  tile is highlighted under the pointer. */
+        /*  And before the drag: with Shift held, the tile under the
+         *  cursor shows in the same tint.  So the drag's start is seen.
+         *  The tile's outline belongs to this Shift-drag, which picks an
+         *  AREA.  The inspector outlines the component instead.  While
+         *  it is on, no tile is highlighted under the pointer. */
         int hover = a->plan && !a->inspect && !a->sel && !flash && (SDL_GetModState() & SDL_KMOD_SHIFT) != 0 && a->q_col >= 0 && a->q_row >= 0;
         if (a->plan && (a->sel || flash || hover) && (hover || (a->sel_c0 >= 0 && a->sel_c1 >= 0)))
         {
@@ -625,7 +632,7 @@ void ui_fill(App *a)
     s->grid        = a->gv.grid;
     s->markings    = a->gv.markings;
     s->furniture   = a->gv.furniture;
-    s->sidewalks   = a->gv.sidewalks;
+    s->margins   = a->gv.margins;
     s->plain_sweep = a->gv.plain_sweep;
     s->underground = a->opts.underground;
     s->view        = a->opts.view;
@@ -675,7 +682,7 @@ void ui_apply(App *a, SDL_Window *win, int pw, int ph)
     }
     if (s->tune_changed)
     {
-        /*  The knobs are a tuning session's; outline is a view and is
+        /*  The knobs are a tuning session's.  Outline is a view and is
          *  applied below with the other views. */
         float keep = mesh_tune()[9];
         memcpy(mesh_tune(), s->tune, sizeof s->tune);
@@ -691,7 +698,7 @@ void ui_apply(App *a, SDL_Window *win, int pw, int ph)
     if (!!s->outline != (mesh_tune()[9] > 0.5f))
     {
         /*  Outline stands the roads aside and draws the fitted curves and
-         *  the footway network on bare ground.  It is geometry, so the
+         *  the margin network on bare ground.  It is geometry, so the
          *  mesh is built again, and it is remembered like the grid. */
         mesh_tune()[9] = s->outline ? 1.0f : 0.0f;
         a->mesh_dirty  = 1;
@@ -703,10 +710,10 @@ void ui_apply(App *a, SDL_Window *win, int pw, int ph)
     if (!!s->grid != !!a->gv.grid)
         if (a->prefs_ok)
             prefs_set("grid", s->grid ? "on" : "off"); /* the checkbox, remembered like the key */
-    if (!!s->markings != !!a->gv.markings || !!s->furniture != !!a->gv.furniture || !!s->sidewalks != !!a->gv.sidewalks)
+    if (!!s->markings != !!a->gv.markings || !!s->furniture != !!a->gv.furniture || !!s->margins != !!a->gv.margins)
     {
         /*  The passes: markings are the shader's and a crosswalk band's,
-         *  furniture and a junction's sidewalk band are built in, so any
+         *  furniture and a junction's margin band are built in, so any
          *  change rebuilds the mesh. */
         if (!!s->markings != !!a->gv.markings)
             if (a->prefs_ok)
@@ -714,14 +721,13 @@ void ui_apply(App *a, SDL_Window *win, int pw, int ph)
         if (!!s->furniture != !!a->gv.furniture)
             if (a->prefs_ok)
                 prefs_set("furniture", s->furniture ? "on" : "off");
-        if (!!s->sidewalks != !!a->gv.sidewalks)
+        if (!!s->margins != !!a->gv.margins)
             if (a->prefs_ok)
-                prefs_set("sidewalks", s->sidewalks ? "on" : "off");
+                prefs_set("margins", s->margins ? "on" : "off");
         a->gv.markings  = s->markings;
         a->gv.furniture = s->furniture;
-        a->gv.sidewalks = s->sidewalks;
-        marking_enable(a->gv.markings);
-        sidewalk_enable(a->gv.sidewalks); /* markings and sidewalks are draws: instant */
+        a->gv.margins = s->margins;
+        margin_enable(a->gv.margins); /* markings and margins are draws: instant */
         if (furniture_on() != !!a->gv.furniture)
         {
             furniture_enable(a->gv.furniture); /* furniture is built in: a rebuild */
@@ -776,14 +782,14 @@ void ui_apply(App *a, SDL_Window *win, int pw, int ph)
             a->city = fresh;
             set_city_name(a, s->load_path);
             {
-                /* opens paused; the saved speed is what unpausing resumes */
+                /* opens paused.  The saved speed is what unpausing resumes */
                 int32_t saved = (int32_t)a->city->misc[MISC_SPEED];
                 set_speed(a, 1);
                 a->last_speed             = saved > 1 ? saved : 3;
                 a->city->misc[MISC_SPEED] = (uint16_t)saved;
             }
-            /*  the sweep and the terrain mesh are both cached, so a new
-             *  city is not visible until they are asked to rebuild --
+            /*  the sweep and the terrain mesh are both cached.  So a new
+             *  city is not visible until they are asked to rebuild:
              *  without this the map keeps drawing the old one */
             a->dirty      = 1;
             a->mesh_dirty = 1;
@@ -907,7 +913,7 @@ void ui_apply(App *a, SDL_Window *win, int pw, int ph)
 
 /*  What a tile sounds like when queried: the original lets a building be
  *  heard under the query tool.  By the building's name where the table
- *  has one and by the piece's range where it has not; 0 for silence. */
+ *  has one and by the piece's range where it has not.  0 for silence. */
 static int building_sound(const City *c, int32_t row, int32_t col)
 {
     uint8_t     b    = c->xbld[row][col];
@@ -945,7 +951,7 @@ static int building_sound(const City *c, int32_t row, int32_t col)
     if (b >= 0x0E && b <= 0x1C)
         return R_SND_ZZAP; /* power lines */
     if (b >= 0x51 && b <= 0x5F)
-        return R_SND_HORNS; /* bridges and ramps */
+        return R_SND_HORNS; /* bridges and spurs */
     return 0;
 }
 
@@ -974,15 +980,15 @@ void use_tool(App *a, SDL_Window *win)
         case RUI_TOOL_CENTER:
             SDL_GetWindowSizeInPixels(win, &pw, &ph);
             {
-                /*  Centre through the camera's own anchor rather than a
+                /*  Center through the camera's own anchor rather than a
                  *  projection of its own.  The one that stood here was a
-                 *  fourth transcription and it was wrong twice: it put
+                 *  fourth transcription and it was wrong twice.  It put
                  *  the origin half a tile out (tile_h / 2, not the
-                 *  tile_h + 0.5 every other path uses), took no account
-                 *  of pitch at all, and divided by gv.scale while
-                 *  ignoring gv.zoom -- so the tile you clicked did not
-                 *  land in the middle at any zoom but one, and never in
-                 *  the map view. */
+                 *  tile_h + 0.5 every other path uses).  It took no
+                 *  account of pitch at all.  It divided by gv.scale
+                 *  while ignoring gv.zoom.  So the tile you clicked did
+                 *  not land in the middle at any zoom but one, and never
+                 *  in the map view. */
                 int32_t idx   = row * R_MAP + col;
                 a->anch_c     = (float)col + 0.5f;
                 a->anch_r     = (float)row + 0.5f;

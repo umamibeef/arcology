@@ -1,15 +1,15 @@
---  street_lamp.lua -- a road's cobra-head luminaire (spec 1.6, 6.4).
+--  street_lamp.lua -- a line's cobra-head luminaire (spec 1.6, 6.4).
 --
---  A pole on the footway with a davit arm in over the road and the head
+--  A pole on the margin with a davit arm in over the line and the head
 --  hung at its end.  It stands on the strip's own height, not on the
---  ground under the kerb, and every piece is cut on the tile folds since
+--  ground under the lip, and every piece is cut on the tile folds since
 --  the arm reaches into the next tile.
 
 arc.model.define("street_lamp", {
     p = {
         post   = 0.02,    --  the pole, round
         tall   = 1.35,    --  ten metres
-        arm    = 0.2,     --  the davit arm, three metres over the road
+        arm    = 0.2,     --  the davit arm, three metres over the line
         armw   = 0.014,
         armz   = 1.33,
         rise   = 0.03,    --  how far the arm lifts as it reaches in

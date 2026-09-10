@@ -1,15 +1,16 @@
-/*  atlas.h -- the tile art, as the renderer wants it. artpack.py turns the
- *  game's MIFF/SC2K art into one palette-indexed PNG per zoom level plus a
- *  JSON sidecar.  This reads those back.  Nothing here knows about the
- *  resource fork, the 68k binary, or the simulation: it is a loader for
- *  standard files, which is the point of the exercise.  Portability rules
- *  this file lives by, and the reason for each: - fixed-width types only;
- *  `long` is 32 bits on Win64 and 64 elsewhere - every file opened in
- *  binary mode, or Windows rewrites \n on the way in - no POSIX-only calls;
- *  the build forces -std=c99 rather than -std=gnu99 so that a stray strdup
- *  or unistd.h fails at compile time, not on a user's machine - all
- *  multi-byte values are read a byte at a time, never memcpy'd over a
- *  struct, so a big-endian host reads the same numbers */
+/*  atlas.h: the tile art, as the renderer wants it. artpack.py turns the
+ *  game's art into one palette-indexed PNG per zoom level plus a JSON
+ *  sidecar.  This reads those back.  Nothing here knows about the
+ *  resource fork, the 68k binary.  The simulation: it is a loader for
+ *  standard files, which is the point of the exercise.  Portability
+ *  rules this file lives by, and the reason for each: - fixed-width
+ *  types only.  `long` is 32 bits on Win64 and 64 elsewhere.  Every file
+ *  is opened in binary mode, or Windows rewrites \n on the way in - no
+ *  POSIX-only calls.  The build forces -std=c99 rather than -std=gnu99.
+ *  A stray strdup or unistd.h then fails at compile time, not on a
+ *  user's machine.  All multi-byte values are read a byte at a time,
+ *  never memcpy'd over a struct.  So a big-endian host reads the same
+ *  numbers */
 #ifndef R_ATLAS_H
 #define R_ATLAS_H
 
@@ -19,10 +20,11 @@
 #define R_MAX_LEVELS 3   /* the 8, 16 and 32 pixel art sets           */
 #define R_MAX_SHAPE  1500 /* SHAP ids run 1..1499                     */
 
-/*  One tile's place in its atlas.  `ax`/`ay` are the blit origin relative
- *  to the left corner of the ground diamond: `ay` is how far the art rises
- *  above the diamond, which is `h - tile_h` for the shipped art but is
- *  stored rather than derived so mod art may be taller. */
+/*  One tile's place in its atlas.  `ax`/`ay` are the blit origin
+ *  relative to the left corner of the ground diamond: `ay` is how far
+ *  the art rises above the diamond.  This is `h - tile_h` for the
+ *  shipped art but is stored rather than derived so mod art may be
+ *  taller. */
 typedef struct
 {
     uint16_t id;   /* SHAP id, 1..1499                        */
@@ -44,7 +46,7 @@ typedef struct
     int32_t transparent; /* the reserved palette index             */
 
     int32_t  w, h;     /* atlas dimensions                          */
-    uint8_t *indices;  /* w*h palette indices; kept for re-resolve  */
+    uint8_t *indices;  /* w*h palette indices.  Kept for re-resolve  */
     uint8_t *rgba;     /* w*h*4, premultiplied, ready for upload    */
 
     RTile   *tiles;
@@ -53,8 +55,8 @@ typedef struct
 } RAtlasLevel;
 
 /*  A run of palette entries the game cycles with _AnimatePalette.  The
- *  art is static; the shimmer on water, the blinking on some buildings and
- *  the traffic lights are all one rotating colour ramp. */
+ *  art is static.  The shimmer on water, the blinking on some buildings
+ *  and the traffic lights are all one rotating color spur. */
 typedef struct
 {
     int32_t first; /* first index in the run          */
@@ -66,7 +68,7 @@ typedef struct
 {
     RAtlasLevel level[R_MAX_LEVELS]; /* ordered 8, 16, 32            */
     int32_t     n_levels;
-    uint8_t     palette[256][4];     /* RGBA; the reserved index is 0 alpha */
+    uint8_t     palette[256][4];     /* RGBA.  The reserved index is 0 alpha */
     uint8_t     palette0[256][4];    /* phase 0, so phases compose from it */
     RAnim       anim[4];
     int32_t     n_anim;
@@ -79,25 +81,26 @@ int atlas_load(RAtlas *a, const char *dir);
 
 void atlas_free(RAtlas *a);
 
-/*  The level whose art is closest to `scale` (1.0 = 32 px tiles), and the
- *  tile record for a SHAP id, or NULL if this level has no such shape. */
+/*  The level whose art is closest to `scale` (1.0 = 32 px tiles), and
+ *  the tile record for a SHAP id.  NULL if this level has no such shape. */
 const RAtlasLevel *atlas_level_for_scale(const RAtlas *a, float scale);
 const RTile       *atlas_tile(const RAtlasLevel *l, int32_t shap_id);
 
 /*  Re-resolve `indices` into `rgba` through the current palette.  Cheap
  *  enough per frame for the handful of palette-cycled tiles, which is how
  *  water shimmer and a day/night tint come for free. */
-/*  Rotate the animated runs to `phase`.  Phase 0 restores the art exactly
- *  as the atlas was built.  Rotating the palette is all the game does --
- *  no pixel is touched -- so it is one memcpy plus a few dozen entries per
- *  frame however big the map is. */
+/*  Rotate the animated runs to `phase`.  Phase 0 restores the art
+ *  exactly as the atlas was built.  Rotating the palette is all the game
+ *  does.  No pixel is touched.  So it is one memcpy plus a few dozen
+ *  entries per frame however big the map is. */
 void atlas_animate(RAtlas *a, int32_t phase);
 /*  The same, with each run on its own clock: idlePump ($9728) turns the
  *  49-entry run every 12 ticks and the 15-entry run every 90.  Steps are
- *  reduced by each permutation's period, so the counters may grow without
- *  bound.  Only the palette is rewritten; the levels' rgba is left alone,
- *  which is what the GPU path wants (it resolves through the palette on
- *  the GPU).  atlas_resolve brings rgba back in step if needed. */
+ *  reduced by each permutation's period, so the counters may grow
+ *  without bound.  Only the palette is rewritten.  The levels' rgba is
+ *  left alone.  This is what the GPU path wants (it resolves through the
+ *  palette on the GPU).  atlas_resolve brings rgba back in step if
+ *  needed. */
 void atlas_animate_runs(RAtlas *a, int32_t steps_a, int32_t steps_b);
 
 void atlas_resolve(RAtlas *a, RAtlasLevel *l);

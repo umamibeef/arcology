@@ -1,23 +1,24 @@
-/*  The incremental rebuild.  An edit changes a few tiles.  The mesh is kept
- *  in chunks (mesh.h, MESH_CHUNK), so a rebuild after an edit need only
- *  replace the chunks whose geometry changed, and which those are is a
- *  closure over the tables the grading pass leaves behind: a segment whose
- *  tiles touch a dirty tile has a new fit; a junction at its end has a new
- *  box, so every segment ending there has new trims; a highway band near
- *  the dirty tiles has a new fit, and so has every ramp on it and the road
- *  at each ramp's foot; a ramp beside a changed junction has a new join,
- *  and its band carries the lane drop.  Their tiles, dilated by a tile or
- *  two, name the chunks.  The building pass then runs as it always does --
- *  every table is complete, the traffic's graph and the lane model are
- *  whole -- but the terrain loop skips the other chunks' tiles and the one
- *  triangle emitter drops what falls outside them (mesh_want_xy, by the
- *  same first-vertex rule the partition keys on).  The result is sorted by
- *  chunk and spliced into the previous mesh range by range.  What decides
- *  an edit is a snapshot of the city the last build saw: the tiles that
- *  differ are the dirty ones.  A change of anything else the build reads --
- *  the view, the knobs, the furniture switch -- is a different build key
- *  and a full build, as is an edit touching more than an eighth of the map,
- *  or the same city again (nothing to do). */
+/*  The incremental rebuild.  An edit changes a few tiles.  The mesh is
+ *  kept in chunks (mesh.h, MESH_CHUNK), so a rebuild after an edit need
+ *  only replace the chunks whose geometry changed.  Which those are is a
+ *  closure over the tables the grading pass leaves behind.  A segment
+ *  whose tiles touch a dirty tile has a new fit.  A junction at its end
+ *  has a new box.  So every segment ending there has new trims.  A band
+ *  band near the dirty tiles has a new fit.  So has every spur on it and
+ *  the line at each spur's foot.  A spur beside a changed junction has a
+ *  new join, and its band carries the lane drop.  Their tiles, dilated
+ *  by a tile or two, name the chunks.  The building pass then runs as it
+ *  always does.  Every table is complete, the traffic's graph and the
+ *  lane model are whole.  But the terrain loop skips the other chunks'
+ *  tiles.  The one triangle emitter drops what falls outside them
+ *  (mesh_want_xy, by the same first-vertex rule the partition keys on).
+ *  The result is sorted by chunk and spliced into the previous mesh
+ *  range by range.  What decides an edit is a snapshot of the city the
+ *  last build saw: the tiles that differ are the dirty ones.  A change
+ *  of anything else the build reads is a different build key.  The view,
+ *  the knobs and the furniture switch are all such changes, and each
+ *  takes a full build.  So does an edit touching more than an eighth of
+ *  the map, or the same city again (nothing to do). */
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,7 +28,7 @@
 #include "log.h"
 #include "mesh/internal.h"
 #include "mesh/mesh.h"
-#include "net/internal.h"
+#include "pipeline.h"
 #include "opt.h"
 #include "script.h"
 
@@ -54,7 +55,7 @@ int s_incr_on; /* an incremental build is under way: the emitter tests mesh_want
 
 static uint8_t  s_want[MESH_CHUNKS];
 static uint8_t  s_dirty[NT];
-static uint8_t  s_near1[NT]; /* the dirty tiles and their neighbours, from the build's start */
+static uint8_t  s_near1[NT]; /* the dirty tiles and their neighbors, from the build's start */
 static int      s_ndirty;
 static uint32_t s_old_n, s_old_nw; /* the previous lists' counts, while they stand aside */
 static struct
@@ -84,8 +85,8 @@ int mesh_want_xy(float x, float y)
 }
 
 /*  A tile's faces reach a quarter step past its edges (the seabed, the
- *  water's back faces) and its walls stand on its far edge, so a tile
- *  builds when its own chunk or any neighbour's does. */
+ *  water's back faces) and its walls stand on its far edge.  So a tile
+ *  builds when its own chunk or any neighbor's does. */
 int mesh_want_tile(int32_t col, int32_t row)
 {
     int32_t dc, dr;
@@ -100,12 +101,12 @@ int mesh_want_tile(int32_t col, int32_t row)
 
 /* ---- the partition ------------------------------------------------------ */
 
-/*  A stable counting sort of a triangle list by chunk -- and, for the
- *  opaque list, by terrain or network: the triangles before `n_split`
- *  are the terrain's.  `start`/`count` come out in vertices. */
-/*  ... and `aux`, one entry a triangle, is permuted the same way: the
- *  component ids must follow their geometry through the chunk sort or the
- *  inspector would name whatever ended up in the slot. */
+/*  A stable counting sort of a triangle list by chunk.  The opaque list
+ *  is sorted by terrain or network as well.  The triangles before
+ *  `n_split` are the terrain's.  `start`/`count` come out in vertices. */
+/*  ... and `aux`, one entry a triangle, is permuted the same way.  The
+ *  component ids must follow their geometry through the chunk sort or
+ *  the inspector would name whatever ended up in the slot. */
 static int bucket_sort(const RMeshVert *src, uint32_t n, int split, uint32_t n_split, RMeshVert *dst, uint32_t *start, uint32_t *count, int nk, uint32_t *aux)
 {
     static uint32_t  key_cap;
@@ -249,7 +250,7 @@ int mesh_incr_begin(RMesh *m, const RCity *c, const void *key, size_t keylen)
             return 0;
         }
     }
-    /*  The old lists step aside, still sorted and ranged; the build
+    /*  The old lists step aside, still sorted and ranged.  The build
      *  emits into the scratch, which the last partition left as large. */
     s_old_n  = m->n_land;
     s_old_nw = m->n_water;
@@ -260,7 +261,7 @@ int mesh_incr_begin(RMesh *m, const RCity *c, const void *key, size_t keylen)
     memset(s_near1, 0, sizeof s_near1);
     dilate_into(s_dirty, s_near1, 1);
     /*  The last build's component ids, kept while this one overwrites the
-     *  array: the chunks that stand take theirs from here (splice). */
+     *  array: the chunks that stand take theirs from here (meet). */
     {
         uint32_t ntri = s_old_n / 3u;
         if (m->cap_tri_comp_old < ntri)
@@ -305,7 +306,7 @@ int mesh_incr_snapshot(RMesh *m, const RCity *c, const void *key, size_t keylen)
         return -1;
     if (!m->snap)
     {
-        m->snap = malloc(sizeof *c); /* one RCity; the field is a void pointer, so size it by the city */
+        m->snap = malloc(sizeof *c); /* one RCity.  The field is a void pointer, so size it by the city */
         if (!m->snap)
             return -1;
     }
@@ -372,7 +373,7 @@ static void want_all(void)
 }
 
 /*  After the grading pass, with its tables complete: which chunks the
- *  building pass emits into.  `roads` says the tables were filled. */
+ *  building pass emits into.  `lines` says the tables were filled. */
 /*  How far the closure reaches, in tiles, and every distance in it the
  *  SCRIPT'S (scripts/incr.lua).  Read once a build: the closure runs
  *  once, so a rule here costs one call.
@@ -381,19 +382,19 @@ static void want_all(void)
  *  would predict too few chunks and leave the last build's triangles
  *  standing.  So the answer to a missing rule is every chunk, which is
  *  slow and correct, rather than a guess, which is fast and wrong. */
-static const char *const REACH[] = {"band_fit", "ramp", "band_ground", "band_ramp", "band_margin", "segment"};
+static const char *const REACH[] = {"band_fit", "spur", "band_ground", "band_spur", "band_margin", "segment"};
 enum
 {
     R_BAND_FIT = 0,
-    R_RAMP,
+    R_SPUR,
     R_BAND_GROUND,
-    R_BAND_RAMP,
+    R_BAND_SPUR,
     R_BAND_MARGIN,
     R_SEGMENT,
     R_N
 };
 
-void mesh_incr_closure(int roads)
+void mesh_incr_closure(int lines)
 {
     static uint8_t near2[NT], changed[NT], want_t[NT], hot[SEGS_MAX], reemit[SEGS_MAX], hotb[SEGS_MAX];
     const uint8_t *near1 = s_near1;
@@ -415,17 +416,17 @@ void mesh_incr_closure(int roads)
     memset(want_t, 0, sizeof want_t);
     dilate_into(s_dirty, near2, (int)reach[R_BAND_FIT]);
     memcpy(changed, near1, sizeof changed);
-    if (roads)
+    if (lines)
     {
         ns = seg_table_count();
-        nb = hiway_band_count();
+        nb = band_count();
         if (ns > SEGS_MAX || nb > SEGS_MAX || nb < 0)
         {
             want_all(); /* beyond the closure's tables: every chunk, still correct */
             s_stat.chunks = MESH_CHUNKS;
             return;
         }
-        /* a segment through the dirty tiles' neighbourhood has a new fit; its ends have new boxes */
+        /* a segment through the dirty tiles' neighborhood has a new fit.  Its ends have new boxes */
         for (i = 0; i < ns; ++i)
         {
             int32_t        col, row, cc, cr;
@@ -450,23 +451,23 @@ void mesh_incr_closure(int roads)
             const int32_t *bt;
             int            n;
             hotb[i] = 0;
-            if (hiway_band_get(i, &bt, &n) != 0)
+            if (band_get(i, &bt, &n) != 0)
                 continue;
             for (k = 0; k < n && !hotb[i]; ++k)
                 if (near2[bt[k]])
                     hotb[i] = 1;
         }
-        /* a ramp beside a changed tile has a new join, and its band carries the lane drop */
+        /* a spur beside a changed tile has a new join, and its band carries the lane drop */
         for (t = 0; t < NT; ++t)
         {
             int32_t col = t % R_MAP, row = t / R_MAP;
-            if (!lane_ramp_tile(col, row) || !any_near(changed, col, row, (int)reach[R_RAMP]))
+            if (!lane_spur_tile(col, row) || !any_near(changed, col, row, (int)reach[R_SPUR]))
                 continue;
             for (i = 0; i < nb; ++i)
             {
                 const int32_t *bt;
                 int            n;
-                if (hotb[i] || hiway_band_get(i, &bt, &n) != 0)
+                if (hotb[i] || band_get(i, &bt, &n) != 0)
                     continue;
                 for (k = 0; k < n; ++k)
                     if (abs(bt[k] % R_MAP - col) <= 1 && abs(bt[k] / R_MAP - row) <= 1)
@@ -476,18 +477,19 @@ void mesh_incr_closure(int roads)
                     }
             }
         }
-        /*  A hot band's ramps and the roads at their feet, and the roads
-         *  its ends become: two tiles out.  A hot band whose fit came out
-         *  as before changes geometry only where the ground under it did
-         *  (its profile follows the ground, eased at a sixth of a level a
-         *  tile) or where a lane drop did: those tiles of it, eight out
-         *  from the edit and six from a changed ramp, with the same
-         *  margin.  A band whose fit changed is drawn again whole. */
+        /*  A hot band's spurs and the lines at their feet, and the lines
+         *  its ends become: two tiles out.  A hot band whose fit came
+         *  out as before changes geometry only where the ground under it
+         *  did.  Its profile follows the ground, eased at a sixth of a
+         *  level a tile.  It also changes where a lane drop did.  Those
+         *  tiles of it, eight out from the edit and six from a changed
+         *  spur, with the same margin.  A band whose fit changed is
+         *  drawn again whole. */
         for (i = 0; i < nb; ++i)
         {
             const int32_t *bt;
             int            n, whole;
-            if (!hotb[i] || hiway_band_get(i, &bt, &n) != 0)
+            if (!hotb[i] || band_get(i, &bt, &n) != 0)
                 continue;
             ++s_stat.hotb;
             whole = !seg_table_unchanged(seg_table_band_index(i));
@@ -495,7 +497,7 @@ void mesh_incr_closure(int roads)
             {
                 int32_t bc = bt[k] % R_MAP, br = bt[k] / R_MAP;
                 if (!whole && !any_near(s_dirty, bc, br, (int)reach[R_BAND_GROUND]) &&
-                    !(hotb[i] == 2 && any_near(changed, bc, br, (int)reach[R_BAND_RAMP])))
+                    !(hotb[i] == 2 && any_near(changed, bc, br, (int)reach[R_BAND_SPUR])))
                     continue;
                 mark_around(changed, bc, br, (int)reach[R_BAND_MARGIN]);
                 mark_around(want_t, bc, br, (int)reach[R_BAND_MARGIN]);
@@ -523,7 +525,7 @@ void mesh_incr_closure(int roads)
     }
     s_stat.nseg  = ns;
     s_stat.nband = nb;
-    /* the ground beside an edit: a face reads its neighbours' heights */
+    /* the ground beside an edit: a face reads its neighbors' heights */
     for (t = 0; t < NT; ++t)
         if (near1[t])
             want_t[t] = 1;
@@ -534,13 +536,13 @@ void mesh_incr_closure(int roads)
         s_stat.chunks += s_want[k];
 }
 
-/* ---- the splice --------------------------------------------------------- */
+/* ---- the meet --------------------------------------------------------- */
 
 /*  `aux` and `aux_old` are the component ids of the new list and of the
- *  last build's: a chunk that stands keeps its old ids, a chunk redrawn
- *  takes the new ones, exactly as its triangles do, so the
- *  inspector names the component that actually drew each triangle. */
-static int splice(RMeshVert **list, uint32_t *n, uint32_t *cap, int split, uint32_t n_split, const RMeshVert *old, uint32_t *start, uint32_t *count, int nk, uint32_t *aux, const uint32_t *aux_old)
+ *  last build's.  A chunk that stands keeps its old ids, a chunk redrawn
+ *  takes the new ones, exactly as its triangles do.  So the inspector
+ *  names the component that actually drew each triangle. */
+static int meet(RMeshVert **list, uint32_t *n, uint32_t *cap, int split, uint32_t n_split, const RMeshVert *old, uint32_t *start, uint32_t *count, int nk, uint32_t *aux, const uint32_t *aux_old)
 {
     uint32_t   pstart[2 * MESH_CHUNKS], pcount[2 * MESH_CHUNKS], ostart[2 * MESH_CHUNKS], ocount[2 * MESH_CHUNKS];
     uint32_t   need = 0, pos = 0;
@@ -555,8 +557,8 @@ static int splice(RMeshVert **list, uint32_t *n, uint32_t *cap, int split, uint3
             return -1;
     }
     /*  An edit's re-sort of one list: the component ids are the full
-     *  build's and are left alone here, so the inspector names them from
-     *  the last full build until the next one. */
+     *  build's and are left alone here.  So the inspector names them
+     *  from the last full build until the next one. */
     if (bucket_sort(*list, *n, split, n_split, tmp, pstart, pcount, nk, aux) != 0)
     {
         free(tmp);
@@ -615,8 +617,8 @@ int mesh_incr_end(RMesh *m)
     if (!s_incr_on)
         return -1;
     s_stat.emitted = m->n_land / 3u;
-    if (splice(&m->land, &m->n_land, &m->cap_land, 1, m->n_terrain, m->bucket, m->range_start, m->range_count, 2 * MESH_CHUNKS, m->tri_comp, m->tri_comp_old) != 0 ||
-        splice(&m->water, &m->n_water, &m->cap_water, 0, 0, m->wbucket, m->wrange_start, m->wrange_count, MESH_CHUNKS, NULL, NULL) != 0)
+    if (meet(&m->land, &m->n_land, &m->cap_land, 1, m->n_terrain, m->bucket, m->range_start, m->range_count, 2 * MESH_CHUNKS, m->tri_comp, m->tri_comp_old) != 0 ||
+        meet(&m->water, &m->n_water, &m->cap_water, 0, 0, m->wbucket, m->wrange_start, m->wrange_count, MESH_CHUNKS, NULL, NULL) != 0)
         return -1;
     m->ranged = 1;
     memcpy(m->chunk_changed, s_want, sizeof m->chunk_changed);
@@ -639,7 +641,7 @@ int mesh_incr_end(RMesh *m)
 /* ---- the check ---------------------------------------------------------- */
 
 /*  Every triangle in a range keys to that range's chunk, the ranges tile
- *  the list: what a splice must keep true. */
+ *  the list: what a meet must keep true. */
 int mesh_ranges_check(const RMesh *m, int verbose)
 {
     uint32_t bad = 0, pos = 0, i;

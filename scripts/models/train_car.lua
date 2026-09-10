@@ -8,7 +8,7 @@ arc.model.define("train_car", {
         len  = 0.42,
         wid  = 0.1,
         high = 0.24,
-        sit  = 0.02,   --  how far its floor stands over the rail
+        sit  = 0.02,   --  how far its floor stands over the thread
     },
 
     build = function (p)

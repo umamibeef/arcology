@@ -1,10 +1,10 @@
-/*  log.h -- console messages that say where they came from.  Every line is
- *  `source  message`, the source coloured so a glance tells you which part
- *  is talking.  spdlog does the work; this is a small C face over it so the
+/*  log.h: console messages that say where they came from.  Every line is
+ *  `source  message`, the source colored so a glance tells you which part
+ *  is talking.  Spdlog does the work.  This is a small C face over it so the
  *  C sources stay plain C. Streams.  Diagnostics go to stderr.  This
- *  program's stdout carries measured output -- the --run summary, --check
- *  counts, --pick coordinates -- which people pipe elsewhere, so a log line
- *  on stdout would corrupt data rather than merely annoy.  Colour is
+ *  program's stdout carries measured output: the --run summary, --check
+ *  counts, --pick coordinates: which people pipe elsewhere, so a log line
+ *  on stdout would corrupt data rather than merely annoy.  Color is
  *  decided once, in this order: NO_COLOR present and non-empty  -> no
  *  (no-color.org) CLICOLOR=0                      -> no FORCE_COLOR /
  *  CLICOLOR_FORCE    -> yes, unless set to 0 otherwise
@@ -35,10 +35,10 @@ void log_init(void);
 /*  Nothing quieter than this is printed.  R_LOG_NOTE by default. */
 void log_set_level(RLogLevel max);
 
-/*  Force colour on or off, whatever the environment said. */
+/*  Force color on or off, whatever the environment said. */
 void log_set_colour(int on);
 
-/*  Whether colour ended up on, for code that draws its own output. */
+/*  Whether color ended up on, for code that draws its own output. */
 int log_colour(void);
 
 void log_msg(RLogLevel lvl, const char *source, const char *fmt, ...);
@@ -48,14 +48,14 @@ void log_msg(RLogLevel lvl, const char *source, const char *fmt, ...);
 #define R_NOTE(src, ...) log_msg(R_LOG_NOTE, (src), __VA_ARGS__)
 #define R_DBG(src, ...)  log_msg(R_LOG_DEBUG, (src), __VA_ARGS__)
 
-/*  The banner: `n` lines of ASCII art to the log's stream, each
- *  character coloured by a gradient across the banner's width, under
- *  the same colour rules as the log, so NO_COLOR gets the plain text. */
+/*  The banner.  It is `n` lines of ASCII art to the log's stream.  A
+ *  gradient across the banner's width colors each character, under the
+ *  same color rules as the log, so NO_COLOR gets the plain text. */
 void log_banner(const char *const *lines, int n);
 
-/*  Text verbatim to the log's stream -- no stamp, no level, no colour.  The
- *  lines under the banner.  Kept here rather than as an fputs in the caller
- *  so the choice of stream stays in one place. */
+/*  Text verbatim to the log's stream: no stamp, no level, no color.  The
+ *  lines under the banner.  Kept here rather than as an fputs in the
+ *  caller so the choice of stream stays in one place. */
 void log_raw(const char *text);
 
 #ifdef __cplusplus

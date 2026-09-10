@@ -1,17 +1,17 @@
---  junction_band.lua -- how the pavement sits on a junction's ring.
+--  junction_band.lua -- how the margin sits on a junction's ring.
 --
---  The ring is arc.rules.outline's.  Read as a footway it is three
+--  The ring is arc.rules.outline's.  Read as a margin it is three
 --  things: which of its edges carry a band, which way each faces into
 --  the junction, and which arm's mouth each is -- a mouth carries no
---  pavement, because the road runs on through it.
+--  margin, because the line runs on through it.
 --
---  The same reading gives the ring moved IN by the footway's width,
---  which is where the junction's asphalt stops.  Every edge is moved as
+--  The same reading gives the ring moved IN by the margin's width,
+--  which is where the junction's fill stops.  Every edge is moved as
 --  a LINE and the corners are where consecutive lines meet.  Offsetting
 --  each vertex along a mitre instead is only right where both its edges
 --  move by the same amount: at a mouth, where one moves and one does
 --  not, the mitred point slides along the mouth and the ring crosses
---  itself, which puts asphalt back over the footway it was meant to stop
+--  itself, which puts fill back over the margin it was meant to stop
 --  at.
 
 local f32 = arc.put.f32
@@ -27,7 +27,7 @@ arc.rules.band = function (b)
     local d = b:info()
     local n = d.n
     if n < 3 then return true end
-    local mouth = arc.rules.family({name = "road"}).footway.mouth
+    local mouth = arc.rules.family({name = "line"}).margin.mouth
 
     local p = {}
     for i = 0, n - 1 do
@@ -36,11 +36,11 @@ arc.rules.band = function (b)
     end
 
     --  Which side of an edge the junction is on comes from the ring's own
-    --  WINDING, not from which way the middle lies.  A kerb return makes
+    --  WINDING, not from which way the middle lies.  A lip return makes
     --  the boundary concave, and there a normal aimed at the middle comes
     --  out very nearly tangential: the band then slides along the
     --  boundary and out of the junction, which leaves the corner paved
-    --  with asphalt and the footway lying on the grass outside it.
+    --  with fill and the margin lying on the grass outside it.
     local area2 = 0.0
     for i = 0, n - 1 do
         local q = p[(i + 1) % n]
@@ -51,8 +51,8 @@ arc.rules.band = function (b)
     --  Each arm's mouth is ONE edge of the ring: the one whose two ends
     --  lie nearest the two corners of that arm's cut, whichever way round
     --  the ring happens to run.  Chosen per arm, so every arm has exactly
-    --  one mouth however the points were ordered, and the footway breaks
-    --  at every road rather than running over the ones whose tags did not
+    --  one mouth however the points were ordered, and the margin breaks
+    --  at every line rather than running over the ones whose tags did not
     --  survive.
     local edge_arm = {}
     for i = 0, n - 1 do edge_arm[i] = -1 end
@@ -72,8 +72,8 @@ arc.rules.band = function (b)
     end
 
     --  The inward normal of each edge, and whether it carries a band.  A
-    --  mouth keeps its normal -- that is the way a crossing laid there
-    --  runs into the junction -- but carries no pavement.
+    --  mouth keeps its normal -- that is the way a meet laid there
+    --  runs into the junction -- but carries no margin.
     local nrm, has = {}, {}
     for i = 0, n - 1 do
         local q = p[(i + 1) % n]
@@ -90,7 +90,7 @@ arc.rules.band = function (b)
 
     --  Where the band turns a corner of the ring its offset is MITRED --
     --  the bisector of the two edges' normals, stretched by the angle --
-    --  so a kerb round a return is one smooth band and not a row of
+    --  so a lip round a return is one smooth band and not a row of
     --  quads each square to its own edge, which leaves a tooth at every
     --  vertex.  Against a mouth, which carries no band, there is nothing
     --  to mitre with and the edge keeps its own normal.

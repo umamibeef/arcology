@@ -8,18 +8,21 @@ unnoticed.
 **This count is not a goal and must never be treated as one.**  See THE
 PURPOSE in CLAUDE.md.  What matters is whether the look of the city can
 be changed from a script; a call-up removed that leaves no new number
-reachable has bought nothing, and driving this to one has already cost a
-session for no gain.  Read the count as "no worse than before", never as
-"this far to go".
+reachable has bought nothing.  Read the count as "no worse than before",
+never as "this far to go".
 
-Two of the standing sites cannot go and should not be attacked.
-`arc.rules.world` is the drive and is meant to be there.  `pieces` in
-geo/fit.c is asked from the biarc router, which is entered from inside
-loops over candidate lanes and from probes whose answer is thrown away --
-there is no moment at which the set of paths to cut is known, so there is
-nothing to gather.  The seven in the running world are asked once a beat,
-per car and per crossing, and are the world asking what to do rather than
-C reaching up.
+What is left is ONE site, and it is the drive.  `arc.rules.frame` is
+entered once a frame and everything else hangs off it: the build under
+`arc.rules.world`, the world that moves under `arc.rules.moving`.
+
+Every path the renderer draws is cut by `arc.rules.pieces`, and every one
+of them goes through the CUT QUEUE (mesh/fit.c): a pass that wants a path
+cut puts the chain in the queue and reads the pieces back once the drive
+has been round.  A junction's connectors, a segment's dead-end caps, the
+links across a meet, a thread junction's threads, a spur's descent, its
+join and the two legs it falls back on -- all of them queue.  `arc.fit`
+asks the same rule from src/script, which is a SCRIPT asking, not the
+renderer.
 
     tools/call_up.py            # the count, and where they are
     tools/call_up.py --list     # every site, file by file
@@ -32,15 +35,15 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 TREE = os.path.join(ROOT, "src", "render")
 
-#  What the count may not exceed.  The build's share of it goes to 1.
-CEILING = 11
+#  What the count may not exceed.  It is one, and it is the drive.
+CEILING = 1
 
 #  A call from C into a script.  `script_emit_open` opens the window a
 #  prop rule draws through, so it is a call up as much as the rule is.
 CALL = re.compile(r"\b(script_rule_[a-z_]+|script_stage_[a-z_]+|script_emit_open)\s*\(")
 
 #  The one that is meant to be there.
-DRIVE = re.compile(r'script_rule_object\s*\(\s*"world"')
+DRIVE = re.compile(r'script_rule_object\s*\(\s*"frame"')
 
 
 def sites():

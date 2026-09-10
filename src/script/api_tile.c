@@ -1,17 +1,17 @@
-/*  api_tile.c -- the ground, one tile at a time, as a script composes it.
+/*  api_tile.c: the ground, one tile at a time, as a script composes it.
  *
- *  What the terrain IS -- how high each corner stands, which corners a
- *  slope's art cuts, where a water surface sits, what lies under it --
- *  is settled before this: the heightfield, the slope codes and the pads
- *  a network cut are the pipeline's own.  What is DRAWN over them is
- *  arc.rules.tile's: the top face, the seabed beneath a water body, the
- *  wall down to each neighbour, and the sediment at the map's cut edges.
+ *  What the terrain IS.  How high each corner stands, which corners a
+ *  slope's art cuts, where a water surface sits, what lies under it.  Is
+ *  settled before this: the heightfield, the slope codes and the pads a
+ *  network cut are the pipeline's own.  What is DRAWN over them is
+ *  arc.rules.tile's.  It draws the top face, the seabed beneath a water
+ *  body, the wall down to each neighbor, and the sediment at the map's
+ *  cut edges.
  *
  *  A city is sixteen thousand tiles, so a tile answers in plain numbers
- *  and makes no table but `info`.  Corners run 1 to 4 -- north-west,
- *  north-east, south-east, south-west -- and edges 1 to 4, north, east,
- *  south, west.
- */
+ *  and makes no table but `info`.  Corners run 1 to 4: north-west,
+ *  north-east, south-east, south-west: and edges 1 to 4, north, east,
+ *  south, west. */
 #include "script.h"
 
 
@@ -19,13 +19,17 @@
 
 #include "internal.h"
 #include "mesh/internal.h"
-#include "net/internal.h"
+#include "pipeline.h"
 
 TileFan *api_tile_of(lua_State *L);
 
-/*  What the tile is: where it stands, what the map says about it, which
- *  slope its art cuts, where it sits in the painter's stack, and whether
- *  a body of water lies on it. */
+/*  What the tile is.
+ *
+ *      Where it stands.
+ *      What the map says about it.
+ *      Which slope its art cuts.
+ *      Where it sits in the painter's stack.
+ *      Whether a body of water lies on it. */
 static int t_info(lua_State *L)
 {
     TileFan *t = api_tile_of(L);
@@ -47,8 +51,12 @@ static int t_info(lua_State *L)
     return 1;
 }
 
-/*  Corner k: where it stands on the map, how high the drawn ground is
- *  there, how high the seabed under it, and how high the levelled pad. */
+/*  Corner k.
+ *
+ *      Where it stands on the map.
+ *      How high the drawn ground is there.
+ *      How high the seabed under it.
+ *      How high the leveled pad. */
 static int t_at(lua_State *L)
 {
     TileFan *t = api_tile_of(L);
@@ -63,8 +71,8 @@ static int t_at(lua_State *L)
     return 5;
 }
 
-/*  A colour the ground is drawn in: the tile's own from the atlas, or
- *  one of the four the ground is walled and bedded in. */
+/*  A color the ground is drawn in: the tile's own from the atlas, or one
+ *  of the four the ground is walled and bedded in. */
 static int t_colour(lua_State *L)
 {
     TileFan    *t    = api_tile_of(L);
@@ -86,13 +94,18 @@ static int t_colour(lua_State *L)
     return 3;
 }
 
-/*  What lies over one edge: whether there is a tile there at all, the
- *  neighbour's ground at this edge's two corners, whether it carries
- *  water under its top, what is built on it, whether a network's
- *  corridor runs over it, which two corners of this tile the edge joins,
- *  whether the edge is the map's own cut, and whether its terrain is
- *  water at all -- which is not the same question: a tile can be dry on
- *  top and still be a river's. */
+/*  What lies over one edge.
+ *
+ *      Whether there is a tile there at all.
+ *      The neighbor's ground at this edge's two corners.
+ *      Whether it carries water under its top.
+ *      What is built on it.
+ *      Whether a network's corridor runs over it.
+ *      Which two corners of this tile the edge joins.
+ *      Whether the edge is the map's own cut.
+ *
+ *  Whether its terrain is water at all: which is not the same question:
+ *  a tile can be dry on top and still be a river's. */
 static int t_edge(lua_State *L)
 {
     TileFan *t = api_tile_of(L);
@@ -187,8 +200,8 @@ static int t_wall(lua_State *L)
     return 1;
 }
 
-/*  The same wall, carrying the two heights the material reads along it:
- *  the layers of sediment at the map's cut edge run from what the tile
+/*  The same wall, carrying the two heights the material reads along it.
+ *  The layers of sediment at the map's cut edge run from what the tile
  *  draws down to the base. */
 static int t_wall_r(lua_State *L)
 {

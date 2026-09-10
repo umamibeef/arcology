@@ -1,7 +1,7 @@
-/*  sound.c -- the game's sounds through SDL_AudioStream.  One stream per
- *  playing sound, bound to the device, which mixes them; a stream that has
- *  drained is reused.  The WAVs are 8-bit mono at the resources' own rates
- *  and SDL converts them to the device's format. */
+/*  sound.c: the game's sounds through SDL_AudioStream.  One stream per
+ *  playing sound, bound to the device, which mixes them.  A stream that
+ *  has drained is reused.  The WAVs are 8-bit mono at the resources' own
+ *  rates and SDL converts them to the device's format. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

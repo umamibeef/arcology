@@ -30,11 +30,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 
 #  Five places on the map, chosen to reach different work: a junction, a
-#  highway band, a ramp's foot, a railway, and open ground away from any
+#  band band, a spur's foot, a railway, and open ground away from any
 #  of it.
 EDITS = ["66,113", "72,88", "90,81", "105,84", "20,20"]
 
-CHECK = re.compile(r"^(mesh check|road clip|lanes|sidewalks|on-ramps|tangent|chunks|road pieces)")
+CHECK = re.compile(r"^(mesh check|line clip|lanes|margins|on-spurs|tangent|chunks|line pieces)")
 
 
 def build(binary, city, out, extra=()):

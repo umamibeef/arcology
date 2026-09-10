@@ -10,13 +10,13 @@ arc.family.define{
     answers = true,
     walk    = -1, -- the tile pass reaches it, not the walk
 
-    width = "road_w",
-    rmin  = "road_rmin",
-    rmax  = "road_rmax",
+    width = "line_w",
+    rmin  = "line_rmin",
+    rmax  = "line_rmax",
     ref_width = 0.50,
 
-    material = arc.mat.road,
-    loft     = "road",
+    material = arc.mat.line,
+    loft     = "line",
     slot     = "slot_strip",
     fit      = 0,
 

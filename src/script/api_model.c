@@ -1,8 +1,8 @@
-/*  api_model.c -- `arc.model`: the props, each a file of its own.
+/*  api_model.c: `arc.model`: the props, each a file of its own.
  *
  *  A model is one file under scripts/models.  It names itself, carries
- *  its own parameters, and answers with the pieces it is made of when it
- *  is asked for a prop of a given size:
+ *  its own parameters.  Answers with the pieces it is made of when it is
+ *  asked for a prop of a given size:
  *
  *      arc.model.define("street_lamp", {
  *          p = {post = 0.016, tall = 1.35, ...},   its own numbers
@@ -31,10 +31,10 @@
  *                                          put on: 0 near, 1 far
  *       mat = arc.mat.prop, code = 0}
  *
- *  Every number in it is a plain number: the build function has already
+ *  Every number in it is a plain number.  The build function has already
  *  worked them out from the model's own parameters and the size it was
  *  asked for.  That is what makes a model parametric rather than merely
- *  stored -- a signal's arm reaches over the junction it stands at, so
+ *  stored: a signal's arm reaches over the junction it stands at.  So
  *  what it answers for one junction is not what it answers for another.
  *
  *      arc.model.names()          every model there is
@@ -44,8 +44,7 @@
  *      arc.model.params(name)     its own numbers, to read or to change
  *
  *  There is no reset and nothing is shipped in C: what the files define
- *  is all there is.
- */
+ *  is all there is. */
 #include "script.h"
 
 
@@ -53,8 +52,8 @@
 
 #include "internal.h"
 #include "mesh/internal.h"
-#include "net/internal.h"
-#include "geo/model.h"
+#include "pipeline.h"
+#include "mesh/model.h"
 
 static const char *const KIND[] = {"box", "arm", "lens", "face", "prism"};
 
@@ -62,8 +61,8 @@ static const char *const KIND[] = {"box", "arm", "lens", "face", "prism"};
 #define MODEL_MAX  64
 #define MODEL_NAME 32
 
-/*  The models, by name and in the order the files defined them, each
- *  with its own table held in the registry so the build function and the
+/*  The models, by name and in the order the files defined them.  Each
+ *  has its own table held in the registry, so the build function and the
  *  parameters stay reachable. */
 static char       s_name[MODEL_MAX][MODEL_NAME];
 static int        s_ref[MODEL_MAX];
@@ -97,6 +96,18 @@ void script_model_reset(void)
             luaL_unref(s_ms, LUA_REGISTRYINDEX, s_ref[i]);
     s_nmodel = 0;
     s_ms     = NULL;
+}
+
+/*  A yes or no on a part.  Read apart from `field`, because
+ *  lua_tonumber answers 0 for a boolean and a part that says `uv = true`
+ *  would silently read as false. */
+static int field_yes(lua_State *L, int t, const char *key)
+{
+    int v;
+    lua_getfield(L, t, key);
+    v = lua_toboolean(L, -1) && !lua_isnil(L, -1);
+    lua_pop(L, 1);
+    return v;
 }
 
 static float field(lua_State *L, int t, const char *key, float def)
@@ -179,6 +190,7 @@ int script_model_build(int model, float size, ModelHead *head, ModelPart *parts,
             p->f1   = field(L, pt, "f1", 1.0f);
             p->mat  = field(L, pt, "mat", (float)MAT_PROP);
             p->code = field(L, pt, "code", 0.0f);
+            p->uv   = field_yes(L, pt, "uv");
             lua_pop(L, 1);
         }
     }
@@ -237,7 +249,7 @@ static int l_params(lua_State *L)
 
 /*  What a model is made of at that size, as the program sees it: the
  *  pieces with every number worked out.  For a console, a check or a
- *  report -- the build itself goes straight to the walk. */
+ *  report: the build itself goes straight to the walk. */
 static int l_build(lua_State *L)
 {
     ModelHead head;

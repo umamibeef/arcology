@@ -1,7 +1,8 @@
-/*  prefs.c -- what the game remembers between runs, and the themes it
- *  remembers a choice from.  A small JSON file beside the assets, written
- *  by hand rather than with a library: it holds a dozen flat string pairs
- *  and the game already carries a parser for reading them back. */
+/*  prefs.c: what the game remembers between runs, and the themes it
+ *  remembers a choice from.  A small JSON file beside the assets,
+ *  written by hand rather than with a library.  It holds a dozen flat
+ *  string pairs and the game already carries a parser for reading them
+ *  back. */
 #include <SDL3/SDL.h>
 
 #include "../app/internal.h"
@@ -22,7 +23,7 @@ typedef struct
 {
     char key[64];
     char val[192];
-    int  is_str; /* written quoted; a number or true/false goes bare */
+    int  is_str; /* written quoted.  A number or true/false goes bare */
 } Pref;
 
 /*  ==================================================================
@@ -165,8 +166,8 @@ static int name_cmp(const void *a, const void *b)
     return strcmp((const char *)a, (const char *)b);
 }
 
-/*  Every pack under <assets>/themes -- a directory with a theme.txt --
- *  by name, sorted, for the menu. */
+/*  Every pack under <assets>/themes, a directory with a theme.txt, by
+ *  name, sorted, for the menu. */
 void scan_themes(App *a, const char *assets_dir)
 {
     DIR           *d;
@@ -192,10 +193,10 @@ void scan_themes(App *a, const char *assets_dir)
 }
 
 /*  Put a scheme on: by name from assets/themes, by path, or "none" for
- *  the hand-drawn look.  `why` is for the log -- default, saved
- *  preference, --theme, chosen.  A default pack that is not there is
- *  not a warning: assets/ is built from the game's own files and a
- *  fresh checkout has no schemes yet. */
+ *  the hand-drawn look.  `why` is for the log: default, saved
+ *  preference, --theme, chosen.  A default pack that is not there is not
+ *  a warning.  Assets/ is built from the game's own files and a fresh
+ *  checkout has no schemes yet. */
 int apply_theme_choice(App *a, const char *name, const char *why)
 {
     char        path[1200];

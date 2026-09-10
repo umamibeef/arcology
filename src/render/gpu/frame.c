@@ -1,6 +1,6 @@
-/*  gpu/frame.c -- drawing one frame with the device gpu.c made.  Culling
- *  and ordering the instances, the camera uniforms, the passes, and the two
- *  ways out: to the window, and to a readback buffer. */
+/*  gpu/frame.c: drawing one frame with the device gpu.c made.  Culling
+ *  and ordering the instances, the camera uniforms, the passes, and the
+ *  two ways out: to the window, and to a readback buffer. */
 #include "materials.h" /* GENERATED: the material numbers a script may add to */
 #include "script.h"
 #include "dump.h"
@@ -22,9 +22,14 @@
 /* ---- drawing ---------------------------------------------------------- */
 
 /*  The vertex uniform of every pipeline that places things on the
- *  canvas, sprites and mesh alike: the scroll and the scale, the tile
- *  projection, the altitude step and the free rotation.  The sprite
- *  shader reads the rotation too, to move each sprite with its tile. */
+ *  canvas, sprites and mesh alike.
+ *
+ *      The scroll and the scale.
+ *      The tile projection.
+ *      The altitude step and the free rotation.
+ *
+ *  The sprite shader reads the rotation too, to move each sprite with
+ *  its tile. */
 typedef struct
 {
     float view[4]; /* scroll x, scroll y, 2*scale/target_w, 2*scale/target_h */
@@ -37,9 +42,9 @@ typedef struct
 static int s_chunks_said; /* --times: the chunks drawn, said once */
 
 /*  Is chunk k in view?  Its four corner tiles at the ground's floor and
- *  its highest level, through the very projection terrain.vert applies
- *  -- the turn about the pivot, the pitch's foreshortening, the height's
- *  lift -- to normalised device coordinates; out only when every corner
+ *  its highest level, through the very projection terrain.vert applies.
+ *  The turn about the pivot, the pitch's foreshortening, the height's
+ *  lift, to normalized device coordinates.  Out only when every corner
  *  lies past one edge, with a twentieth of margin. */
 static int chunk_visible(const CamU *u, int k)
 {
@@ -65,9 +70,9 @@ static int chunk_visible(const CamU *u, int k)
     return maxx >= -1.05f && minx <= 1.05f && maxy >= -1.05f && miny <= 1.05f;
 }
 
-/*  The fragment uniform of every sprite pipeline.  sprite.frag and
- *  shadow.frag declare only the first member; sprite_water.frag reads all
- *  three.  One struct is pushed for all of them. */
+/*  The fragment uniform of every sprite pipeline.  Sprite.frag and
+ *  shadow.frag declare only the first member.  Sprite_water.frag reads
+ *  all three.  One struct is pushed for all of them. */
 typedef struct
 {
     int32_t p[4]; /* transparent index, 0, 0, 0     */
@@ -85,11 +90,11 @@ typedef struct
 {
     float sun[4];
     float params[4];
-    float flags[4]; /* x: the pass (0 base, 1 sidewalks, 2 markings); y: the sidewalks on; the rest spare */
-    /*  The materials a script declared: a colour and a roughness each, in
-     *  the order arc.mat.define gave them, so material MAT_SCRIPT_BASE + k
-     *  is shaded from mats[k].  A built-in material has a branch of its
-     *  own instead and reads none of this. */
+    float flags[4]; /* x: the pass (0 base, 1 margins, 2 markings).  Y: the margins on.  The rest spare */
+    /*  The materials a script declared: a color and a roughness each, in
+     *  the order arc.mat.define gave them.  So material MAT_SCRIPT_BASE
+     *  + k is shaded from mats[k].  A built-in material has a branch of
+     *  its own instead and reads none of this. */
     float mats[MAT_SCRIPT_MAX][4];
 } LightU;
 
@@ -106,26 +111,26 @@ static float view_pitch(const RGpuView *v)
     return v->pitch > 0.0f ? v->pitch : ARC_PITCH_DEG;
 }
 
-/*  --no-shadow 1: draw no silhouettes, so a frame at the snap and a
+/*  --no-shadow 1 draws no silhouettes.  So a frame at the snap and a
  *  frame a hair off it differ only in how they order what is left. */
 static int g_no_shadow = -1;
 
-/*  Is the camera off the game's own view -- turned, or raised? */
+/*  Is the camera off the game's own view: turned, or raised? */
 static int cam_free(const RGpuView *v)
 {
-    /*  A quarter turn on the game's pitch is not free: the sweep was run
-     *  on the view turned that way and its sprites are drawn as at the
-     *  snap, unturned; only the mesh is projected at the quarter. */
+    /*  A quarter turn on the game's pitch is not free.  The sweep was
+     *  run on the view turned that way and its sprites are drawn as at
+     *  the snap, unturned.  Only the mesh is projected at the quarter. */
     float turn = fmodf(fabsf(v->angle), 90.0f);
     int   off  = turn > 0.01f && turn < 89.99f;
     return off || !arc_is_game_pitch(view_pitch(v));
 }
 
-/*  A sprite's distance from the camera along the way it looks: the base of
- *  the standing or flat quad sprite.vert builds, the same number.  The art
- *  writes its depth now, so the depth test orders it; the sort is what
- *  settles the ties, art at equal distance, which the turned camera has
- *  plenty of.  Farthest first. */
+/*  A sprite's distance from the camera along the way it looks: the base
+ *  of the standing or flat quad sprite.vert builds, the same number.
+ *  The art writes its depth now, so the depth test orders it.  The sort
+ *  is what settles the ties, art at equal distance, which the turned
+ *  camera has plenty of.  Farthest first. */
 typedef struct
 {
     float    k;
@@ -133,18 +138,18 @@ typedef struct
     RInst    in;
 } SortInst;
 
-/*  The sprites' own turn.  The sweep is made for a quarter, and its art
- *  is drawn with the turn LEFT from that quarter to the camera's angle,
- *  about the map's centre -- what a quarter's sweep is turned about --
- *  and carried by the translation that puts a turn about the centre
- *  where the mesh's turn about the pivot is.  At a settled quarter the
- *  turn left is nothing and the translation nothing: the art sits where
- *  the sweep put it.  On the move the second half of the swing draws the
+/*  The sprites' own turn.  The sweep is made for a quarter.  Its art is
+ *  drawn with the turn LEFT from that quarter to the camera's angle,
+ *  about the map's center.  What a quarter's sweep is turned about.  And
+ *  carried by the translation that puts a turn about the center where
+ *  the mesh's turn about the pivot is.  At a settled quarter the turn
+ *  left is nothing and the translation nothing: the art sits where the
+ *  sweep put it.  On the move the second half of the swing draws the
  *  destination's sweep, so the settle draws nothing new. */
 typedef struct
 {
     float ca, sa; /* cos, sin of the turn left                */
-    float cx, cy; /* the map's centre, the sweep's own pivot   */
+    float cx, cy; /* the map's center, the sweep's own pivot   */
     float dx, dy; /* the translation, grid units              */
     int   moved;  /* the art is not where the sweep put it     */
 } SpriteTurn;
@@ -164,7 +169,7 @@ static void sprite_turn(const RGpuView *v, SpriteTurn *t)
     t->cx = t->cy = c;
     gpu_view_pivot(v, &pc, &pr);
     /*  D = R(theta)(C - P) + P - C: a turn about the pivot P is a turn
-     *  about the centre C and this translation. */
+     *  about the center C and this translation. */
     t->dx    = (c - pc) * ca - (c - pr) * sa + pc - c;
     t->dy    = (c - pc) * sa + (c - pr) * ca + pr - c;
     t->moved = fabsf(left) > 0.01f || !arc_is_game_pitch(view_pitch(v));
@@ -270,7 +275,7 @@ static int build_visible(RGpu *g, const RGpuView *v, Ranges *r)
             int          want;
             /*  Turned, the sprites still draw, each moved with its tile
              *  and unturned, as the original shows the same art at every
-             *  one of its rotations; only the silhouettes, cast on the
+             *  one of its rotations.  Only the silhouettes, cast on the
              *  unturned canvas, stay off. */
             if (pass == 0)
                 want = (kind == K_TERRAIN) ||
@@ -286,12 +291,12 @@ static int build_visible(RGpu *g, const RGpuView *v, Ranges *r)
                 want = view_pitch(v) > 30.5f
                            ? (kind == K_LANDMARK)
                            : ((kind == K_SPRITE) || (kind == K_LANDMARK) ||
-                              ((kind == K_ROAD_ART || kind == K_CAR || kind == K_TRAIN) && !v->geometry));
+                              ((kind == K_LINE_ART || kind == K_CAR || kind == K_TRAIN) && !v->geometry));
             else
                 /*  A silhouette is cast on the unturned canvas of its
-                 *  sweep; it moves with its tile as the art does, so it
-                 *  neither vanishes for the swing nor pops back at the
-                 *  settle.  --no-shadow drops them all. */
+                 *  sweep.  It moves with its tile as the art does.  So
+                 *  it neither vanishes for the swing nor pops back at
+                 *  the settle.  --no-shadow drops them all. */
                 want = (kind == K_SHADOW) && !g_no_shadow;
             if (!want)
                 continue;
@@ -327,17 +332,17 @@ static void cam_for(const RGpu *g, const RGpuView *v, CamU *u)
     const RAtlasLevel *l = g->sw.level;
     u->view[0]           = (float)v->scroll_x;
     u->view[1]           = (float)v->scroll_y;
-    /*  The canvas is drawn at the target's own resolution: a canvas pixel
-     *  is view_factor() target pixels, so sprites magnify by nearest and
-     *  the mesh and the water shade every target pixel. */
+    /*  The canvas is drawn at the target's own resolution.  A canvas
+     *  pixel is view_factor() target pixels, so sprites magnify by
+     *  nearest and the mesh and the water shade every target pixel. */
     u->view[2] = 2.0f * g->factor / (float)g->tw;
     u->view[3] = 2.0f * g->factor / (float)g->th;
-    /*  A ground sprite's rise is its full height, so its diamond
-     *  occupies the th + 1 rows ABOVE the tile's origin row: the top
+    /*  A ground sprite's rise is its full height.  So its diamond
+     *  occupies the th + 1 rows ABOVE the tile's origin row.  The top
      *  vertex at sy - th - 1, the bottom row at sy - 1.  The mesh
-     *  rhombus is th tall and is centred on that hexagon, which is
-     *  one pixel inside the sprite on the top and bottom rows, the
-     *  residual tools/terrain_shapes.py records. */
+     *  rhombus is th tall and is centered on that hexagon.  This is one
+     *  pixel inside the sprite on the top and bottom rows, the residual
+     *  tools/terrain_shapes.py records. */
     u->proj[0] = l ? arc_origin_x((float)g->sw.ox, (float)l->tile_w) : 0.0f;
     u->proj[1] = l ? arc_origin_y((float)g->sw.oy, (float)l->tile_h) : 0.0f;
     u->proj[2] = l ? arc_half_w((float)l->tile_w) : arc_half_w(ARC_TILE_W_MAX);
@@ -346,10 +351,10 @@ static void cam_for(const RGpu *g, const RGpuView *v, CamU *u)
     u->alt[1]  = 800.0f; /* the depth range: the diagonal units of distance the buffer spans, from 300 before the map's near corner */
     u->alt[2]  = cosf(v->angle * ARC_DEG2RAD);
     u->alt[3]  = sinf(v->angle * ARC_DEG2RAD);
-    /*  The free camera -- turned off the snap, or raised off the game's
-     *  own pitch -- stops the painter's slot ordering the tiles.  A quarter
-     *  turn on the game's pitch keeps it: the shaders turn the grid about
-     *  the pivot and map each slot through the quarter. */
+    /*  The free camera, turned off the snap, or raised off the game's
+     *  own pitch, stops the painter's slot ordering the tiles.  A
+     *  quarter turn on the game's pitch keeps it: the shaders turn the
+     *  grid about the pivot and map each slot through the quarter. */
     {
         float turn = fmodf(fabsf(v->angle), 90.0f);
         int   off  = turn > 0.01f && turn < 89.99f;
@@ -358,9 +363,9 @@ static void cam_for(const RGpu *g, const RGpuView *v, CamU *u)
     gpu_view_pivot(v, &u->rot[1], &u->rot[2]);
     u->rot[3] = view_pitch(v) * ARC_DEG2RAD;
     /*  The compositing: the original's art alone, at the original's own
-     *  camera, composes as the sweep drew it, by the painter's slot; with
-     *  the mesh, or off that camera, everything composes by the camera's
-     *  depth and the art writes it. */
+     *  camera, composes as the sweep drew it, by the painter's slot.
+     *  With the mesh, or off that camera, everything composes by the
+     *  camera's depth and the art writes it. */
     u->mode[0] = (v->geometry || cam_free(v)) ? 0.0f : 1.0f;
     u->mode[1] = (float)(2 * R_MAP * R_MAP + 2); /* the painter's slot divisor */
     u->mode[2] = u->mode[3] = 0.0f; /* the mesh turns about the pivot itself: no translation */
@@ -392,8 +397,8 @@ static void draw_mesh(RGpu *g, SDL_GPUCommandBuffer *cmd, SDL_GPURenderPass *rp,
          *  underground view half a DEVICE pixel, a hairline at any scale. */
         lu.params[2] = v->underground ? 0.5f : (v->grid ? 0.5f * g->factor : 0.0f);
         lu.params[3] = v->underground ? 1.0f : (v->plan ? -1.0f : 0.0f); /* the map view is -1: the tints' switch */
-        lu.flags[0]  = 0.0f;                                             /* the pass: 0 the base draw, 1 sidewalks, 2 markings */
-        lu.flags[1]  = v->sidewalks ? 1.0f : 0.0f;
+        lu.flags[0]  = 0.0f;                                             /* the pass: 0 the base draw, 1 margins, 2 markings */
+        lu.flags[1]  = v->margins ? 1.0f : 0.0f;
         lu.flags[2] = lu.flags[3] = 0.0f;
         /*  The script's own materials, as it declared them.  Anything it
          *  did not declare is left black and matt, which is what a
@@ -415,12 +420,12 @@ static void draw_mesh(RGpu *g, SDL_GPUCommandBuffer *cmd, SDL_GPURenderPass *rp,
         vb.buffer = g->mbuf;
         vb.offset = 0;
         SDL_BindGPUVertexBuffers(rp, 0, &vb, 1);
-        /*  By chunk, when the mesh is bucketed: each chunk in view drawn as
-         *  its terrain range then its network range; a chunk outside the
-         *  view -- its eight corners, ground and highest ground, all past
-         *  one edge in the shader's own projection -- is skipped, which is
-         *  what keeps a world 100x this one drawable.  Unbucketed, the
-         *  whole list. */
+        /*  By chunk, when the mesh is bucketed: each chunk in view drawn
+         *  as its terrain range then its network range.  A chunk outside
+         *  the view, its eight corners, ground and highest ground, all
+         *  past one edge in the shader's own projection, is skipped.
+         *  This is what keeps a world 100x this one drawable.
+         *  Unbucketed, the whole list. */
         {
             int k, drawn = 0;
             for (k = 0; k < MESH_CHUNKS; ++k)
@@ -439,19 +444,19 @@ static void draw_mesh(RGpu *g, SDL_GPUCommandBuffer *cmd, SDL_GPURenderPass *rp,
                 dumpf("time  frame  chunks drawn %d of %d\n", drawn, MESH_CHUNKS);
             }
         }
-        /*  The passes: the network range of the opaque list -- roads,
-         *  decks, boxes, furniture -- drawn again under a pass number in
-         *  flags.x, the same vertices each time.  Pass 1 is the sidewalk
-         *  pass's (net/sidewalk.c): a road strip's outer fifth, discarded
-         *  by the base draw, painted now; pass 2 the marking pass's
-         *  (marking.c): the lines alone over the asphalt, at equal depth.
-         *  A pass off is a draw skipped, no rebuild. */
+        /*  The passes.  The network range of the opaque list holds
+         *  lines, slabs, boxes and furniture.  Each is drawn again under
+         *  a pass number in flags.x, the same vertices each time.  Pass
+         *  1 is the margin pass's (net/margin.c): a line strip's outer
+         *  fifth, discarded by the base draw, painted now.  Pass 2 the
+         *  marking pass's (marking.c): the lines alone over the fill, at
+         *  equal depth.  A pass off is a draw skipped, no rebuild. */
         if (slots_held(g, 1, 2))
         {
             int pass;
             for (pass = 1; pass <= 2; ++pass)
             {
-                if (pass == 1 ? !v->sidewalks : !v->markings)
+                if (pass == 1 ? !v->margins : !v->markings)
                     continue;
                 lu.flags[0] = (float)pass;
                 SDL_PushGPUFragmentUniformData(cmd, 0, &lu, sizeof lu);
@@ -473,7 +478,7 @@ static void draw_mesh(RGpu *g, SDL_GPUCommandBuffer *cmd, SDL_GPURenderPass *rp,
             SDL_DrawGPUPrimitives(rp, g->movers_n, 1, 0, 0);
             SDL_BindGPUVertexBuffers(rp, 0, &vb, 1);
         }
-        /*  The water, blended: every chunk's slot in order, whole -- the
+        /*  The water, blended: every chunk's slot in order, whole: the
          *  order its faces were sorted into, as the one list was drawn. */
         if (slots_held(g, 2 * MESH_CHUNKS, 1))
         {
@@ -490,7 +495,7 @@ static void draw_mesh(RGpu *g, SDL_GPUCommandBuffer *cmd, SDL_GPURenderPass *rp,
 }
 
 /*  Draw passes 1 and 2 (the frame target and the shadow mask) and then
- *  resolve to `final`, which is the swapchain texture or the offscreen
+ *  resolve to `final`.  This is the swapchain texture or the offscreen
  *  one.  `sw`/`sh` are the final target's size in pixels. */
 static int draw_frame(RGpu *g, SDL_GPUCommandBuffer *cmd, const RGpuView *v, SDL_GPUTexture *final, SDL_GPUGraphicsPipeline *resolve_pipe, int32_t sw, int32_t sh, float scale)
 {
@@ -508,12 +513,12 @@ static int draw_frame(RGpu *g, SDL_GPUCommandBuffer *cmd, const RGpuView *v, SDL
 
     if (build_visible(g, v, &r) != 0)
         return -1;
-    /*  Raised off the game's own pitch the mesh draws alone: the sprites
-     *  are drawn for one camera and cannot be looked at from above, where
-     *  they would only cover the world they are meant to show.  The
-     *  structures the player placed are the exception, and they are kept:
-     *  a map wants its landmarks on it, and the original's own art is
-     *  what says which is which. */
+    /*  Raised off the game's own pitch the mesh draws alone.  The
+     *  sprites are drawn for one camera and cannot be looked at from
+     *  above.  There they would only cover the world they are meant to
+     *  show.  The structures the player placed are the exception.  They
+     *  are kept: a map wants its landmarks on it, and the original's own
+     *  art is what says which is which. */
     if (v->mesh_only || view_pitch(v) > 30.5f)
     {
         r.n_terrain = r.n_water = r.n_shadow = 0;
@@ -570,11 +575,15 @@ static int draw_frame(RGpu *g, SDL_GPUCommandBuffer *cmd, const RGpuView *v, SDL
     SDL_EndGPUCopyPass(cp);
 
     cam_for(g, v, &cam);
-    /*  The sprites' own camera: the turn left from their sweep's quarter,
-     *  about the map's centre, and the translation onto the mesh's turn
-     *  about the pivot (sprite_turn).  Both the sine AND the cosine are
-     *  tested: a cosine of minus one is a half turn, and with the art
-     *  carrying real depth a sine-only test drops half the sprites. */
+    /*  The sprites' own camera.
+     *
+     *      The turn left from their sweep's quarter.  About the map's
+     *      center.  The translation onto the mesh's turn about the pivot
+     *      (sprite_turn).
+     *
+     *  Both the sine AND the cosine are tested.  A cosine of minus one
+     *  is a half turn, and with the art carrying real depth a sine-only
+     *  test drops half the sprites. */
     scam = cam;
     {
         SpriteTurn st;
@@ -590,7 +599,7 @@ static int draw_frame(RGpu *g, SDL_GPUCommandBuffer *cmd, const RGpuView *v, SDL
     memset(&fu, 0, sizeof fu);
     fu.p[0] = g->transparent;
     fu.p[1] = v->geometry ? 1 : 0; /* the water sprites drop their rim  */
-    /*  and shade their water -- underground there is no sky to reflect. */
+    /*  and shade their water: underground there is no sky to reflect. */
     fu.p[2]   = (v->geometry && !v->underground) ? 1 : 0;
     fu.f[0]   = v->time;
     fu.f[1]   = arc_half_w((float)l->tile_w);
@@ -698,7 +707,7 @@ static int draw_frame(RGpu *g, SDL_GPUCommandBuffer *cmd, const RGpuView *v, SDL
         rp          = SDL_BeginGPURenderPass(cmd, &ct, 1, NULL);
         SDL_BindGPUGraphicsPipeline(rp, resolve_pipe);
         ts[0].texture = g->color;
-        ts[0].sampler = g->linear; /* the fractional zoom filters; integer scales fetch texels */
+        ts[0].sampler = g->linear; /* the fractional zoom filters.  Integer scales fetch texels */
         ts[1].texture = g->shadow;
         ts[2].texture = g->pal;
         ts[2].sampler = g->nearest;
@@ -719,7 +728,7 @@ static int draw_frame(RGpu *g, SDL_GPUCommandBuffer *cmd, const RGpuView *v, SDL
 }
 
 /*  The palette entry the software rasteriser snaps the sky to: the frame
- *  is cleared to that entry's colour, as the software paints it, and the
+ *  is cleared to that entry's color, as the software paints it.  The
  *  shadow rule reads the same index off the background. */
 static void snap_background(RGpu *g, const uint8_t sky[3])
 {
@@ -778,7 +787,7 @@ int gpu_frame(RGpu *g, const RGpuView *v, const uint8_t sky[3], RGpuOverlay over
         return -1;
     }
     g->factor = scale;
-    /*  The palette snapped to the sky: use the phase-0 colours, which is
+    /*  The palette snapped to the sky: use the phase-0 colors, which is
      *  what the software does with the palette it was given. */
     snap_background(g, sky);
     if (draw_frame(g, cmd, v, swap, g->pipe_resolve, (int32_t)sw, (int32_t)sh, 1.0f) != 0)

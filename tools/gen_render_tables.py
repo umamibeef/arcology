@@ -30,7 +30,7 @@ VEH_FLIP     = -0x62AE   # byte: slot -> the blitter's variant flag
 VEH_DX       = -0x629A   # byte: slot -> extra x nudge
 VEH_DY       = -0x6286   # word: slot -> extra y nudge
 #  Traffic, from $17612.  Cars are drawn from the XTRF density layer, not
-#  from XTHG; the road's own shape picks which car sprite.
+#  from XTHG; the line's own shape picks which car sprite.
 TRAF_CAR     = -0x4826   # byte: XBLD-29 -> car sprite index, 0 = none
 TRAF_HEAVY   = -0x47D6   # byte: car index -> its heavy-traffic variant
 UGND_GROUND  = -0x48B2   # word: XTER -> the underground view's ground shape
@@ -107,7 +107,7 @@ def main():
     a("const uint8_t R_DIR_FLIP[8]  = {" + ", ".join(str(v) for v in dl) + "};")
     a("")
     a("/*  Road vehicles, thing types 10 and 11 ($A7E0).  The sprite is chosen")
-    a(" *  by the road tile under the vehicle, not by its heading:")
+    a(" *  by the line tile under the vehicle, not by its heading:")
     a(" *    d4 = XBLD - 0x2C, rejected outside 0..0x22, then -6 above 0x12")
     a(" *    and a further -4 above 0x16;  slot = R_VEH_SLOT[d4];  a slot of")
     a(" *    50 means resolve it from thing[+8] through R_VEH_SLOT8 instead.")
@@ -120,8 +120,8 @@ def main():
     a("const uint8_t R_VEH_DX[20]    = {" + ", ".join(str(v) for v in bytesat(img, VEH_DX, 20)) + "};")
     a("const int16_t R_VEH_DY[20]    = {" + ", ".join(str(v) for v in words(VEH_DY, 20)) + "};")
     a("")
-    a("/*  Traffic ($17612).  A road tile draws a car when the XTRF density at")
-    a(" *  (row/2, col/2) exceeds a threshold -- 0x1C for the highway shapes")
+    a("/*  Traffic ($17612).  A line tile draws a car when the XTRF density at")
+    a(" *  (row/2, col/2) exceeds a threshold -- 0x1C for the band shapes")
     a(" *  73..80, 0x55 otherwise -- and a heavier variant above 0x38 / 0xAA.")
     a(" *  The sprite is 399 + index. */")
     a("/*  A zone building in the underground view is not drawn as itself:")
@@ -145,7 +145,7 @@ def main():
     a(" *  A is 3 eight-cycles, a four-cycle, a fixed point, then an")
     a(" *  eight-cycle, a four-cycle and an eight-cycle running the OTHER")
     a(" *  way; B is seven swaps and a fixed point -- a blink, not a flow.")
-    a(" *  Rotating all 49 as one block mixes unrelated ramps together. */")
+    a(" *  Rotating all 49 as one block mixes unrelated spurs together. */")
     a("/*  Thing types 0, 4 and 9 do NOT use the eight-heading tables the")
     a(" *  other arms use: $A214 reads a four-entry pair instead ($A224 for")
     a(" *  the mirror).  Using the eight-entry ones picks the wrong frame. */")

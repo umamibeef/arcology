@@ -1,5 +1,5 @@
-/*  tables.h -- tables lifted out of the binary's own global image.  See
- *  tools/gen_render_tables.py; never hand-type a constant here. */
+/*  tables.h: tables lifted out of the binary's own global image.  See
+ *  tools/gen_render_tables.py.  Never hand-type a constant here. */
 #ifndef R_TABLES_H
 #define R_TABLES_H
 

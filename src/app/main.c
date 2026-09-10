@@ -1,9 +1,9 @@
 /* ==================================================================== *
- *  Arcology -- the one entry point.
+ *  main.c: the one entry point of Arcology.
  *
  *  The verification driver, the game, the atlas dumper and the
  *  software rasteriser are one binary.  app/modes.cpp reads the line with CLI11 and says which
- *  of them runs; each then reads its own arguments, so the line is
+ *  of them runs.  Each then reads its own arguments, so the line is
  *  handed on whole.  Anything that is not a developer mode is the
  *  game's, which is the only program a player ever wants.
  * ==================================================================== */

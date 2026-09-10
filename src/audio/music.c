@@ -1,10 +1,8 @@
-/*  music.c -- see music.h.  The player is small because the data is:
- *  every instrument is one sample, no key splits, no tremolo, every
- *  instrument flag clear.  What SoundMusicSys does beyond that -- its
- *  exact envelope, its mixer's headroom -- is read off the original's
- *  driver when the emulator runs it; until then the two guesses are
- *  marked below.
- */
+/*  music.c: see music.h.  The player is small because the data is: every
+ *  instrument is one sample, no key splits, no tremolo, every instrument
+ *  flag clear.  What SoundMusicSys does beyond that, its exact envelope,
+ *  its mixer's headroom, is read off the original's driver when the
+ *  emulator runs it.  Until then the two guesses are marked below. */
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,14 +17,14 @@
 #define MAX_SAMPLES 32
 #define MAX_SONGS   24
 #define OUT_RATE    44100
-/*  The engine's reference rate.  With ZBF_useSampleRate clear -- and it
- *  is clear on every instrument here -- SoundMusicSys ignores the rate
- *  in a sample's header and plays it as if recorded at its own
- *  reference, 22254.54 Hz on the Macintosh of its day (the rate the
- *  drums and bass are actually at; the rest are 11 kHz recordings meant
- *  to be played an octave up).  Honouring the headers instead plays
- *  eleven of the fifteen samples an octave low and at half speed.
- *  GenSynth.c 4794-4811 in miniBAE. */
+/*  The engine's reference rate.  With ZBF_useSampleRate clear.  And it
+ *  is clear on every instrument here.  SoundMusicSys ignores the rate in
+ *  a sample's header and plays it as if recorded at its own reference,
+ *  22254.54 Hz on the Macintosh of its day (the rate the drums and bass
+ *  are actually at.  The rest are 11 kHz recordings meant to be played an
+ *  octave up).  Honouring the headers instead plays eleven of the
+ *  fifteen samples an octave low and at half speed.  GenSynth.c
+ *  4794-4811 in miniBAE. */
 #define REF_RATE              22254.54
 #define XBF_enableMIDIProgram 0x04
 
@@ -72,11 +70,12 @@ typedef struct
 
 /*  The engine's slice, 11 ms (BUFFER_SLICE_TIME in miniBAE): a released
  *  note holds at full volume for RELEASE_SLICES of them, then is cut in
- *  one.  The count is the engine's hardcoded default of 8 (GenSynth.c 4823,
- *  "the_entry->NoteDecay = 8"), NOT the SONG resource's noteDecay field:
- *  that 40/50 is left unused by the engine, and using it held a note five
- *  times too long, so a released note kept its slot and the six voices were
- *  forever stolen from -- half the notes of a song did not sound. */
+ *  one.  The count is the engine's hardcoded default of 8 (GenSynth.c
+ *  4823, "the_entry->NoteDecay = 8"), NOT the SONG resource's noteDecay
+ *  field.  That 40/50 is left unused by the engine.  Using it held a
+ *  note five times too long.  A released note then kept its slot, and
+ *  the six voices were forever stolen from: half the notes of a song did
+ *  not sound. */
 #define SLICE_FRAMES   (OUT_RATE * 11 / 1000)
 #define RELEASE_SLICES 8
 
@@ -208,7 +207,7 @@ static int load_sample(RMusic *m, int id, const char *file, double rate, int l0,
         SDL_free(data);
         return -1;
     }
-    /* the resources are 8-bit unsigned mono; anything else is taken as such a first channel */
+    /* the resources are 8-bit unsigned mono.  Anything else is taken as such a first channel */
     for (k = 0; k < s->len; k++)
     {
         if (spec.format == SDL_AUDIO_U8)
@@ -335,7 +334,7 @@ typedef struct
     long          tick;
     int           seq;
     unsigned char st, a, b;
-    long          tempo; /* for a tempo meta event; else 0 */
+    long          tempo; /* for a tempo meta event.  Else 0 */
 } Raw;
 
 static const unsigned char *vlq(const unsigned char *p, const unsigned char *end, long *v)
@@ -483,7 +482,7 @@ static int load_midi(RMusic *m, const char *path)
          *  to 11 at once, and SoundMusicSys's analyze path widens the count
          *  to a song's measured peak (GenSong.c: maxSongVoices = MAX_VOICES
          *  - maxEffectVoices).  So the count is the song's own peak demand,
-         *  never below its stated 6 and never above the sixteen-voice pool;
+         *  never below its stated 6 and never above the sixteen-voice pool.
          *  ARC_MUSIC_VOICES pins it for comparison.  A fixed six dropped a
          *  third of the Theme's notes. */
         const char *pin = getenv("ARC_MUSIC_VOICES");
@@ -503,11 +502,12 @@ static int load_midi(RMusic *m, const char *path)
             want = m->cur.max_notes; /* never below the song's own floor */
         if (want < 1)
             want = 1;
-        m->grow = pin ? 0 : 1; /* a pin is a hard cap; otherwise grow freely */
-        /*  The pool is sized to the song's measured peak, and with no pin
-         *  it grows past that on demand, so every note the MIDI holds at
-         *  once gets a voice and none is dropped.  It only ever grows, so a
-         *  later busier song keeps this one's larger allocation. */
+        m->grow = pin ? 0 : 1; /* a pin is a hard cap.  Otherwise grow freely */
+        /*  The pool is sized to the song's measured peak, and with no
+         *  pin it grows past that on demand.  So every note the MIDI
+         *  holds at once gets a voice and none is dropped.  It only ever
+         *  grows, so a later busier song keeps this one's larger
+         *  allocation. */
         if (want > m->n_voices)
         {
             Voice *nv = (Voice *)realloc(m->v, (size_t)want * sizeof *nv);
@@ -537,11 +537,12 @@ static void song_reset(RMusic *m)
     m->n_started = m->n_stolen = m->n_dropped = 0;
 }
 
-/*  A voice for a new note.  A free one; else one already releasing (past
- *  its note-off -- reusing it drops nothing); else, since every actively
- *  held note must keep sounding, GROW the pool by one.  Only a pinned
- *  count (ARC_MUSIC_VOICES, the faithful mode) refuses to grow and
- *  steals the quietest held note instead, as the six-voice hardware did. */
+/*  A voice for a new note.  A free one.  Else one already releasing
+ *  (past its note-off: reusing it drops nothing).  Else, since every
+ *  actively held note must keep sounding, GROW the pool by one.  Only a
+ *  pinned count (ARC_MUSIC_VOICES, the faithful mode) refuses to grow
+ *  and steals the quietest held note instead, as the six-voice hardware
+ *  did. */
 static Voice *find_voice(RMusic *m)
 {
     Voice *v = NULL;
@@ -591,11 +592,11 @@ static void note_on(RMusic *m, int chan, int note, int vel)
     if (!v)
         return;
     if (v->on && !v->releasing)
-        m->n_stolen++; /* a held note cut short -- only possible under a pin */
+        m->n_stolen++; /* a held note cut short: only possible under a pin */
     m->n_started++;
     /*  GenSynth.c 4502 and 4652: an instrument root key transposes the
-     *  note so the root plays as 60, and the sample's base key is then
-     *  taken from 60 -- so the offset is (note - root + 60) - base, or
+     *  note so the root plays as 60.  The sample's base key is then
+     *  taken from 60.  So the offset is (note - root + 60) - base, or
      *  note - base with no root. */
     base = in->root ? smp->base + in->root - 60 : smp->base;
     memset(v, 0, sizeof *v);
@@ -609,13 +610,13 @@ static void note_on(RMusic *m, int chan, int note, int vel)
     v->age  = ++m->age;
 }
 
-/*  PV_StopMIDINote: the youngest voice on that channel at that pitch,
- *  and only it, goes into release -- which is not a fade: it plays on
- *  at full volume for the song's decay count of slices and is then cut
- *  in one (GenSynth.c 2803 and 2962).  A one-shot sample that is never
- *  released simply plays to its end.  GUESS: that the SONG resource's
- *  noteDecay is that count, as it was before the engine fixed it at 8;
- *  the original's driver under the emulator will say. */
+/*  PV_StopMIDINote: the youngest voice on that channel at that pitch.
+ *  Only it, goes into release.  That is not a fade.  It plays on at full
+ *  volume for the song's decay count of slices, and is then cut in one
+ *  (GenSynth.c 2803 and 2962).  A one-shot sample that is never released
+ *  simply plays to its end.  GUESS: that the SONG resource's noteDecay
+ *  is that count, as it was before the engine fixed it at 8.  The
+ *  original's driver under the emulator will say. */
 static void note_off(RMusic *m, int chan, int note)
 {
     Voice *v = NULL;
@@ -669,7 +670,7 @@ static void handle(RMusic *m, const Ev *e)
 static void render(RMusic *m, float *out, int n)
 {
     int         i, k;
-    const float master = 0.35f; /* GUESS: the driver's own scaler/clipper; six voices at full scale must not clip */
+    const float master = 0.35f; /* GUESS: the driver's own scaler/clipper.  Six voices at full scale must not clip */
     for (i = 0; i < n; i++)
     {
         float mix  = 0.0f;
@@ -718,11 +719,12 @@ static void render(RMusic *m, float *out, int n)
                                                  : mix;
         m->t += 1.0 / (double)OUT_RATE;
         /*  The song is over when its events are spent: either the last
-         *  voice has died, or a tail (two seconds) has passed since the
-         *  final event -- a note whose off-event was lost to a steal would
-         *  otherwise loop for ever and the song would never end, so the
-         *  next never started.  A song with no events at all is over
-         *  before it starts, and has no final event to measure from. */
+         *  voice has died.  A tail (two seconds) has passed since the
+         *  final event.  A note whose off-event was lost to a steal
+         *  would otherwise loop for ever and the song would never end,
+         *  so the next never started.  A song with no events at all is
+         *  over before it starts, and has no final event to measure
+         *  from. */
         if (m->next_ev >= m->n_ev &&
             (!m->ev || !m->n_ev || !live || m->t > m->ev[m->n_ev - 1].t + 2.0))
         {
@@ -853,30 +855,31 @@ void music_stop(RMusic *m)
         SDL_UnlockAudioStream(m->stream);
 }
 
-/*  The original's scheduler, CODE 2 at $471E, run once a pass through the
- *  event loop.  Two nine-entry tables in its A5 world: a draw of 0..8 from
- *  the game's own rand (lib_rand, $20EE6) picks a song index through
- *  ROTATION (A5-$65C4), and WAIT (A5-$65B2) says how many ticks after the
- *  start the NEXT may begin.  A song already among the last four played is
- *  rejected and the pass ends -- the next pass draws again.  A song only
- *  ever starts when none is playing, so a wait shorter than the song means
- *  the next follows at once, and a longer one is silence.  WAIT has nine
- *  entries but is indexed by the song index, which runs to 18: for RastaMin
- *  (11), SimCitAy (12) and SimGoodN (13) the original reads its own
- *  ROTATION copy instead, 4, 7 and 8 ticks, and for the Theme (18) whatever
- *  lies beyond its frame.  All four come to the same thing under the idle
- *  rule: the next song follows the moment that one ends.  That is what this
- *  does for them. */
+/*  The original's scheduler, CODE 2 at $471E, run once a pass through
+ *  the event loop.  Two nine-entry tables in its A5 world: a draw of
+ *  0..8 from the game's own rand (lib_rand, $20EE6) picks a song index
+ *  through ROTATION (A5-$65C4).  WAIT (A5-$65B2) says how many ticks
+ *  after the start the NEXT may begin.  A song already among the last
+ *  four played is rejected and the pass ends.  The next pass draws
+ *  again.  A song only ever starts when none is playing, so a wait
+ *  shorter than the song means the next follows at once.  A longer one
+ *  is silence.  WAIT has nine entries but is indexed by the song index.
+ *  This runs to 18: for RastaMin (11), SimCitAy (12) and SimGoodN (13).
+ *  The original reads its own ROTATION copy instead, 4, 7 and 8 ticks,
+ *  and for the Theme (18) whatever lies beyond its frame.  All four come
+ *  to the same thing under the idle rule: the next song follows the
+ *  moment that one ends.  That is what this does for them. */
 /*  The generator is never seeded, in the original or here: its state is
- *  1 in the A5 image, and the first draw of nine from 1 is 18 -- so the
- *  first song after launch is the Theme, every time, and only then does
- *  the order depend on the simulation's own draws in between.  That is
- *  the original's behaviour and it is kept. */
+ *  1 in the A5 image.  The first draw of nine from 1 is 18: so the first
+ *  song after launch is the Theme, every time.  Only then does the order
+ *  depend on the simulation's own draws in between.  That is the
+ *  original's behavior and it is kept. */
 static const int ROTATION[9] = {0, 3, 4, 7, 8, 11, 12, 13, 18};
 static const int WAIT[9]     = {9000, 6000, 7200, 11000, 13000, 6000, 6000, 9000, 9000};
 
-/*  THINK C's rand as the game's rng.c has it, for when no generator
- *  is handed in: the ANSI constants, the high word masked to 15 bits. */
+/*  THINK C's rand as the game's rng.c has it, for when no generator is
+ *  handed in.  It uses the ANSI constants, with the high word masked to
+ *  15 bits. */
 static uint16_t private_rand(RMusic *m, uint16_t n)
 {
     uint16_t v;
@@ -971,7 +974,7 @@ int music_render_wav(RMusic *m, const char *song, const char *path, int rate)
                 found = 1;
     if (!found)
         return -1;
-    (void)rate; /* the render runs at OUT_RATE; the header says so */
+    (void)rate; /* the render runs at OUT_RATE.  The header says so */
     f = fopen(path, "wb");
     if (!f)
         return -1;

@@ -1,23 +1,23 @@
-/*  testcity.c -- a city built to exercise the network renderer. arcology
- *  --testcity <template city> <out.sc2> The shipped cities are places, not
- *  test cases: they have thousands of ordinary straights and a handful of
- *  the corners that actually break the fit, and finding those means
- *  hunting.  This lays out every case the road and rail fitter has to
- *  handle, once each, in labelled blocks on flat ground, and prints where
- *  each one is.  A template city is loaded and its tile layers replaced, so
- *  the file that comes out has the chunk order, the scalars and the MISC
- *  block of a real save; nothing here has to know the container.  It lives
- *  on the simulation's side of the fence because it AUTHORS a City.  The
- *  renderer may only read one, through adapt.c -- "the one file that
- *  includes both sides" (adapt.h) -- so a generator that builds a save
- *  cannot live in src/render, however much it is used for looking at the
- *  renderer's work.  The piece ids follow the layout every family shares --
- *  power at 0x0E, roads at 0x1D, rails at 0x2C -- read off the shipped
- *  cities the same way the crossings were: +0 east-west straight +8 north-
- *  east corner +1 north-south straight +9 north-west corner +2..+5
- *  straights on a slope +10 north-south-west tee +6 south-west corner +11
- *  east-south-west tee +7 east-south corner +12 north-east-south tee +13
- *  north-east-west tee +14 crossroads */
+/*  testcity.c: a city built to exercise the network renderer. arcology
+ *  --testcity <template city> <out.sc2> The shipped cities are places,
+ *  not test cases: they have thousands of ordinary straights and a
+ *  handful of the corners that actually break the fit, and finding those
+ *  means hunting.  This lays out every case the road and rail fitter has
+ *  to handle, once each, in labeled blocks on flat ground, and prints
+ *  where each one is.  A template city is loaded and its tile layers
+ *  replaced, so the file that comes out has the chunk order, the scalars
+ *  and the MISC block of a real save.  Nothing here has to know the
+ *  container.  It lives on the simulation's side of the fence because it
+ *  AUTHORS a City.  The renderer may only read one, through adapt.c,
+ *  "the one file that includes both sides" (adapt.h), so a generator
+ *  that builds a save cannot live in src/render, however much it is used
+ *  for looking at the renderer's work.  The piece ids follow the layout
+ *  every family shares, power at 0x0E, roads at 0x1D, rails at 0x2C,
+ *  read off the shipped cities the same way the crossings were: +0
+ *  east-west straight +8 north- east corner +1 north-south straight +9
+ *  north-west corner +2..+5 straights on a slope +10 north-south-west
+ *  tee +6 south-west corner +11 east-south-west tee +7 east-south corner
+ *  +12 north-east-south tee +13 north-east-west tee +14 crossroads */
 #include "sim.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -62,7 +62,7 @@ static void vrun(int c, int r0, int r1, int f)
 }
 
 /*  A staircase: `runs` legs of `leg` tiles, stepping down one row after
- *  each.  leg 1 is the 45 degree case, leg 2 the 2:1, and so on -- the
+ *  each.  Leg 1 is the 45 degree case, leg 2 the 2:1, and so on: the
  *  shapes the fit has to turn into one smooth diagonal. */
 static void staircase(int c0, int r0, int leg, int runs, int f)
 {
@@ -131,7 +131,7 @@ static uint8_t base_of(int f)
 }
 
 /*  Where two families meet, the six ids the crossings actually use. */
-static uint8_t crossing_id(int a, int b, int a_mask)
+static uint8_t meet_id(int a, int b, int a_mask)
 {
     const int ew = (a_mask & 10) != 0 && (a_mask & 5) == 0;
     if ((a == N_ROAD && b == N_RAIL) || (a == N_RAIL && b == N_ROAD))
@@ -231,9 +231,9 @@ static void lay_jogs(int c, int r, int f, const char *fname)
 }
 
 /*  All six crossing ids, which needs each pair BOTH ways round: the id
- *  says which axis the road or the rail runs on, so a power line has to
+ *  says which axis the road or the rail runs on.  So a power line has to
  *  cross an east-west road as well as a north-south one. */
-static void lay_crossings(int c, int r)
+static void lay_meets(int c, int r)
 {
     hrun(c + 1, c + 14, r + 2, N_ROAD);   /* east-west road ...            */
     vrun(c + 4, r + 1, r + 14, N_RAIL);   /* ... crossed by rail   -> 0x45 */
@@ -328,11 +328,11 @@ int testcity_main(int argc, char **argv)
     lay_diagonals(44, 44, N_POWER, "power");
     lay_jogs(64, 44, N_POWER, "power");
 
-    lay_crossings(4, 64);
+    lay_meets(4, 64);
     lay_comb(24, 64);
     lay_grid(44, 64);
 
-    /*  Ids last, so every tile sees its finished neighbourhood. */
+    /*  Ids last, so every tile sees its finished neighborhood. */
     for (row = 0; row < TH; ++row)
         for (col = 0; col < TW; ++col)
         {
@@ -342,7 +342,7 @@ int testcity_main(int argc, char **argv)
             mask = links_of(col, row, f);
             if (g)
             {
-                uint8_t x = crossing_id(f, g, mask);
+                uint8_t x = meet_id(f, g, mask);
                 if (x)
                 {
                     c->xbld[row][col] = x;

@@ -1,18 +1,22 @@
-/*  gpu.h -- the GPU path.  The same op list the software rasteriser paints,
- *  uploaded as instances and drawn through SDL_GPU: one atlas bind per
- *  level, the terrain first with depth writes, the sprites after it tested
- *  against that depth, the shadows into a mask, and a resolve onto the
- *  window.  At the four snaps and an integer scale the frame is meant to be
- *  the software frame pixel for pixel, and gpu_readback exists so that
- *  claim can be measured.  One switch replaces art with shading.
- *  RGpuView.geometry gives the land tiles' art over to a mesh that
- *  replicates the sprites' geometry (gpu_set_mesh), drawn in the depth pass
- *  where the art was so everything else composes unchanged; it shades the
- *  water inside the water sprites' outline, and it draws the roads, their
- *  traffic and their rails as strips on that mesh in place of the road art.
- *  They were three switches and are one.  The camera is the original's, and
- *  RGpuView.pitch is how far it has been raised from it: 30 degrees is the
- *  game's own view, 90 is the map view, straight down. */
+/*  gpu.h: the GPU path.  The same op list the software rasteriser
+ *  paints, uploaded as instances and drawn through SDL_GPU.
+ *
+ *      One atlas bind per level.  The terrain first with depth writes.
+ *      The sprites after it tested against that depth.  The shadows into
+ *      a mask.  A resolve onto the window.
+ *
+ *  At the four snaps and an integer scale the frame is the software
+ *  frame, pixel for pixel.  gpu_readback exists so that claim can be
+ *  measured.  One switch replaces art with shading.  RGpuView.geometry
+ *  gives the land tiles' art over to a mesh.  That mesh replicates the
+ *  sprites' geometry. gpu_set_mesh takes it, drawn in the depth pass
+ *  where the art was so everything else composes unchanged.  It shades
+ *  the water inside the water sprites' outline.  It draws the lines,
+ *  their traffic and their threads as strips on that mesh in place of
+ *  the tile art.  They were three switches and are one.  The camera is
+ *  the original's.  RGpuView.pitch is how far it has been raised from
+ *  it. 30 degrees is the game's own view, 90 is the map view, straight
+ *  down. */
 #ifndef R_GPU_H
 #define R_GPU_H
 
@@ -34,36 +38,34 @@ typedef struct
     int32_t scroll_x, scroll_y; /* the canvas pixel at the target's top-left */
     int32_t scale;              /* integer pixel scale, target to screen     */
     float   zoom;               /* continuous zoom on top of it: the canvas
-                                 * is resolved by scale * zoom; 1 or 0 = none */
-    int geometry;               /* the mesh instead of the land art: the
-                                 * ground, the water shader inside the water
-                                 * sprites, and the roads, rails and traffic
+                                 * is resolved by scale * zoom.  1 or 0 is none */
+    int geometry;               /* the mesh instead of the land art.  It draws the ground, the water shader inside the water sprites, and the lines, threads and traffic
                                  * as strips on it                            */
     int plain_sweep;            /* debug: no depth at all, list order only   */
     int mesh_only;              /* debug: draw no sprite at all              */
     int grid;                   /* the sprites' edge outline on the mesh     */
     int plan;                   /* the map view: the network tints show      */
-    int markings;               /* the road-marking pass: lines and dashes  */
+    int markings;               /* the line-marking pass: lines and dashes  */
     int furniture;              /* the street furniture pass (built in)      */
-    int sidewalks;              /* the sidewalk pass: the strips' outer fifth  */
+    int margins;              /* the margin pass: the strips' outer fifth  */
     int underground;            /* the underground view: the mesh as a white
                                  * ground with a hairline grid                */
     float pitch;                /* the camera above the ground, degrees: 30
                                  * the original's view, 90 the map view      */
     float angle;                /* free rotation, degrees, about the pivot   */
     float pivot_c, pivot_r;     /* the grid point the view turns about: the
-                                 * point under the view's centre             */
+                                 * point under the view's center             */
     int sweep_quarter;          /* the quarter the sweep was made for: its art
                                  * is drawn with the turn left from there    */
     float time;                 /* seconds, for the water                    */
 } RGpuView;
 
 /*  The point the view turns about.  A quarter turn on the game's own
- *  pitch always pivots on the map's centre: the sprite sweep is then run
- *  on the view turned the original's way, which turns the grid about its
- *  centre, and the mesh -- built once, from the untouched grid -- must
- *  turn about the same point to meet it.  Any other turn pivots on the
- *  point under the view's centre, the anchor. */
+ *  pitch always pivots on the map's center.  The sprite sweep is then
+ *  run on the view turned the original's way, which turns the grid about
+ *  its center.  The mesh, built once, from the untouched grid, must turn
+ *  about the same point to meet it.  Any other turn pivots on the point
+ *  under the view's center, the anchor. */
 static inline int gpu_view_quarter(const RGpuView *v)
 {
     float turn = v->angle < 0.0f ? -v->angle : v->angle;
@@ -88,12 +90,12 @@ static inline void gpu_view_pivot(const RGpuView *v, float *pc, float *pr)
 RGpu *gpu_create(struct SDL_Window *win, const RAtlas *a, char *err, size_t err_len);
 void  gpu_destroy(RGpu *g);
 
-/*  The palette as it stands now (after atlas_animate); uploaded on the
+/*  The palette as it stands now (after atlas_animate).  Uploaded on the
  *  next frame.  Entries that are water are marked, for the water shader. */
 void gpu_set_palette(RGpu *g, const RAtlas *a);
 
-/*  Replace the op list.  `sw` is the sweep that produced it; the level it
- *  names selects the atlas. */
+/*  Replace the op list.  `sw` is the sweep that produced it.  The level
+ *  it names selects the atlas. */
 int gpu_set_ops(RGpu *g, const ROpList *ops, const RSweep *sw);
 
 /*  Replace the terrain mesh (n vertices, triangles). */
@@ -104,21 +106,26 @@ int gpu_set_movers(RGpu *g, const RMeshVert *v, uint32_t n);
 
 /*  The terrain field for the water and ground shaders: four bytes per
  *  tile.  The first is the distance in tiles from a water tile to the
- *  nearest land, 0 on land; the second the water's depth in levels, the
- *  table over the bed that ALTM carries; the third the distance from a
- *  land tile to the nearest water, 0 on water; the fourth unused.  All
+ *  nearest land, 0 on land.  The second the water's depth in levels, the
+ *  table over the bed that ALTM carries.  The third the distance from a
+ *  land tile to the nearest water, 0 on water.  The fourth unused.  All
  *  scaled by R_SHORE_SCALE and clamped, and sampled bilinearly, so they
  *  vary smoothly.  `n` is the map side, R_MAP. */
 #define R_SHORE_SCALE 16
 int gpu_set_shore(RGpu *g, const uint8_t *field, int32_t n);
 
-/*  The sun for the lit material: a direction toward the light, in world
- *  units (x along columns, y along rows, z up), plus ambient and diffuse. */
+/*  The sun for the lit material.
+ *
+ *      A direction toward the light.
+ *      In world units (x along columns.
+ *      Y along rows.
+ *      Z up).
+ *      Plus ambient and diffuse. */
 void gpu_set_light(RGpu *g, float x, float y, float z, float ambient, float diffuse);
 
 /*  Draw and present one frame. */
-/*  An overlay drawn on the finished frame -- the UI -- inside the command
- *  buffer the renderer is about to submit; `target` is the swapchain
+/*  An overlay drawn on the finished frame, the UI, inside the command
+ *  buffer the renderer is about to submit.  `target` is the swapchain
  *  texture (or the readback's offscreen one), `w` by `h` pixels.  The
  *  resolve pass has ended when it is called. */
 typedef void (*RGpuOverlay)(void *ud, struct SDL_GPUCommandBuffer *cmd, struct SDL_GPUTexture *target, uint32_t w, uint32_t h);

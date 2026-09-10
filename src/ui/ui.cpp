@@ -1,19 +1,20 @@
-/*  ui.cpp -- the canon interface, hosted by Dear ImGui.  The original's
- *  interface, from its own resources: the tool palette is PICT 500 with the
- *  thirty-four buttons the help texts enumerate, in a floating windoid; the
- *  menus are the MENU resources, title by title and item by item; the
- *  windows wear System 7 chrome, a striped title bar with a close box,
- *  drawn here.  ImGui is the engine under it: layout, hit-testing, text and
- *  the draw lists.  The widgets see an RUiState and nothing else; the app
- *  fills it, they edit it, the app applies it.  apply_theme is the one
- *  place the look is set, for a Kaleidoscope scheme to drive later.  Not
- *  the original's yet: the text is ImGui's bitmap font, not Chicago (the
- *  game uses the system's fonts, which are not in its resources); the
- *  windows the palette opens are the game's stand-ins in the original's
- *  chrome, not the original's windows. */
+/*  ui.cpp: the canon interface, hosted by Dear ImGui.  The original's
+ *  interface, from its own resources: the tool palette is PICT 500 with
+ *  the thirty-four buttons the help texts enumerate, in a floating
+ *  windoid.  The menus are the MENU resources, title by title and item
+ *  by item.  The windows wear System 7 chrome, a striped title bar with
+ *  a close box, drawn here.  ImGui is the engine under it: layout,
+ *  hit-testing, text and the draw lists.  The widgets see an RUiState
+ *  and nothing else.  The app fills it, they edit it, and the app
+ *  applies it.  apply_theme is the one place the look is set.  A
+ *  Kaleidoscope scheme drives it later.  Not the original's yet: the
+ *  text is ImGui's bitmap font, not Chicago (the game uses the system's
+ *  fonts, which are not in its resources).  The windows the palette
+ *  opens are the game's stand-ins in the original's chrome, not the
+ *  original's windows. */
 extern "C" {
 #include "ui.h"
-/* lodepng is compiled as C in the vendor library; only this call is used */
+/* lodepng is compiled as C in the vendor library.  Only this call is used */
 unsigned lodepng_decode32_file(unsigned char **out, unsigned *w, unsigned *h, const char *filename);
 }
 
@@ -46,10 +47,10 @@ struct Pict
     int id, x, y, w, h;
 };
 
-/*  A Kaleidoscope scheme, as tools/scheme.py packs it: elements cut
- *  from the scheme's colour icons with the corner size that stretches
- *  them and the colours their info table names, and the parts of the
- *  window frames. */
+/*  A Kaleidoscope scheme, as tools/scheme.py packs it.  It holds
+ *  elements cut from the scheme's color icons, with the corner size that
+ *  stretches them.  It also holds the colors their info table names, and
+ *  the parts of the window frames. */
 struct ThemeEl
 {
     char name[32];
@@ -93,9 +94,14 @@ static const char *VIEW_NAME[12]  = {"Normal", "Traffic", "Density", "Growth and
 static const char *ZONE_NAME[16]  = {
     "none", "light residential", "dense residential", "light commercial", "dense commercial", "light industrial", "dense industrial", "military", "airport", "seaport", "zone 10", "zone 11", "zone 12", "zone 13", "zone 14", "zone 15"};
 
-/*  The palette's buttons: rectangles in PICT 500, measured from its
- *  bevels (the light top and left edges, the dark bottom and right),
- *  and the tool each is.  The RCI column is the demand button. */
+/*  The palette's buttons.
+ *
+ *      Rectangles in PICT 500.
+ *      Measured from its bevels (the light top and left edges.
+ *      The dark bottom and right).
+ *      The tool each is.
+ *
+ *  The RCI column is the demand button. */
 struct PalButton
 {
     int x0, y0, x1, y1, tool;
@@ -248,11 +254,11 @@ static void theme_nine(const RUi *u, ImDrawList *dl, const ThemeEl *e, ImVec2 a,
     ImGuiPlatformIO &pio = ImGui::GetPlatformIO();
     if (pio.DrawCallback_SetSamplerNearest)
         dl->AddCallback(pio.DrawCallback_SetSamplerNearest, nullptr);
-    /*  The icon's centre carries the scheme's colour samples -- the
-     *  pixel the info table names for the background, the one for the
-     *  text -- so the centre is never stretched: it is filled with the
-     *  background colour, and each edge is the one-pixel strip next to
-     *  its corners, stretched along the edge. */
+    /*  The icon's center carries the scheme's color samples.  The pixel
+     *  the info table names for the background, the one for the text.
+     *  So the center is never stretched: it is filled with the
+     *  background color.  Each edge is the one-pixel strip next to its
+     *  corners, stretched along the edge. */
     int   c = e->corner;
     float W = b.x - a.x, H = b.y - a.y;
     if (c <= 0 || 2 * c >= e->w || 2 * c >= e->h || W < (float)(2 * c) || H < (float)(2 * c))
@@ -366,7 +372,7 @@ extern "C" int ui_set_theme(RUi *u, const char *dir)
     t.tw     = (int)w;
     t.th     = (int)h;
     t.loaded = true;
-    /* the colours the scheme names go into the style */
+    /* the colors the scheme names go into the style */
     ImGuiStyle    &st  = ImGui::GetStyle();
     const ThemeEl *bar = theme_el(u, "menu_bar"), *item = theme_el(u, "menu_item"),
                   *sel = theme_el(u, "menu_item_selected"), *bg = theme_el(u, "menu_background");
@@ -401,7 +407,7 @@ extern "C" void ui_clear_theme(RUi *u)
     t.tex    = nullptr;
     t.loaded = false;
     t.n_els = t.n_parts = 0;
-    apply_theme(u->dpi); /* the style colours the scheme set, back to the hand-drawn look's */
+    apply_theme(u->dpi); /* the style colors the scheme set, back to the hand-drawn look's */
 }
 
 /*  Draw a picture, or a part of it, at a screen position, one texel per
@@ -430,7 +436,7 @@ static void draw_pict(const RUi *u, ImDrawList *dl, int id, ImVec2 at, int sx = 
 /* ---- the look --------------------------------------------------------- */
 
 /*  System 7: white windows with a black line round them, square, and
- *  black text.  Menus are white with black text; a menu drops down as a
+ *  black text.  Menus are white with black text.  A menu drops down as a
  *  white box with a shadow.  Fonts are the bitmap default until Chicago
  *  is at hand. */
 static void apply_theme(float dpi)
@@ -477,24 +483,33 @@ static void apply_theme(float dpi)
         st.ScaleAllSizes(dpi);
 }
 
-/*  A System 7 title bar over the top of the current window: the striped
- *  bar, the title in a white box, the close box at the left.  Returns
- *  true if the close box was clicked.  Windows are begun without
+/*  A System 7 title bar over the top of the current window.
+ *
+ *      The striped bar.
+ *      The title in a white box.
+ *      The close box at the left.
+ *
+ *  Returns true if the close box was clicked.  Windows are begun without
  *  ImGui's own title bar and reserve TITLE_H at the top for this. */
 static const float TITLE_H = 14.0f;
 
-/*  The scheme's title bar, when one is loaded: the frame's left part up
- *  to its one-pixel title tile, the tile stretched across, the right
- *  part anchored right, and the title in the middle; the close box is
- *  where the scheme's window definition puts it.  Returns true if the
- *  close box was clicked, false if there is no scheme. */
+/*  The scheme's title bar, when one is loaded.
+ *
+ *      The frame's left part up to its one-pixel title tile.
+ *      The tile stretched across.
+ *      The right part anchored right.
+ *      The title in the middle.
+ *
+ *  The close box is where the scheme's window definition puts it.
+ *  Returns true if the close box was clicked, false if there is no
+ *  scheme. */
 static bool theme_title(RUi *u, const char *window, const char *title, bool *drawn)
 {
     *drawn            = false;
     const ThemeEl *fr = theme_el(u, strcmp(window, "utility") == 0 ? "utility_active" : "window_active");
     if (!fr)
         return false;
-    /* the tile column: the part one pixel wide; the close box: part 1 */
+    /* the tile column: the part one pixel wide.  The close box: part 1 */
     const ThemePart *tile = nullptr, *close = theme_part(u, window, 1);
     for (int k = 0; k < u->theme.n_parts; ++k)
         if (u->theme.parts[k].w == 1 && strcmp(u->theme.parts[k].window, window) == 0)
@@ -719,9 +734,14 @@ static void palette(RUi *u, RUiState *s)
     ImGui::PopStyleVar();
 }
 
-/*  The zone demand indicator: three bars from a centre line, up for
- *  demand and down for surplus, residential green, commercial blue,
- *  industrial yellow, as the original's popup draws them. */
+/*  The zone demand indicator.
+ *
+ *      Three bars from a center line.
+ *      Up for demand and down for surplus.
+ *      Residential green.
+ *      Commercial blue.
+ *      Industrial yellow.
+ *      As the original's popup draws them. */
 static void demand(RUi *u, RUiState *s)
 {
     (void)u;
@@ -754,11 +774,11 @@ static void demand(RUi *u, RUiState *s)
     }
     (void)top;
     /*  Everything above went straight into the draw list, so this window
-     *  submits no item at all -- and mac_title left the cursor below the
-     *  title bar, which ImGui reads as a boundary extension nobody closed
-     *  ("Code uses SetCursorPos()... please submit an item e.g.  Dummy()
-     *  afterwards").  One Dummy the size of the content says what we
-     *  actually covered. */
+     *  submits no item at all: and mac_title left the cursor below the
+     *  title bar.  This imGui reads as a boundary extension nobody
+     *  closed ("Code uses SetCursorPos()... please submit an item e.g.
+     *  Dummy() afterwards").  One Dummy the size of the content says
+     *  what we actually covered. */
     {
         ImVec2 ws = ImGui::GetWindowSize();
         ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + TITLE_H));
@@ -772,14 +792,14 @@ static void demand(RUi *u, RUiState *s)
 
 /* ---- menus: the shortcut at the right, the check at the left ------------- */
 
-/*  The Mac's menus put a check mark at the left of an item and its key at
- *  the far right, with the ⌘ that every one of them needs; ImGui's MenuItem
- *  puts the key in a column just past the widest label and the mark to the
- *  right of that.  So an item is a Selectable that spans the row -- the
- *  highlight covers it, the layout width is the label's and the key's --
- *  with the three pieces drawn on it by hand.  Every shortcut here takes
- *  the platform's command key: ⌘ on the Mac, Ctrl elsewhere, and the labels
- *  say which. */
+/*  The Mac's menus put a check mark at the left of an item.  They put
+ *  its key at the far right, with the command mark that every one of
+ *  them needs.  ImGui's MenuItem puts the key in a column just past the
+ *  widest label and the mark to the right of that.  So an item is a
+ *  Selectable that spans the row.  The highlight covers it, the layout
+ *  width is the label's and the key's.  With the three pieces drawn on
+ *  it by hand.  Every shortcut here takes the platform's command key: ⌘
+ *  on the Mac, Ctrl elsewhere, and the labels say which. */
 #ifdef __APPLE__
     #define SC_MOD   "\xE2\x8C\x98" /* ⌘ U+2318 */
     #define SC_SHIFT "\xE2\x87\xA7" /* ⇧ U+21E7 */
@@ -789,9 +809,9 @@ static void demand(RUi *u, RUiState *s)
 #endif
 #define CHECK_MARK "\xE2\x9C\x93" /* ✓ U+2713, in Chicago */
 
-/*  "⌘L", or "⇧⌘T" with shift -- the Mac writes the shift first; Windows
- *  writes Ctrl+Shift+T.  A ring of buffers so several can be live in
- *  one menu. */
+/*  "⌘L", or "⇧⌘T" with shift: the Mac writes the shift first.  Windows
+ *  writes Ctrl+Shift+T.  A ring of buffers so several can be live in one
+ *  menu. */
 static const char *sc(char key, bool shift = false)
 {
     static char buf[16][24];
@@ -812,7 +832,7 @@ static bool menu_item(const char *label, const char *shortcut = nullptr, bool se
     const float       lw      = ImGui::CalcTextSize(label).x;
     const float       sw      = shortcut ? ImGui::CalcTextSize(shortcut).x : 0.0f;
     /*  the layout width: the check column, the label, and room for the
-     *  key; SpanAvailWidth then stretches the highlight to the row */
+     *  key.  SpanAvailWidth then stretches the highlight to the row */
     const float need = check_w + lw + (shortcut ? 4.0f * st.ItemSpacing.x + sw : 0.0f);
     ImGui::PushID(label);
     if (!enabled)
@@ -863,7 +883,7 @@ static void menu_bar(RUi *u, RUiState *s)
             dl->AddLine(ImVec2(p.x, p.y + sz.y - 1.0f), ImVec2(p.x + sz.x, p.y + sz.y - 1.0f), BLACK);
     }
     /*  MENU 1000 is the Apple menu: the Mac's, not the game's, so it is
-     *  not drawn; its one item, About SimCity 2000, waits for a home.
+     *  not drawn.  Its one item, About SimCity 2000, waits for a home.
      *  MENU 1001 is the first that is. */
     if (ImGui::BeginMenu("File"))
     {
@@ -903,8 +923,8 @@ static void menu_bar(RUi *u, RUiState *s)
             s->want_music = 1;
         ImGui::Separator();
         /*  The Kaleidoscope schemes: None, then every pack found under
-         *  assets/themes.  A pick is a request; app puts the scheme
-         *  on and writes the preference. */
+         *  assets/themes.  A pick is a request.  App puts the scheme on
+         *  and writes the preference. */
         if (ImGui::BeginMenu("Theme"))
         {
             const bool none = s->theme_name[0] == 0 || strcmp(s->theme_name, "none") == 0;
@@ -976,7 +996,7 @@ static void menu_bar(RUi *u, RUiState *s)
         if (menu_item("Query", nullptr, s->show_query != 0))
             s->show_query = !s->show_query;
         if (menu_item("Inspect", sc('I', true), s->show_inspect != 0))
-            s->want_inspect = 1; /* a toggle request; the app owns the switch */
+            s->want_inspect = 1; /* a toggle request.  The app owns the switch */
         if (menu_item("Messages", nullptr, s->show_log != 0))
             s->show_log = !s->show_log;
         if (menu_item("Renderer", nullptr, s->show_renderer != 0))
@@ -993,10 +1013,10 @@ static void menu_bar(RUi *u, RUiState *s)
     /* the view switches, ours, at the right */
     if (ImGui::BeginMenu("View"))
     {
-        /*  No art set and no pixel scale here: the zoom is continuous and
-         *  picks the set that is closest to native by itself, and the pixel
-         *  scale is a developer's knob, not a view.  The keys and the
-         *  command line still reach both. */
+        /*  No art set and no pixel scale here: the zoom is continuous
+         *  and picks the set that is closest to native by itself.  The
+         *  pixel scale is a developer's knob, not a view.  The keys and
+         *  the command line still reach both. */
         bool b;
         b = s->geometry != 0;
         if (menu_item("Geometry", sc('T', true), &b))
@@ -1013,9 +1033,9 @@ static void menu_bar(RUi *u, RUiState *s)
         b = s->furniture != 0;
         if (menu_item("Street furniture", nullptr, &b))
             s->furniture = b;
-        b = s->sidewalks != 0;
-        if (menu_item("Sidewalks", nullptr, &b))
-            s->sidewalks = b;
+        b = s->margins != 0;
+        if (menu_item("Margins", nullptr, &b))
+            s->margins = b;
         b = s->outline != 0;
         if (menu_item("Outline", sc('O', true), &b))
             s->outline = b;
@@ -1047,19 +1067,28 @@ static void menu_bar(RUi *u, RUiState *s)
     ImGui::PopStyleVar();
 }
 
-/*  The inspector's window: what the mesh under the pointer is, and who drew
- *  it.  Its own window, drawn from ui_frame -- it lived inside the query
- *  window's function and so appeared only when that window was open. */
+/*  The inspector's window: what the mesh under the pointer is, and who
+ *  drew it.  Its own window, drawn from ui_frame: it lived inside the
+ *  query window's function and so appeared only when that window was
+ *  open. */
 static void inspect_window(RUiState *s)
 {
-    /*  What the mesh under the pointer is, in a table: the thing, the
-     *  function that drew it, what asked for it, its material, its
-     *  triangles, the box it occupies, and the generating call's note
-     *  of the thing, a row a line.  The width is held: the values wrap,
-     *  and a window fitted to its content would never widen for them.
-     *  The height follows the rows to the bottom of the screen and
-     *  scrolls past it.  It opens at the top right, clear of the palette
-     *  and of the middle, where what is being inspected usually is. */
+    /*  What the mesh under the pointer is, in a table.
+     *
+     *      The thing.
+     *      The function that drew it.
+     *      What asked for it.
+     *      Its material.
+     *      Its triangles.
+     *      The box it occupies.
+     *      The generating call's note of the thing.
+     *      A row a line.
+     *
+     *  The width is held: the values wrap, and a window fitted to its
+     *  content would never widen for them.  The height follows the rows
+     *  to the bottom of the screen and scrolls past it.  It opens at the
+     *  top right, clear of the palette and of the middle, where what is
+     *  being inspected usually is. */
     const ImGuiViewport *vp = ImGui::GetMainViewport();
     const float          w = 600.0f, margin = 24.0f;
     ImGui::SetNextWindowSizeConstraints(ImVec2(w, 0.0f), ImVec2(w, vp->WorkSize.y - 2.0f * margin));
@@ -1265,8 +1294,8 @@ static void query_window(RUiState *s)
 
 /*  The script console: what the running program answers when asked in
  *  Lua.  A line is typed, the app runs it against the live state and
- *  puts the answer back, and the status line says which script is
- *  loaded, how many rules it sets and what went wrong if anything did. */
+ *  puts the answer back.  The status line says which script is loaded,
+ *  how many rules it sets and what went wrong if anything did. */
 static void script_window(RUiState *s)
 {
     if (!mac_begin("Script", &s->show_script, 520.0f, ImVec2(140.0f, 160.0f)))
@@ -1306,7 +1335,7 @@ static void tuning_window(RUiState *s)
      *  made rather than described.  The window is the game's own, through
      *  mac_begin, so it wears whatever theme is on. */
     static const char *NAME[19] = {
-        "road width", "rail width", "road min radius", "rail min radius", "road max sweep", "rail max sweep", "node approach", "corridor margin", "junction trim", "show curves", "highway width", "highway min radius", "highway max sweep", "ramp reach", "staircase step", "corner share", "ramp merge", "deck grade", "deck stiffness"};
+        "road width", "rail width", "road min radius", "rail min radius", "road max sweep", "rail max sweep", "node approach", "corridor margin", "junction trim", "show curves", "band width", "band min radius", "band max sweep", "spur reach", "staircase step", "corner share", "spur merge", "deck grade", "deck stiffness"};
     static const float LO[19]  = {0.15f, 0.15f, 0.05f, 0.05f, 0.5f, 0.5f, 0.0f, 0.0f, 0.10f, 0.0f, 0.30f, 0.5f, 1.0f, 0.5f, 0.0f, 0.25f, 0.0f, 0.02f, 0.0f};
     static const float HI[19]  = {1.00f, 1.00f, 4.00f, 8.00f, 12.0f, 16.0f, 2.0f, 0.3f, 0.60f, 1.0f, 1.00f, 6.0f, 16.0f, 3.0f, 6.0f, 1.00f, 4.0f, 0.50f, 8.0f};
     static const float DEF[19] = {0.50f, 0.62f, 0.90f, 3.00f, 6.00f, 8.00f, 0.8f, 0.04f, 0.45f, 0.0f, 0.60f, 2.5f, 8.0f, 1.6f, 2.0f, 0.50f, 2.5f, 0.10f, 2.0f};
@@ -1322,7 +1351,7 @@ static void tuning_window(RUiState *s)
         if (k == 9)
             continue; /* outline is a view, on the View menu */
         if (k == 10)
-            ImGui::Separator(); /* the highway's knobs */
+            ImGui::Separator(); /* the band's knobs */
         if (ImGui::SliderFloat(NAME[k], &s->tune[k], LO[k], HI[k], "%.3f"))
             s->tune_changed = 1;
     }
@@ -1460,12 +1489,12 @@ extern "C" RUi *ui_create(SDL_Window *win, SDL_GPUDevice *dev, int swap_fmt, flo
     ImGui::CreateContext();
     ImGuiIO &io    = ImGui::GetIO();
     io.IniFilename = nullptr;
-    /*  The system font: Chicago 12, as Chicago-Kare, Duane King's
-     *  pixel-for-pixel reproduction of Susan Kare's bitmap (MIT), whose
-     *  outlines lie on a sixteen-pixel-per-em grid, so drawn at sixteen
-     *  pixels with no hinting and no anti-aliasing every pixel is the
-     *  bitmap's.  ChicagoFLF, an outline revival, stands in if it is
-     *  absent, and ImGui's own pixel font after that. */
+    /*  The system font is Chicago 12, as Chicago-Kare.  That is Duane
+     *  King's pixel-for-pixel reproduction of Susan Kare's bitmap (MIT).
+     *  Its outlines lie on a sixteen-pixel-per-em grid, so drawn at
+     *  sixteen pixels with no hinting and no anti-aliasing every pixel
+     *  is the bitmap's.  ChicagoFLF, an outline revival, stands in if it
+     *  is absent, and ImGui's own pixel font after that. */
     {
         char         fpath[1024];
         ImFontConfig fc;
@@ -1577,8 +1606,8 @@ extern "C" int ui_event(RUi *u, const SDL_Event *e)
         case SDL_EVENT_KEY_DOWN:
         case SDL_EVENT_KEY_UP:
         case SDL_EVENT_TEXT_INPUT:
-            /* only a text field being typed in owns the keys; the game's keys
-             * keep working after a click on a window */
+            /* only a text field being typed in owns the keys.  The
+             * game's keys keep working after a click on a window */
             return io.WantTextInput ? 1 : 0;
         default:
             return 0;
@@ -1596,22 +1625,22 @@ extern "C" int ui_wants_keyboard(const RUi *u)
 }
 
 /*  LOADING.  A reading of the scripts is followed by a whole build, and
- *  the build blocks: the window stops repainting for about a second and
- *  a half.  This is the frame drawn just before it, so what the panel
- *  says is what the window will be showing for as long as the build
- *  takes -- which is the whole point of it.
+ *  the build blocks.  The window stops repainting for about a second and
+ *  a half.  This is the frame drawn just before it.  So what the panel
+ *  says is what the window shows for as long as the build takes.  That
+ *  is the whole point of it.
  *
  *  It sits in the middle of the screen and takes no input: there is
  *  nothing to press, and the frame after it is the build. */
 /*  LOADING.  The scripts are read in a few milliseconds and the world
- *  they describe takes about a second and a half to build, so what this
+ *  they describe takes about a second and a half to build.  So what this
  *  announces is the BUILD.  The bar carries the words: a caption beside
- *  it would leave the bar itself saying nothing, and the bar is the part
+ *  it would leave the bar itself saying nothing.  The bar is the part
  *  the eye goes to.
  *
  *  The words are drawn TWICE, clipped either side of the fill: white
  *  over the black that is done, black over the white that is not.  That
- *  is how the machine this interface comes from drew one, and it is also
+ *  is how the machine this interface comes from drew one.  It is also
  *  the only way to read a label on a bar whose fill and text are both
  *  black. */
 static void loading_window(RUiState *s)
@@ -1687,7 +1716,7 @@ extern "C" void ui_frame(RUi *u, RUiState *s)
     if (s->show_query && s->q_poly_ok)
     {
         /*  The footprint under the query, outlined on the map: a white
-         *  line over a dark one, so it reads on any ground as the
+         *  line over a dark one.  So it reads on any ground as the
          *  original's inverting outline did. */
         ImVec2 pts[4];
         for (int k = 0; k < 4; ++k)
@@ -1701,9 +1730,10 @@ extern "C" void ui_frame(RUi *u, RUiState *s)
     if (s->comp_ok && s->comp_n >= 2)
     {
         /*  The component under the pointer, outlined where the thing
-         *  itself is.  The points come in PAIRS, one edge of the silhouette
-         *  each, in no order round it -- so each pair is its own line, and
-         *  nothing joins one edge's end to the next edge's start. */
+         *  itself is.  The points come in PAIRS, one edge of the
+         *  silhouette each, in no order round it: so each pair is its
+         *  own line.  Nothing joins one edge's end to the next edge's
+         *  start. */
         ImDrawList *dl = ImGui::GetBackgroundDrawList();
         for (int k = 0; k + 1 < s->comp_n; k += 2)
         {
@@ -1728,9 +1758,10 @@ extern "C" void ui_frame(RUi *u, RUiState *s)
     }
     if (s->sel_ok)
     {
-        /*  The area being selected for a debug report, a tinted rectangle
-         *  with its outline and its size in a caption; after the release it
-         *  blinks and goes, and the log says what was written. */
+        /*  The area being selected for a debug report, a tinted
+         *  rectangle with its outline and its size in a caption.  After
+         *  the release it blinks and goes, and the log says what was
+         *  written. */
         ImVec2 pts[4];
         ImVec2 at(1e9f, 1e9f);
         for (int k = 0; k < 4; ++k)
@@ -1763,10 +1794,11 @@ extern "C" void ui_frame(RUi *u, RUiState *s)
 
     if (s->plan && s->show_cells && s->cell_ok)
     {
-        /*  Every cell's own number, "col,row", tucked into its bottom-right
-         *  corner on screen, in the map view only, where the cells are
-         *  squares and the frame below is exact.  Drawn the way the ruler
-         *  is, through a transparent click-through window. */
+        /*  Every cell's own number, "col,row", tucked into its
+         *  bottom-right corner on screen, in the map view only.  There
+         *  the cells are squares and the frame below is exact.  Drawn
+         *  the way the ruler is, through a transparent click-through
+         *  window. */
         const ImVec2 disp = ImGui::GetIO().DisplaySize;
         const float  cw   = sqrtf(s->cell_c[0] * s->cell_c[0] + s->cell_c[1] * s->cell_c[1]);
         const float  det  = s->cell_c[0] * s->cell_r[1] - s->cell_c[1] * s->cell_r[0];
@@ -1802,9 +1834,9 @@ extern "C" void ui_frame(RUi *u, RUiState *s)
             for (int r = r0; r <= r1; ++r)
                 for (int c = c0; c <= c1; ++c)
                 {
-                    /*  The cell's four corners on screen; the label goes by
-                     *  the one lowest and rightmost, whichever way the map
-                     *  is turned. */
+                    /*  The cell's four corners on screen.  The label
+                     *  goes by the one lowest and rightmost, whichever
+                     *  way the map is turned. */
                     float bx = -1e9f, by = -1e9f, best = -1e9f;
                     for (int k = 0; k < 4; ++k)
                     {

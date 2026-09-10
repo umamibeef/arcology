@@ -1,15 +1,15 @@
-/*  sim.c -- the clock, and the money it spends: sim_tick's phase table, the
- *  budget, the ordinances and the February poll.  This was the whole
+/*  sim.c: the clock, and the money it spends: sim_tick's phase table,
+ *  the budget, the ordinances and the February poll.  This was the whole
  *  simulation once, 8,438 lines of it.  The phases themselves now live
- *  beside each other by subject -- sim_scan.c, sim_growth.c, sim_map.c,
- *  sim_place.c, sim_thing.c, sim_disaster.c, sim_micro.c, and the ring they
- *  share in sim_queue.c -- and what is left here is the thing that calls
+ *  beside each other by subject, sim_scan.c, sim_growth.c, sim_map.c,
+ *  sim_place.c, sim_thing.c, sim_disaster.c, sim_micro.c, and the ring
+ *  they share in sim_queue.c.  What is left here is the thing that calls
  *  them in the original's order. sim_int.h names everything that crosses
  *  between them.  Layout still follows the original's phase structure
- *  rather than any tidier arrangement, so each function can be read next to
- *  the listing it came from.  Arithmetic is deliberately kept in the
- *  original's widths: the game runs on 16-bit registers in many places and
- *  the truncation is observable in the results. */
+ *  rather than any tidier arrangement, so each function can be read next
+ *  to the listing it came from.  Arithmetic is deliberately kept in the
+ *  original's widths: the game runs on 16-bit registers in many places
+ *  and the truncation is observable in the results. */
 #include "sim.h"
 #include "ext80.h"
 #include "sim_int.h"
@@ -17,8 +17,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-/*  $41B8 and $42AC -- which infra[] counter a military building id
- *  belongs to.  The two switches in $4110 share this one table. */
+/*  $41B8 and $42AC: which infra[] counter a military building id belongs
+ *  to.  The two switches in $4110 share this one table. */
 static int infra_slot(int bld)
 {
     /*        $DD $DE $DF $E0 $E1 $E2 $E3 $E4 $E5 $E6 $E7 $E8 $E9 $EA $EB */
@@ -45,7 +45,7 @@ static int infra_slot(int bld)
 }
 
 /* ================================================================== *
- *  $4110  setTile -- the routine 168 call sites funnel through.
+ *  $4110  setTile: the routine 168 call sites funnel through.
  *
  *  Besides writing XBLD it keeps a running census of every building id
  *  on the map.  That census is what lets the growth pass ask questions
@@ -60,11 +60,11 @@ void sim_set_tile(City *c, int y, int x, uint8_t bld)
 
     if (XZON_TYPE(c->xzon[y][x]) == ZONE_MILITARY)
     {
-        /*  $418C -- a military tile keeps its own tally instead.  Two
+        /*  $418C: a military tile keeps its own tally instead.  Two
          *  identical 29-case switches over ids $DD..$F9 pick a slot in
          *  infra[]: the old building's slot goes down, the new one's
-         *  goes up.  Anything outside that range, and every id in it
-         *  the table does not name, lands on slot 0. */
+         *  goes up.  Anything outside that range, and every id in it the
+         *  table does not name, lands on slot 0. */
         c->infra[infra_slot(c->xbld[y][x])]--; /* $41B8 */
         c->infra[infra_slot(bld)]++;           /* $42AC */
         c->xbld[y][x] = bld;                   /* $4396 */
@@ -78,7 +78,7 @@ void sim_set_tile(City *c, int y, int x, uint8_t bld)
 }
 
 /*  Rebuild the census from scratch.  The game maintains it incrementally
- *  from a new-city state; we have to derive it after loading a save. */
+ *  from a new-city state.  We have to derive it after loading a save. */
 void sim_rebuild_census(City *c)
 {
     int y, x;
@@ -90,36 +90,36 @@ void sim_rebuild_census(City *c)
 
 /* ================================================================== *
  *  A shared BFS queue.  The original keeps it at A5+0x13B6/0x13B8 with
- *  the ring buffer alongside; push is $21DD4 / $21DF2 and pop $21E3A.
+ *  the ring buffer alongside.  Push is $21DD4 / $21DF2 and pop $21E3A.
  *  Both flood fills use it, one at a time.
  * ================================================================== */
 
 /* ================================================================== *
- *  Phase 1 -- the power grid.  $20FC4 clears the flags and hunts for
- *  plants; $210A2 floods outward from each one.
+ *  Phase 1: the power grid.  $20FC4 clears the flags and hunts for
+ *  plants.  $210A2 floods outward from each one.
  * ================================================================== */
 
 /* ================================================================== *
- *  Phase 20 -- the water network.  Same shape as power, with its own
+ *  Phase 20: the water network.  Same shape as power, with its own
  *  pair of flag bits: 0x20 conducts, 0x10 supplied.
  * ================================================================== */
 
 /* ================================================================== *
- *  Phase 2 -- the data layers.  $2317E rebuilds pollution from the
+ *  Phase 2: the data layers.  $2317E rebuilds pollution from the
  *  buildings and traffic underneath each 64x64 cell, then blurs it.
  * ================================================================== */
 
 /* ================================================================== *
- *  $22330  graphHistoryPass -- one month of graph history.
+ *  $22330  graphHistoryPass: one month of graph history.
  *
  *  Phase 21 of the clock calls it, at $220F0, straight after
- *  populationPass ($33FAE) and economyPass ($34D04) -- so the readings
- *  it takes are the ones those two have just settled.
+ *  populationPass ($33FAE) and economyPass ($34D04).  So the readings it
+ *  takes are the ones those two have just settled.
  *
- *  The pass runs in four movements: shift the monthly band along, take
- *  a fresh reading for each of the sixteen series, bring the vertical
- *  scales up to date, and then shift the two slower bands if the
- *  calendar calls for it.
+ *  The pass runs in four movements.  It shifts the monthly band along.
+ *  It takes a fresh reading for each of the sixteen series.  It brings
+ *  the vertical scales up to date.  Then it shifts the two slower bands
+ *  if the calendar calls for it.
  *
  *  Three details are worth keeping in view.  The arcology term at
  *  $2238E adds twenty thousand residents for every arcology past the
@@ -133,7 +133,7 @@ void sim_rebuild_census(City *c)
  * ================================================================== */
 
 /* ================================================================== *
- *  $2317E stages 3-5 -- city centre and land value.
+ *  $2317E stages 3-5: city center and land value.
  *
  *  These share one 128-row scratch plane of words, the row-pointer
  *  array at A5+0x13BA.  The stages address it at different resolutions,
@@ -147,15 +147,15 @@ void sim_rebuild_census(City *c)
  * ================================================================== */
 
 /* ================================================================== *
- *  $2317E stages 6-8 ($23C3A .. $23F3C) -- police, fire and density.
+ *  $2317E stages 6-8 ($23C3A .. $23F3C): police, fire and density.
  *
  *  These three layers come out of one walk of the map, so they are one
- *  function here too.  The walk first clears the 32x32 scratch plane
- *  and both coverage layers, then for every tile
+ *  function here too.  The walk first clears the 32x32 scratch plane and
+ *  both coverage layers, then for every tile
  *
  *    - a developed zone building adds its population to the scratch
  *      plane and, under the two service ordinances, two points of free
- *      coverage to the cell it stands in;
+ *      coverage to the cell it stands in.
  *    - anything above the zone range adds a flat 2 (12 for an arcology)
  *      and, if it is a police or fire station standing on its corner
  *      tile, stamps a coverage diamond around itself.
@@ -168,32 +168,32 @@ void sim_rebuild_census(City *c)
  * ================================================================== */
 
 /* ================================================================== *
- *  $3258A / $33028 / $32830 -- putting a building on the map.
+ *  $3258A / $33028 / $32830: putting a building on the map.
  *
  *  All three end in the same place: pick an id out of a group and stamp
  *  it down.  The groups are five kinds by four tiers, and which variant
- *  inside the group is chosen is random -- except for the smallest
+ *  inside the group is chosen is random: except for the smallest
  *  residential group, where land value decides which third of the group
  *  to draw from, so poor land gets the shacks and rich land the houses.
  * ================================================================== */
 
 /* ================================================================== *
- *  $EEAE  allocMicro -- hands a building an XMIC slot, the eight-byte
+ *  $EEAE  allocMicro: hands a building an XMIC slot, the eight-byte
  *  record that holds a stadium's team or an arcology's stage.  Returns
  *  the slot index, which $3590 writes into XTXT.
  *
- *  NOT RECONSTRUCTED.  It reads a kind table at A5-0x5D42 indexed by
- *  bld - 0xC6, then linear-probes XMIC for a free eight-byte record.
- *  It draws no randoms, so leaving it out cannot shift the RNG stream
- *  and cannot move XBLD, XZON, XBIT or XTRF -- the four layers the
- *  growth oracle compares.  What it costs is the XTXT label byte. */
+ *  NOT RECONSTRUCTED.  It reads a kind table at A5-0x5D42 indexed by bld
+ *  - 0xC6, then linear-probes XMIC for a free eight-byte record.  It
+ *  draws no randoms, so leaving it out cannot shift the RNG stream and
+ *  cannot move XBLD, XZON, XBIT or XTRF: the four layers the growth
+ *  oracle compares.  What it costs is the XTXT label byte. */
 
 /* ================================================================== *
- *  $5FAA  demolishAndPlace -- take a building off the map.
+ *  $5FAA  demolishAndPlace: take a building off the map.
  *
  *  Most of its 5,680 bytes animate the collapse.  All of the change to
- *  the city happens in the loop at $73A4, which walks the footprint the
- *  size table gives and does the same six things to every tile:
+ *  the city happens in the loop at $73A4.  It walks the footprint the
+ *  size table gives, and does the same six things to every tile:
  *
  *      the new building is rubble, $01 to $04 by a coin, unless the
  *          tile stands on sloped or watered ground, where it goes bare
@@ -202,13 +202,13 @@ void sim_rebuild_census(City *c)
  *      XZON keeps its zone nibble and loses its corner marker
  *      the XTXT byte is cleared, unless it names a moving object
  *      whatever that byte pointed at is released
- *      a tile that was burnt out is taken off the burnt tally
+ *      a tile that was burned out is taken off the burned tally
  *
  *  Then the terrain around the footprint is put back in order.
  * ================================================================== */
 
 /* ================================================================== *
- *  $3A000  demolishTile -- what a disaster calls to flatten one tile.
+ *  $3A000  demolishTile: what a disaster calls to flatten one tile.
  *
  *  It takes the building down through $5FAA, then optionally scorches
  *  the footprint, then records the tile in the city's worst-problem
@@ -220,31 +220,34 @@ void sim_rebuild_census(City *c)
  * ================================================================== */
 
 /* ================================================================== *
- *  $128DE  fixTerrain -- put one tile back in order after the land
+ *  $128DE  fixTerrain: put one tile back in order after the land
  *  under it has moved.
  *
- *  First it clears what can no longer stand there: a building of $0D or
- *  more is demolished, the tile is emptied unless its building is 5,
- *  and anything underground goes.
+ *  First it clears what can no longer stand there.
  *
- *  Then it works out the tile's shape.  Each of the eight neighbours
- *  that stands higher raises the corners it touches -- the byte table
- *  at A5-0x4DF6 says which corners those are -- and the four-bit set of
+ *      A building of $0D or more is demolished.  The tile is emptied
+ *      unless its building is 5.  Anything underground goes.
+ *
+ *
+ *
+ *  Then it works out the tile's shape.  Each of the eight neighbors that
+ *  stands higher raises the corners it touches: the byte table at
+ *  A5-0x4DF6 says which corners those are.  And the four-bit set of
  *  raised corners picks a slope code out of the sixteen at A5-0x4DEE.
- *  Code $32 is not a slope: it means all four corners are higher, so
+ *  Code $32 is not a slope.  It means all four corners are higher.  So
  *  this tile has to come up a step itself.
  *
  *  Last it decides land or water.  A tile at or above the city's water
  *  level (MISC[912]) loses its water bit and keeps its slope code.  One
  *  below gets the water bit, has the water level written into ALTM bits
  *  5..9, is emptied, and takes a shifted code: $20 plus the slope when
- *  it sits exactly one step under the water line -- the shoreline -- and
+ *  it sits exactly one step under the water line, the shoreline, and
  *  $10 plus the slope when it is deeper.
  * ================================================================== */
 
 /* ================================================================== *
  *  The moving-object table, XTHG: forty twelve-byte records.  Slot 0 is
- *  never used -- $9DDA starts its search at 1 and treats 40 as "full".
+ *  never used: $9DDA starts its search at 1 and treats 40 as "full".
  *
  *  Record layout, as $B0BC fills it:
  *      +0  kind        $0A locomotive, $0B carriage
@@ -262,11 +265,11 @@ void sim_rebuild_census(City *c)
  *  scan at $B058 steps twice as far as the movement tables do. */
 
 /* ================================================================== *
- *  $32BFA  growTo3x3 -- try to turn a 2x2 into a 3x3.
+ *  $32BFA  growTo3x3: try to turn a 2x2 into a 3x3.
  *
  *  Four candidate anchors are tried in turn.  For each, the eight tiles
  *  around a 3x3 whose TOP-RIGHT corner is the anchor must all take the
- *  building -- the centre is neither tested nor cleared -- and at least
+ *  building.  The center is neither tested nor cleared.  And at least
  *  one of four diagonal positions just outside the block must hold a
  *  road of the right orientation.  Only then is anything written.
  * ================================================================== */
@@ -278,9 +281,9 @@ void sim_rebuild_census(City *c)
  *  anything, which is why a saved city reproduces exactly without it.
  *
  *  Seven of the seventeen types never move.  Types 0, 4, 11, 13 and 14
- *  are disabled in the table at A5-0x635A, and the two that are enabled
- *  but have a stepper -- 7 and 8 -- reach $D7CE and $D7D6, which are
- *  `link; unlk; rts` and do nothing at all.
+ *  are disabled in the table at A5-0x635A.  Two are enabled but have a
+ *  stepper.  They are 7 and 8, reach $D7CE and $D7D6, which are `link.
+ *  Unlk.  Rts` and do nothing at all.
  *
  *  Type 11, the train carriage, is the commonest thing in the shipped
  *  cities and is disabled here.  It still moves: the locomotive drags
@@ -291,7 +294,7 @@ void sim_rebuild_census(City *c)
  *  another address. */
 
 /* ================================================================== *
- *  Ships -- type 3.
+ *  Ships: type 3.
  *
  *  A ship is a five-state machine on the byte at +2, dispatched through
  *  the jump table at $E68C: 0 sails, 1 lines itself up, 2 works its way
@@ -302,7 +305,7 @@ void sim_rebuild_census(City *c)
  * ================================================================== */
 
 /* ================================================================== *
- *  Helicopters -- type 2.
+ *  Helicopters: type 2.
  *
  *  Six states on the byte at +2, jump table at $C83C.  0 climbs, 1 does
  *  nothing at all, 2 cruises, 3 descends to land, 4 sits, 5 spirals in
@@ -310,7 +313,7 @@ void sim_rebuild_census(City *c)
  * ================================================================== */
 
 /* ================================================================== *
- *  Aeroplanes -- type 1.
+ *  Aeroplanes: type 1.
  *
  *  Eight states, jump table at $C336: 0 climbs out, 1 lands, 2 cruises,
  *  3 turns onto the approach, 4 flies the approach, 5 and 6 do nothing,
@@ -320,7 +323,7 @@ void sim_rebuild_census(City *c)
  * ================================================================== */
 
 /* ================================================================== *
- *  $333C8  placeSpecial -- grows the furniture that belongs to a
+ *  $333C8  placeSpecial: grows the furniture that belongs to a
  *  military base, an airport or a seaport.  Dispatches on the building
  *  id: $E1..$E8 and $EA are one tile, $EE..$F2 and $F6 are two by two,
  *  $F9 is the military three by three.  $DD and $E0 have handlers of
@@ -328,33 +331,34 @@ void sim_rebuild_census(City *c)
  *
  *  Returns $FF when the caller should consider the job done and 0 when
  *  it should fall back to a smaller building.  Note that several
- *  "rejections" still return $FF -- a tile that is already built on
+ *  "rejections" still return $FF: a tile that is already built on
  *  counts as done, not as a failure.
  * ================================================================== */
 
 int trip_mark_log;
 
 /* ================================================================== *
- *  tripGenerate ($245E8) -- can a journey be made from here?
+ *  tripGenerate ($245E8): can a journey be made from here?
  *
  *  Asked "can a building of this zone and tier work here", the game
  *  answers by trying to make a journey.  It steps onto the nearest
- *  transport tile, then walks the network at random -- turning
- *  consistently left or right, never immediately doubling back --
- *  spending a length budget as it goes.  The trip succeeds if it
- *  reaches a tile whose zone the starting zone wants (ZONE_ATTRACTS:
- *  homes want shops and factories, shops want homes and factories) or
- *  reaches a road off the edge of the map, which is a neighbouring
- *  city.  It fails if the budget runs out or the network dead-ends.
+ *  transport tile.  Then it walks the network at random, turning
+ *  consistently left or right, never immediately doubling back, spending
+ *  a length budget as it goes.  The trip succeeds if it reaches a tile
+ *  whose zone the starting zone wants.  ZONE_ATTRACTS says homes want
+ *  shops and factories, and shops want homes and factories.  The trip
+ *  also succeeds if it reaches a road off the edge of the map, which is
+ *  a neighboring city.  It fails if the budget runs out or the network
+ *  dead-ends.
  *
  *  Every accepted step is pushed on the shared ring, and on the way out
  *  the whole route is drained again and stamped into XTRF.  That is
- *  where traffic comes from: it is not modelled, it is the residue of
+ *  where traffic comes from: it is not modeled, it is the residue of
  *  journeys that were actually attempted.
  * ================================================================== */
 
 /* ================================================================== *
- *  growthScan ($3170E) -- phases 3 through 18.
+ *  growthScan ($3170E): phases 3 through 18.
  *
  *  Sixteen phases each walk a quarter-offset lattice: phase (y0,x0)
  *  visits y = y0, y0+4, ... and x = x0, x0+4, ..., so over one cycle
@@ -375,20 +379,24 @@ int trip_mark_log;
  * ================================================================== */
 
 /* ================================================================== *
- *  budgetPass ($263C8) -- the monthly budget pass, phase 0.
+ *  budgetPass ($263C8): the monthly budget pass, phase 0.
  *
  *  This is what police and fire coverage were waiting on.  It keeps
- *  sixteen department records: each holds an `amount` recomputed from
- *  the tile census, a `funding` level the mayor sets, and the year's
- *  accrual of their product, settled into the treasury every January.
- *  Coverage reads the police and fire funding levels straight out of
- *  it, which is why nothing could compute XPLC or XFIR until the block
- *  itself was located in MISC.
+ *  sixteen department records.
+ *
+ *      Each holds an `amount` recomputed from the tile census.
+ *      A `funding` level the mayor sets.
+ *      The year's accrual of their product.
+ *      Settled into the treasury every January.
+ *
+ *  Coverage reads the police and fire funding levels straight out of it.
+ *  This is why nothing could compute XPLC or XFIR until the block itself
+ *  was located in MISC.
  *
  *  Service buildings are counted in tiles, so dividing by 9 or 16 turns
  *  a tile count back into a building count.  The infrastructure ranges
  *  overlap on purpose: a bridge tile is charged to both the road and
- *  the highway department.
+ *  the band department.
  * ================================================================== */
 
 int32_t sim_ordinance_cost(const City *c, int which) /* ordinanceCost $41368 */
@@ -412,9 +420,9 @@ void sim_budget(City *c)
     int i, t;
 
     /*  The January reconciliation, $263E0.  It only runs if last
-     *  December armed it, and it divides the year's accrual by twelve
-     *  times the department's own divisor -- positive for the four
-     *  revenue departments, negative for the twelve that spend. */
+     *  December armed it.  It divides the year's accrual by twelve times
+     *  the department's own divisor: positive for the four revenue
+     *  departments, negative for the twelve that spend. */
     if (c->year_end && c->month == 0)
     {
         for (i = 0; i < N_DEPT; i++)
@@ -425,9 +433,9 @@ void sim_budget(City *c)
             c->dept[i].accrued = 0; /* $2642C */
         }
         c->year_end = 0; /* $26438 */
-        /*  $26442 -- and with the year closed, every special building
-         *  on the map takes its turn.  Inside the year-end block, after
-         *  the flag is cleared, exactly where the original calls it. */
+        /*  $26442: and with the year closed, every special building on
+         *  the map takes its turn.  Inside the year-end block, after the
+         *  flag is cleared, exactly where the original calls it. */
         sim_microsim(c);
     }
 
@@ -473,14 +481,14 @@ void sim_budget(City *c)
         if (c->ordinances & ((int32_t)1 << i))
             c->dept[DEPT_ORDINANCE].amount += sim_ordinance_cost(c, i);
 
-    /*  $2670A -- and then, one month in eight, a city with money in the
+    /*  $2670A: and then, one month in eight, a city with money in the
      *  bank finds an ordinance has been passed without it.  The treasury
-     *  has to beat a random figure plus fifty thousand, so it only happens
-     *  to a rich city, and the newspaper announces it.  The same A5+0x13AA
-     *  switch that turns disasters off turns this off too, which is the
-     *  only reason to think of it as one.  Both its dice are drawn whenever
-     *  the switch is on, so a model that leaves it out is a draw short
-     *  every month. */
+     *  has to beat a random figure plus fifty thousand, so it only
+     *  happens to a rich city, and the newspaper announces it.  The same
+     *  A5+0x13AA switch that turns disasters off turns this off too,
+     *  which is the only reason to think of it as one.  Both its dice
+     *  are drawn whenever the switch is on, so a model that leaves it
+     *  out is a draw short every month. */
     if (!c->disasters_off && (Random() & 7) == 0)
     {
         int32_t bar = (int32_t)(uint16_t)Random() + 50000; /* $26726 */
@@ -493,20 +501,20 @@ void sim_budget(City *c)
 }
 
 /* ================================================================== *
- *  $2317E stages 6-7 -- population density.
+ *  $2317E stages 6-7: population density.
  *
- *  Every building contributes a value from the table at A5-0x3982 into
- *  a 32x32 accumulator; the density is four times that, saturated to a
+ *  Every building contributes a value from the table at A5-0x3982 into a
+ *  32x32 accumulator.  The density is four times that, saturated to a
  *  byte.  Specials outside the zone range contribute a flat 2, except
  *  arcologies (0xFB..0xFE) which contribute 12.
  *
  *  The growth-rate layer that follows it, XROG, is an exponential
- *  average of the CHANGE in density -- (7*old + 8*delta + 128) / 8 --
+ *  average of the CHANGE in density: (7*old + 8*delta + 128) / 8,
  *  so it needs the pre-pass state and cannot be rebuilt from a save.
  * ================================================================== */
 void sim_density(City *c)
 {
-    /*  Density is not a pass of its own: it is the tail of the same map
+    /*  Density is not a pass of its own.  It is the tail of the same map
      *  walk that lays down police and fire coverage, and shares that
      *  walk's accumulator.  Kept as a name because that is what the
      *  layer is called. */
@@ -514,38 +522,40 @@ void sim_density(City *c)
 }
 
 /* ================================================================== *
- *  $3152A  opinionPoll -- the February poll.
+ *  $3152A  opinionPoll: the February poll.
  *
  *  Once a year, in month 2, phase 0 stops a hundred imaginary citizens
- *  in the street and asks each one what is wrong with the city.  The
- *  answer is not computed from the indicators directly: each of the
+ *  in the street.  It asks each one what is wrong with the city.  The
+ *  answer is not computed from the indicators directly.  Each of the
  *  seven complaints is given a weight, contentment is given a weight of
- *  its own, and the hundred answers are drawn from that distribution.
- *  So a city with a little crime still returns a few people who name
- *  crime, and the ranking wobbles from year to year even when nothing
- *  has changed.
+ *  its own.  The hundred answers are drawn from that distribution.  So a
+ *  city with a little crime still returns a few people who name crime.
+ *  The ranking wobbles from year to year even when nothing has changed.
  *
  *  The seven weights ($31544 to $315AE) are the raw indicators, not
- *  normalised: the three map averages as they stand, the tax rate
- *  tripled, the unemployment count, and the two shortfalls -- how far
- *  education is below 100 and life expectancy below 70.  A city that
- *  is over those two marks contributes nothing from them.
+ *  normalized.
+ *
+ *      The three map averages as they stand.  The tax rate tripled.  The
+ *      unemployment count.  The two shortfalls.
+ *
+ *  How far education is below 100 and life expectancy below 70.  A city
+ *  that is over those two marks contributes nothing from them.
  *
  *  Contentment is 50 plus the land value average ($315B2).  That is the
- *  whole of the poll's optimism, and it is why a rich city polls well
- *  even with problems: land value is measured in the hundreds while the
+ *  whole of the poll's optimism.  It is why a rich city polls well even
+ *  with problems.  Land value is measured in the hundreds while the
  *  complaints are usually in the tens.
  *
  *  Two details are easy to get wrong.  The map averages are read as
  *  words from the middle of a long ($31548 reads offset 2 of the graph
- *  slot), so only the low sixteen bits count -- contentment takes the
+ *  slot).  So only the low sixteen bits count: contentment takes the
  *  whole long.  And the tax term reads the same department three times
- *  over ($31568 loads a1 and a0 from one pointer), so it is three times
+ *  over ($31568 loads a1 and a0 from one pointer).  So it is three times
  *  the residential rate and not the sum of the three tax rates.
  *
  *  Afterwards the seven are sorted worst first ($31656, a bubble sort
  *  on the index array) and the sorted counts are kept beside them.  The
- *  newspaper and the advisors read the ranking; nothing else does.
+ *  newspaper and the advisors read the ranking.  Nothing else does.
  * ================================================================== */
 int sim_opinion_poll(City *c)
 {
@@ -556,18 +566,18 @@ int sim_opinion_poll(City *c)
     int32_t total;
     int     i, j, n;
 
-    /*  $31544 -- the three map overlays, low word only */
+    /*  $31544: the three map overlays, low word only */
     w[PROBLEM_TRAFFIC]   = (int16_t)c->graph[GRAPH_TRAFFIC][0];
     w[PROBLEM_POLLUTION] = (int16_t)c->graph[GRAPH_POLLUTION][0];
     w[PROBLEM_CRIME]     = (int16_t)c->graph[GRAPH_CRIME][0];
 
-    /*  $31562 -- three times department 0's rate, see above */
+    /*  $31562: three times department 0's rate, see above */
     w[PROBLEM_TAXES] = (int16_t)(c->dept[0].funding * 3);
 
-    /*  $31578 -- the low word of the unemployment count */
+    /*  $31578: the low word of the unemployment count */
     w[PROBLEM_UNEMPLOYMENT] = (int16_t)c->unemployment;
 
-    /*  $3157E and $31596 -- the two shortfalls, floored at zero */
+    /*  $3157E and $31596: the two shortfalls, floored at zero */
     w[PROBLEM_EDUCATION] = (int32_t)c->misc[MISC_AGE_W90] >= 100
                                ? 0
                                : (int16_t)(100 - c->misc[MISC_AGE_W90]);
@@ -575,7 +585,7 @@ int sim_opinion_poll(City *c)
                                ? 0
                                : (int16_t)(70 - c->misc[MISC_AGE_W65]);
 
-    /*  $315B2 -- contentment, then every complaint on top of it */
+    /*  $315B2: contentment, then every complaint on top of it */
     total = 50 + c->graph[GRAPH_VALUE][0];
     for (i = 0; i < N_PROBLEM; i++)
     {
@@ -584,15 +594,15 @@ int sim_opinion_poll(City *c)
         index[i]  = (int16_t)i; /* $315D4 */
     }
 
-    /*  $315EA -- a city with no weight at all, or under a hundred
-     *  people, is not polled and keeps last year's ranking. */
+    /*  $315EA: a city with no weight at all, or under a hundred people,
+     *  is not polled and keeps last year's ranking. */
     if ((int16_t)total == 0 || c->population < 100)
         return SIM_EV_NONE;
 
     was         = c->approval; /* $315FA */
     c->approval = 0;           /* $31600 */
 
-    /*  $31608 -- a hundred citizens, each landing in one bucket */
+    /*  $31608: a hundred citizens, each landing in one bucket */
     for (n = 0; n < 100; n++)
     {
         int r = (uint16_t)Random() % (uint16_t)(int16_t)total; /* $31612 */
@@ -604,12 +614,12 @@ int sim_opinion_poll(City *c)
             r -= w[i];
         }
         if (i == N_PROBLEM)
-            c->approval++; /* $3163A -- nothing to complain about */
+            c->approval++; /* $3163A: nothing to complain about */
         else
             counts[i]++; /* $31646 */
     }
 
-    /*  $31656 -- sort the index worst first, then read the counts back
+    /*  $31656: sort the index worst first, then read the counts back
      *  through it so the two arrays line up. */
     for (n = N_PROBLEM - 1; n > 0; n--)
         for (j = 0; j < n; j++)
@@ -625,29 +635,33 @@ int sim_opinion_poll(City *c)
         c->problem_votes[i] = counts[index[i]];
     }
 
-    /*  $316D6 -- crossing four fifths approval is congratulated once,
-     *  on the way up only. */
+    /*  $316D6: meet four fifths approval is congratulated once, on the
+     *  way up only. */
     return (was < 80 && c->approval >= 80)
                ? SIM_EV_APPROVAL /* $316EA sound, $316FC message */
                : SIM_EV_NONE;
 }
 
 /* ================================================================== *
- *  $101AC  microsimPass -- the year-end turn of every special building.
+ *  $101AC  microsimPass: the year-end turn of every special building.
  *
  *  budgetPass calls it once a year, from the January settlement, right
  *  after the sixteen departments have been reconciled into the treasury
  *  ($26442).  It is the only thing in the game that walks XMIC.
  *
  *  XMIC is 150 records of eight bytes at A5+0x2BC6, one per special
- *  building on the map: the power plants, the stations, the schools and
- *  hospitals, the arcologies, the marina.  Records 1 to 149 are walked
- *  in order; record 0 is never used.  Each record's first byte is a
- *  building id, and `$1027C` dispatches on it -- 58 entries covering
- *  $C6 to $FF, of which 26 are distinct and two are "do nothing".
+ *  building on the map.
+ *
+ *      The power plants.  The stations.  The schools and hospitals.  The
+ *      arcologies.  The marina.
+ *
+ *  Records 1 to 149 are walked in order.  Record 0 is never used.  Each
+ *  record's first byte is a building id.  `$1027C` dispatches on it: 58
+ *  entries covering $C6 to $FF, of which 26 are distinct and two are "do
+ *  nothing".
  *
  *  What the three words in a record mean is the type's own business.  A
- *  power plant keeps its age; a marina keeps how many boats it has.
+ *  power plant keeps its age.  A marina keeps how many boats it has.
  *  There is no common schema and pretending there is one would be an
  *  invention.
  * ================================================================== */
@@ -657,13 +671,13 @@ int sim_opinion_poll(City *c)
  *  zero means one per hundred people. */
 
 /* ====================================================================
- *  simTick $21EDE -- one phase of the 25-phase clock.
+ *  simTick $21EDE: one phase of the 25-phase clock.
  *
  *  The date advances first ($21EE6) and the phase is the date modulo
- *  25 ($21EF0); there is no phase counter of its own to save.  The
+ *  25 ($21EF0).  There is no phase counter of its own to save.  The
  *  jump table at $21F0A has 25 arms.  Whatever an arm does that is not
- *  simulation -- the window title, dialogs, menus, the cursor, the graph
- *  windows, the newspaper -- is named here and left out.
+ *  simulation: the window title, dialogs, menus, the cursor, the graph
+ *  windows, the newspaper: is named here and left out.
  * ==================================================================== */
 int sim_tick(City *c)
 {
@@ -684,10 +698,10 @@ int sim_tick(City *c)
             c->years = c->date / 300;
             /*  $21F42: g_yearEndDue opens the year-end budget dialog
              *  ($2535E).  $21F62: $2EAEA is a dialog in months 3 and 7.
-             *  Neither touches the model; the poll below does. */
+             *  Neither touches the model.  The poll below does. */
             sim_budget(c); /* $21F4E */
 
-            /*  $21F54 -- the poll runs in month 2 and only there */
+            /*  $21F54: the poll runs in month 2 and only there */
             if (c->month == 2)
             {
                 int e = sim_opinion_poll(c);
@@ -704,7 +718,7 @@ int sim_tick(City *c)
             sim_power_grid(c); /* $21FA6 */
             break;
         case 2:
-            /*  cityScanPass $2317E, stages 1 to 9 in order; coverage
+            /*  cityScanPass $2317E, stages 1 to 9 in order.  Coverage
              *  runs inside the density stage. */
             sim_pollution(c);
             sim_land_value(c);
@@ -724,11 +738,11 @@ int sim_tick(City *c)
             break;
         case 22:
             {
-                /*  $220FA: the city is promoted a stage when its population
-                 *  passes the next rung of the ladder at A5-0x3ED8, indexed
-                 *  by stage + 1; a zero rung ends the ladder.  The newspaper
-                 *  and the reward prompt that follow ($2EDE4, $4094, $22708)
-                 *  are interface. */
+                /*  $220FA: the city is promoted a stage when its
+                 *  population passes the next rung of the ladder at
+                 *  A5-0x3ED8, indexed by stage + 1.  A zero rung ends
+                 *  the ladder.  The newspaper and the reward prompt that
+                 *  follow ($2EDE4, $4094, $22708) are interface. */
                 int32_t stage = c->misc[MISC_STAGE];
                 int32_t need  = (stage >= 0 && stage + 1 < 10)
                                     ? CITY_STAGE_POP[stage + 1]

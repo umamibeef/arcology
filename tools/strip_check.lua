@@ -8,7 +8,7 @@
 --  They agree to the BIT.  A script works in doubles and the mesh keeps
 --  floats, so the composition narrows every step through arc.f32 and
 --  comes out the number the pipeline's own float arithmetic would have
---  reached.  That is what makes a band's edge and the footway's beside
+--  reached.  That is what makes a band's edge and the margin's beside
 --  it the same line rather than two lines a few millionths apart.
 --
 --      arcology cities/atlanta.sc2 --mute --run 0 --lua tools/strip_check.lua
@@ -24,11 +24,11 @@ local seen, bad, worst = 0, 0, 0
 arc.rules.strip = function (s)
     local d = s:info()
     local fam = arc.rules.family({name = d.family, width = d.half * 2})
-    local inset = (d.curbs and fam.footway) and fam.footway.inner or 1.0
-    --  A pair the crossing band cuts is compared by the composition
+    local inset = (d.lips and fam.margin) and fam.margin.inner or 1.0
+    --  A pair the meet band cuts is compared by the composition
     --  itself, which cuts it in the mesh's precision; the pipeline's own
     --  pair is cut in floats and the two are the same line by different
-    --  roads.  Only the whole pairs are compared here.
+    --  lines.  Only the whole pairs are compared here.
     local cut0, cut1 = d.cross0, d.len - d.cross1
     for i = 2, s:count() do
         local a0x, a0y, a1x, a1y, b0x, b0y, b1x, b1y, acr, acl, ala, alb, ma, order = s:pair(i)

@@ -15,7 +15,7 @@ if [ -z "$REF" ]; then echo "usage: tools/sweep3.sh <reference binary>" >&2; exi
 find cities ${ARC_CITIES:+"$ARC_CITIES"} -maxdepth 3 -iname "*.sc2" | sort | tr "\n" "\0" |
 xargs -0 -P $(sysctl -n hw.logicalcpu) -I{} zsh -c '
 f="$1"; REF="$2"; ROOT="$3"; cd "$ROOT"
-L="^mesh build failed\|^mesh check\|^road clip\|^on-ramps\|^tangent fit  highway\|^lanes\|^sidewalks"
+L="^mesh build failed\|^mesh check\|^line clip\|^on-spurs\|^tangent fit  band\|^lanes\|^margins"
 n=$(build/arcology "$f" --mute --mesh-check --dump-to - 2>&1 | grep -a "$L" | cut -c1-400)
 r=$($REF "$f" --mute --mesh-check --dump-to - 2>&1 | grep -a "$L" | cut -c1-400)
 if [ "$n" = "$r" ]; then printf "SAME %s\n" "$(basename "$f")"

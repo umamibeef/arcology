@@ -1,8 +1,8 @@
-/*  The area report.  The map view's Shift-drag selects the tiles (app.c);
- *  on release the report goes to debug/<city>-<area>.txt under the working
- *  directory and to the clipboard, and the Messages window says so. --area
- *  C0,R0-C1,R1 makes the same report headless, to the dump sink, so it can
- *  be made again from the command line. */
+/*  The area report.  The map view's Shift-drag selects the tiles
+ *  (app.c).  On release the report goes to debug/<city>-<area>.txt under
+ *  the working directory and to the clipboard.  The Messages window says
+ *  so. --area C0,R0-C1,R1 makes the same report headless, to the dump
+ *  sink.  So it can be made again from the command line. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -43,7 +43,7 @@ void area_report_ui(App *a)
     }
     SDL_SetClipboardText(text);
     ui_log(&a->us, "Area %d,%d to %d,%d (%d x %d): %s%s, and copied to the clipboard", (int)c0, (int)r0, (int)c1, (int)r1, (int)(c1 - c0 + 1), (int)(r1 - r0 + 1), fp ? "written to " : "could not write ", path);
-    a->sel_flash_until = SDL_GetTicksNS() + 480000000ull; /* two blinks, then gone; the message is the log's */
+    a->sel_flash_until = SDL_GetTicksNS() + 480000000ull; /* two blinks, then gone.  The message is the log's */
     free(text);
 }
 

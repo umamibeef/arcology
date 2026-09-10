@@ -1,11 +1,12 @@
-/*  city.c -- SimCity 2000 city file (.SC2) reader and writer.  The file is
- *  IFF: "FORM" <len> "SCDH", then a sequence of chunks, each a 4-byte tag,
- *  a big-endian length, and that many bytes.  There is no pad byte between
- *  chunks -- the game writes them back to back.  Every chunk except CNAM
- *  and ALTM is run-length encoded.  The codec below is a direct port of the
- *  encoder at $293EC and the decoder it implies; see the comments on
- *  sc2_rle_encode for the exact rules, which matter because we want to
- *  reproduce Maxis's byte stream and not merely an equivalent one. */
+/*  city.c: SimCity 2000 city file (.SC2) reader and writer.  The file is
+ *  IFF: "FORM" <len> "SCDH", then a sequence of chunks, each a 4-byte
+ *  tag, a big-endian length, and that many bytes.  There is no pad byte
+ *  between chunks: the game writes them back to back.  Every chunk
+ *  except CNAM and ALTM is run-length encoded.  The codec below is a
+ *  direct port of the encoder at $293EC and the decoder it implies.  See
+ *  the comments on sc2_rle_encode for the exact rules, which matter
+ *  because we want to reproduce Maxis's byte stream and not merely an
+ *  equivalent one. */
 #include "arco.h"
 #include "sim.h"
 #include <stdio.h>
@@ -25,7 +26,7 @@ static void     wr32(uint8_t *p, uint32_t v)
 
 /* ------------------------------------------------------------------ *
  *  Decoder.  A count byte below 128 introduces that many literal
- *  bytes; 128 or above means the next byte repeats (count - 127) times.
+ *  bytes.  128 or above means the next byte repeats (count - 127) times.
  * ------------------------------------------------------------------ */
 size_t sc2_rle_decode(const uint8_t *in, size_t in_len, uint8_t *out, size_t out_cap)
 {
@@ -54,7 +55,7 @@ size_t sc2_rle_decode(const uint8_t *in, size_t in_len, uint8_t *out, size_t out
 }
 
 /* ------------------------------------------------------------------ *
- *  Encoder -- a faithful port of $293EC.
+ *  Encoder: a faithful port of $293EC.
  *
  *  The original is not a textbook RLE and the differences are load
  *  bearing if you want identical bytes back:
@@ -63,7 +64,7 @@ size_t sc2_rle_decode(const uint8_t *in, size_t in_len, uint8_t *out, size_t out
  *      it is capped at 128 ($2946A: cmpi.l #$80).
  *    - The literal branch ($294A2) writes bytes one ahead of the count
  *      slot and stops as soon as it sees a byte equal to its
- *      predecessor -- so a literal chunk always ends just before a run
+ *      predecessor: so a literal chunk always ends just before a run
  *      begins, and the byte that ended it is left for the next chunk.
  *    - The main loop runs while i < size-1, so a final odd byte is
  *      emitted afterwards as a one-byte literal ($29514).
@@ -187,8 +188,8 @@ static void store_chunk(City *c, const char *tag, const uint8_t *d, size_t n)
         keep_raw(&c->xthg, &c->xthg_len, d, n);
     else if (!memcmp(tag, "XGRP", 4))
     {
-        /*  Sixteen series of 52 big-endian longs, in series order --
-         *  the block $2D52E allocates, written out whole. */
+        /*  Sixteen series of 52 big-endian longs, in series order: the
+         *  block $2D52E allocates, written out whole. */
         size_t i, k;
         keep_raw(&c->xgrp, &c->xgrp_len, d, n);
         for (i = 0; i < N_GRAPH; i++)
@@ -203,7 +204,7 @@ static void store_chunk(City *c, const char *tag, const uint8_t *d, size_t n)
         keep_raw(&c->cnam, &c->cnam_len, d, n);
 }
 
-/* gather a city member back into a flat chunk; returns length, 0 if unknown */
+/* gather a city member back into a flat chunk.  Returns length, 0 if unknown */
 static size_t fetch_chunk(const City *c, const char *tag, uint8_t *out)
 {
     size_t r, x;
@@ -271,10 +272,10 @@ static size_t fetch_chunk(const City *c, const char *tag, uint8_t *out)
     return 0;
 }
 
-/* pull the named scalars out of raw MISC.  Indices 2..13 are the ones
- * the MISC builder at $2A186 emits from straight-line code, so they are
- * unambiguous; anything past 26 sits behind counted loops and is not
- * decoded here yet. */
+/* pull the named scalars out of raw MISC.  The MISC builder at $2A186
+ * emits indices 2..13 from straight-line code, so they are unambiguous.
+ * Anything past 26 sits behind counted loops and is not decoded here
+ * yet. */
 void city_misc_to_scalars(City *c)
 {
     int i;
@@ -292,10 +293,10 @@ void city_misc_to_scalars(City *c)
     c->population     = c->misc[MISC_POPULATION];
     c->ordinances     = c->misc[MISC_ORDINANCES];
     /*  These four are saved, and the MISC indices come from
-     *  out/miscload.json -- the game's own unpacker at $295D6 with
-     *  every read tagged.  Leaving them out started a loaded city
-     *  with less state than the original has, which the clock
-     *  comparison shows on the very first tick. */
+     *  out/miscload.json: the game's own unpacker at $295D6 with every
+     *  read tagged.  Leaving them out started a loaded city with less
+     *  state than the original has, which the clock comparison shows on
+     *  the very first tick. */
     c->unemployment  = c->misc[1001];          /* A5+0x2C82 */
     c->power_pct     = c->misc[1048];          /* A5+0x1E86 */
     c->water_pct     = c->misc[1049];          /* A5+0x1E8A */
@@ -304,11 +305,11 @@ void city_misc_to_scalars(City *c)
     c->disaster_kind = (int16_t)c->misc[28];   /* A5+0x13A0 */
     c->centre_y      = (int16_t)c->misc[1030]; /* A5+0x867E */
     c->centre_x      = (int16_t)c->misc[1031]; /* A5+0x8680 */
-    /*  A5+0x1EFA -- sixteen counters, one per id $DD..$EC, saved as
-     *  MISC[1002..1017].  The growth scan only ever adjusts them by
-     *  one as buildings come and go, so a loaded city that starts
-     *  them at zero has the military and airport ladders reading
-     *  nothing and asking for the wrong building. */
+    /*  A5+0x1EFA: sixteen counters, one per id $DD..$EC, saved as
+     *  MISC[1002..1017].  The growth scan only ever adjusts them by one
+     *  as buildings come and go.  So a loaded city that starts them at
+     *  zero has the military and airport ladders reading nothing and
+     *  asking for the wrong building. */
     {
         int k;
         for (k = 0; k < 16; k++)
@@ -343,17 +344,17 @@ void city_misc_to_scalars(City *c)
 
     /*  Two blocks rather than scalars.  Both were located by running the
      *  game's own MISC unpacker at $295D6 under the interpreter with
-     *  every read tagged by its MISC index (tools/miscload.py); the
+     *  every read tagged by its MISC index (tools/miscload.py).  The
      *  layout below is what that produced, not a guess at a stride.  The
      *  census is unsigned: a big map can hold more than 32767 trees, and
      *  several shipped cities do, so the game zero-extends every read. */
     for (i = 0; i < 256; i++)
         c->census[i] = (uint16_t)c->misc[MISC_CENSUS + i];
 
-    /*  Population per zone kind, MISC[380..387] -- the city scan
-     *  rebuilds it, but the economy reads accum8[7] (the industrial
-     *  total) before any scan has run, in the pollution-per-head term
-     *  at $35FBA.  Loading it is what takes Flint and Oakland exact. */
+    /*  Population per zone kind, MISC[380..387]: the city scan rebuilds
+     *  it.  But the economy reads accum8[7] (the industrial total)
+     *  before any scan has run, in the pollution-per-head term at
+     *  $35FBA.  Loading it is what takes Flint and Oakland exact. */
     for (i = 0; i < 8; i++)
         c->accum8[i] = c->misc[MISC_ACCUM8 + i];
 
@@ -404,11 +405,11 @@ static void scalars_to_misc(City *c)
 int city_load(const char *path, City *c)
 {
     /*  .arco and the 1995 .sc2 are both cities as far as a caller is
-     *  concerned.  Which one this is, is a question the file answers.  The
-     *  two report differently and always will: city_load answers 1 for
-     *  success because its callers read it as a predicate, and arco_load
-     *  answers 0 because its callers read it as an errno.  Converting here
-     *  is the whole of the reconciliation. */
+     *  concerned.  Which one this is, is a question the file answers.
+     *  The two report differently and always will.  City_load answers 1
+     *  for success because its callers read it as a predicate.
+     *  Arco_load answers 0 because its callers read it as an errno.
+     *  Converting here is the whole of the reconciliation. */
     if (arco_is_arco(path))
         return arco_load(path, c) == 0;
     {
@@ -439,7 +440,7 @@ int city_load(const char *path, City *c)
 
         memset(c, 0, sizeof *c);
 
-        /*  $2D594 -- the graph scales come up as one, not zero.  They are
+        /*  $2D594: the graph scales come up as one, not zero.  They are
          *  not in the save file, so a loaded city starts here and the
          *  running maximum climbs from the samples. */
         {

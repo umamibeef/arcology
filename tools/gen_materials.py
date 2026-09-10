@@ -80,7 +80,7 @@ def main():
     os.makedirs(OUT, exist_ok=True)
 
     wide = max(len(n) for _, n, _, _ in mats)
-    h = ['/*  GENERATED from src/render/mesh/materials.def -- do not edit.',
+    h = ['/*  GENERATED from src/render/mesh/materials.def.  Do not edit.',
          ' *',
          " *  A material is the number a vertex colour's third component",
          ' *  carries.  The mesh writes it, the shaders read it by range, and',
@@ -110,7 +110,7 @@ def main():
     if not write(os.path.join(OUT, "materials.h"), "\n".join(h) + "\n", check):
         return 1
 
-    c = ['/*  GENERATED from src/render/mesh/materials.def -- do not edit. */',
+    c = ['/*  GENERATED from src/render/mesh/materials.def.  Do not edit. */',
          '#include "materials.h"',
          '',
          'const RMaterial r_materials[] = {']

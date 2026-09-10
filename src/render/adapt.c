@@ -1,4 +1,4 @@
-/*  adapt.c -- see adapt.h. */
+/*  adapt.c: see adapt.h. */
 #include "adapt.h"
 
 #include <string.h>
@@ -8,7 +8,7 @@ void adapt_city(RCity *v, const City *c)
     size_t n, k;
 
     /*  The layer arrays have the same element type and count on both
-     *  sides; only their shape differs (rows and columns against a flat
+     *  sides.  Only their shape differs (rows and columns against a flat
      *  run), which memcpy does not care about. */
     memcpy(v->altm, c->altm, sizeof v->altm);
     memcpy(v->xbld, c->xbld, sizeof v->xbld);
@@ -49,14 +49,14 @@ void adapt_city(RCity *v, const City *c)
     v->err[0] = '\0';
 }
 
-/*  The renderer's view of the city seen from a quarter turn, 1 to 3, filled
- *  from the city as it is: every cell of the turned view reads its own cell
- *  of the grid, and the ids that encode a direction pass through the
- *  original's art table for that orientation, as do the moving things'
- *  headings.  Nothing of the city is rewritten -- the grid is one grid of
- *  data, and a turn is a change of perspective; the original gets the same
- *  art by rotating its map, and this reads it off the unturned one.  With
- *  no turn it is adapt_city. */
+/*  The renderer's view of the city seen from a quarter turn, 1 to 3,
+ *  filled from the city as it is.  Every cell of the turned view reads
+ *  its own cell of the grid.  The ids that encode a direction pass
+ *  through the original's art table for that orientation, as do the
+ *  moving things' headings.  Nothing of the city is rewritten: the grid
+ *  is one grid of data, and a turn is a change of perspective.  The
+ *  original gets the same art by rotating its map, and this reads it off
+ *  the unturned one.  With no turn it is adapt_city. */
 static void turned_src(int32_t x, int32_t y, int q, int32_t n, int32_t *sx, int32_t *sy)
 {
     int k;

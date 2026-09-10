@@ -1,7 +1,7 @@
-/*  mesh/emit.c -- the emit primitives: triangles, walls, tops and boxes.
- *  Split out of mesh.c; see mesh/internal.h. */
+/*  mesh/emit.c: the emit primitives: triangles, walls, tops and boxes.
+ *  See mesh/internal.h. */
 #include "mesh/internal.h"
-#include "net/internal.h"
+#include "pipeline.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -62,18 +62,19 @@ static int same_point(const float a[3], const float b[3])
 }
 
 /*  One flat-shaded triangle.  A ground vertex also carries what the
- *  ground material reads of the topology at its corner: the curvature in
- *  the normal's fourth component and the height field's gradient, in
- *  world units, in the colour's first two -- or zero gradient when `flat`
- *  is set, for a levelled pad.  A wall vertex carries the material's
- *  reference heights instead, `ref` and `ref2` per vertex: the ground the
- *  sediment's layers follow, the table and the bed the water column
- *  deepens between.  A degenerate triangle is dropped. */
+ *  ground material reads of the topology at its corner.  That is the
+ *  curvature in the normal's fourth component.  It is also the height
+ *  field's gradient, in world units, in the color's first two.  The
+ *  gradient is zero when `flat` is set, for a leveled pad.  A wall
+ *  vertex carries the material's reference heights instead, `ref` and
+ *  `ref2` per vertex.  They are the ground the sediment's layers follow,
+ *  the table and the bed the water column deepens between.  A degenerate
+ *  triangle is dropped. */
 /*  Who drew what, per tile: up to eight (function, material) pairs a
  *  tile, in the order they first drew there.  The names are string
- *  literals from __func__, so the table holds pointers and costs
- *  nothing to fill.  It is written as the mesh is built and read by the
- *  inspector; a rebuild starts it again. */
+ *  literals from __func__, so the table holds pointers and costs nothing
+ *  to fill.  It is written as the mesh is built and read by the
+ *  inspector.  A rebuild starts it again. */
 static void box_grow(float b[6], const float p[3][3])
 {
     int k, a;
@@ -88,11 +89,11 @@ static void box_grow(float b[6], const float p[3][3])
 }
 
 /*  Who is drawing.  The shape layer (mesh/shape.h) holds the answer: a
- *  producer opens a shape, draws into it and closes it, and every
- *  triangle emitted meanwhile is filed under it.  A boundary worked out
- *  instead from the call site, the material and how near the last
- *  triangle fell merges unrelated things and splits single ones, which is
- *  why nothing here guesses. */
+ *  producer opens a shape, draws into it and closes it.  Every triangle
+ *  emitted meanwhile is filed under it.  A boundary worked out from the
+ *  call site, the material and how near the last triangle fell merges
+ *  unrelated things.  It also splits single ones, which is why nothing
+ *  here guesses. */
 static int s_record; /* a build is under way: the emitter files what it draws */
 
 void mesh_record(int on)
@@ -162,9 +163,9 @@ static void origin_note(const char *where, const char *who, const float p[3][3],
 }
 
 /*  The topmost thing drawn on a tile whose footprint holds the point: a
- *  lamp, a signal, a wall, a strip -- whatever stands highest there.
- *  Everything the mesh draws is in this table, which is the only handle on
- *  the things no table of the network's knows about. */
+ *  lamp, a signal, a wall, a strip.  Whatever stands highest there.
+ *  Everything the mesh draws is in this table.  This is the only handle
+ *  on the things no table of the network's knows about. */
 int mesh_origin_pick(int32_t col, int32_t row, float wx, float wy, const char **who, const char **where, float *mat, uint32_t *tris, float box[6])
 {
     int32_t i = row * R_MAP + col;
@@ -185,15 +186,16 @@ int mesh_origin_pick(int32_t col, int32_t row, float wx, float wy, const char **
             continue;
         }
         {
-            /*  The topmost wins; but the ground and what lies ON it are a
-             *  hair apart, and the thing drawn on the ground is what the
-             *  eye is on -- a junction's asphalt over the pad it sits on,
-             *  a marking over the asphalt. */
+            /*  The topmost wins.  But the ground and what lies ON it are
+             *  a hair apart, and the thing drawn on the ground is what
+             *  the eye is on.  A junction's fill over the pad it sits
+             *  on, a marking over the fill. */
             const float *bb   = s_origin[i].box[best];
             int          hair = fabsf(b[5] - bb[5]) < 0.08f;
-            /*  The topmost; and where two lie a hair apart -- a junction's
-             *  asphalt and the markings painted on it -- the one that made
-             *  the most of the geometry, which is the thing itself. */
+            /*  The topmost.  And where two lie a hair apart.  A
+             *  junction's fill and the markings painted on it.  The one
+             *  that made the most of the geometry, which is the thing
+             *  itself. */
             if (hair ? s_origin[i].count[k] > s_origin[i].count[best] : b[5] > bb[5])
                 best = k;
         }
@@ -228,20 +230,20 @@ int mesh_origins(int32_t col, int32_t row, char *out, size_t n)
     return s_origin[i].n;
 }
 
-/*  Every face has a colour: `col` is r, g and the material, and the
+/*  Every face has a color: `col` is r, g and the material, and the
  *  material is what the whole pipeline reads a face by.  `nrm`, `ref`
- *  and `ref2` are optional; `col` is not. */
+ *  and `ref2` are optional.  `col` is not. */
 int put_tri_r2_at(const char *where, const char *who, RMesh *m, const float p[3][3], const float *nrm, float order, const float col[3], const float *ref, const float *ref2, int flat)
 {
-    /*  Only while the mesh is being built, and never in the grading pass:
-     *  the traffic is drawn again on every frame through the same
-     *  emitter, and its boxes would pile up in the table for ever. */
+    /*  Only while the mesh is being built, and never in the grading
+     *  pass: the traffic is drawn again on every frame through the same
+     *  emitter.  Its boxes would pile up in the table for ever. */
     if (s_record && s_pass != 1)
         origin_note(where, who, p, col[2]);
     /*  The first pass grades the ground and draws nothing: every emitter
      *  ends here, and what it would have built the second pass rebuilds
      *  from scratch.  A third of a build's time went into geometry that
-     *  was thrown away (Atlanta: 32 of 49 ms in pass 1). */
+     *  was thrown away. */
     if (s_pass == 1)
         return 0;
     if (s_incr_on && !mesh_want_xy(p[0][0], p[0][1]))
@@ -260,9 +262,9 @@ int put_tri_r2_at(const char *where, const char *who, RMesh *m, const float p[3]
     if (!m->to_water)
     {
         /*  The triangle about to be written is land triangle n_land/3:
-         *  record which component made it, so the inspector can point at
-         *  a triangle and be told.  Outside a build -- a frame's traffic
-         *  -- there is nothing to record. */
+         *  record which component made it.  So the inspector can point
+         *  at a triangle and be told.  Outside a build, a frame's
+         *  traffic, there is nothing to record. */
         uint32_t t = m->n_land / 3u;
         if (t >= m->cap_tri_comp)
         {
@@ -327,9 +329,9 @@ static int put_tri(RMesh *m, const float p[3][3], float order, const float col[3
 
 /*  A quad standing on an edge: the top points t0, t1 and the points b0,
  *  b1 under them.  `r` and `s` are the material's reference heights at
- *  the two ends.  The quad may twist -- t0 above b0 and t1 below b1 --
- *  and is still two triangles on the same four points, so every edge it
- *  makes is shared. */
+ *  the two ends.  The quad may twist, t0 above b0 and t1 below b1.  Is
+ *  still two triangles on the same four points, so every edge it makes
+ *  is shared. */
 int put_wall_r2(RMesh *m, const float t0[3], const float t1[3], const float b0[3], const float b1[3], const float nrm[3], float order, const float col[3], float r0, float r1, float s0, float s1)
 {
     float p[3][3], ref[3], ref2[3];
@@ -366,22 +368,11 @@ int put_wall(RMesh *m, const float t0[3], const float t1[3], const float b0[3], 
     return put_wall_r(m, t0, t1, b0, b1, nrm, order, col, t0[2], t1[2]);
 }
 
-/*  The diagonal a tile's top is cut on: a tile with one odd corner keeps
- *  a flat triangle on the other three (tools/terrain_shapes.py), so the
- *  cut avoids the odd corner; the saddle is cut NE-SW; a plane is planar
- *  either way. */
+/*  The diagonal a tile's top is cut on, which the script settles for
+ *  every slope code (`fold_ne_sw`). */
 int cut_ne_sw(int32_t code)
 {
-    uint8_t mask   = CODE_MASK[code];
-    int     raised = 0, odd = -1, k;
-    for (k = 0; k < 4; ++k)
-        if (mask & (1u << k))
-            ++raised;
-    if (raised == 1 || raised == 3)
-        for (k = 0; k < 4; ++k)
-            if (((mask >> k) & 1u) == (raised == 1 ? 1u : 0u))
-                odd = k;
-    return (code == 13) || odd == NW || odd == SE;
+    return script_bytes("fold_ne_sw")[code];
 }
 
 /*  The two triangles of a tile's top, cut on the diagonal the sprite is
@@ -413,7 +404,7 @@ int put_top(RMesh *m, const float p[4][3], int32_t code, float order, const floa
     return put_tri(m, tri, order, col, flat);
 }
 
-/*  The mean colour of a sprite's opaque pixels through the phase-0
+/*  The mean color of a sprite's opaque pixels through the phase-0
  *  palette, or `fallback` when the level has no such tile. */
 void tile_colour(const RAtlas *a, const RAtlasLevel *l, int32_t tile, float out[3], const float fallback[3])
 {
@@ -453,40 +444,40 @@ void grid_point(int32_t col, int32_t row, int k, float z, float out[3])
     out[2] = z;
 }
 
-/*  Set while a highway deck is being lofted: the deck is a two-tile
- *  band, not a one-tile strip, and nothing else about the loft changes
- *  for it yet. */
+/*  Set while a band slab is being lofted.  The slab is a two-tile band,
+ *  not a one-tile strip, and nothing else about the loft changes for it
+ *  yet. */
 
-/*  How far the deck rides above the ground, in altitude levels.  Spec
- *  7.2 puts the road surface 7.5 to 8 m up, and 7.4.4 makes the step
- *  between one deck level and the next 7.4 m: L1 is 7.5 m over ground,
- *  L2 = L1 + 7.4, L3 = L2 + 7.4.  A level IS that step, so the lower
- *  deck stands at exactly one and an upper deck will stand at two. */
-/*  The box girder's depth under the deck, the parapet's height above it
- *  and the bent's span along -- two tiles, the spec's 30 m. */
-/*  The cap is 1.5 m deep along the deck (7.2) and the columns 1.8 m across,
- *  against the spec's 15 m tile.  Two departures from 7.2, both taken from
- *  the original's own art, which is the reference for how a raised highway
- *  reads.  It stands a column under each edge of the deck every TILE, not a
- *  hammerhead on the centreline every two: measured off the sprites, the
- *  columns are 16 px apart in x, which is one tile step along a deck, about
- *  4 px wide, and they drop about 5 px below the deck's near edge.  A
- *  hammerhead on the centreline is hidden by the deck it carries at this
- *  camera -- the near edge projects eight pixels further down the screen
- *  than the centreline does -- which is why the first build read as a deck
- *  lying on the ground. */
+/*  How far the slab rides above the ground, in altitude levels.  Spec
+ *  7.2 puts the line surface 7.5 to 8 m up. 7.4.4 makes the step between
+ *  one slab level and the next 7.4 m.  L1 is 7.5 m over ground, L2 is L1
+ *  + 7.4, and L3 is L2 + 7.4.  A level IS that step, so the lower slab
+ *  stands at exactly one and an upper slab will stand at two. */
+/*  The box girder's depth under the slab, the parapet's height above it
+ *  and the bent's span along: two tiles, the spec's 30 m. */
+/*  The cap is 1.5 m deep along the slab (7.2) and the columns 1.8 m
+ *  across, against the spec's 15 m tile.  Two departures from 7.2, both
+ *  taken from the original's own art, which is the reference for how a
+ *  raised band reads.  It stands a column under each edge of the slab
+ *  every TILE, not a hammerhead on the centerline every two.  Measured
+ *  off the sprites, the columns are 16 px apart in x.  This is one tile
+ *  step along a slab, about 4 px wide, and they drop about 5 px below
+ *  the slab's near edge.  A hammerhead on the centerline is hidden by
+ *  the slab it carries at this camera.  The near edge projects eight
+ *  pixels further down the screen than the centerline does.  Which is
+ *  why the first build read as a slab lying on the ground. */
 
-/*  A box with a clipped skirt, and the vehicle default.  These came out of
- *  road.c, where they had accreted at the bottom under the road algorithm:
- *  they are emit primitives -- a prism, its four sides and its top -- and
- *  this is the file that owns those.  The road code and the traffic both
- *  draw with them. */
+/*  A box with a clipped skirt, and the vehicle default.  These came out
+ *  of line.c, where they had accreted at the bottom under the line
+ *  algorithm.  They are emit primitives, a prism, its four sides and its
+ *  top.  This is the file that owns those.  The line code and the
+ *  traffic both draw with them. */
 /*  A prism clipped to the tile grid, each piece in the depth slot of the
  *  tile under it.  A car had carried the order of the tile under its
- *  centre, and the part of it over the next tile toward the viewer lay
- *  under that tile's ground until the centre crossed, when the whole car
- *  stood up at once. `order` is the centre tile's slot with the fraction
- *  the pieces keep above each tile's ground. */
+ *  center.  The part of it over the next tile toward the viewer then lay
+ *  under that tile's ground.  It stayed there until the center crossed,
+ *  when the whole car stood up at once.  `order` is the center tile's
+ *  slot with the fraction the pieces keep above each tile's ground. */
 int put_prism_clip_m(RMesh *m, const RCity *c, uint8_t mask_bit, float order, float cx, float cy, float dx, float dy, float len, float wid, float zb, float zf, float z0, float z1, float paint, float mat)
 {
     static const float up[3] = {0.0f, 0.0f, 1.0f};
@@ -522,32 +513,27 @@ int put_prism_clip_m(RMesh *m, const RCity *c, uint8_t mask_bit, float order, fl
         memcpy(t3[0], ta, sizeof t3[0]);
         memcpy(t3[1], tb, sizeof t3[1]);
         memcpy(t3[2], b, sizeof t3[2]);
-        if (put_tri_road_n(m, c, mask_bit, order, (const float (*)[3])t3, nrm, col, ref, ref2) != 0)
+        if (put_tri_line_n(m, c, mask_bit, order, (const float (*)[3])t3, nrm, col, ref, ref2) != 0)
             return -1;
         memcpy(t3[0], ta, sizeof t3[0]);
         memcpy(t3[1], b, sizeof t3[1]);
         memcpy(t3[2], a, sizeof t3[2]);
-        if (put_tri_road_n(m, c, mask_bit, order, (const float (*)[3])t3, nrm, col, ref, ref2) != 0)
+        if (put_tri_line_n(m, c, mask_bit, order, (const float (*)[3])t3, nrm, col, ref, ref2) != 0)
             return -1;
     }
     memcpy(t3[0], top[0], sizeof t3[0]);
     memcpy(t3[1], top[1], sizeof t3[1]);
     memcpy(t3[2], top[2], sizeof t3[2]);
-    if (put_tri_road_n(m, c, mask_bit, order, (const float (*)[3])t3, up, col, ref, ref2) != 0)
+    if (put_tri_line_n(m, c, mask_bit, order, (const float (*)[3])t3, up, col, ref, ref2) != 0)
         return -1;
     memcpy(t3[0], top[0], sizeof t3[0]);
     memcpy(t3[1], top[2], sizeof t3[1]);
     memcpy(t3[2], top[3], sizeof t3[2]);
-    return put_tri_road_n(m, c, mask_bit, order, (const float (*)[3])t3, up, col, ref, ref2);
-}
-
-int put_prism_clip(RMesh *m, const RCity *c, uint8_t mask_bit, float order, float cx, float cy, float dx, float dy, float len, float wid, float zb, float zf, float z0, float z1, float paint)
-{
-    return put_prism_clip_m(m, c, mask_bit, order, cx, cy, dx, dy, len, wid, zb, zf, z0, z1, paint, MAT_VEHICLE);
+    return put_tri_line_n(m, c, mask_bit, order, (const float (*)[3])t3, up, col, ref, ref2);
 }
 
 /*  ------------------------------------------------------------------
- *  Pointing at a triangle.  The inspector asks what is under the pointer;
+ *  Pointing at a triangle.  The inspector asks what is under the pointer.
  *  the answer is a land triangle, and through it the component that drew
  *  it.  A tile index makes the question cheap: the triangles whose middle
  *  lies in a tile, in a linked list a build long.
@@ -621,17 +607,17 @@ void mesh_tri_get(const RMesh *m, uint32_t t, float p[3][3], uint32_t *comp)
 /*  The component's outline: the edges of its triangles that one triangle
  *  alone holds.
  *
- *  Welded in THREE dimensions.  A component stands over itself -- a deck
- *  and the ramp coming down under it, a strip and the skirt hanging off
- *  its edge -- so two edges at one place on the map at different heights
- *  are not the same edge, and a face standing vertically has no area on
- *  the map at all.  Judged in plan, the first pair cancel each other and
- *  the second cancels nothing, which is how an outline comes to show
- *  every triangle it is made of.
+ *  Welded in THREE dimensions.  A component stands over itself, a slab
+ *  and the spur coming down under it, a strip and the skirt hanging off
+ *  its edge.  So two edges at one place on the map at different heights
+ *  are not the same edge.  A face standing vertically has no area on the
+ *  map at all.  Judged in plan, the first pair cancel each other and the
+ *  second cancels nothing.  This is how an outline comes to show every
+ *  triangle it is made of.
  *
- *  Each edge is first cut at any vertex of the component lying on it, so
- *  that the T left where a clip split one side and not the other closes:
- *  the long edge becomes the two halves its neighbour already has, and
+ *  Each edge is first cut at any vertex of the component lying on it.
+ *  So the T left where a clip split one side and not the other closes.
+ *  The long edge becomes the two halves its neighbor already has, and
  *  both cancel.  Written as pairs of points, SIX floats to a segment. */
 
 typedef struct
@@ -651,10 +637,10 @@ static int      s_cov_n, s_cov_cap, s_cov_hn;
 static CoEdge  *s_coe;
 static int32_t *s_coe_hash;
 
-/*  The emitter's own scratch, kept between builds because every build
- *  wants the same tables at about the same size: the triangle index by
- *  tile, and the two hashes the coplanar check walks with.  Given back
- *  when the program is done with meshes altogether. */
+/*  The emitter's own scratch.  It is kept between builds, because every
+ *  build wants the same tables at about the same size.  The triangle
+ *  index by tile, and the two hashes the coplanar check walks with.
+ *  Given back when the program is done with meshes altogether. */
 void mesh_emit_free(void)
 {
     free(s_tri_head), s_tri_head = NULL;
@@ -688,9 +674,9 @@ static int co_grow(void **buf, int *cap, size_t elem, int want)
     return 0;
 }
 
-/*  The vertex at p, added if it is new.  The lookup walks the twenty-seven
- *  cells around its own so that two vertices a float's breadth apart, but
- *  either side of a cell line, still come back as one. */
+/*  The vertex at p, added if it is new.  The lookup walks the
+ *  twenty-seven cells around its own.  So two vertices a float's breadth
+ *  apart, but either side of a cell line, still come back as one. */
 static int32_t co_vert_g(const float p[3], float grid)
 {
     int32_t q[3], d0, d1, d2;
@@ -732,9 +718,9 @@ static int32_t co_vert(const float p[3])
     return co_vert_g(p, CO_GRID);
 }
 
-/*  The edge between two vertices, counted.  `add` files it; otherwise it
- *  is only asked after, which is how a piece of a cut edge learns that
- *  the triangle next door already holds it. */
+/*  The edge between two vertices, counted.  `add` files it.  Otherwise
+ *  it is only asked after, which is how a piece of a cut edge learns
+ *  that the triangle next door already holds it. */
 static CoEdge *co_edge(int32_t a, int32_t b, int add)
 {
     uint32_t h;
@@ -791,9 +777,9 @@ static int co_tables(int want)
     return 0;
 }
 
-/*  Where a vertex sits along an edge, or -1 if it is not on it: the
- *  parameter of its projection, taken only when it lies within a weld of
- *  the line and clear of both ends. */
+/*  Where a vertex sits along an edge, or -1 if it is not on it.  It is
+ *  the parameter of its projection, taken only when it lies within a
+ *  weld of the line and clear of both ends. */
 static float co_on_edge(const float a[3], const float b[3], const float p[3])
 {
     float d[3], w[3], len2 = 0.0f, t = 0.0f, off = 0.0f, end;
@@ -823,12 +809,12 @@ static float co_on_edge(const float a[3], const float b[3], const float p[3])
 }
 
 /*  The outline's pieces, chained and thinned.  Where exactly two pieces
- *  meet at a point the chain runs on through it, and each chain is
- *  reduced to the points that keep it within a fiftieth of a tile of
- *  itself (Douglas-Peucker), so the thousand stations along a band's
- *  edge come out as the few edges the eye can tell apart.  The ends are
- *  welded on a coarser grid than the triangles were, since a cut piece's
- *  end is an interpolation and not the vertex it stands for. */
+ *  meet at a point the chain runs on through it.  Each chain is reduced
+ *  to the points that keep it within a fiftieth of a tile of itself
+ *  (Douglas-Peucker).  So the thousand stations along a band's edge come
+ *  out as the few edges the eye can tell apart.  The ends are welded on
+ *  a coarser grid than the triangles were.  This is because a cut
+ *  piece's end is an interpolation and not the vertex it stands for. */
 #define THIN_GRID net_geo(&gix_thin_grid, "thin_grid")
 #define THIN_TOL  net_geo(&gix_thin_tol, "thin_tol")
 typedef struct
@@ -1014,7 +1000,7 @@ int mesh_comp_edges(const RMesh *m, uint32_t comp, float *segs, int max_seg)
                 return 0;
     }
     /*  An edge two triangles share is inside the component.  One that
-     *  stands alone is its outline -- unless a vertex lies along it, when
+     *  stands alone is its outline: unless a vertex lies along it, when
      *  the pieces it cuts into are asked for themselves. */
     s_raw_n = 0;
     for (i = 0; i < s_coe_n; ++i)
@@ -1028,7 +1014,7 @@ int mesh_comp_edges(const RMesh *m, uint32_t comp, float *segs, int max_seg)
         memcpy(pa, s_cov[s_coe[i].a].p, sizeof pa);
         memcpy(pb, s_cov[s_coe[i].b].p, sizeof pb);
         /*  The cut is a walk of the component's vertices, so it is left
-         *  off a component too big to pay for it; a T there shows as a
+         *  off a component too big to pay for it.  A T there shows as a
          *  line across the outline, which is a good deal better than the
          *  wait. */
         if (nv > 4000)
@@ -1065,7 +1051,7 @@ int mesh_comp_edges(const RMesh *m, uint32_t comp, float *segs, int max_seg)
             }
             if (ncut)
             {
-                /*  A piece the neighbour already holds is an inside edge:
+                /*  A piece the neighbor already holds is an inside edge:
                  *  this is the T closing. */
                 int32_t i0 = co_vert(p0), i1 = co_vert(p1);
                 if (i0 >= 0 && i1 >= 0 && i0 != i1 && co_edge(i0, i1, 0))

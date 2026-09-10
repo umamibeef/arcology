@@ -1,6 +1,6 @@
 --  milepost.lua -- a whistle post beside the line.
 --
---  A slim post two tiles before every level crossing, each way, telling
+--  A slim post two tiles before every level meet, each way, telling
 --  the driver to sound the horn.
 
 arc.model.define("milepost", {

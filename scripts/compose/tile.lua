@@ -16,7 +16,7 @@
 --                once;
 --    the RIM     at the map's own cut edges: through land the layers of
 --                sediment from what the tile draws down to the base, and
---                the foundation of a pad or a ramp as blocks above the
+--                the foundation of a pad or a spur as blocks above the
 --                ground; through water the glass from the surface to the
 --                seabed and the sediment under it.
 --
@@ -99,7 +99,7 @@ arc.rules.tile = function (t)
                 --  ENGINEERED, earth where it is the hill's own.  A
                 --  building's foundation is engineered; so is the side of
                 --  a network tile that stands ABOVE its neighbour, which
-                --  is a road or a line built up on fill.  A network tile
+                --  is a line or a line built up on fill.  A network tile
                 --  that sits BELOW its neighbour is a cut into the slope,
                 --  and the slope's face is earth, which is what the art
                 --  shows.

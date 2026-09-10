@@ -47,9 +47,9 @@ def measure(binary, city):
     except (subprocess.TimeoutExpired, OSError) as e:
         return {"corners": {}, "nogeom": None, "error": str(e)}
     corners = {}
-    for fam, n in re.findall(r"^tangent fit  (road|rail|highway): .*?(\d+) corners", text, re.M):
+    for fam, n in re.findall(r"^tangent fit  (line|thread|band): .*?(\d+) corners", text, re.M):
         corners[fam] = int(n)
-    m = re.search(r"^road pieces without geometry: (\d+)", text, re.M)
+    m = re.search(r"^line pieces without geometry: (\d+)", text, re.M)
     return {"corners": corners, "nogeom": int(m.group(1)) if m else None}
 
 
@@ -68,7 +68,7 @@ def main():
     if os.path.exists(BASELINE):
         with open(BASELINE) as fp:
             baseline = json.load(fp)
-    worse, remaining, totals = [], [], {"road": 0, "rail": 0, "highway": 0, "nogeom": 0}
+    worse, remaining, totals = [], [], {"line": 0, "thread": 0, "band": 0, "nogeom": 0}
     for name, r in sorted(results.items()):
         if "error" in r:
             worse.append("%s: could not run (%s)" % (name, r["error"]))
@@ -87,7 +87,7 @@ def main():
         with open(BASELINE, "w") as fp:
             json.dump({n: {"corners": sum(r["corners"].values()), "nogeom": r["nogeom"] or 0} for n, r in sorted(results.items()) if "error" not in r}, fp, indent=1)
         print("corner check: baseline written for %d cities" % len(results))
-    print("corner check: %d cities; hard corners road %d rail %d highway %d; segments without geometry %d; %d cities still above zero" % (len(results), totals["road"], totals["rail"], totals["highway"], totals["nogeom"], len(remaining)))
+    print("corner check: %d cities; hard corners line %d thread %d band %d; segments without geometry %d; %d cities still above zero" % (len(results), totals["line"], totals["thread"], totals["band"], totals["nogeom"], len(remaining)))
     for line in remaining:
         print("  " + line)
     if worse and not args.update:

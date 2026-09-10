@@ -1,4 +1,4 @@
-/*  fs.c -- see fs.h. */
+/*  fs.c: see fs.h. */
 #include "fs.h"
 
 #include <sys/stat.h>

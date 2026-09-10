@@ -133,7 +133,7 @@ def _at(tbl, i, default=0):
 w('/*  Everything the simulation knows about one tile id.  In the original')
 w(" *  these are six separate arrays that do NOT share an index base: the")
 w(' *  names step 16 bytes from A5-0x6D42, four of the columns start at id')
-w(' *  0x70, and the department masks are keyed by the raw id.  Indexing')
+w(' *  0x70, and the department masks are keyed by the raw id.  Indemeet')
 w(' *  all of it by id is the whole point of the merge.')
 w(' *')
 w(' *    name        A5-0x6D42, real only from 0xC6 up')
@@ -257,7 +257,7 @@ emit_bytes('WALK_TURN_MASK', -0x38AE, 4,
            '  Each entry clears the bit for the way the trip just came, so a'
            ' journey never immediately doubles back on itself.')
 emit_words('WALK_DY', -0x392C, 4,
-           'A5-0x392C  row step per direction 0..3, used by the road walk at $24784.')
+           'A5-0x392C  row step per direction 0..3, used by the line walk at $24784.')
 emit_words('WALK_DX', -0x3924, 4,
            'A5-0x3924  column step per direction, $24794.')
 emit_words('NEIGHBOUR_ORDER', -0x391C, 48,

@@ -1,6 +1,6 @@
 --  node_mid.lua -- a mark on the fitted curve, where a fitted line turns.
 --
---  The outline view draws these in place of the roads, so the shape the
+--  The outline view draws these in place of the lines, so the shape the
 --  fit actually chose can be read off the map.  `phase` is the paint the
 --  vehicle material reads.
 

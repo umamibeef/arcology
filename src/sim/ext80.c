@@ -1,3 +1,10 @@
+/*  ext80.c: the 80-bit extended arithmetic, as ext80.h declares it.
+ *
+ *  It builds a number from a sign, a significand and an exponent, and it
+ *  adds, subtracts, multiplies, divides, compares and rounds them.  The
+ *  economy runs on these, so every result matches what the original's
+ *  SANE trap gives.  Nothing here reads the city.
+ */
 #include "ext80.h"
 #include <stdint.h>
 #include <string.h>

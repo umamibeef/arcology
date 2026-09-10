@@ -1,4 +1,4 @@
-/*  fs.h -- the two filesystem questions this program asks.  Neither knows
+/*  fs.h: the two filesystem questions this program asks.  Neither knows
  *  anything about cities, art or drawing, which is why they are here and
  *  not beside the code that looks for those. */
 #ifndef ARC_FS_H

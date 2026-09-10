@@ -1,4 +1,4 @@
---  car.lua -- a road car.
+--  car.lua -- a line car.
 --
 --  A body the length of the run it sits on and a cabin over the middle
 --  of it.  Drawn every frame from this, so it is the shape and nothing

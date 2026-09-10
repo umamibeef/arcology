@@ -77,18 +77,19 @@ Every stage is proved output-identical before it is believed.  A geometry
 change that cannot show this has not been verified, however sound it
 reads.
 
-    sh tools/fp.sh                       # the six views; the only exact check
+    sh tools/fp.sh                       # the eight views; the only exact check
 
     for c in atlanta toronto tokyo flint babar maltron chicago; do
         ./build/arcology cities/$c.sc2 --mute --mesh-check --run 1 2>&1 |
             grep -aE "^mesh check|road clip|claimed by none"
     done
 
-    ctest --test-dir build               # 29 tests
+    ctest --test-dir build               # 36 tests
 
 The reference, which every one of these must still print:
 
-    12f28cc62f e664211a6f e43c1d3e03 582be65e62 c8ff0ea62c b303e7b5b4  at 1280x800
+    12f28cc62f e664211a6f e43c1d3e03 389bb13ee6 c8ff0ea62c b303e7b5b4
+    75d042c626 305a6a8296                                     at 1280x800
 
 | city | triangles | shapes |
 |---|---|---|
@@ -101,10 +102,23 @@ The reference, which every one of these must still print:
 | chicago | 1069533 | 35090 |
 
 with `road clip  0 samples` and `0 triangles claimed by none` on every
-one, and `ctest` at 29 of 29.  The four simulation checks (`verify`,
+one, and `ctest` at 36 of 36.  The four simulation checks (`verify`,
 `microsim`, `allocmicro`, `arco_roundtrip`) are behind
 `-DARC_SIM_TESTS=ON` and off by default: the simulation is verified
 against the original and the renderer cannot move a simulation layer.
+
+Views seven and eight frame a 2x2 highway INTERCHANGE, which none of the
+others reaches: without them the battery is blind to the deck a driver
+crosses one on, and every claim about it rests on a screenshot somebody
+chose.  Neither frames WATER, and that is not an accident: the water
+shader moves every frame, so a view with a river in it hashes
+differently on every run and the battery cries wolf.
+
+The views say nothing about the traffic: a headless frame does not
+draw the movers, so `--traffic-t 0` and `--traffic-t 26` hash the same.
+What the moving world does is checked by `moving_world`
+(`tools/traffic_check.py`), which advances five cities and hashes every
+car, gate and train and every vertex of the mesh the frame uploads.
 
 Two traps in the battery itself.  A crashed run leaves the previous PNGs
 in place, so `fp.sh` would report stale hashes as a pass -- it deletes
@@ -116,27 +130,72 @@ size it got.
 
 ## Where the renderer's code lives
 
-    src/render/walk/    reading the map: the network walk, the pieces a
-                        tile carries, the footway network.  GOAL 4 empties
-                        this: what it does belongs in a script.
-    src/render/geo/     making geometry: the corridor fit, the loft, the
-                        lane router, junctions, footways, furniture,
-                        models, grading.  GOALS 2 and 3 turn these into
-                        services a script calls.
-    src/render/net/     the four families (road, rail, highway, power),
-                        the plumbing that turns a Lua declaration into
-                        one, the segment table, the number store, the
-                        running world, the debug report.
-    src/render/mesh/    chunks, shapes, emission, the incremental rebuild.
+    src/render/walk/    a segment's stages, the pieces a tile carries,
+                        the footway network.  The network walk itself is
+                        scripts/compose/network.lua: nothing here decides
+                        which cells make a segment.
+    src/render/net/     the STORES and the PLUMBING.  The plumbing that
+                        turns a Lua declaration into a family; the fans
+                        that offer a reading to a rule and take its
+                        answer back; and the stores.  Nothing here
+                        decides anything, and nothing here knows what
+                        any family draws.
+                          family drive cut loft table lane station shelf
+                          network geo report traffic
+                          box meet band spur node margin
+    src/render/mesh/    EVERY SHAPE PRIMITIVE, and NOTHING ELSE.  A file
+                        here names no road, ramp, deck, track, junction
+                        or footway, and a script inventing something the
+                        renderer has never heard of can build it out of
+                        what these offer.
+                          mesh chunk shape shapes emit incr check
+                          fit (the tangent fit: arc.fit)
+                          loft (the sweep: w:loft)
+                          piece surface model tile
     scripts/            the numbers, the rules, the families, the models
                         and the drive.
 
-`net/hiway.c` is the outlier: 3469 lines that walk the map, make geometry
-and declare a family all at once.  It is the largest single obstacle to
-goals 2 to 4 and wants cutting three ways.
+`src/render/pipeline.h` is what the three share, and it sits above them
+because two of every three things it declares are `mesh/`'s.  The
+boundary is a convention until each declaration is filed with the
+directory that defines it.
 
-`net/internal.h` is shared by all three of `walk/`, `geo/` and `net/`, so
-the boundary between them is a convention and not yet enforced.
+## The pipeline names no family
+
+C holds the primitives and the accounting.  WHAT is drawn -- a road, a
+railway, a raised highway, a power line, and everything those imply: a
+deck, a ramp, a sidewalk, a level crossing -- is the scripts'.  So none
+of those words appears under `src/render`: not in a filename, not in an
+identifier, not in a comment.  `ctest -R family_words`
+(`tools/family_words.py`, no build needed) holds the line.
+
+The generic vocabulary they are written in instead:
+
+| word | what it is |
+|---|---|
+| a **family** | one kind of line and everything about how it is drawn |
+| a **line**, a **strip** | what a family lays along a run of cells |
+| a **band** | a line two cells wide, whose spine runs on the seam |
+| a **slab** | the surface a raised band carries |
+| an **incline** | a band's own sloped end cells |
+| a **node** | where three or four lines meet, and the box it draws |
+| a **spur** | a short line joining a band to a line below it |
+| a **margin** | the band beside a line, and the **lip** along its inside |
+| a **lap** | two families sharing one cell |
+| a **stripe** | a marked way across a line at a node's mouth |
+| a **thread** | a line a family draws inside its own strip |
+| the **fill** | what a node lays inside its outline |
+
+A tile family is a SLOT, and which name sits at which slot is the
+script's.  `Family` is an int; the pipeline reaches for one only through
+the pointers the declarations fill in -- `net_line`, `net_thread`,
+`net_band`, `net_power` -- and `net_line_rules()` is the knobs of the
+family the scripts named `line`.
+
+`src/render/soft` is exempt, and says why: it reproduces the ORIGINAL's
+tile renderer address by address, so naming what the 1995 game draws is
+describing the material rather than deciding anything -- the same reason
+`src/sim` is exempt from the no-history rule.
 
 ## Traps when extending the script API
 
@@ -175,6 +234,29 @@ build and runs in a moment.
 
 A log inside a per-frame path says its line **once, when what it is
 saying changes** — never once a frame.
+
+## Comments: Simplified Technical English
+
+A comment is read by someone whose first language may not be English, so
+it is written in ASD-STE100.  `ctest -R ste_comments`
+(`tools/ste_lint.py`, no build needed) holds the mechanical rules over
+every C and H file under `src`, less `src/vendor`.
+
+| rule | what it means |
+|---|---|
+| `long` | a sentence over 25 words.  Split it |
+| `semicolon` | write two sentences |
+| `dash` | no em dash, and no `--` standing in for one |
+| `short` | no contraction |
+| `word` | the short common word: use, help, make sure, before, get, show, also |
+| `spell` | American spelling |
+| `header` | the first comment names the file and says what it holds |
+
+Two tools go with it.  `tools/ste_fix.py` does the sweeps a machine can
+do and wraps a paragraph again.  `tools/ste_edit.py` applies one rewrite
+and wraps the paragraph it is in.  Neither touches `generated/`: a
+generated file is rewritten by rewriting its generator and running it
+again.
 
 ## Comments: what the code does, once
 

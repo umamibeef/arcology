@@ -83,6 +83,12 @@ endif()
 enable_testing()
 add_test(NAME no_printf COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tools/no_printf.sh)
 add_test(NAME comment_style COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tools/comment_style.py)
+#  The pipeline names no family: no road, railway, highway, ramp,
+#  sidewalk or crossing in a filename, an identifier or a comment.
+add_test(NAME family_words COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tools/family_words.py)
+#  The comments are Simplified Technical English: short sentences, the
+#  active voice, no em dash, no semicolon, and one name for one thing.
+add_test(NAME ste_comments COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tools/ste_lint.py)
 add_test(NAME script_api COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tools/script_api.py)
 add_test(NAME materials_fresh COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_materials.py --check)
 

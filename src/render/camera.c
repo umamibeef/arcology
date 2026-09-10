@@ -1,8 +1,8 @@
-/*  camera.c -- the camera, and the two directions between a tile and a
- *  pixel.  Pitch, yaw, zoom and scroll, the eased move between two of them,
- *  and the projection the query box reads.  The same arithmetic exists
- *  twice more, as GPU uniforms and again in the shader, which is the next
- *  thing here worth unifying. */
+/*  camera.c: the camera, and the two directions between a tile and a
+ *  pixel.  Pitch, yaw, zoom and scroll, the eased move between two of
+ *  them, and the projection the query box reads.  The same arithmetic
+ *  exists twice more, as GPU uniforms and again in the shader, which is
+ *  the next thing here worth unifying. */
 #include <SDL3/SDL.h>
 
 #include "../app/internal.h"
@@ -20,10 +20,10 @@
  *  Zoom, pitch, yaw and scroll, and the two directions between a tile
  *  and a pixel that the query box uses.
  *  ================================================================== */
-/*  Continuous zoom, as the renderer brief has it (section 5): the three
+/*  Continuous zoom, as the renderer brief has it (section 5).  The three
  *  art sets are levels of detail across one range, each used where it is
- *  closest to native -- 8 px below 0.354x, 16 px to 0.707x, 32 px above,
- *  the switch points the geometric means -- and the canvas resolved by
+ *  closest to native.  8 px below 0.354x, 16 px to 0.707x, 32 px above,
+ *  the switch points the geometric means.  And the canvas resolved by
  *  the remaining factor, never more than about 1.41x either way.  `mx`,
  *  `my` is the window point that stays put, in pixels. */
 void zoom_to(App *a, float z, float mx, float my)
@@ -34,7 +34,7 @@ void zoom_to(App *a, float z, float mx, float my)
     if (z < 0.125f)
         z = 0.125f;
     if (z > 32.0f)
-        z = 32.0f; /* past 4 the art is blocky; the mesh repays a much closer look */
+        z = 32.0f; /* past 4 the art is blocky.  The mesh repays a much closer look */
     set    = z >= 0.7071f ? 32 : (z >= 0.3536f ? 16 : 8);
     native = (float)set / 32.0f;
     f      = z / native;
@@ -47,9 +47,9 @@ void zoom_to(App *a, float z, float mx, float my)
         float ratio = (float)set / (float)a->opts.zoom;
         cx *= ratio;
         cy *= ratio;
-        /*  The sprite set changes; the mesh does not.  It is the world
+        /*  The sprite set changes.  The mesh does not.  It is the world
          *  in world units and reads the artwork it needs from the finest
-         *  level, so nothing about it depends on which set is drawn. */
+         *  level.  So nothing about it depends on which set is drawn. */
         a->opts.zoom = set;
         a->dirty     = 1;
     }
@@ -61,13 +61,13 @@ void zoom_to(App *a, float z, float mx, float my)
 
 /*  The tile under a window point, from the sweep's own projection run
  *  backwards.  Along a diamond row + col and row - col are linear in y
- *  and x; the altitude term is settled by iterating on the tile found. */
+ *  and x.  The altitude term is settled by iterating on the tile found. */
 /*  The camera's two scales on the canvas, the same numbers terrain.vert
- *  projects with: pixels down the screen per unit of column plus row,
- *  and pixels up it per altitude level.  At the game's own pitch of 30
- *  they are half a tile height and one alt_step; raised to the map
- *  view's 90 the ground stops being foreshortened and height stops
- *  shifting a point at all. */
+ *  projects with.  They are pixels down the screen per unit of column
+ *  plus row, and pixels up it per altitude level.  At the game's own
+ *  pitch of 30 they are half a tile height and one alt_step.  Raised to
+ *  the map view's 90 the ground stops being foreshortened and height
+ *  stops shifting a point at all. */
 void cam_scales(const App *a, float *ysc, float *hsc)
 {
     const RAtlasLevel *l  = a->sw.level;
@@ -76,12 +76,13 @@ void cam_scales(const App *a, float *ysc, float *hsc)
     *hsc                  = arc_alt_scale((float)l->alt_step, pt);
 }
 
-/*  Where a grid point lands on the canvas, at its own altitude: turned
- *  about the pivot first when the view is turned, exactly as the shaders
- *  turn the mesh and as screen_to_grid turns back.  Projecting the point
- *  unturned is right only while the point IS the pivot: with the pivot at
- *  the map's centre at the quarters, the anchor hold re-scrolls to the
- *  anchor's unturned place and the map shifts on every turn. */
+/*  Where a grid point lands on the canvas, at its own altitude.  It is
+ *  turned about the pivot first when the view is turned, exactly as the
+ *  shaders turn the mesh and as screen_to_grid turns back.  Projecting
+ *  the point unturned is right only while the point IS the pivot.  With
+ *  the pivot at the map's center at the quarters, the anchor hold
+ *  re-scrolls to the anchor's unturned place.  The map then shifts on
+ *  every turn. */
 void grid_to_canvas(const App *a, float fc, float fr, float alt, float *ocx, float *ocy)
 {
     const RAtlasLevel *l = a->sw.level;
@@ -102,9 +103,9 @@ void grid_to_canvas(const App *a, float fc, float fr, float alt, float *ocx, flo
 
 /*  The grid point that projects to a window point at a GIVEN altitude:
  *  the inverse of grid_to_canvas, turned back about the pivot.  For a
- *  fixed window point the difference row - col is settled by the canvas x
- *  and only the sum moves with altitude, so walking the altitude walks a
- *  diagonal up the grid -- which is the line of every tile whose geometry
+ *  fixed window point the difference row - col is settled by the canvas
+ *  x.  Only the sum moves with altitude, so walking the altitude walks a
+ *  diagonal up the grid.  Which is the line of every tile whose geometry
  *  could be under the pointer. */
 void canvas_to_grid_at(const App *a, float mx, float my, float dens, float alt, float *ofc, float *ofr)
 {
@@ -131,12 +132,15 @@ void canvas_to_grid_at(const App *a, float mx, float my, float dens, float alt, 
     *ofr = fr;
 }
 
-/*  The grid point under a window point, and the altitude it was found
- *  at: the ground diamond at its own drawn altitude, found by iterating
- *  on the altitude, and turned back about the pivot when the view is
- *  turned.  Runs the camera backwards, at whatever pitch it is at, so
- *  the query tool reads the map view as it reads the game's own.
- *  Returns 0, or -1 off the map. */
+/*  The grid point under a window point.  The altitude it was found at.
+ *
+ *      The ground diamond at its own drawn altitude.
+ *      Found by iterating on the altitude.
+ *      Turned back about the pivot when the view is turned.
+ *
+ *  Runs the camera backwards, at whatever pitch it is at.  So the query
+ *  tool reads the map view as it reads the game's own.  Returns 0, or -1
+ *  off the map. */
 int screen_to_grid(App *a, float mx, float my, SDL_Window *win, float *ofc, float *ofr, float *oalt)
 {
     const RAtlasLevel *l    = a->sw.level;
@@ -194,8 +198,8 @@ int screen_to_grid(App *a, float mx, float my, SDL_Window *win, float *ofc, floa
 }
 
 /*  The grid cell under the pointer, so every cell can be targeted on its
- *  own.  A sprite standing in front of a cell does not take the pick; the
- *  footprint it belongs to is shown by the highlight instead. */
+ *  own.  A sprite standing in front of a cell does not take the pick.
+ *  The footprint it belongs to is shown by the highlight instead. */
 void pick_tile(App *a, float mx, float my, SDL_Window *win)
 {
     float fc, fr, alt;
@@ -210,12 +214,12 @@ void pick_tile(App *a, float mx, float my, SDL_Window *win)
     a->q_fy  = fr;
 }
 
-/*  The camera's anchor: the grid point under the view's centre.  It is the
- *  pivot the camera turns about and the point it holds in the middle of the
- *  window while it moves, so turning or raising the camera leaves what the
- *  view looks at where it is.  The pivot never moves under the rotation, so
- *  the scroll only has to put its unturned canvas position back at the
- *  centre. */
+/*  The camera's anchor: the grid point under the view's center.  It is
+ *  the pivot the camera turns about and the point it holds in the middle
+ *  of the window while it moves.  So turning or raising the camera
+ *  leaves what the view looks at where it is.  The pivot never moves
+ *  under the rotation, so the scroll only has to put its unturned canvas
+ *  position back at the center. */
 void cam_hold(App *a, SDL_Window *win)
 {
     float cx, cy, f;
@@ -232,9 +236,9 @@ void cam_hold(App *a, SDL_Window *win)
     a->anch_ok     = 1;
 }
 
-/*  Take the point under the centre as the anchor, and pivot on it.  It is
- *  measured once, at the start of a move, so a move cannot walk the view
- *  away a rounded pixel at a time. */
+/*  Take the point under the center as the anchor, and pivot on it.  It
+ *  is measured once, at the start of a move, so a move cannot walk the
+ *  view away a rounded pixel at a time. */
 void cam_anchor(App *a, SDL_Window *win)
 {
     float dens = win ? SDL_GetWindowPixelDensity(win) : 0.0f;
@@ -242,11 +246,11 @@ void cam_anchor(App *a, SDL_Window *win)
     int   pw, ph;
     if (!a->sw.level || dens <= 0.0f || !SDL_GetWindowSizeInPixels(win, &pw, &ph))
         return;
-    /*  Still the point under the centre -- nothing has scrolled or zoomed
-     *  since the last hold put it there -- then it is kept as it is.
-     *  Measured afresh each time, through an integer scroll and an iterated
-     *  inverse, it drifted a little per turn, and four quarters did not
-     *  come back to the same view. */
+    /*  Still the point under the center.  Nothing has scrolled or zoomed
+     *  since the last hold put it there.  Then it is kept as it is.
+     *  Measured afresh each time, through an integer scroll and an
+     *  iterated inverse, it drifted a little per turn.  Four quarters
+     *  did not come back to the same view. */
     if (a->anch_ok && a->gv.scroll_x == a->anch_sx && a->gv.scroll_y == a->anch_sy && a->gv.zoom == a->anch_zoom)
     {
         a->gv.pivot_c = a->anch_c;
@@ -269,7 +273,7 @@ void cam_set(App *a, float pitch, float yaw, SDL_Window *win)
 {
     int turned = a->angle != 0.0f;
     /*  Stored in [0, 360): a move may land on -45 or 360 after taking
-     *  the short way round, and the snap and the quarters are tested
+     *  the short way round.  The snap and the quarters are tested
      *  against exact values. */
     yaw = fmodf(yaw, 360.0f);
     if (yaw < 0.0f)
@@ -279,8 +283,8 @@ void cam_set(App *a, float pitch, float yaw, SDL_Window *win)
     a->gv.pitch = pitch;
     a->angle    = yaw;
     a->gv.angle = yaw;
-    /*  The mesh is the full one, built once -- every water surface and
-     *  all four cuts -- so a turn never rebuilds it. */
+    /*  The mesh is the full one, built once, every water surface and all
+     *  four cuts, so a turn never rebuilds it. */
     (void)turned;
     cam_hold(a, win);
 }
@@ -314,12 +318,12 @@ void cam_step(App *a, float dt, SDL_Window *win)
     if (a->cam_t >= 1.0f || dt <= 0.0f)
         return;
     a->cam_t += dt / CAM_SECONDS;
-    /*  The last hair of the ease arrives at once.  A frame a hair short of
-     *  a quarter reads as the quarter -- within a hundredth of a degree --
-     *  while the move has not ended, so nothing settles, and it is drawn in
-     *  the quarter's regime with the sweep of the quarter it left: the city
-     *  turned twice, for one frame.  A hundredth of the move is a third of
-     *  a degree, which no eye sees. */
+    /*  The last hair of the ease arrives at once.  A frame a hair short
+     *  of a quarter reads as the quarter, within a hundredth of a
+     *  degree, while the move has not ended.  So nothing settles.  It is
+     *  drawn in the quarter's regime with the sweep of the quarter it
+     *  left: the city turned twice, for one frame.  A hundredth of the
+     *  move is a third of a degree, which no eye sees. */
     if (a->cam_t > 0.99f)
         a->cam_t = 1.0f;
     u = a->cam_t * a->cam_t * (3.0f - 2.0f * a->cam_t);
@@ -340,8 +344,8 @@ void cam_step(App *a, float dt, SDL_Window *win)
 }
 
 /*  Raise the camera to the map view, or lower it back to the game's own.
- *  The map view draws the mesh whatever the 3D switch says, so entering it
- *  may have to build the mesh first. */
+ *  The map view draws the mesh whatever the 3D switch says.  So entering
+ *  it may have to build the mesh first. */
 void set_plan(App *a, int on, SDL_Window *win)
 {
     float yaw = a->cam_t < 1.0f ? a->yaw_to : a->angle;
@@ -363,7 +367,7 @@ void set_plan(App *a, int on, SDL_Window *win)
 }
 
 /*  Turn the camera by `deg`, from where it is going if it is already on
- *  its way, so keys pressed in a row add up instead of fighting. */
+ *  its way.  Keys pressed in a row then add up instead of fighting. */
 void rotate_by(App *a, float deg, SDL_Window *win)
 {
     float yaw = (a->cam_t < 1.0f ? a->yaw_to : a->angle) + deg;

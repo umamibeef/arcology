@@ -14,7 +14,7 @@
 --
 --  It stops at a floor, and the floor is the interesting part.  An arc
 --  narrower than the band's own half width folds its inner edge through
---  itself -- a deck a tile wide each side has no arc at all under a tile
+--  itself -- a slab a tile wide each side has no arc at all under a tile
 --  of radius -- and an arc narrower than the kink stops reading as an
 --  arc and is better drawn as a corner.  Below the floor the answer is
 --  no arc, and the corner is reported tight so the fit can say so.

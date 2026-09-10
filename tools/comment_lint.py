@@ -388,7 +388,7 @@ HISTORY = [
     ("H3", r"\bpreviously\b|\bformerly\b|\boriginally\b", "describes a past implementation"),
     (
         "H4",
-        #  "for a while" also measures distance along a road, so it counts
+        #  "for a while" also measures distance along a line, so it counts
         #  only beside a past-tense verb.
         r"\bat first\b|\bfor months\b|\bat one point\b"
         r"|\bfor a while\b(?=[^\n]*\b(?:was|were|had|did)\b)"
@@ -480,7 +480,7 @@ def data_rules(root):
         ),
         (
             "D3",
-            r"\b(?:box|arms?|spoke|ramp|slot|band|deck|verge|shelf)\s+\d+\.\d+",
+            r"\b(?:box|arms?|spoke|spur|slot|band|slab|verge|shelf)\s+\d+\.\d+",
             "cites a measured value from one case",
             #  A dimension carries a unit or a second number: "box 2.4 x 0.5 m"
             #  describes a thing, not a reading taken from one city.
