@@ -184,11 +184,12 @@ static SDL_GPUTexture *make_texture(RGpu *g, SDL_GPUTextureFormat fmt, Uint32 us
     return SDL_CreateGPUTexture(g->dev, &ti);
 }
 
-static SDL_GPUBuffer *make_buffer(RGpu *g, Uint32 usage, uint32_t bytes)
+/*  A vertex buffer.  Nothing here makes any other kind. */
+static SDL_GPUBuffer *make_buffer(RGpu *g, uint32_t bytes)
 {
     SDL_GPUBufferCreateInfo bi;
     memset(&bi, 0, sizeof bi);
-    bi.usage = usage;
+    bi.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
     bi.size  = bytes;
     return SDL_CreateGPUBuffer(g->dev, &bi);
 }
@@ -273,7 +274,7 @@ int ensure_targets(RGpu *g, int32_t w, int32_t h)
     if (g->color && g->tw == w && g->th == h)
         return 0;
     release_targets(g);
-    g->color  = make_texture(g, g->color_fmt, SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER, w, h);
+    g->color  = make_texture(g, GPU_COLOR_FMT, SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER, w, h);
     g->shadow = make_texture(g, SDL_GPU_TEXTUREFORMAT_R8_UNORM, SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER, w, h);
     g->depth  = make_texture(g, g->depth_fmt, SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET, w, h);
     if (!g->color || !g->shadow || !g->depth)
@@ -298,7 +299,7 @@ int ensure_offscreen(RGpu *g, int32_t w, int32_t h)
         return 0;
     if (g->offscreen)
         SDL_ReleaseGPUTexture(g->dev, g->offscreen);
-    g->offscreen = make_texture(g, g->color_fmt, SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER, w, h);
+    g->offscreen = make_texture(g, GPU_COLOR_FMT, SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER, w, h);
     if (!g->offscreen)
         return -1;
     g->ow = w;
@@ -318,7 +319,7 @@ int ensure_instances(RGpu *g, uint32_t n)
         SDL_ReleaseGPUBuffer(g->dev, g->ibuf);
     if (g->itb)
         SDL_ReleaseGPUTransferBuffer(g->dev, g->itb);
-    g->ibuf = make_buffer(g, SDL_GPU_BUFFERUSAGE_VERTEX, cap * (uint32_t)sizeof(RInst));
+    g->ibuf = make_buffer(g, cap * (uint32_t)sizeof(RInst));
     g->itb  = make_transfer(g, 0, cap * (uint32_t)sizeof(RInst));
     if (!g->ibuf || !g->itb)
         return -1;
@@ -355,7 +356,6 @@ RGpu *gpu_create(SDL_Window *win, const RAtlas *a, char *err, size_t err_len)
     }
     g->fmt       = SDL_GetGPUShaderFormats(g->dev);
     g->swap_fmt  = SDL_GetGPUSwapchainTextureFormat(g->dev, win);
-    g->color_fmt = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
     g->depth_fmt = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
     if (!SDL_GPUTextureSupportsFormat(g->dev, g->depth_fmt, SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET))
         g->depth_fmt = SDL_GPU_TEXTUREFORMAT_D16_UNORM;
@@ -369,17 +369,17 @@ RGpu *gpu_create(SDL_Window *win, const RAtlas *a, char *err, size_t err_len)
      *      The water is terrain with its own fragment shader.
      *      The mesh is geometry.
      *      The resolve needs none. */
-    g->pipe_terrain = make_pipe(g, "sprite.vert", "sprite.frag", g->color_fmt, 1, 1, L_INSTANCE, 0);
-    g->pipe_sprite  = make_pipe(g, "sprite.vert", "sprite.frag", g->color_fmt, 1, 0, L_INSTANCE, 0); /* the painter: the art tests, the ground wrote      */
-    g->pipe_sprite_depth = make_pipe(g, "sprite.vert", "sprite.frag", g->color_fmt, 1, 1, L_INSTANCE, 0); /* the camera's depth: the art writes it, it stands in the world */
+    g->pipe_terrain = make_pipe(g, "sprite.vert", "sprite.frag", GPU_COLOR_FMT, 1, 1, L_INSTANCE, 0);
+    g->pipe_sprite  = make_pipe(g, "sprite.vert", "sprite.frag", GPU_COLOR_FMT, 1, 0, L_INSTANCE, 0); /* the painter: the art tests, the ground wrote      */
+    g->pipe_sprite_depth = make_pipe(g, "sprite.vert", "sprite.frag", GPU_COLOR_FMT, 1, 1, L_INSTANCE, 0); /* the camera's depth: the art writes it, it stands in the world */
     g->pipe_shadow  = make_pipe(g, "sprite.vert", "shadow.frag", SDL_GPU_TEXTUREFORMAT_R8_UNORM, 1, 0, L_INSTANCE, 0);
-    g->pipe_water   = make_pipe(g, "sprite.vert", "sprite_water.frag", g->color_fmt, 1, 1, L_INSTANCE, 0);
-    g->pipe_mesh    = make_pipe(g, "terrain.vert", "terrain.frag", g->color_fmt, 1, 1, L_MESH, 0);
+    g->pipe_water   = make_pipe(g, "sprite.vert", "sprite_water.frag", GPU_COLOR_FMT, 1, 1, L_INSTANCE, 0);
+    g->pipe_mesh    = make_pipe(g, "terrain.vert", "terrain.frag", GPU_COLOR_FMT, 1, 1, L_MESH, 0);
     /*  The water column faces of the map edge's cut: blended over the
      *  seabed behind them, tested against depth but not writing it. */
-    g->pipe_mesh_blend  = make_pipe(g, "terrain.vert", "terrain.frag", g->color_fmt, 1, 0, L_MESH, 1);
+    g->pipe_mesh_blend  = make_pipe(g, "terrain.vert", "terrain.frag", GPU_COLOR_FMT, 1, 0, L_MESH, 1);
     g->pipe_resolve     = make_pipe(g, "resolve.vert", "resolve.frag", g->swap_fmt, 0, 0, L_NONE, 0);
-    g->pipe_resolve_off = make_pipe(g, "resolve.vert", "resolve.frag", g->color_fmt, 0, 0, L_NONE, 0);
+    g->pipe_resolve_off = make_pipe(g, "resolve.vert", "resolve.frag", GPU_COLOR_FMT, 0, 0, L_NONE, 0);
     if (!g->pipe_terrain || !g->pipe_sprite || !g->pipe_sprite_depth || !g->pipe_shadow ||
         !g->pipe_water || !g->pipe_mesh || !g->pipe_resolve ||
         !g->pipe_resolve_off)
@@ -765,7 +765,7 @@ static int slots_lay(RGpu *g, const uint32_t *count)
     {
         if (g->mbuf)
             SDL_ReleaseGPUBuffer(g->dev, g->mbuf);
-        g->mbuf = make_buffer(g, SDL_GPU_BUFFERUSAGE_VERTEX, pos * (uint32_t)sizeof(RMeshVert));
+        g->mbuf = make_buffer(g, pos * (uint32_t)sizeof(RMeshVert));
         if (!g->mbuf)
         {
             g->mbuf_cap = 0;
@@ -898,7 +898,7 @@ int gpu_set_movers(RGpu *g, const RMeshVert *v, uint32_t n)
             cap *= 2u;
         if (g->mvbuf)
             SDL_ReleaseGPUBuffer(g->dev, g->mvbuf);
-        g->mvbuf = make_buffer(g, SDL_GPU_BUFFERUSAGE_VERTEX, cap * (uint32_t)sizeof(RMeshVert));
+        g->mvbuf = make_buffer(g, cap * (uint32_t)sizeof(RMeshVert));
         if (!g->mvbuf)
         {
             g->mvbuf_cap = 0;
@@ -943,9 +943,11 @@ int gpu_swapchain_format(const RGpu *g)
     return (int)g->swap_fmt;
 }
 
-int gpu_offscreen_format(const RGpu *g)
+/*  The format an offscreen frame is drawn into.  It is the one every
+ *  target of ours is made in, whatever device is in hand. */
+int gpu_offscreen_format(void)
 {
-    return (int)g->color_fmt;
+    return (int)GPU_COLOR_FMT;
 }
 
 const char *gpu_driver(const RGpu *g)

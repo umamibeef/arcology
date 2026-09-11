@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "dump.h"
+#include "build.h"
 
 /*  ==================================================================
  *  Building what gets drawn
@@ -148,7 +149,7 @@ int remesh(App *a)
     static uint8_t     shore[R_MAP * R_MAP * 4];
     if (!l)
         return -1;
-    if (mesh_build(&a->mesh, a->view, &a->atlas, l, a->opts.underground, 1 /* the full mesh, every side and surface, once */, geometry_on(a) && !a->opts.underground) != 0)
+    if (build_world(&a->mesh, a->view, &a->atlas, l, a->opts.underground, 1 /* the full mesh, every side and surface, once */, geometry_on(a) && !a->opts.underground) != 0)
         return -1;
     shore_field(a->view, shore);
     /*  --field-dump path writes the field as a binary PPM (r: water's

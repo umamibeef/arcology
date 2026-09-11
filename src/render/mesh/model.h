@@ -67,7 +67,7 @@ int net_model_shape(int model, float size, const ModelHead **head, const ModelPa
  *  `phase` is the prop's own place in the signal's cycle and `group` the
  *  lamp code its lenses start at.  Answers 0, or -1 on a mesh error. */
 int net_model_put(int model, RMesh *m, const RCity *c, uint8_t mask_bit, float order,
-                  float x, float y, float fx, float fy, float size, float phase, float group);
+                  float x, float y, float fx, float fy);
 /*  The same, standing on a surface of its own rather than on the ground:
  *  a lamp beside a strip stands on the strip's own height.  This the
  *  ground under the lip is not. */

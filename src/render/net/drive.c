@@ -19,7 +19,9 @@
 #include "log.h"
 #include "mesh/internal.h"
 #include "pipeline.h"
+#include "net/net.h"
 #include "script.h"
+#include "build.h"
 
 static struct
 {
@@ -49,7 +51,7 @@ static int drive(int what)
 int net_drive_build(void)
 {
     int rc = drive(DRIVE_BUILD);
-    return rc != 0 ? rc : mesh_build_passes_rc();
+    return rc != 0 ? rc : build_rc();
 }
 
 int net_drive_move(void)

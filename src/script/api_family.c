@@ -23,6 +23,7 @@
 
 #include "internal.h"
 #include "pipeline.h"
+#include "net/net.h"
 #include "script.h"
 
 
@@ -37,29 +38,30 @@ static void field_str(lua_State *L, int t, const char *key, char *out, size_t ca
     lua_pop(L, 1);
 }
 
-static int field_int(lua_State *L, int t, const char *key, int def)
+static int field_int(lua_State *L, const char *key, int def)
 {
     int v;
-    lua_getfield(L, t, key);
+    lua_getfield(L, 1, key);
     v = lua_isnil(L, -1) ? def : (int)lua_tointeger(L, -1);
     lua_pop(L, 1);
     return v;
 }
 
-static int field_bool(lua_State *L, int t, const char *key)
+static int field_bool(lua_State *L, const char *key)
 {
     int v;
-    lua_getfield(L, t, key);
+    lua_getfield(L, 1, key);
     v = lua_toboolean(L, -1);
     lua_pop(L, 1);
     return v;
 }
 
-static float field_f(lua_State *L, int t, const char *key, float def)
+/*  A number off the table, or nought where the script set none. */
+static float field_f(lua_State *L, const char *key)
 {
     float v;
-    lua_getfield(L, t, key);
-    v = lua_isnil(L, -1) ? def : (float)lua_tonumber(L, -1);
+    lua_getfield(L, 1, key);
+    v = lua_isnil(L, -1) ? 0.0f : (float)lua_tonumber(L, -1);
     lua_pop(L, 1);
     return v;
 }
@@ -75,21 +77,22 @@ static struct
     char          width[64], rmin[64], rmax[64], stage[NET_HOOKS][64];
 } s_read;
 
-const NetFamilyDecl *api_family_read(lua_State *L, int t)
+/*  The declaration is the call's own argument, at slot 1. */
+const NetFamilyDecl *api_family_read(lua_State *L)
 {
     NetFamilyDecl *d = &s_read.d;
     int            h;
-    if (!lua_istable(L, t))
+    if (!lua_istable(L, 1))
         return NULL;
     memset(&s_read, 0, sizeof s_read);
-    field_str(L, t, "name", s_read.name, sizeof s_read.name, NULL);
-    field_str(L, t, "tiles", s_read.tiles, sizeof s_read.tiles, NULL);
-    field_str(L, t, "loft", s_read.loft, sizeof s_read.loft, "line");
-    field_str(L, t, "lane_ends", s_read.ends, sizeof s_read.ends, "open");
-    field_str(L, t, "slot", s_read.slot, sizeof s_read.slot, "slot_strip");
-    field_str(L, t, "width", s_read.width, sizeof s_read.width, NULL);
-    field_str(L, t, "rmin", s_read.rmin, sizeof s_read.rmin, NULL);
-    field_str(L, t, "rmax", s_read.rmax, sizeof s_read.rmax, NULL);
+    field_str(L, 1, "name", s_read.name, sizeof s_read.name, NULL);
+    field_str(L, 1, "tiles", s_read.tiles, sizeof s_read.tiles, NULL);
+    field_str(L, 1, "loft", s_read.loft, sizeof s_read.loft, "line");
+    field_str(L, 1, "lane_ends", s_read.ends, sizeof s_read.ends, "open");
+    field_str(L, 1, "slot", s_read.slot, sizeof s_read.slot, "slot_strip");
+    field_str(L, 1, "width", s_read.width, sizeof s_read.width, NULL);
+    field_str(L, 1, "rmin", s_read.rmin, sizeof s_read.rmin, NULL);
+    field_str(L, 1, "rmax", s_read.rmax, sizeof s_read.rmax, NULL);
     d->name              = s_read.name;
     d->tiles             = s_read.tiles;
     d->loft              = s_read.loft;
@@ -98,38 +101,38 @@ const NetFamilyDecl *api_family_read(lua_State *L, int t)
     d->width             = s_read.width;
     d->rmin              = s_read.rmin;
     d->rmax              = s_read.rmax;
-    d->answers           = field_bool(L, t, "answers");
-    d->walk              = field_int(L, t, "walk", -1);
-    d->ref_width         = field_f(L, t, "ref_width", 0.0f);
-    d->mat               = field_f(L, t, "material", 0.0f);
-    d->fit               = field_int(L, t, "fit", 0);
-    d->junc_lift         = field_f(L, t, "junc_lift", 0.0f);
-    d->shelf_grade       = field_f(L, t, "shelf_grade", 0.0f);
-    d->lips             = field_bool(L, t, "lips");
-    d->spurs             = field_bool(L, t, "spurs");
-    d->ends_at_buildings = field_bool(L, t, "ends_at_buildings");
-    d->caps              = field_bool(L, t, "caps");
-    d->classed           = field_bool(L, t, "classed");
+    d->answers           = field_bool(L, "answers");
+    d->walk              = field_int(L, "walk", -1);
+    d->ref_width         = field_f(L, "ref_width");
+    d->mat               = field_f(L, "material");
+    d->fit               = field_int(L, "fit", 0);
+    d->junc_lift         = field_f(L, "junc_lift");
+    d->shelf_grade       = field_f(L, "shelf_grade");
+    d->lips             = field_bool(L, "lips");
+    d->spurs             = field_bool(L, "spurs");
+    d->ends_at_buildings = field_bool(L, "ends_at_buildings");
+    d->caps              = field_bool(L, "caps");
+    d->classed           = field_bool(L, "classed");
     /*  Where a strip files itself for the traffic.  A family that says
      *  so needs no record stage: the pipeline files it. */
-    field_str(L, t, "graph", s_read.graph, sizeof s_read.graph, "");
+    field_str(L, 1, "graph", s_read.graph, sizeof s_read.graph, "");
     d->graph        = s_read.graph[0] ? s_read.graph : NULL;
-    d->record_class = field_int(L, t, "record_class", -1);
-    d->stations     = field_bool(L, t, "stations");
-    d->meets    = field_bool(L, t, "meets");
-    d->paved        = field_bool(L, t, "paved");
-    d->crossed      = field_bool(L, t, "crossed");
-    d->threads       = field_bool(L, t, "threads");
-    field_str(L, t, "props", s_read.props, sizeof s_read.props, "");
+    d->record_class = field_int(L, "record_class", -1);
+    d->stations     = field_bool(L, "stations");
+    d->meets    = field_bool(L, "meets");
+    d->paved        = field_bool(L, "paved");
+    d->crossed      = field_bool(L, "crossed");
+    d->threads       = field_bool(L, "threads");
+    field_str(L, 1, "props", s_read.props, sizeof s_read.props, "");
     d->props        = s_read.props[0] ? s_read.props : NULL;
-    field_str(L, t, "margin", s_read.margin, sizeof s_read.margin, "");
+    field_str(L, 1, "margin", s_read.margin, sizeof s_read.margin, "");
     d->margin      = s_read.margin[0] ? s_read.margin : NULL;
-    d->lane_paint        = field_f(L, t, "lane_paint", 0.0f);
-    d->free_reach        = field_int(L, t, "free_reach", 0);
-    d->turnout           = field_f(L, t, "turnout", 0.0f);
-    d->slab              = field_bool(L, t, "slab");
+    d->lane_paint        = field_f(L, "lane_paint");
+    d->free_reach        = field_int(L, "free_reach", 0);
+    d->turnout           = field_f(L, "turnout");
+    d->slab              = field_bool(L, "slab");
     /*  The stages, each under its own name: `stages = { box = "..." }`. */
-    lua_getfield(L, t, "stages");
+    lua_getfield(L, 1, "stages");
     for (h = 0; h < NET_HOOKS; ++h)
     {
         if (lua_istable(L, -1))
@@ -144,7 +147,7 @@ static int l_family_define(lua_State *L)
 {
     const NetFamilyDecl *d;
     luaL_checktype(L, 1, LUA_TTABLE);
-    d = api_family_read(L, 1);
+    d = api_family_read(L);
     lua_pushboolean(L, d && net_family_define(d) == 0);
     return 1;
 }

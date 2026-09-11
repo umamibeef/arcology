@@ -6,6 +6,7 @@
 
 #include "mesh/internal.h"
 #include "pipeline.h"
+#include "net/net.h"
 #include "mesh/model.h"
 #include "script.h"
 #include "dump.h"
@@ -133,9 +134,9 @@ typedef struct
 static void thread_ends(const JBox *jb, int e, ThreadEnd out[2])
 {
     V2 d;
-    lane_port(net_thread->f, jb->col, jb->row, e, 0, 0, &out[0].p, &d); /* the in-port: heads into the junction */
+    lane_port(net_thread->f, jb->col, jb->row, e, 0, &out[0].p, &d); /* the in-port: heads into the junction */
     out[0].away = (V2){-d.x, -d.y};
-    lane_port(net_thread->f, jb->col, jb->row, e, 1, 0, &out[1].p, &out[1].away);
+    lane_port(net_thread->f, jb->col, jb->row, e, 1, &out[1].p, &out[1].away);
 }
 
 static V2 thread_mid(const ThreadEnd r[2])
@@ -371,7 +372,7 @@ static void lap_frame(Meet *x)
         if (line_meet((V2){xr->x, xr->y}, (V2){ox, oy}, (V2){xl->x, xl->y}, (V2){lx, ly}, &met))
         {
             float dx = met.x - cx, dy = met.y - cy;
-            float r  = net_geo(&gix_lap_point, "lap_point");
+            float r  = geo_num(&gix_lap_point, "lap_point");
             if (dx * dx + dy * dy < r * r) /* still near enough this tile */
             {
                 cx = met.x;
@@ -596,7 +597,7 @@ int net_lap_place(const ScriptApproach *mk)
     if (!furniture_on())
         return 0;
     return net_model_put(net_model_find(mk->model), x->m, x->c, x->mask_bit, x->order,
-                         px, py, mk->fx, mk->fy, 0.0f, 0.0f, 0.0f);
+                         px, py, mk->fx, mk->fy);
 }
 
 

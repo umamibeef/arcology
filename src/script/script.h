@@ -140,7 +140,7 @@ int         script_model_find(const char *name);
 void        script_model_reset(void);
 /*  What the model is made of for a prop of that size.  Answers how many
  *  pieces were written into `parts`. */
-int script_model_build(int model, float size, struct ModelHead *head, struct ModelPart *parts, int max);
+int script_model_build(int model, float size, struct ModelHead *head, struct ModelPart *parts);
 
 /*  ---- the strips ----------------------------------------------------
  *
@@ -247,7 +247,7 @@ typedef struct
  *  the band's own direction runs with the spur's.  Answers the top of
  *  the descent, its foot, how long it is, and which way along the band
  *  the taper lies. */
-/*  Where a band band's walk begins.  `back` and `on` say whether the
+/*  Where a band's walk begins.  `back` and `on` say whether the
  *  band carries on the two ways along it from this cell.  1 walks forward
  *  from here, -1 backward, 0 leaves the cell to the sweep that walks a
  *  band with no end at all. */

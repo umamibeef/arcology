@@ -10,6 +10,7 @@
 
 #include "mesh/internal.h"
 #include "pipeline.h"
+#include "net/net.h"
 #include "mesh/model.h"
 #include "script.h"
 

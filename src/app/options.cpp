@@ -28,6 +28,7 @@ extern "C" {
 #include "opt.h"
 #include "options.h"
 #include "soft/soft.h"
+#include "net/net.h"
 }
 #ifndef _WIN32
     #include <sys/utsname.h>
@@ -87,7 +88,7 @@ const DevFlag FLAGS[] = {
     {"plan-dump",   &g_dev.plan_dump,   "the fit stage by stage, for tools/plan.py"                                    },
     {"prof-dump",   &g_dev.prof_dump,   "the finished profile of every segment"                                        },
     {"loft-dump",   &g_dev.loft_dump,   "the loft's stations"                                                          },
-    {"band-dump",  &g_dev.band_dump,  "the band bands and their spurs"                                            },
+    {"band-dump",  &g_dev.band_dump,  "the bands and their spurs"                                            },
     {"clip-dump",   &g_dev.clip_dump,   "the road clip check's samples, tile by tile"                                  },
     {"input-log",   &g_dev.input_log,   "every mouse and touch event as it arrives, to see what the threadpad sends"     },
     {"inspect",     &g_dev.inspect,     "the inspector on from the start: the mesh under the pointer outlined, named and reported" },
@@ -317,7 +318,7 @@ extern "C" int parse_options(Startup *o, App *a, int argc, char **argv)
      *  their defaults. */
     if (g_dev.tune)
     {
-        float *t = mesh_tune();
+        float *t = tune_array();
         sscanf(g_dev.tune, "%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f", &t[0], &t[1], &t[2], &t[3], &t[4], &t[5], &t[6], &t[7], &t[8], &t[9], &t[10], &t[11], &t[12], &t[13], &t[14], &t[15], &t[16], &t[17], &t[18]);
     }
     a->q_col = a->q_row = -1;

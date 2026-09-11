@@ -62,6 +62,7 @@
 #include "internal.h"
 #include "mesh/internal.h"
 #include "pipeline.h"
+#include "net/net.h"
 #include "mesh/model.h"
 
 /*  The world a prop is being drawn into, and what it is drawn with.  Set
@@ -178,7 +179,7 @@ static void put_flush(void)
             float t[3][3] = {{a[0], a[1], a[2]}, {a[3], a[4], a[5]}, {a[6], a[7], a[8]}};
             float col[3]  = {a[9], a[10], a[11]};
             float ref[3]  = {a[9], a[9], a[9]}, ref2[3] = {a[10], a[10], a[10]};
-            put_tri_ground(s_m, s_c, s_mask, r->order, (const float (*)[3])t, NULL, col, ref, ref2);
+            put_tri_ground(s_m, s_c, s_mask, r->order, (const float (*)[3])t, col, ref, ref2);
             break;
         }
         case PUT_FAN: strip_fan_z(s_m, s_c, s_mask, r->order, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], r->n, a[8]); break;

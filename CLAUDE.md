@@ -40,27 +40,40 @@ starting first.  The user sets these; do not add, reorder or reinterpret
 them.
 
 **1.  Lua can read the simulation.**  Any layer at any cell, with
-neighbours, fast enough for a script to walk the whole map.  Today it
-cannot: `arc.bytes` lets a script declare in advance what each of 256
-bytes means, and then C walks the map on the script's behalf.  Until this
+neighbours, fast enough for a script to walk the whole map.  Until this
 is met, nothing else on this list is expressible.
+MET.  `arc.city.at(layer, col, row)`, `.near` and `.plane` read any layer
+at any cell, and `scripts/compose/bands.lua` walks whole planes with
+them.  `ctest -R map_read` decodes the city a second time in Python and
+checks every layer three ways, so it is not the renderer agreeing with
+itself.
 *Met when a script can walk the map itself and read what is on a cell.*
 
 **2.  The fit is a service a script calls.**  `fit(points, radii,
-budgets) -> pieces`, at any moment the script likes.  Today the fit is
-entered from inside C's own passes and a script may only shape a fit that
-C already chose.
+budgets) -> pieces`, at any moment the script likes.
+MET.  `arc.fit` (`src/script/api_fit.c`) reads no pass state, so there
+need be no build running at all.  It asks `arc.rules.pieces`, which is
+the same cut the drive queues, through the same `PieceFan` and the same
+four accessors in `mesh/fit.c`: two callers, one implementation.
+`ctest -R fit_service`.
 *Met when a script can fit a path of its own invention and get the pieces
 back.*
 
 **3.  The loft is a service a script calls.**  `loft(pieces, profile) ->
-geometry`.  Today the loft is a stage of C's walk with eleven fixed
-hooks.
+geometry`.
+MET.  `w:loft` is the generic sweep in `mesh/loft.c`: a chain of pieces
+and a cross-section, and nothing else.  The eleven moments in
+`net/strip.c` are the other half, and each offers a reading to the rule
+the family named.  `ctest -R loft_service`.
 *Met when a script can loft a path it invented, along a cross-section it
 defined, and see it in the world.*
 
 **4.  The network is discovered in Lua.**  Which cells form a segment,
 and where it runs, is the script's.  `walk/` stops walking.
+MET as the criterion below has it.  `scripts/compose/network.lua`
+produces every run, and there is no walk in C behind it.  `walk/` has
+not gone, though: it still runs a segment's own stages once the script
+has said which cells make one.  `ctest -R network_discovery`.
 *Met when C offers cells and neighbours and the script produces the
 segments.*
 
@@ -69,6 +82,8 @@ to a different algorithm by editing a script alone:
 roads sweeping through the grid corridors; an on-ramp cell raising a
 smooth climb to a highway; the pattern an intersection draws; the lanes a
 road carries, from density and neighbourhood.
+MET.  `ctest -R swappable` replaces each with a rule of its own making
+and checks the city changes with it.
 *Met when each one can be replaced without a compile.*
 
 ## The constraint on all of it
@@ -81,28 +96,28 @@ reads.
 
     for c in atlanta toronto tokyo flint babar maltron chicago; do
         ./build/arcology cities/$c.sc2 --mute --mesh-check --run 1 2>&1 |
-            grep -aE "^mesh check|road clip|claimed by none"
+            grep -aE "^mesh check|line clip|claimed by none"
     done
 
-    ctest --test-dir build               # 36 tests
+    ctest --test-dir build               # 39 tests
 
 The reference, which every one of these must still print:
 
-    12f28cc62f e664211a6f e43c1d3e03 389bb13ee6 c8ff0ea62c b303e7b5b4
-    75d042c626 305a6a8296                                     at 1280x800
+    c2a1eea4b9 e664211a6f e43c1d3e03 389bb13ee6 c8ff0ea62c b303e7b5b4
+    e976ebeceb 5cfeb5254e                                     at 1280x800
 
 | city | triangles | shapes |
 |---|---|---|
-| atlanta | 1068927 | 33397 |
-| toronto | 776689 | 29458 |
-| tokyo | 832168 | 29509 |
-| flint | 817221 | 30485 |
+| atlanta | 1070955 | 33413 |
+| toronto | 778196 | 29483 |
+| tokyo | 840849 | 29601 |
+| flint | 818083 | 30499 |
 | babar | 671535 | 21045 |
-| maltron | 827675 | 30066 |
+| maltron | 828321 | 30077 |
 | chicago | 1069533 | 35090 |
 
-with `road clip  0 samples` and `0 triangles claimed by none` on every
-one, and `ctest` at 36 of 36.  The four simulation checks (`verify`,
+with `line clip  0 samples` and `0 triangles claimed by none` on every
+one, and `ctest` at 39 of 39.  The four simulation checks (`verify`,
 `microsim`, `allocmicro`, `arco_roundtrip`) are behind
 `-DARC_SIM_TESTS=ON` and off by default: the simulation is verified
 against the original and the renderer cannot move a simulation layer.
@@ -130,35 +145,62 @@ size it got.
 
 ## Where the renderer's code lives
 
+Four levels, and the includes nearly hold the order.  The top runs a
+build.  `walk/` and `net/` sit under it, and still name each other in
+both directions.  `mesh/` is under both, and is meant to know nothing
+above itself.
+
+    src/render/         THE BUILD, and what all three below it share.
+                          build   two passes over one body, handed one
+                                  at a time to the script that composes
+                                  them.  The door itself is net/drive.c
+                          incr    what a build has to redo after an edit
+                          geo     the numbers a script tunes with:
+                                  arc.geo's store and arc.tune's knobs
+                          pipeline.h  the vocabulary the three share
     src/render/walk/    a segment's stages, the pieces a tile carries,
                         the footway network.  The network walk itself is
                         scripts/compose/network.lua: nothing here decides
                         which cells make a segment.
+                          walk (one segment's stages) cursor (the order
+                          the drive steps them in) cell (what a cell
+                          carries) walkway
     src/render/net/     the STORES and the PLUMBING.  The plumbing that
                         turns a Lua declaration into a family; the fans
                         that offer a reading to a rule and take its
                         answer back; and the stores.  Nothing here
                         decides anything, and nothing here knows what
                         any family draws.
-                          family drive cut loft table lane station shelf
-                          network geo report traffic
-                          box meet band spur node margin
+                          family drive cut strip table lane station shelf
+                          network report traffic
+                          box meet node margin
+                          band (what the map says) band_walk (one walked)
+                          spur (the tiles) spur_build (the descent)
     src/render/mesh/    EVERY SHAPE PRIMITIVE, and NOTHING ELSE.  A file
                         here names no road, ramp, deck, track, junction
                         or footway, and a script inventing something the
                         renderer has never heard of can build it out of
                         what these offer.
-                          mesh chunk shape shapes emit incr check
+                          mesh shape shapes emit check
                           fit (the tangent fit: arc.fit)
                           loft (the sweep: w:loft)
                           piece surface model tile
     scripts/            the numbers, the rules, the families, the models
                         and the drive.
 
-`src/render/pipeline.h` is what the three share, and it sits above them
-because two of every three things it declares are `mesh/`'s.  The
-boundary is a convention until each declaration is filed with the
-directory that defines it.
+`src/render/pipeline.h` is what the three share, and nothing more: a
+point, a piece, a sample, a family slot, what a loft is asked to draw.
+It declares no `net/` name at all.  What the network offers is
+`net/net.h` and one header a file under it, so a reader who wants to
+know what the band offers opens `net/band.h`.
+
+Five includes still run the wrong way, from `mesh/` up into `net/`, and
+each one is a real dependency rather than an accident: the ground is cut
+to the corridor shelves (`tile.c`), the loft reads the profile slots and
+a family's stages (`loft.c`), the per-pass body walks the bands
+(`mesh.c`), and two more read one name apiece (`shapes.c`,
+`surface.c`).  Whether `mesh/` should know a family HAS stages is a
+design question, not a file move.
 
 ## The pipeline names no family
 
@@ -168,6 +210,15 @@ deck, a ramp, a sidewalk, a level crossing -- is the scripts'.  So none
 of those words appears under `src/render`: not in a filename, not in an
 identifier, not in a comment.  `ctest -R family_words`
 (`tools/family_words.py`, no build needed) holds the line.
+
+**And not abbreviated either.**  A word list cannot see `hw`, so the
+checker tests the SHAPE of a name as well: a part of a longer name that
+starts with `hw` is the family, and is a fault.  `HwSpur`, `s_hw_st`,
+`HW_MAX_ST` and `s_hwfit_q` all named the same family in two letters.
+A bare `hw` is a HALF WIDTH, which every fit and loft takes, so it
+passes, and so do `hw_end` and `SPUR_HW` -- the three are named in
+`HALF_WIDTH` in the checker.  Add to that list only for another half
+width, and say so.
 
 The generic vocabulary they are written in instead:
 

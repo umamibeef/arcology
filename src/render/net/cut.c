@@ -15,6 +15,7 @@
 #include "mesh/internal.h"
 #include "pipeline.h"
 
+#include "net/net.h"
 /*  How many chains one drive may queue, and the arenas they and their
  *  pieces are cut into. */
 #define CUT_MAX    8192

@@ -75,7 +75,7 @@ arc.geo.lane_av_in         = 0.115
 arc.geo.lane_av_out        = 0.306
 arc.geo.lane_bd_in         = 0.162
 arc.geo.lane_bd_out        = 0.317
---  Where one band band's slab lane carries on into the next band's.
+--  Where one band's slab lane carries on into the next band's.
 --  The window is wide -- six tiles of reach, four aside, and a lane end
 --  a little BEHIND still counts -- because two bands meeting at an
 --  interchange are not neatly end to end.  It is deliberately wider than
@@ -87,6 +87,11 @@ arc.geo.band_aside         = 4.0
 arc.geo.band_dot           = -0.2
 arc.geo.band_off           = 0.05
 arc.geo.band_reach         = 6.0
+--  A continuation's far end must lead AWAY from the near one by at
+--  least this much, along the way the traffic travels.  At nought a
+--  band that turns a corner stops matching its own lanes across the
+--  turn, which is a U-turn and not a continuation at all.
+arc.geo.band_lead          = 0.0
 
 --  Where a band's six lanes become a line's two.  The inner lane routes
 --  into the line; the middle and outer taper into the inner, the outer
@@ -260,7 +265,7 @@ arc.geo.slab_lift          = 1.0
 arc.geo.interchange_dump   = 0
 
 --  WHAT A LANE MUST BE for a car to drive it, checked over every piece
---  of every lane (geo/lane.c lane_check_curves).  The shortest piece
+--  of every lane (net/lane.c lane_check_curves).  The shortest piece
 --  that is a real piece rather than a hair; how far two pieces may end
 --  and start apart before the line is broken; and how nearly their
 --  headings must agree before the join is a corner rather than a curve.

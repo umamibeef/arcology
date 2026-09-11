@@ -10,7 +10,10 @@
 #include "dump.h"
 #include "mesh/internal.h"
 #include "pipeline.h"
+#include "net/net.h"
+#include "walk/walk.h"
 #include "opt.h"
+#include "incr.h"
 
 /*  One segment walk's working state, handed to the stages below so each
  *  can be read on its own.
@@ -42,7 +45,7 @@ int32_t        s_seg_at[R_MAP * R_MAP * 4]; /* (tile, edge) -> the segment start
  *  segment was a third of a build.
  *  Two arenas, this build's and the last one's, grown on demand.  A
  *  segment's samples are valid for the same trimmed pieces (hashed) when
- *  no tile near it changed (mesh_incr_near).  The last build's table
+ *  no tile near it changed (incr_near).  The last build's table
  *  survives as (start tile, edge) -> hash and range. */
 typedef struct
 {
@@ -393,7 +396,7 @@ int seg_table_replay(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mas
         const RSeg *r = &s_segs[i];
         Seg         x;
         if (r->band)
-            continue; /* a band band: no arms, no meets.  Band.c replays it */
+            continue; /* a band: no arms, no meets.  Band.c replays it */
         memset(&x, 0, sizeof x);
         x.m = m, x.c = c, x.l = l, x.mask_bit = mask_bit, x.comp = comp, x.f = r->f, x.col = r->col, x.row = r->row, x.e = r->e;
         x.visited = visited;
@@ -408,7 +411,7 @@ int seg_table_replay(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mas
     return 0;
 }
 
-/* ---- band bands in the table ------------------------------------------ */
+/* ---- bands in the table ------------------------------------------ */
 
 int seg_store_band(int32_t col, int32_t row, int ew, int sign, const Piece *pc, int np, const V2 *q, const float *rad, const float *tlim, int nk, const int32_t *own, int n_own)
 {

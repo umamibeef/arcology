@@ -57,12 +57,17 @@ enum
     K_LINE_ART   = 9
 };
 
+/*  The color format everything is drawn into.  The swapchain's own is
+ *  whatever SDL gives us.  This is the one every target and every
+ *  pipeline of ours is made in. */
+#define GPU_COLOR_FMT SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
+
 struct RGpu
 {
     SDL_GPUDevice       *dev;
     SDL_Window          *win;
     SDL_GPUShaderFormat  fmt;
-    SDL_GPUTextureFormat swap_fmt, depth_fmt, color_fmt;
+    SDL_GPUTextureFormat swap_fmt, depth_fmt;
 
     SDL_GPUGraphicsPipeline *pipe_terrain, *pipe_sprite, *pipe_sprite_depth, *pipe_shadow;
     SDL_GPUGraphicsPipeline *pipe_mesh, *pipe_mesh_blend, *pipe_water, *pipe_resolve,

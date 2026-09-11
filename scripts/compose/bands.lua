@@ -1,4 +1,4 @@
---  bands.lua -- which cells form a band band, and where it runs.
+--  bands.lua -- which cells form a band, and where it runs.
 --
 --  The same question scripts/compose/network.lua asks of the lines,
 --  asked of the slab.  Four readings of every cell are taken off the

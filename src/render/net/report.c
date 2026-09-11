@@ -14,6 +14,7 @@
 #include "mesh/internal.h"
 #include "mesh/mesh.h"
 #include "pipeline.h"
+#include "net/net.h"
 #include "net/report.h"
 
 typedef struct
@@ -164,7 +165,7 @@ int net_area_report(const RCity *c, int32_t c0, int32_t r0, int32_t c1, int32_t 
             mesh_query(c, col, row, buf, sizeof buf);
             text_printf(&t, "  %3d,%-3d xbld 0x%02x %-30s alt %2d  xter 0x%02x  %s\n", (int)col, (int)row, (unsigned)b, tile_kind(b), (int)rcity_alt_ground(c->altm[idx]), (unsigned)c->xter[idx], buf);
         }
-    /*  The band bands over the area: their tiles here, their fitted
+    /*  The bands over the area: their tiles here, their fitted
      *  nodes near here, their stations here. */
     n = band_count();
     for (i = 0; i < n; ++i)
@@ -183,7 +184,7 @@ int net_area_report(const RCity *c, int32_t c0, int32_t r0, int32_t c1, int32_t 
             continue;
         idx = seg_table_band_index(i);
         r   = idx >= 0 ? seg_table_entry(idx) : NULL;
-        text_printf(&t, "band band %d%s: %d of its %d tiles are in the area\n", i, r ? "" : " (not in the table)", here, nb);
+        text_printf(&t, "band %d%s: %d of its %d tiles are in the area\n", i, r ? "" : " (not in the table)", here, nb);
         if (r)
             text_printf(&t, "  walked from %d,%d, %d fitted nodes, %d pieces\n", (int)r->col, (int)r->row, r->nk, r->np);
         if (r && seg_table_nodes(idx, &q, &rad, &nk) == 0)
@@ -199,9 +200,9 @@ int net_area_report(const RCity *c, int32_t c0, int32_t r0, int32_t c1, int32_t 
     }
     {
         int nst = 0, band = -1, first = -1, last = -1;
-        for (k = 0; k < s_hw_nst; ++k)
+        for (k = 0; k < s_band_nst; ++k)
         {
-            const HwSt *st = &s_hw_st[k];
+            const BandSt *st = &s_band_st[k];
             if (!in_area((int32_t)floorf(st->pos.x), (int32_t)floorf(st->pos.y), c0, r0, c1, r1))
                 continue;
             if (nst == 0)
@@ -210,7 +211,7 @@ int net_area_report(const RCity *c, int32_t c0, int32_t r0, int32_t c1, int32_t 
             ++nst;
         }
         if (nst)
-            text_printf(&t, "slab stations in the area: %d (the loft's band %d), first (%.2f,%.2f) s %.2f z %.2f, last (%.2f,%.2f) s %.2f z %.2f\n", nst, band, (double)s_hw_st[first].pos.x, (double)s_hw_st[first].pos.y, (double)s_hw_st[first].s, (double)s_hw_st[first].z, (double)s_hw_st[last].pos.x, (double)s_hw_st[last].pos.y, (double)s_hw_st[last].s, (double)s_hw_st[last].z);
+            text_printf(&t, "slab stations in the area: %d (the loft's band %d), first (%.2f,%.2f) s %.2f z %.2f, last (%.2f,%.2f) s %.2f z %.2f\n", nst, band, (double)s_band_st[first].pos.x, (double)s_band_st[first].pos.y, (double)s_band_st[first].s, (double)s_band_st[first].z, (double)s_band_st[last].pos.x, (double)s_band_st[last].pos.y, (double)s_band_st[last].s, (double)s_band_st[last].z);
     }
     /*  The line and thread segments over the area. */
     n = seg_table_count();
@@ -229,9 +230,9 @@ int net_area_report(const RCity *c, int32_t c0, int32_t r0, int32_t c1, int32_t 
             text_printf(&t, "%s segment %d from %d,%d to %d,%d: %d of its %d tiles are in the area, %d pieces, %d fitted nodes\n", r->f == net_thread->f ? "thread" : "line", i, (int)col0, (int)row0, (int)cc, (int)cr, here, nt, r->np, r->nk);
     }
     /*  The on-spurs, with the stage that lost any. */
-    for (i = 0; i < s_hw_nspurs; ++i)
+    for (i = 0; i < s_band_nspurs; ++i)
     {
-        const HwSpur *rp = &s_hw_spurs[i];
+        const BandSpur *rp = &s_band_spurs[i];
         const char   *lost;
         if (!in_area(rp->rc, rp->rr, c0, r0, c1, r1))
             continue;
@@ -342,7 +343,7 @@ int net_component_at(const RCity *c, const RAtlasLevel *l, int32_t col, int32_t 
         int            k, side, steps;
         float          total = 0.0f, step;
         if (!r || r->np < 1)
-            continue; /* a band band is walked whole and its tiles are not its own: the report skips it too */
+            continue; /* a band is walked whole and its tiles are not its own: the report skips it too */
         seg_table_arenas(r, &pc, &q, &rad, &tlim, &tc, &tr);
         for (k = 0; k < r->nt; ++k)
             if (tc[k] == col && tr[k] == row)
@@ -371,7 +372,7 @@ int net_component_at(const RCity *c, const RAtlasLevel *l, int32_t col, int32_t 
                 poly[*n].y = pos.y - dir.x * (side ? -r->hw : r->hw);
                 ++*n;
             }
-        snprintf(label, lab, "%s %d, %d,%d to %d,%d", r->band ? "band band" : (r->f == net_thread->f ? "thread segment" : "line segment"), i, (int)r->col, (int)r->row, (int)r->cc, (int)r->cr);
+        snprintf(label, lab, "%s %d, %d,%d to %d,%d", r->band ? "band" : (r->f == net_thread->f ? "thread segment" : "line segment"), i, (int)r->col, (int)r->row, (int)r->cc, (int)r->cr);
         return 0;
     }
     return -1;

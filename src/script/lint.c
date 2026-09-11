@@ -30,6 +30,7 @@
 #include "mesh/internal.h"
 #include "pipeline.h"
 
+#include "net/net.h"
 /*  One run's faults, said as they are found and counted for the exit. */
 static int         s_bad;
 static const char *s_file;
@@ -530,7 +531,7 @@ static int l_family_define(lua_State *L)
         bad("arc.family.define wants a table");
         return 0;
     }
-    d = api_family_read(L, 1);
+    d = api_family_read(L);
     if (!d || net_family_check(d, rule) != 0)
     {
         bad("arc.family.define: the declaration names something the pipeline has not");
@@ -602,8 +603,8 @@ static int l_empty_plane(lua_State *L)
 static void arc_open(lua_State *L)
 {
     lua_newtable(L);
-    settings_open(L, "tune", net_tune_name);
-    settings_open(L, "geo", net_geo_name);
+    settings_open(L, "tune", tune_name);
+    settings_open(L, "geo", geo_name);
     lua_newtable(L); /* rules */
     lua_newtable(L);
     lua_pushcfunction(L, l_rule_set);
@@ -1585,7 +1586,7 @@ static void rule_args(lua_State *L, const char *rule, int *nargs)
                           " net_discover = function () return 0 end,"
                           " net_cells = function () return nil end,"
                           " net_found = function () return true end,"
-                          " hw_cells = function () return nil end,"
+                          " band_cells = function () return nil end,"
                           " gate_rest = function () end,"
                           " tile = function () return nil end,"
                           " zone = function () return nil end,"
@@ -1669,7 +1670,7 @@ static void rule_args(lua_State *L, const char *rule, int *nargs)
                           " curves = function () return nil end,"
                           " strip = function () return nil end,"
                           " strip_done = function () end,"
-                          " band_band = function () return false end,"
+                          " band_next = function () return false end,"
                           " car_density_is = function () end,"
                           " road_class_is = function () end,"
                           " control_prop_is = function () end,"
@@ -1685,18 +1686,18 @@ static void rule_args(lua_State *L, const char *rule, int *nargs)
                           " spur_span = function () return nil end,"
                           " spur_span_is = function () end,"
                           " band_chain = function () return nil end,"
-                          " band_band_chained = function () end,"
-                          " hw_fits = function () return 0 end,"
-                          " hw_fit = function () return nil end,"
-                          " hw_fit_done = function () end,"
-                          " hw_fit_choice = function () return nil end,"
-                          " hw_fit_choice_is = function () end,"
-                          " band_band_fitted = function () end,"
-                          " band_band_cut = function () end,"
+                          " band_chained = function () end,"
+                          " band_fits = function () return 0 end,"
+                          " band_fit = function () return nil end,"
+                          " band_fit_done = function () end,"
+                          " band_fit_choice = function () return nil end,"
+                          " band_fit_choice_is = function () end,"
+                          " band_fitted = function () end,"
+                          " band_cut = function () end,"
                           " cuts = function () return 0 end,"
                           " cut = function () return nil end,"
                           " cut_done = function () end,"
-                          " band_band_done = function () end,"
+                          " band_done = function () end,"
                           " band_spurs = function () return true end,"
                           " spur_next = function () return false end,"
                           " spur_pick = function () return nil end,"

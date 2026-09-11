@@ -197,7 +197,6 @@ void traffic_free(RTraffic *t);
  *  is drawn.  The script runs the beats the clock owes and lays the
  *  geometry of what moves. */
 int  traffic_moving(RTraffic *t, const RMesh *m, const RCity *c, float dt, float time, int draw);
-int  traffic_build(RTraffic *t, const RMesh *m, const RCity *c);
 
 /*  Build the land list for `c`.  Returns 0, or -1 when out of memory. */
 /*  `underground` builds the underground view's ground instead.
@@ -216,15 +215,12 @@ int  traffic_build(RTraffic *t, const RMesh *m, const RCity *c);
  *      One constant-width band per line tile along the piece's connections.
  *      Bent on a quarter circle at a corner.
  *      In place of the line sprites. */
-int  mesh_build(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel *l, int underground, int rotated, int lines);
 void mesh_free(RMesh *m);
 /*  The incremental rebuild's own scratch, kept between builds: given
  *  back when the program is done with meshes altogether. */
-void mesh_incr_free(void);
 /*  The emitter's own scratch: the triangle index by tile and the
  *  coplanar check's hashes, kept between builds. */
 void mesh_emit_free(void);
-void net_table_free(void); /* net/table.c: the segment table's sample arenas, once, at exit */
 
 /*  What the mesh made of a tile, for the query tool.  It gives its kind,
  *  the corners of the face it draws, and the shared terrain around it.
@@ -293,11 +289,9 @@ int mesh_check_collide(const RMesh *m, int verbose);
 void mesh_probe(const RMesh *m, float px, float py);
 /*  The mesh the last build wrote into, or NULL before the first one: what
  *  a query with no mesh of its own asks (src/script). */
-const RMesh *mesh_built(void);
 /*  A junction's outline must be a simple ring: no vertex where it doubles
  *  back, no two edges meet.  Nonzero when the last build laid one
  *  that is not (net/node.c). */
-int junction_outline_faults(void);
 /*  A meet must reach a margin at both of its ends.  Nonzero when
  *  the last build marked one that does not (walk/walkway.c). */
 int walk_net_faults(void);
@@ -309,13 +303,11 @@ int walk_net_faults(void);
  *  back.  Nine floats in the order the tuning window shows them.
  *  Writing them and rebuilding the mesh is all that is needed to see the
  *  change. */
-float *mesh_tune(void);
 
 /*  The street-furniture and margin passes (furniture.c, margin.c): each
  *  switched as one, from the View menu or --no-furniture / --no-margins.
  *  A change rebuilds the mesh. */
 void furniture_enable(int on);
-void margin_enable(int on); /* the margin pass */
 int  furniture_on(void);      /* the furniture pass's state, to know when a toggle needs a rebuild */
 
 #endif /* R_MESH_H */

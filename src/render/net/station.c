@@ -16,13 +16,14 @@
 #include "mesh/internal.h"
 #include "pipeline.h"
 
-HwSt s_hw_st[HW_MAX_ST];
-int  s_hw_nst, s_hw_band;
+#include "net/net.h"
+BandSt s_band_st[BAND_MAX_ST];
+int  s_band_nst, s_band_st_at;
 
 void net_station_reset(void)
 {
-    s_hw_nst  = 0;
-    s_hw_band = 0;
+    s_band_nst  = 0;
+    s_band_st_at = 0;
 }
 
 /*  One loft's stations filed under its band.  Answers 0 always: a slab
@@ -33,14 +34,14 @@ int net_station_record(const Loft *x)
     int           ns = x->ns, i;
     if (x->d->struct_)
         return 0;
-    for (i = 0; i < ns && s_hw_nst < HW_MAX_ST; ++i)
+    for (i = 0; i < ns && s_band_nst < BAND_MAX_ST; ++i)
     {
-        s_hw_st[s_hw_nst].pos  = smp[i].pos;
-        s_hw_st[s_hw_nst].dir  = smp[i].dir;
-        s_hw_st[s_hw_nst].s    = smp[i].s;
-        s_hw_st[s_hw_nst].z    = smp[i].z;
-        s_hw_st[s_hw_nst].band = x->d->band;
-        ++s_hw_nst;
+        s_band_st[s_band_nst].pos  = smp[i].pos;
+        s_band_st[s_band_nst].dir  = smp[i].dir;
+        s_band_st[s_band_nst].s    = smp[i].s;
+        s_band_st[s_band_nst].z    = smp[i].z;
+        s_band_st[s_band_nst].band = x->d->band;
+        ++s_band_nst;
     }
     return 0;
 }

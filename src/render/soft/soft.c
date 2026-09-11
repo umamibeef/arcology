@@ -221,9 +221,9 @@ static ROp *emit(Emitter *e, int kind, int32_t shap, int32_t sx, int32_t sy, int
     return op;
 }
 
-static void emit_blit(Emitter *e, int32_t shap, int32_t sx, int32_t sy, int flip, int32_t rise, int32_t stencil, int terrain)
+static void emit_blit(Emitter *e, int32_t shap, int32_t sx, int32_t sy, int flip, int32_t rise, int terrain)
 {
-    emit(e, R_OP_BLIT, shap, sx, sy, flip, rise, stencil, terrain);
+    emit(e, R_OP_BLIT, shap, sx, sy, flip, rise, -1, terrain); /* no stencil: emit_car is the one that stencils */
 }
 
 /*  $1987E.  The traffic cars do not go through $18E96 at all: all five call
@@ -619,7 +619,7 @@ static void draw_thing(Emitter *e, const RCity *c, int32_t idx, const uint8_t *r
     if ((type == 1 || type == 2 || type == 16) && c->xbld[idx] < 0x70)
         emit_shadow(e, l->id_base + shape, sx + dx, sy + dy + ((int32_t)rec[5] - 2) * (2 << zoom_level), flip);
 
-    emit_blit(e, l->id_base + shape, sx + dx, sy + dy, flip, -1, -1, 0);
+    emit_blit(e, l->id_base + shape, sx + dx, sy + dy, flip, -1, 0);
 }
 
 int soft_sweep(const RAtlas *a, const RCity *c, const RSoftOpts *o, ROpList *ops, RSweep *info)
@@ -770,10 +770,10 @@ int soft_sweep(const RAtlas *a, const RCity *c, const RSoftOpts *o, ROpList *ops
                  *  hang below the tile.  Starting them at sy and walking
                  *  down is why only the bottom face ever looked right. */
                 for (k = 0; k < ga; ++k, y -= alt)
-                    emit_blit(&E, l->id_base + 269, sx, y, 0, -1, -1, 1);
+                    emit_blit(&E, l->id_base + 269, sx, y, 0, -1, 1);
                 if (c->xbit[idx] & 0x04u)
                     for (k = 0; k < wa - ga; ++k, y -= alt)
-                        emit_blit(&E, l->id_base + 284, sx, y, 0, -1, -1, 1);
+                        emit_blit(&E, l->id_base + 284, sx, y, 0, -1, 1);
             }
 
             /*  Ground.  Only a ZONE building (XBLD >= 0x70) suppresses
@@ -842,7 +842,7 @@ int soft_sweep(const RAtlas *a, const RCity *c, const RSoftOpts *o, ROpList *ops
                 else
                     t = terrain_tile(c->xter[idx]);
                 if (t)
-                    emit_blit(&E, l->id_base + t, sx, sy, 0, -1, -1, 1);
+                    emit_blit(&E, l->id_base + t, sx, sy, 0, -1, 1);
             }
 
             /*  A data view draws terrain and tint only.  $1547A sends a
@@ -858,7 +858,7 @@ int soft_sweep(const RAtlas *a, const RCity *c, const RSoftOpts *o, ROpList *ops
                 int32_t gh = gt ? (int32_t)gt->h : l->tile_h;
                 int     k, nu = underground_tiles(c, idx, mask, alt, u, udy, uf, ug);
                 for (k = 0; k < nu; ++k)
-                    emit_blit(&E, l->id_base + u[k], sx, sy + udy[k], uf[k], ug[k] ? gh : -1, -1, 0);
+                    emit_blit(&E, l->id_base + u[k], sx, sy + udy[k], uf[k], ug[k] ? gh : -1, 0);
             }
 
             if (!o->underground && o->view == R_VIEW_NORMAL &&
@@ -903,7 +903,7 @@ int soft_sweep(const RAtlas *a, const RCity *c, const RSoftOpts *o, ROpList *ops
                             continue;
                         gt = terrain_tile(c->xter[r * R_MAP + cc]);
                         if (gt)
-                            emit_blit(&E, l->id_base + gt, sx + fp[k][2] * (l->tile_w / 2), sy + fp[k][3] * (l->tile_h / 2), 0, -1, -1, 1);
+                            emit_blit(&E, l->id_base + gt, sx + fp[k][2] * (l->tile_w / 2), sy + fp[k][3] * (l->tile_h / 2), 0, -1, 1);
                     }
                 }
                 drop = (bt && !o->no_drop)
@@ -998,7 +998,7 @@ int soft_sweep(const RAtlas *a, const RCity *c, const RSoftOpts *o, ROpList *ops
                 if (b == 0x58u && bridge_is_raised(c, o->x0 + dx, o->y0 + dy))
                     b = 0x59;
 
-                emit_blit(&E, l->id_base + b, sx, road_y, flip, -1, -1, 0);
+                emit_blit(&E, l->id_base + b, sx, road_y, flip, -1, 0);
 
                 if (o->draw_things && o->draw_traffic && b < 0x70)
                 {
@@ -1046,7 +1046,7 @@ int soft_sweep(const RAtlas *a, const RCity *c, const RSoftOpts *o, ROpList *ops
                 if ((c->xbit[idx] & 0xC0u) == 0x80u)
                 {
                     int32_t off = arc_half_wi(l->tile_w);
-                    emit_blit(&E, l->id_base + R_NO_POWER, sx - off + (bt ? (int32_t)bt->w / 2 : 0), sy - off, 0, 0, -1, 0);
+                    emit_blit(&E, l->id_base + R_NO_POWER, sx - off + (bt ? (int32_t)bt->w / 2 : 0), sy - off, 0, 0, 0);
                 }
             }
 

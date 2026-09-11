@@ -754,7 +754,7 @@ int mesh_check_clip(const RMesh *m, int verbose)
             if (!((b >= 0x0Eu && b <= 0x3Au) || (b >= 0x43u && b <= 0x48u) || (b >= 0x49u && b <= 0x50u) || (b >= 0x5Du && b <= 0x68u)))
                 continue;
             if (count[i] == 0 && net_tile_served((int32_t)i))
-                continue; /* a thread piece bypassed by its line, fitted across the free ground beside it: its segment was drawn (net/walk.c) */
+                continue; /* a thread piece bypassed by its line, fitted across the free ground beside it: its segment was drawn (walk/walk.c) */
             if (count[i] == 0 && b >= 0x49u && b <= 0x68u)
             {
                 /* A band is a viaduct on its own fit.  The fit keeps only within the free air beside the band.  An arc cuts inside a corner, and a staircase becomes one sweep.  The tiles it left are ground under open air, by design.
@@ -799,14 +799,6 @@ int mesh_check_clip(const RMesh *m, int verbose)
                 }
         }
         dumpf("line clip  %u samples under the terrain on %u tiles\n", hits, n_bad);
-        fit_stats();
-        lane_stats_print();
-        margin_stats_print();
-        junction_outline_print();
-        path_fit_probes();
-        walk_net_check();
-        shape_unclaimed_report();
-        spur_stats();
         for (i = 0; i < n_bad && shown < 40; ++i, ++shown)
             dumpf("  column %3d row %3d  %4u samples, terrain above by %.2f\n",
                    (int)(order[i] % R_MAP),

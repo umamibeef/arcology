@@ -5,8 +5,11 @@
 #include "log.h"
 #include "mesh/internal.h"
 #include "pipeline.h"
+#include "build.h"
+#include "net/net.h"
 #include "opt.h"
 #include "script.h"
+#include "incr.h"
 #include <time.h>
 
 /*  --times: where a build's time goes, for review.  Wall clock, ms. */
@@ -25,195 +28,13 @@ void tnote(const char *what, double t0)
         dumpf("time  pass %d  %-28s %7.1f ms\n", s_pass, what, tms() - t0);
 }
 
-static int mesh_build_pass(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel *l, int underground, int rotated, int lines);
 
 /*  A mesh is built in two passes when there are lines.  The first
  *  GRADES: it walks every network and records the surface each corridor
  *  wants (the shelves, s_tilez), and draws nothing.  Every emitter is a
  *  no-op under s_pass 1.  The second BUILDS the world on those shelves.
  *  They are the same pass body, mesh_build_pass, told which it is. */
-static int mesh_build_passes(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel *l, int underground, int rotated, int lines, int mode);
 
-/*  What the build reads besides the tiles: a different key is a full
- *  build (mesh/incr.c diffs the tiles under the same key).  The sprite
- *  set being drawn is NOT in it.  The mesh is the world in world units.
- *  What it reads off the artwork.  A piece's links, a building's bulk,
- *  the ground's mean color.  Are properties of a tile id and are read
- *  from the finest level whatever level is on screen.  With the level in
- *  the key, every zoom across a set boundary was a full rebuild. */
-typedef struct
-{
-    int   underground, rotated, lines, furniture;
-    float tune[19];
-} BuildKey;
-
-/*  The mesh the last build wrote into: what a query that was handed no
- *  mesh of its own asks. */
-static RMesh *s_built;
-
-const RMesh *mesh_built(void)
-{
-    return s_built;
-}
-
-int mesh_build(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel *l, int underground, int rotated, int lines)
-{
-    s_built = m;
-    BuildKey key;
-    /*  The map the pass is about to read, offered to the scripts: a
-     *  script walks it through arc.city.  It stands after the build so
-     *  the console and --lua-eval read the same city. */
-    script_city_is(c);
-    int      mode, rc;
-    /*  Everything the build reads off the artwork comes from the finest
-     *  level, so the mesh is the same whatever zoom is on screen. */
-    if (a && a->n_levels > 0)
-        l = &a->level[a->n_levels - 1];
-    net_piece_art(a);
-    memset(&key, 0, sizeof key);
-    key.underground = underground;
-    key.rotated     = rotated;
-    key.lines       = lines;
-    key.furniture   = furniture_on();
-    memcpy(key.tune, mesh_tune(), sizeof key.tune);
-    mode = mesh_incr_begin(m, c, &key, sizeof key);
-    if (mode < 0)
-        return 0; /* the same city under the same key: the mesh stands */
-    rc = mesh_build_passes(m, c, a, l, underground, rotated, lines, mode);
-    /*  A rule that raised answered nothing, so whatever it was to draw
-     *  is missing from what the passes just built.  The mesh is
-     *  abandoned rather than shown: the one on the screen is the last
-     *  that was whole.  The fault says which rule to go and look at.  It
-     *  stands until the scripts are read again.  So saving the file is
-     *  what starts the next build. */
-    if (rc == 0 && script_fault())
-    {
-        int n = script_fault_count();
-        R_ERR("mesh", "build abandoned, %d script fault%s; the first: %s",
-              n, n == 1 ? "" : "s", script_fault());
-        rc = -1;
-    }
-    if (rc == 0)
-        rc = mesh_incr_snapshot(m, c, &key, sizeof key);
-    if (rc != 0)
-        mesh_incr_abort(m);
-    return rc;
-}
-
-/*  THE BUILD AS A CURSOR.  The passes are set up here and handed out one
- *  at a time.  Composing each is the drive's, so this file never enters
- *  a script.  `step` is how far the cursor has come: 0 not begun, 1 and
- *  2 the pass of that number open, 3 nothing left. */
-static WorldFan s_world;
-static struct
-{
-    RMesh             *m;
-    const RCity       *c;
-    const RAtlas      *a;
-    const RAtlasLevel *l;
-    int                underground, rotated, lines, mode;
-    int                two;  /* the lines want a grading pass and a building pass */
-    int                step;
-    int                rc;
-} s_bld;
-
-static int mesh_build_pass(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel *l, int underground, int rotated, int lines);
-
-/*  What has to happen before the first pass: who drew what, for the
- *  inspector, and the corridor's own tables where there are two passes. */
-static void mesh_passes_begin(void)
-{
-    if (s_bld.mode != 1)
-        mesh_origins_reset();
-    mesh_record(1);
-    if (!s_bld.two)
-        return;
-    {
-        int32_t g;
-        for (g = 0; g < GRID * GRID; ++g)
-        {
-            s_zcap[g]  = 1e9f;
-            s_zlow[g]  = 1e9f;
-            s_zdist[g] = 1e9f;
-            s_corr[g]  = 0;
-        }
-    }
-    {
-        /*  The shelves are one entry per tile CORNER, four times the map
-         *  and not the grid's own count.  Cleared on the grid's loop,
-         *  three quarters of the map holds a shelf of zero.  This drops
-         *  every tile it touches to the sea and stands a wall round it. */
-        int32_t t;
-        for (t = 0; t < R_MAP * R_MAP * 4; ++t)
-        {
-            s_tilez[t] = 1e9f;
-            s_tile_reset(t);
-        }
-    }
-}
-
-/*  The next pass, set up and handed out, or nothing when the build has
- *  none left. */
-void *mesh_build_pass_next(void)
-{
-    double t0;
-    if (s_bld.step == 0)
-    {
-        mesh_passes_begin();
-        if (!s_bld.two && s_bld.mode == 1)
-        {
-            mesh_incr_closure(0);
-            mesh_origins_clear_wanted();
-        }
-        s_pass    = s_bld.two ? 1 : 0;
-        s_bld.rc  = mesh_build_pass(s_bld.m, s_bld.c, s_bld.a, s_bld.l, s_bld.underground, s_bld.rotated, s_bld.lines);
-        s_bld.step = 1;
-        if (s_bld.rc != 0)
-            return NULL;
-        return &s_world;
-    }
-    /*  What the pass just composed left behind, and then the next. */
-    s_bld.rc = s_world.rc;
-    if (s_bld.step == 1 && s_bld.two && s_bld.rc == 0)
-    {
-        if (s_bld.mode == 1)
-        {
-            mesh_incr_closure(1); /* an edit: which chunks the building pass emits into */
-            mesh_origins_clear_wanted();
-        }
-        t0        = tms();
-        s_pass    = 2;
-        s_bld.rc  = mesh_build_pass(s_bld.m, s_bld.c, s_bld.a, s_bld.l, s_bld.underground, s_bld.rotated, s_bld.lines);
-        tnote("whole pass", t0);
-        s_bld.step = 2;
-        if (s_bld.rc != 0)
-            return NULL;
-        return &s_world;
-    }
-    if (s_bld.rc == 0) /* by chunk, for the frame's culling and per-chunk draws.  An edit's build spliced in */
-        s_bld.rc = s_bld.mode == 1 ? mesh_incr_end(s_bld.m) : mesh_partition(s_bld.m);
-    s_pass     = 0;
-    s_bld.step = 3;
-    mesh_record(0);
-    return NULL;
-}
-
-int mesh_build_passes_rc(void)
-{
-    return s_bld.rc;
-}
-
-static int mesh_build_passes(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel *l, int underground, int rotated, int lines, int mode)
-{
-    memset(&s_bld, 0, sizeof s_bld);
-    s_bld.m = m, s_bld.c = c, s_bld.a = a, s_bld.l = l;
-    s_bld.underground = underground;
-    s_bld.rotated     = rotated;
-    s_bld.lines       = lines;
-    s_bld.mode        = mode;
-    s_bld.two         = lines && !underground && !g_dev.no_cap;
-    return net_drive_build();
-}
 
 /*  What a tile's composition wants beyond its own place: set once a
  *  pass.  So one tile's ground can be composed from anywhere: the loop
@@ -300,7 +121,7 @@ int mesh_ground_fan(int32_t col, int32_t row, TileFan *out)
     const int     underground = s_tp.underground;
     const int32_t dump_r = s_tp.dump_r, dump_c = s_tp.dump_c;
     (void)m, (void)underground;
-    if (s_pass != 1 && !mesh_want_tile(col, row))
+    if (s_pass != 1 && !incr_want_tile(col, row))
         return 0; /* an edit's build: this chunk stands */
     int32_t idx  = row * R_MAP + col;
     uint8_t xter = c->xter[idx], xbld = c->xbld[idx];
@@ -396,7 +217,7 @@ int mesh_tint_fan(int32_t col, int32_t row, TileFan *out)
     const RCity  *c        = s_tp.c;
     const uint8_t mask_bit = s_tp.mask_bit;
     (void)m;
-    if (s_pass != 1 && !mesh_want_tile(col, row))
+    if (s_pass != 1 && !incr_want_tile(col, row))
         return 0;
     int32_t idx  = row * R_MAP + col;
     int     zone = c->xzon[idx] & 0x0Fu;
@@ -429,7 +250,7 @@ int mesh_tint_fan(int32_t col, int32_t row, TileFan *out)
     return 1;
 }
 
-static int mesh_build_pass(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel *l, int underground, int rotated, int lines)
+int mesh_build_pass(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel *l, int underground, int rotated, int lines)
 {
     static const float land_fb[3] = {0.45f, 0.62f, 0.30f};
     float              land_col[3];
@@ -445,7 +266,7 @@ static int mesh_build_pass(RMesh *m, const RCity *c, const RAtlas *a, const RAtl
     if (s_pass != 2)
     {
         /*  The junction controls are stage three's, worked out with the
-         *  trims and the meets that turn on them (net/walk.c).  So they
+         *  trims and the meets that turn on them (walk/walk.c).  So they
          *  are cleared where those are and the building pass reads what
          *  the grading pass left. */
         memset(s_junc_ctrl, 0, sizeof s_junc_ctrl);

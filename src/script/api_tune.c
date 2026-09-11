@@ -17,6 +17,7 @@
 #include "internal.h"
 #include "pipeline.h"
 
+#include "net/net.h"
 typedef int (*SetFn)(const char *name, float v);
 typedef const char *(*NameFn)(int i, float *v);
 
@@ -86,15 +87,15 @@ static void snapshot(lua_State *L, const char *field, NameFn name)
 static int l_settings(lua_State *L)
 {
     lua_newtable(L);
-    snapshot(L, "tune", net_tune_name);
-    snapshot(L, "geo", net_geo_name);
+    snapshot(L, "tune", tune_name);
+    snapshot(L, "geo", geo_name);
     return 1;
 }
 
 void api_tune_open(lua_State *L)
 {
-    table_open(L, "tune", net_tune_set, net_tune_name);
-    table_open(L, "geo", net_geo_set, net_geo_name);
+    table_open(L, "tune", tune_set, tune_name);
+    table_open(L, "geo", geo_set, geo_name);
     lua_pushcfunction(L, l_settings);
     lua_setfield(L, -2, "settings");
 }

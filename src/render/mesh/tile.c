@@ -5,6 +5,7 @@
 #include "log.h"
 #include "mesh/internal.h"
 #include "pipeline.h"
+#include "net/shelf.h" /* the corridor shelves the ground is cut to */
 #include "script.h"
 
 /*  The tables and the field the other pieces read.  The state the

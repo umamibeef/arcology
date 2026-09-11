@@ -10,6 +10,7 @@
 #include "lua.h"
 #include "script.h"
 #include "lualib.h"
+#include "net/net.h"
 
 /*  The one state, or NULL when none is up. */
 extern lua_State *s_L;
@@ -41,14 +42,14 @@ void api_prop_push(lua_State *L, const ScriptProp *at); /* a prop's place, as a 
  *  the lint read a declaration by the same expression.  Answers NULL
  *  where the table is not one. */
 struct NetFamilyDecl;
-const struct NetFamilyDecl *api_family_read(lua_State *L, int t);
+const struct NetFamilyDecl *api_family_read(lua_State *L);
 
 /*  Call `arc.rules[name]` with `nargs` values already on the stack,
  *  asking for `nres`.  Answers 1 when it ran, 0 when there is no such
  *  rule.  On 0 the arguments are popped.  A rule that errors is reported
  *  once and then left alone until the script is read again. */
 int api_rule_begin(lua_State *L, const char *name);
-int api_rule_call(lua_State *L, const char *name, int nargs, int nres);
+int api_rule_call(lua_State *L, const char *name, int nargs);
 /*  A rule that never returns would freeze the frame it was asked in.  A
  *  rule is edited while the city is on screen.  So one is stopped and
  *  reported like any other fault: a loop that cannot end costs a message

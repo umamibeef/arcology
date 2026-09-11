@@ -15,10 +15,10 @@
  *  as malloc'd text the caller frees.  The networks must be built. */
 int net_area_report(const RCity *c, int32_t c0, int32_t r0, int32_t c1, int32_t r1, char **out);
 
-#endif
-
 /*  The component under a tile, an intersection's outline, or the band of
  *  the line through it, in world coordinates, closed, with a name.  The
  *  inspector outlines what it returns. */
 int net_component_at(const RCity *c, const RAtlasLevel *l, int32_t col, int32_t row, float *poly_xy, int max_pts, int *n, char *label, size_t lab);
+
+#endif /* NET_REPORT_H */
 

@@ -497,7 +497,7 @@ static void draw_mesh(RGpu *g, SDL_GPUCommandBuffer *cmd, SDL_GPURenderPass *rp,
 /*  Draw passes 1 and 2 (the frame target and the shadow mask) and then
  *  resolve to `final`.  This is the swapchain texture or the offscreen
  *  one.  `sw`/`sh` are the final target's size in pixels. */
-static int draw_frame(RGpu *g, SDL_GPUCommandBuffer *cmd, const RGpuView *v, SDL_GPUTexture *final, SDL_GPUGraphicsPipeline *resolve_pipe, int32_t sw, int32_t sh, float scale)
+static int draw_frame(RGpu *g, SDL_GPUCommandBuffer *cmd, const RGpuView *v, SDL_GPUTexture *final, SDL_GPUGraphicsPipeline *resolve_pipe, int32_t sw, int32_t sh)
 {
     Ranges                        r;
     SDL_GPUCopyPass              *cp;
@@ -714,7 +714,7 @@ static int draw_frame(RGpu *g, SDL_GPUCommandBuffer *cmd, const RGpuView *v, SDL
         SDL_BindGPUFragmentSamplers(rp, 0, ts, 3);
         ru.screen[0] = (float)sw;
         ru.screen[1] = (float)sh;
-        ru.screen[2] = scale;
+        ru.screen[2] = 1.0f; /* the frame is drawn at its own size */
         ru.screen[3] = 0.0f;
         ru.sky[0]    = (float)g->palette[g->bg_index][0] / 255.0f;
         ru.sky[1]    = (float)g->palette[g->bg_index][1] / 255.0f;
@@ -790,7 +790,7 @@ int gpu_frame(RGpu *g, const RGpuView *v, const uint8_t sky[3], RGpuOverlay over
     /*  The palette snapped to the sky: use the phase-0 colors, which is
      *  what the software does with the palette it was given. */
     snap_background(g, sky);
-    if (draw_frame(g, cmd, v, swap, g->pipe_resolve, (int32_t)sw, (int32_t)sh, 1.0f) != 0)
+    if (draw_frame(g, cmd, v, swap, g->pipe_resolve, (int32_t)sw, (int32_t)sh) != 0)
     {
         SDL_SubmitGPUCommandBuffer(cmd);
         return -1;
@@ -835,7 +835,7 @@ int gpu_readback(RGpu *g, const RGpuView *v, const uint8_t sky[3], int32_t w, in
     cmd = SDL_AcquireGPUCommandBuffer(g->dev);
     if (!cmd)
         return -1;
-    if (draw_frame(g, cmd, v, g->offscreen, g->pipe_resolve_off, w, h, 1.0f) != 0)
+    if (draw_frame(g, cmd, v, g->offscreen, g->pipe_resolve_off, w, h) != 0)
     {
         SDL_SubmitGPUCommandBuffer(cmd);
         return -1;

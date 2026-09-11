@@ -21,6 +21,7 @@
 #include "mesh/internal.h"
 #include "log.h"
 #include "pipeline.h"
+#include "net/net.h"
 #include "script.h"
 #include "opt.h"
 
@@ -72,7 +73,6 @@ typedef struct
 /*  A LANE END NAMES ONE OTHER, and one only: the two ends a join is
  *  about, taken together or not at all.  Every pass that joins two lane
  *  ends goes through this, so no two of them can claim the same end. */
-static int lane_ends_take(int from, int to, int by);
 
 static Lane  s_lane[L_MAX];
 static Piece s_lp[L_PIECES];
@@ -96,6 +96,8 @@ static struct
     int doubled;                             /* an end named by more than one link */
     int refused;                             /* ... and a link refused for asking */
 } s_ls;
+
+static void net_wires_reset(void);
 
 void lane_reset(void)
 {
@@ -165,7 +167,7 @@ void net_lane_run_is(int i, const float *off, int n)
     s_lane_run[i].have = 1;
 }
 
-int net_lane_offsets(Family f, int cls, float *off, int max)
+static int net_lane_offsets(Family f, int cls, float *off, int max)
 {
     int i = lane_run_ix(f, cls), k, n;
     if (i < 0 || !s_lane_run[i].have)
@@ -264,6 +266,8 @@ static int lane_candidates(V2 p, float maxd)
     return n;
 }
 
+static int lane_ends_take(int from, int to, int by);
+
 static int lane_add(uint8_t cls, Family f, const Piece *pc, int np, float w, float rmin, int tight, int k0, int p0, int k1, int p1, int band, float off)
 {
     Lane *l;
@@ -303,16 +307,16 @@ float slab_z_near(const RCity *c, uint8_t mask_bit, int band, V2 p)
 {
     float best = 1e9f, z = 0.0f;
     int   k, have        = 0;
-    for (k = 0; k < s_hw_nst; ++k)
+    for (k = 0; k < s_band_nst; ++k)
     {
         float dx, dy, d;
-        if (s_hw_st[k].band != band)
+        if (s_band_st[k].band != band)
             continue;
-        dx = s_hw_st[k].pos.x - p.x;
-        dy = s_hw_st[k].pos.y - p.y;
+        dx = s_band_st[k].pos.x - p.x;
+        dy = s_band_st[k].pos.y - p.y;
         d  = dx * dx + dy * dy;
         if (d < best)
-            best = d, z = s_hw_st[k].z, have = 1;
+            best = d, z = s_band_st[k].z, have = 1;
     }
     return have ? z : surface_at_world(c, mask_bit, p.x, p.y);
 }
@@ -337,7 +341,8 @@ static int    s_n_wire, s_wire_cap;
 static Piece *s_wire_pc;
 static int    s_wire_pc_n, s_wire_pc_cap;
 
-void net_wires_reset(void)
+/*  The wires a build gathers, emptied with the lanes they belong to. */
+static void net_wires_reset(void)
 {
     s_n_wire = s_wire_pc_n = 0;
 }
@@ -501,17 +506,17 @@ void lane_dump_pieces(const Piece *pc, int np)
 }
 
 /*  A spur tile, when one lies at col,row. */
-static const HwSpur *spur_tile(int32_t col, int32_t row)
+static const BandSpur *spur_tile(int32_t col, int32_t row)
 {
     int r;
-    for (r = 0; r < s_hw_nspurs; ++r)
-        if (s_hw_spurs[r].rc == col && s_hw_spurs[r].rr == row)
-            return &s_hw_spurs[r];
+    for (r = 0; r < s_band_nspurs; ++r)
+        if (s_band_spurs[r].rc == col && s_band_spurs[r].rr == row)
+            return &s_band_spurs[r];
     return NULL;
 }
 
 /*  The same, for the box builder in junction.c. */
-const HwSpur *lane_spur_tile(int32_t col, int32_t row)
+const BandSpur *lane_spur_tile(int32_t col, int32_t row)
 {
     return spur_tile(col, row);
 }
@@ -614,9 +619,9 @@ static void lj_spur_ports(LaneJunc *x)
         int     r, mode = 0;
         if (nc < 0 || nr < 0 || nc >= R_MAP || nr >= R_MAP)
             continue; /* linked or not: a spur tile counts as a line link in the data, and is one-way all the same */
-        for (r = 0; r < s_hw_nspurs; ++r)
+        for (r = 0; r < s_band_nspurs; ++r)
         {
-            const HwSpur *rp = &s_hw_spurs[r];
+            const BandSpur *rp = &s_band_spurs[r];
             V2            rd;
             if (rp->rc != nc || rp->rr != nr)
                 continue;
@@ -1353,7 +1358,7 @@ static void lane_station_back(int li, int which, float back, V2 *pos, V2 *dir)
 
 
 
-/*  Where a band band comes down to grade and becomes a line, its six
+/*  Where a band comes down to grade and becomes a line, its six
  *  lanes have to become the line's two.  At each band end, per side: the
  *  INNER slab lane routes into the line's lane on that side.  The line
  *  lane whose open end lies nearest the slab lane's, running the same
@@ -1682,9 +1687,9 @@ static uint8_t s_pend[R_MAP * R_MAP * 4 * 4], s_pstart[R_MAP * R_MAP * 4 * 4], s
 static void lane_check_curves(int dump)
 {
     static int gix_lmin = -1, gix_gap = -1, gix_kink = -1;
-    const float lmin = net_geo(&gix_lmin, "lane_min_len");
-    const float gap  = net_geo(&gix_gap, "lane_join_gap");
-    const float kink = net_geo(&gix_kink, "lane_join_dot");
+    const float lmin = geo_num(&gix_lmin, "lane_min_len");
+    const float gap  = geo_num(&gix_gap, "lane_join_gap");
+    const float kink = geo_num(&gix_kink, "lane_join_dot");
     int         li;
     for (li = 0; li < s_nl; ++li)
     {
@@ -1894,9 +1899,9 @@ void lane_stats_print(void)
 }
 
 /*  The exported face of port_pose, for the families' own drawings. */
-int lane_port(Family f, int col, int row, int e, int out, int k, V2 *pos, V2 *dir)
+int lane_port(Family f, int col, int row, int e, int out, V2 *pos, V2 *dir)
 {
-    port_pose(f, col, row, e, out, k, pos, dir);
+    port_pose(f, col, row, e, out, 0, pos, dir); /* the first lane of the port */
     return 0;
 }
 
@@ -1921,4 +1926,3 @@ int lane_table_get(int i, int *cls, int *fam, const Piece **pc, int *np, float *
     *w   = l->w;
     return 0;
 }
-

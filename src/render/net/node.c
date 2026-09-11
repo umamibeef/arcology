@@ -12,8 +12,10 @@
 #include "mesh/internal.h"
 #include "log.h"
 #include "pipeline.h"
+#include "net/net.h"
 #include "script.h"
 #include "opt.h"
+#include "incr.h"
 
 /*  The numbers this file reads, each remembering where the store
  *  put it (net/geo.c).  A name here is a name a script must set. */
@@ -101,25 +103,26 @@ void arm_heading(const Piece *pc, int np, float total, int from_end, V2 *pos, V2
     }
 }
 
-/*  The ground under a junction box's outline point.
+/*  The ground under a junction box's outline point.  It is the highest
+ *  of three.
  *
- *      The highest of the box's own plane.
+ *      The box's own plane.
  *      The ground where the point is.
  *      The junction tile's ground at the nearest spot inside it.
  *
- *  Each of the three has been the one that mattered: - the box's plane:
- *  a spot of the junction tile the corridor never graded reads the raw
- *  ground a hair under the shelf, and the outline sloping down to it cut
- *  under the shelf between two samples.
- *  - the ground where it is: an arm's outline reaching PAST the tile
- *  into a neighbor whose shelf stands higher (Four Cities 42,108, River5
- *  57,19: pinned to the junction tile it cut 0.04 under).  - the tile's
- *  own ground inside: a point ON the edge read the neighbor's raw ground
- *  and tilted that side of the box 0.03 under its own tile.  And a point past the edge into a LOWER neighbor let
- *  the fan's spoke dip under the junction tile's own edge on the way out
- *  (River5 29,47, a sloped junction with a 0.08 wall to the south).
+ *  Each of the three is the one that decides in a case the other two get
+ *  wrong.  The box's PLANE holds the point up over a spot the corridor
+ *  never graded.  Such a spot reads the raw ground under the shelf.  An
+ *  outline that slopes down to it cuts under the shelf between two
+ *  samples.  The ground WHERE IT IS holds it up where an arm's outline
+ *  reaches past the tile into a neighbor whose shelf stands higher.  The
+ *  tile's own ground INSIDE holds it up in two cases.  A point on the
+ *  edge reads the neighbor's raw ground, and tilts that side of the box
+ *  under its own tile.  A point past the edge into a lower neighbor lets
+ *  the fan's spoke dip under the junction tile's own edge.
+ *
  *  Uphill the box follows the ground.  Downhill it stays level and
- *  hovers the hair, as the old +0.05 outline did everywhere. */
+ *  hovers the hair. */
 float junc_surface(Family f, const RCity *c, uint8_t mask_bit, int col, int row, float x, float y, float zj)
 {
     const float in = net_family_rules(f)->junc_inset;
@@ -497,7 +500,7 @@ static struct
 } s_box_loft[BOX_LOFTS_MAX];
 static int s_n_box_loft;
 
-void net_box_lofts_reset(void)
+static void net_box_lofts_reset(void)
 {
     s_n_box_loft = 0;
 }
@@ -684,7 +687,7 @@ static void junction_outline_check(const Junc *jx)
             s_out_worst_c = jx->col;
             s_out_worst_r = jx->row;
         }
-        if (fabsf(ang) > net_geo(&gix_junc_spur_angle, "junc_spur_angle"))
+        if (fabsf(ang) > geo_num(&gix_junc_spur_angle, "junc_spur_angle"))
         {
             ++spur;
             if (g_dev.junc_dump)
@@ -848,7 +851,7 @@ static int build_junction_body(RMesh *m, const RCity *c, uint8_t mask_bit, Famil
     x.m = m, x.c = c, x.mask_bit = mask_bit, x.f = f, x.col = col, x.row = row, x.links = links, x.order = order;
     x.hw           = *fam->width * 0.5f;
     x.mat          = fam->mat;
-    x.records_only = !mesh_want_tile(col, row); /* an edit's build: the box reaches no chunk it draws */
+    x.records_only = !incr_want_tile(col, row); /* an edit's build: the box reaches no chunk it draws */
     if (!x.records_only) /* what it is, for the inspector */
         shape_note("links\t%s%s%s%s\nwidth\thalf %.2f tiles", links & L_N ? "north " : "", links & L_E ? "east " : "", links & L_S ? "south " : "", links & L_W ? "west " : "", (double)x.hw);
     x.cx           = (float)col + 0.5f;
@@ -861,10 +864,10 @@ static int build_junction_body(RMesh *m, const RCity *c, uint8_t mask_bit, Famil
     x.b0[0] = x.cx - x.h, x.b0[1] = x.cy + x.h;
     x.b1[0] = x.cx + x.h, x.b1[1] = x.cy + x.h;
     /*  The box stands FLUSH on the graded surface, no hair.  The ground
-     *  under a junction is graded to the line's line like the ground
-     *  under its arms, and the arms lie flush on that.  A hair here, or
-     *  0.05 at the outline, stands every box 0.03 to 0.05 above its
-     *  lines. */
+     *  under a junction is graded to the line's own line like the ground
+     *  under its arms, and the arms lie flush on that.  A hair added
+     *  here, or one the outline carries, raises every box above the
+     *  lines that meet it. */
     x.zj           = surface_at_world(c, mask_bit, x.cx, x.cy);
     shelf_node(col, row); /* a node of the graph: every edge that meets here is at one level */
     x.comp         = net_compensate();

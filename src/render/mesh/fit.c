@@ -223,7 +223,7 @@ static int tf_line_holds(const uint8_t *mark, V2 a, V2 b, float hw)
     py = dx / len;
     {
         static int gix_fit_probe_run = -1;
-        float      st = net_geo(&gix_fit_probe_run, "fit_probe_run");
+        float      st = geo_num(&gix_fit_probe_run, "fit_probe_run");
         m             = (int)(len / (st > 1e-6f ? st : 0.25f)) + 2;
     }
     for (k = 0; k <= m; ++k)
@@ -258,11 +258,10 @@ static float seg_dist(V2 p, V2 a, V2 b)
 }
 
 /*  Does a corner join keep every covered point of the gap it spans under
- *  the band?  The points between the two runs, whose tiles are the
- *  band's own, must lie within the band's half width of one of the
- *  corner's two legs.  A band staircase with a spur pinned to it was
- *  otherwise joined by an L two rows off the spur's cells (Flint
- *  55,113). */
+ *  the band?  The points between the two runs have tiles that are the
+ *  band's own.  Each must lie within the band's half width of one of
+ *  the corner's two legs.  Without the rule a band staircase with a
+ *  spur pinned to it joins by an L that misses the spur's own cells. */
 static int tf_gap_covers(const V2 *pts, int first, int last, V2 a, V2 corner, V2 b, float band)
 {
     ++s_tf_probes;
@@ -282,10 +281,9 @@ static int tf_gap_covers(const V2 *pts, int first, int last, V2 a, V2 corner, V2
 
 /*  Does a run's line keep every covered point under the band?  A point
  *  whose tile is the band's own must lie within the band's half width of
- *  the line.  The run has straightened its way off its cells.  The arcs
- *  had this rule and the runs did not, so a band staircase with a spur
- *  pinned to it was straightened into an L two rows off the spur's cells
- *  (Flint 55,113). */
+ *  the line.  Without it a run straightens its way off its own cells.
+ *  A band staircase with a spur pinned to it then comes out as an L
+ *  that misses the spur's cells. */
 static int tf_run_covers(const V2 *pts, int i, int j, const Run *r, float band)
 {
     ++s_tf_probes;
@@ -573,10 +571,9 @@ static int     s_tf_fail_side;
 static int32_t s_tf_ex0 = -1, s_tf_ex1 = -1; /* the junction tiles: theirs is the junction's surface */
 
 /*  Coverage.  An arc cuts inside the corner it replaces.  If it cuts far
- *  enough it leaves the corner tile with no line over it at all.
- *
- *      Cape Wells' V at column 102 row 48.  Two 45 degree arms meeting
- *      at a right angle.  Came out with its bottom tile bare.
+ *  enough it leaves the corner tile with no line over it at all.  The
+ *  shape that does it is a V: two 45 degree arms meeting at a right
+ *  angle, whose bottom tile comes out bare.
  *
  *  The rule is the one fit_spacing kept when it merged nodes: what the
  *  arc replaces covered these tiles, so the arc must too.  The stubs are
@@ -588,7 +585,7 @@ static uint8_t s_tf_stamp;
 static void tf_stamp_arc(V2 cen, float R, float a0, float sweep, float hw, uint8_t stamp)
 {
     static int gix_fit_probe_arc = -1;
-    float      step = net_geo(&gix_fit_probe_arc, "fit_probe_arc");
+    float      step = geo_num(&gix_fit_probe_arc, "fit_probe_arc");
     int m = (int)(fabsf(sweep) * R / (step > 1e-6f ? step : 0.05f)) + 3, k, s;
     for (k = 0; k <= m; ++k)
     {
@@ -646,7 +643,7 @@ static int tf_arc_holds(const uint8_t *mark, V2 cen, float R, float a0, float sw
 {
     ++s_tf_probes;
     static int gix_fit_probe_arc = -1;
-    float      step = net_geo(&gix_fit_probe_arc, "fit_probe_arc");
+    float      step = geo_num(&gix_fit_probe_arc, "fit_probe_arc");
     int m = (int)(fabsf(sweep) * R / (step > 1e-6f ? step : 0.05f)) + 3, k, s;
     for (k = 0; k <= m; ++k)
     {
@@ -754,7 +751,7 @@ SweepFan *path_sweep_ask(const void *markv, V2 a, V2 b, V2 c, float tlim, float 
         s.ui     = ui;
         s.uo     = uo;
         s.cross  = ui.x * uo.y - ui.y * uo.x;
-        s.straight = dot > net_geo(&gix_fit_straight_dot, "fit_straight_dot");
+        s.straight = dot > geo_num(&gix_fit_straight_dot, "fit_straight_dot");
         s.theta    = acosf(dot < -1.0f ? -1.0f : dot);
         s.tan_half = tanf(0.5f * s.theta);
     }
@@ -819,7 +816,7 @@ static float tf_biarc_holds(const uint8_t *mark, V2 prev, V2 c0, V2 c1, V2 next,
         uo.y /= lo;
         dot   = ui.x * uo.x + ui.y * uo.y;
         cross = ui.x * uo.y - ui.y * uo.x;
-        if (dot > net_geo(&gix_fit_straight_dot, "fit_straight_dot"))
+        if (dot > geo_num(&gix_fit_straight_dot, "fit_straight_dot"))
             continue; /* no turn at this one: a straight through */
         theta = acosf(dot < -1.0f ? -1.0f : dot);
         r     = d / tanf(0.5f * theta);
@@ -911,7 +908,7 @@ static float tf_demand(V2 a, V2 b, V2 c)
     if (la < 1e-6f || lc < 1e-6f)
         return 0.0f;
     dot = ((b.x - a.x) * (c.x - b.x) + (b.y - a.y) * (c.y - b.y)) / (la * lc);
-    if (dot > net_geo(&gix_fit_straight_dot, "fit_straight_dot"))
+    if (dot > geo_num(&gix_fit_straight_dot, "fit_straight_dot"))
         return 0.0f;
     theta = acosf(dot < -1.0f ? -1.0f : dot);
     return tanf(0.5f * theta);
@@ -1522,7 +1519,7 @@ static int tangent_begin(const uint8_t *mark, const uint8_t *own, const V2 *pts,
     /*  The approach a junction's mouth reserves straight.  It is the knob's, scaled by the width, or the length the family asks for.  A thread turnout's reach, so the cut lands on straight thread and the port where the lane ends. */
     const float appr = reserve > 0.0f ? reserve : s_tune.approach * (g_dev.noscale ? 1.0f : gro);
     static int  gix_fit_free_end = -1;
-    const float freen   = net_geo(&gix_fit_free_end, "fit_free_end");
+    const float freen   = geo_num(&gix_fit_free_end, "fit_free_end");
     const float res0 = ex0 >= 0 ? appr : freen, res1 = ex1 >= 0 ? appr : freen;
     int         ns   = nt - 1;
     Tf         *x    = &s_path;
@@ -1673,7 +1670,7 @@ int path_finish(void)
 int path_fit_points_begin(const uint8_t *mark, const uint8_t *own, const V2 *pts, int n, float hw, V2 start, V2 goal, float rmax, float rmin, float gro, int32_t ex0, int32_t ex1, int free_lines, V2 *out, float *rad, float *tlim, int cap)
 {
     s_tf_nprims     = 0;
-    s_tf_edge       = net_geo(&gix_fit_edge_slab, "fit_edge_slab"); /* the point chain is the band's */
+    s_tf_edge       = geo_num(&gix_fit_edge_slab, "fit_edge_slab"); /* the point chain is the band's */
     s_tf_cover_runs = 1;          /* and its runs and corners hold the covered cells, not its arcs alone */
     s_tf_free_lines = free_lines; /* and a run may be any span its corridor lets be straight */
     return tangent_begin(mark, own, pts, n, hw, start, goal, rmax, rmin, gro, 0.0f, ex0, ex1, out, rad, tlim, cap);
@@ -1684,7 +1681,7 @@ int path_fit_points_end(void)
     int nk          = path_finish();
     s_tf_cover_runs = 0;
     s_tf_free_lines = 0;
-    s_tf_edge       = net_geo(&gix_fit_edge, "fit_edge");
+    s_tf_edge       = geo_num(&gix_fit_edge, "fit_edge");
     return nk;
 }
 
@@ -1838,7 +1835,7 @@ int path_corridor(const int32_t **tcol, const int32_t **trow, int *nt, V2 *start
 
 int path_fit_begin(const RCity *c, const int32_t *tcol, const int32_t *trow, int nt, float hw, V2 start, V2 goal, float rmax, float rmin, float gro, float reserve, int32_t ex0, int32_t ex1, int free_reach, V2 *out, float *rad, float *tlim, int cap)
 {
-    s_tf_edge = net_geo(&gix_fit_edge, "fit_edge"); /* a chain of tiles samples its own band's edge */
+    s_tf_edge = geo_num(&gix_fit_edge, "fit_edge"); /* a chain of tiles samples its own band's edge */
     uint8_t *const mark    = s_corr_fit.mark;
     int32_t *const marked  = s_corr_fit.marked;
     V2 *const      centres = s_corr_fit.centres;
@@ -2085,7 +2082,7 @@ int path_piece_corner(PieceFan *p, int i)
     u_out.x /= lout;
     u_out.y /= lout;
     dot = u_in.x * u_out.x + u_in.y * u_out.y;
-    if (dot > net_geo(&gix_fit_straight_dot, "fit_straight_dot"))
+    if (dot > geo_num(&gix_fit_straight_dot, "fit_straight_dot"))
         return 0; /* straight on: no vertex */
     p->ui       = u_in;
     p->uo       = u_out;

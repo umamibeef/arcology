@@ -66,6 +66,9 @@
     #include <sys/utsname.h>
 #endif
 #include "sim.h"
+#include "net/net.h"
+#include "build.h"
+#include "incr.h"
 
 /*  The key every letter shortcut needs: the Mac's command key, and Ctrl
  *  everywhere else.  The bare keys that remain, the digits for the
@@ -864,7 +867,7 @@ int game_main(int argc, char **argv)
     if (!check && !run_frames)
     {
         a.offscreen = shot_out != NULL; /* the interface's pipeline is made for the readback's format, so every frame is read back */
-        a.ui        = ui_create(win, gpu_device(a.gpu), a.offscreen ? gpu_offscreen_format(a.gpu) : gpu_swapchain_format(a.gpu), 1.0f, assets_dir);
+        a.ui        = ui_create(win, gpu_device(a.gpu), a.offscreen ? gpu_offscreen_format() : gpu_swapchain_format(a.gpu), 1.0f, assets_dir);
         R_DBG("ui", "%s", a.ui ? "imgui" : "none");
         if (a.ui)
         {
@@ -893,7 +896,7 @@ int game_main(int argc, char **argv)
                     a.gv.grid = 1;
                 /*  Outline too, unless --tune or --outline set it for this run. */
                 if (!g_dev.tune && !o.outline && prefs_get("curves", g, sizeof g) && strcmp(g, "on") == 0)
-                    mesh_tune()[9] = 1.0f;
+                    tune_array()[9] = 1.0f;
                 /*  and the cell coordinates */
                 if (prefs_get("cells", g, sizeof g) && strcmp(g, "on") == 0)
                     a.us.show_cells = 1;
@@ -981,7 +984,7 @@ int game_main(int argc, char **argv)
     if (o.rotate_turns)
         sim_rotate(a.city, o.rotate_turns); /* --rotate N: the original's own turn, for a look at the other orientations */
     if (o.outline)
-        mesh_tune()[9] = 1.0f; /* --outline: the view the flag asks for, preferences or none */
+        tune_array()[9] = 1.0f; /* --outline: the view the flag asks for, preferences or none */
     if (view_quarter(&a))
         settle_quarter_turn(&a, NULL); /* --angle 90/180/270: the camera at that quarter, pivoting on the map's center */
     /*  Every city opens paused.  The speed it was saved at is what
@@ -1248,6 +1251,7 @@ int game_main(int argc, char **argv)
         if (geometry_on(&a))
         {
             int cut = mesh_check_clip(&a.mesh, 1);
+            build_reports();
             if (cut != 0)
                 bad = 1;
             /*  The buried faces are counted and reported, and held from
@@ -1331,7 +1335,7 @@ done:
      *  behind. */
     traffic_free(&a.traffic); /* the cars, the trains and their own scratch mesh */
     mesh_free(&a.mesh);
-    mesh_incr_free(); /* the incremental rebuild's scratch (mesh/incr.c) */
+    incr_free(); /* the incremental rebuild's scratch (mesh/incr.c) */
     mesh_emit_free(); /* and the emitter's own (mesh/emit.c) */
     net_table_free(); /* the segment table's sample arenas (net/table.c) */
     ops_free(&a.ops);

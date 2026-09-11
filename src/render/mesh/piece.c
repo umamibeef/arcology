@@ -31,7 +31,7 @@ V2 l_right(V2 d)
 
 
 /*  A point on a piece at arc length t, and the direction of travel
- *  there (net/loft.c's piece_at). */
+ *  there (net/strip.c's piece_at). */
 void l_piece_at(const Piece *p, float t, V2 *pos, V2 *dir)
 {
     if (!p->arc)
@@ -73,7 +73,7 @@ void piece_offset(const Piece *p, float off, Piece *o)
     {
         static int gix_lane_arc_min = -1;
         float      s   = p->t1 > p->t0 ? 1.0f : -1.0f;
-        float      lo  = net_geo(&gix_lane_arc_min, "lane_arc_min");
+        float      lo  = geo_num(&gix_lane_arc_min, "lane_arc_min");
         float      r2  = p->r + off * s;
         if (r2 < lo)
             r2 = lo;
@@ -133,7 +133,7 @@ int pose_chain(V2 A, V2 tA, V2 B, V2 tB, V2 *q, float *rad, float *tlim)
         V2         s2 = {tA.x + tB.x, tA.y + tB.y};
         float      c = dt, vs = v.x * s2.x + v.y * s2.y, kk = 2.0f * (1.0f - c), d;
         static int gix_chain_rmax = -1;
-        float      cap = net_geo(&gix_chain_rmax, "lane_route_rmax");
+        float      cap = geo_num(&gix_chain_rmax, "lane_route_rmax");
         if (kk < 1e-5f)
         {
             if (vs <= 1e-6f)

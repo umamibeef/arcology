@@ -22,6 +22,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "dump.h"
+#include "net/net.h"
 
 /*  ==================================================================
  *  The interface, filled and applied
@@ -205,7 +206,7 @@ void ui_fill(App *a)
      *  inspect.  The query tool says what a tile is.  So the ground, its
      *  banks, walls and water are passed over, and what is built on them
      *  is what the pointer finds. */
-    s->outline      = mesh_tune()[9] > 0.5f;
+    s->outline      = tune_array()[9] > 0.5f;
     s->show_inspect = a->inspect;
     s->comp_ok = s->comp_n = s->comp_box_ok = 0;
     s->comp_label[0] = s->comp_who[0] = s->comp_where[0] = s->comp_gen[0] = s->comp_gen_where[0] = s->comp_note[0] = 0;
@@ -599,7 +600,7 @@ void ui_fill(App *a)
     s->geometry = a->gv.geometry;
     /*  The road knobs, unless the window is mid-edit and owns them. */
     if (!s->tune_changed)
-        memcpy(s->tune, mesh_tune(), sizeof s->tune);
+        memcpy(s->tune, tune_array(), sizeof s->tune);
     s->plan    = a->plan;
     s->cell_ok = 0;
     if (a->plan && s->show_cells && a->sw.level)
@@ -684,9 +685,9 @@ void ui_apply(App *a, SDL_Window *win, int pw, int ph)
     {
         /*  The knobs are a tuning session's.  Outline is a view and is
          *  applied below with the other views. */
-        float keep = mesh_tune()[9];
-        memcpy(mesh_tune(), s->tune, sizeof s->tune);
-        mesh_tune()[9] = keep;
+        float keep = tune_array()[9];
+        memcpy(tune_array(), s->tune, sizeof s->tune);
+        tune_array()[9] = keep;
         s->tune_changed = 0;
         a->mesh_dirty   = 1; /* the knobs are geometry: rebuild it */
     }
@@ -695,12 +696,12 @@ void ui_apply(App *a, SDL_Window *win, int pw, int ph)
         a->gv.geometry = s->geometry;
         a->mesh_dirty  = 1; /* the roads are part of the mesh */
     }
-    if (!!s->outline != (mesh_tune()[9] > 0.5f))
+    if (!!s->outline != (tune_array()[9] > 0.5f))
     {
         /*  Outline stands the roads aside and draws the fitted curves and
          *  the margin network on bare ground.  It is geometry, so the
          *  mesh is built again, and it is remembered like the grid. */
-        mesh_tune()[9] = s->outline ? 1.0f : 0.0f;
+        tune_array()[9] = s->outline ? 1.0f : 0.0f;
         a->mesh_dirty  = 1;
         if (a->prefs_ok)
             prefs_set("curves", s->outline ? "on" : "off");

@@ -34,7 +34,7 @@ static int join(char *dst, size_t cap, const char *dir, const char *name)
 
 /*  Binary mode is not optional: on Windows a text-mode read eats \r and
  *  every offset after the first newline is wrong. */
-static char *read_text(const char *path, size_t *out_len)
+static char *read_text(const char *path)
 {
     FILE  *f = fopen(path, "rb");
     long   n;
@@ -69,8 +69,6 @@ static char *read_text(const char *path, size_t *out_len)
         return NULL;
     }
     buf[n] = '\0';
-    if (out_len)
-        *out_len = (size_t) n;
     return buf;
 }
 
@@ -229,7 +227,7 @@ static int load_level(RAtlas *a, const char *dir, const char *sheet_name,
         fail(a, "path too long for %s", sheet_name);
         return -1;
     }
-    js = read_text(path, NULL);
+    js = read_text(path);
     if (!js)
     {
         fail(a, "cannot read %s", path);
@@ -441,7 +439,7 @@ int atlas_load(RAtlas *a, const char *dir)
         fail(a, "asset path too long", NULL);
         return -1;
     }
-    js = read_text(path, NULL);
+    js = read_text(path);
     if (!js)
     {
         fail(a, "cannot read %s -- run tools/artpack.py extract first", path);

@@ -1,10 +1,12 @@
-/*  The piece tables: which family a tile's piece belongs to, how it
- *  links to its neighbors, and the second piece a tile may carry. */
+/*  cell.c: WHAT A CELL CARRIES.  Which family a tile's piece belongs
+ *  to.  How it links to its neighbors.  And the second piece a tile may
+ *  carry.  The piece's own arithmetic is mesh/piece.c's. */
 #include <math.h>
 #include <string.h>
 
 #include "mesh/internal.h"
 #include "pipeline.h"
+#include "net/net.h"
 
 const uint8_t *s_check_xbld; /* the last built city's XBLD, for the piece scan */
 

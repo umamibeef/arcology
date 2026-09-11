@@ -121,7 +121,7 @@ static float field(lua_State *L, int t, const char *key, float def)
 
 /*  What the model answers for a prop of that size, read into the walk's
  *  own arrays.  A model that answers nothing draws nothing. */
-int script_model_build(int model, float size, ModelHead *head, ModelPart *parts, int max)
+int script_model_build(int model, float size, ModelHead *head, ModelPart *parts)
 {
     lua_State *L = s_ms;
     int        n = 0, k, t;
@@ -138,7 +138,7 @@ int script_model_build(int model, float size, ModelHead *head, ModelPart *parts,
     lua_getfield(L, -2, "p"); /* the model's own numbers */
     lua_newtable(L);
     lua_pushnumber(L, size), lua_setfield(L, -2, "size");
-    if (!api_rule_call(L, s_name[model], 2, 1))
+    if (!api_rule_call(L, s_name[model], 2))
     {
         lua_pop(L, 1);
         return 0;
@@ -158,7 +158,7 @@ int script_model_build(int model, float size, ModelHead *head, ModelPart *parts,
     {
         int have = (int)lua_rawlen(L, -1);
         int list = lua_gettop(L);
-        n        = have < max ? have : max;
+        n        = have < MODEL_PARTS ? have : MODEL_PARTS;
         for (k = 0; k < n; ++k)
         {
             ModelPart  *p = &parts[k];
@@ -258,7 +258,7 @@ static int l_build(lua_State *L)
     float     size = (float)luaL_optnumber(L, 2, 0.0);
     if (mi < 0)
         return 0;
-    n = script_model_build(mi, size, &head, part, MODEL_PARTS);
+    n = script_model_build(mi, size, &head, part);
     lua_newtable(L);
     lua_pushnumber(L, head.slot), lua_setfield(L, -2, "slot");
     lua_pushnumber(L, head.lift), lua_setfield(L, -2, "lift");

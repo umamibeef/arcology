@@ -34,6 +34,7 @@
 #include "dump.h"
 #include "mesh/internal.h"
 #include "pipeline.h"
+#include "net/net.h"
 #include "script.h"
 #include "opt.h"
 
@@ -43,7 +44,7 @@
 
 #define WALK_MAX 65536
 static int gix_walk_mouth_eps = -1;
-#define WALK_EPS net_geo(&gix_walk_mouth_eps, "walk_mouth_eps") /* how much wider an avenue's mouth may be than the box's */
+#define WALK_EPS geo_num(&gix_walk_mouth_eps, "walk_mouth_eps") /* how much wider an avenue's mouth may be than the box's */
 
 typedef struct
 {

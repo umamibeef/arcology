@@ -9,6 +9,7 @@
 
 #include "mesh/internal.h"
 #include "pipeline.h"
+#include "net/net.h"
 #include "dump.h"
 #include "opt.h"
 

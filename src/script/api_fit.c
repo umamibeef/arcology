@@ -66,13 +66,15 @@ static V2 point_at(lua_State *L, int t, int i)
 
 /*  A per-point number: the sequence's own entry, the one number the
  *  argument is, or `def` where there is neither. */
-static float num_at(lua_State *L, int t, int i, float def)
+/*  A per-point number: the sequence's own entry, the one number the
+ *  argument is, or nought where there is neither. */
+static float num_at(lua_State *L, int t, int i)
 {
-    float v = def;
+    float v = 0.0f;
     if (lua_isnumber(L, t))
         return (float)lua_tonumber(L, t);
     if (!lua_istable(L, t))
-        return def;
+        return 0.0f;
     lua_rawgeti(L, t, i);
     if (lua_isnumber(L, -1))
         v = (float)lua_tonumber(L, -1);
@@ -133,12 +135,12 @@ static int l_fit(lua_State *L)
     for (i = 0; i < n; ++i)
         q[i] = point_at(L, 1, i + 1);
     for (i = 0; i < n; ++i)
-        rad[i] = num_at(L, 2, i + 1, 0.0f);
+        rad[i] = num_at(L, 2, i + 1);
     if (lua_isnoneornil(L, 3))
         tlim_half(q, n, tlim);
     else
         for (i = 0; i < n; ++i)
-            tlim[i] = num_at(L, 3, i + 1, 0.0f);
+            tlim[i] = num_at(L, 3, i + 1);
     if (cut_pieces(q, n, rad, tlim, out, &np) != 0)
         np = 0;
     lua_createtable(L, np, 0);

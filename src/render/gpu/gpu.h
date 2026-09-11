@@ -143,7 +143,7 @@ const char *gpu_driver(const RGpu *g);
  *  readback's offscreen target, for a UI that draws on them. */
 struct SDL_GPUDevice *gpu_device(const RGpu *g);
 int                   gpu_swapchain_format(const RGpu *g);
-int                   gpu_offscreen_format(const RGpu *g);
+int                   gpu_offscreen_format(void);
 
 /*  What the last frame drew, for the title bar. */
 void gpu_stats(const RGpu *g, uint32_t *instances, uint32_t *culled);

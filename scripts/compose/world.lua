@@ -198,7 +198,7 @@ arc.rules.world = function (w)
         --  A build that is replaying the bands a previous one fitted has
         --  nothing to discover and is handed no map.
         local bands = arc.rules.bands
-        local hw = w:hw_cells()
+        local hw = w:band_cells()
         if hw then bands(hw) end
 
         --  And how a spur's foot meets the line it lands on: the eight
@@ -468,29 +468,29 @@ arc.rules.world = function (w)
         --  the meets into the lanes facing them before the bands are
         --  joined to the lines they become.
         w:bands()
-        while w:band_band() do
+        while w:band_next() do
             n_band = n_band + 1
             --  The points the fit is given, picked from the band the
             --  walk read: the straight cells', a lone block's corner,
             --  and nothing of a staircase.
             stage(w:band_chain())
-            w:band_band_chained()
+            w:band_chained()
 
             --  A band the grading pass walked is fitted here, the same
             --  two ways a railway's segment is; one the building pass
             --  replayed was fitted already and asks for none.
-            for k = 0, w:hw_fits() - 1 do
-                local p = w:hw_fit(k)
+            for k = 0, w:band_fits() - 1 do
+                local p = w:band_fit(k)
                 if p and path then path(p) end
-                w:hw_fit_done(k)
+                w:band_fit_done(k)
             end
-            local c = w:hw_fit_choice()
-            if c then w:hw_fit_choice_is(fit_choice and fit_choice(c)) end
-            w:band_band_fitted()
+            local c = w:band_fit_choice()
+            if c then w:band_fit_choice_is(fit_choice and fit_choice(c)) end
+            w:band_fitted()
             cut()
-            w:band_band_cut()
+            w:band_cut()
             lofted()
-            w:band_band_done()
+            w:band_done()
         end
         step("spur spans")
 
@@ -547,7 +547,7 @@ arc.rules.world = function (w)
         cut()                        -- the links it asked for
         w:lane_cross_done()
 
-        step("hw links")
+        step("band links")
 
         --  And the bands' own ends joined: which slab lane goes on to
         --  which -- the lane of another band round an interchange, the

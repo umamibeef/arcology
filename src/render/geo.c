@@ -1,4 +1,5 @@
-/*  geo.c: the line works' numbers, and the one place they are written.
+/*  geo.c: the numbers a script tunes the world with, and the one
+ *  place they are written.
  *
  *  Every number is the SCRIPTS' (scripts/geo.lua).  There is no list
  *  here and no struct of fields: a name exists from the moment something
@@ -13,16 +14,14 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "mesh/internal.h"
 #include "pipeline.h"
-
 #define GEO_MAX 512
 
 static char  s_name[GEO_MAX][32];
 static float s_val[GEO_MAX];
 static int   s_n;
 
-const char *net_geo_name(int i, float *v)
+const char *geo_name(int i, float *v)
 {
     if (i < 0 || i >= s_n)
         return NULL;
@@ -31,7 +30,7 @@ const char *net_geo_name(int i, float *v)
     return s_name[i];
 }
 
-int net_geo_index(const char *name)
+static int geo_index(const char *name)
 {
     int i;
     for (i = 0; name && i < s_n; ++i)
@@ -40,19 +39,19 @@ int net_geo_index(const char *name)
     return -1;
 }
 
-float net_geo(int *cache, const char *name)
+float geo_num(int *cache, const char *name)
 {
     if (*cache < 0)
-        *cache = net_geo_index(name);
+        *cache = geo_index(name);
     return *cache >= 0 ? s_val[*cache] : 0.0f;
 }
 
-int net_geo_set(const char *name, float v)
+int geo_set(const char *name, float v)
 {
     int i;
     if (!name || !*name)
         return 0;
-    i = net_geo_index(name);
+    i = geo_index(name);
     if (i >= 0)
     {
         s_val[i] = v;
@@ -129,7 +128,7 @@ static const struct
     {"band_stiff",   offsetof(RTune, band_stiff), 0.00f, 8.00f},
 };
 
-int net_tune_set(const char *name, float v)
+int tune_set(const char *name, float v)
 {
     size_t i;
     for (i = 0; i < sizeof TUNE / sizeof TUNE[0]; ++i)
@@ -149,7 +148,7 @@ int net_tune_set(const char *name, float v)
 /*  A knob's own float, to keep.  A family holds pointers at its width
  *  and its radii.  So a strip drawn a year later reads the value the
  *  window is showing rather than the one the declaration was read at. */
-const float *net_tune_at(const char *name)
+const float *tune_at(const char *name)
 {
     size_t i;
     for (i = 0; name && i < sizeof TUNE / sizeof TUNE[0]; ++i)
@@ -158,7 +157,7 @@ const float *net_tune_at(const char *name)
     return NULL;
 }
 
-const char *net_tune_name(int i, float *v)
+const char *tune_name(int i, float *v)
 {
     if (i < 0 || (size_t)i >= sizeof TUNE / sizeof TUNE[0])
         return NULL;
@@ -167,7 +166,7 @@ const char *net_tune_name(int i, float *v)
     return TUNE[i].name;
 }
 
-float *mesh_tune(void)
+float *tune_array(void)
 {
     return &s_tune.line_w; /* nineteen floats, in the struct's own order */
 }

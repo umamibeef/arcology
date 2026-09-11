@@ -21,6 +21,7 @@
 #include <string.h>
 
 #include "pipeline.h"
+#include "net/net.h"
 #include "log.h"
 #include "script.h"
 
@@ -45,15 +46,7 @@ static int s_registered;
 
 void net_hook_add(NetHook h, const char *name, NetHookFn fn)
 {
-    net_hook_add_split(h, name, fn, NULL, NULL);
-}
-
-/*  A stage the drive composes inside runs in two halves.  The first
- *  gathers what the script is to be handed, the second takes up what it
- *  answered.  One name registers both. */
-void net_hook_add_split(NetHook h, const char *name, NetHookFn fn, NetHookFn after, const char *ask)
-{
-    net_hook_add_split2(h, name, fn, after, ask, NULL);
+    net_hook_add_split2(h, name, fn, NULL, NULL, NULL);
 }
 
 /*  A stage whose second half asks a rule of its own in turn: a slab's
@@ -235,11 +228,11 @@ static int family_read(const NetFamilyDecl *d, NetFamily *out, int *rule, int st
     if ((ends = which(d->lane_ends, ENDS, 3)) < 0)
         return decl_fault(d, "lane ending", d->lane_ends);
     memset(&x, 0, sizeof x);
-    if (!(x.width = net_tune_at(d->width)))
+    if (!(x.width = tune_at(d->width)))
         return decl_fault(d, "knob", d->width);
-    if (!(x.rmin = net_tune_at(d->rmin)))
+    if (!(x.rmin = tune_at(d->rmin)))
         return decl_fault(d, "knob", d->rmin);
-    if (!(x.rmax = net_tune_at(d->rmax)))
+    if (!(x.rmax = tune_at(d->rmax)))
         return decl_fault(d, "knob", d->rmax);
     x.f                 = (Family)tiles;
     x.loft              = (LoftKind)loft;
@@ -517,15 +510,6 @@ int net_family_record(const NetFamily *fam, Loft *x)
     if (fam->margin)
         script_walk_reset();
     return 0;
-}
-
-/*  Whether a strip standing that far over the ground clears it.  It is
- *  asked at every STATION of every strip, in the middle of the grading.
- *  So no rule may answer it: a family's own primitive settles it or
- *  nothing does. */
-int net_family_flies(const NetFamily *fam, const RLoft *d, float over)
-{
-    return fam->flies ? fam->flies(d, over) : 0;
 }
 
 void net_family_taper(const NetFamily *fam, Loft *x)

@@ -33,6 +33,11 @@
 --  and never by name.
 local say = arc.error or arc.log
 
+--  How far the far end of a continuation must lead away from the near
+--  one, along the way the traffic travels.  It is a number of the
+--  scripts' like every other (scripts/geo.lua).
+local band_lead = arc.put.f32(arc.geo.band_lead or 0.0)
+
 local f32 = arc.put.f32
 local sqrt = arc.put.sqrt
 
@@ -86,8 +91,18 @@ arc.rules.links = function (x)
                         local ahead = dot(vx, vy, ddx, ddy)
                         local aside = math.abs(f32(f32(vx * ddy) - f32(vy * ddx)))
                         local dd = sqrt(f32(f32(vx * vx) + f32(vy * vy)))
+                        --  The far end must LEAD AWAY along the way the
+                        --  traffic travels.  `ahead` says the two ends
+                        --  lie the right way round; this says the far one
+                        --  faces on rather than back.  Without it a band
+                        --  that turns a corner matches its own lanes
+                        --  across the turn: the way then leaves one lane,
+                        --  swings through half a circle and arrives in
+                        --  another lane of the same band, which is a
+                        --  U-turn and reads as a kink of 180 degrees.
+                        local lead = dot(d2x, d2y, vx, vy)
                         if ahead >= d.band_ahead and dd <= ba and aside <= d.band_aside
-                           and dd >= d.band_apart then
+                           and dd >= d.band_apart and lead > band_lead then
                             --  the router must be able to build it
                             local q
                             if which == 1 then q = x:route(pdx, pdy, ddx, ddy, p2x, p2y, d2x, d2y)
@@ -140,75 +155,24 @@ arc.rules.links = function (x)
                               and of_tile[tr * size + tc] or nil
                     local g = k and at_node[k]
                     if g then
-                        --  Which EDGE of the node this end belongs to:
-                        --  the nearest, since an end stands where its
-                        --  way meets the glob's boundary.
-                        --  Which EDGE of the node this end belongs to:
-                        --  the one with a CELL nearest it.  Two edges of
-                        --  a node lie close together and their middles
-                        --  sit far from the tiles they are made of, so a
-                        --  test against the middle charges one edge's
-                        --  ends to its neighbour and leaves it bare.
-                        --  Which EDGE of the node this end belongs to:
-                        --  the one it FACES, found by walking out from
-                        --  the node's middle through the end until the
-                        --  step lands on an edge's tiles.
-                        --  Which EDGE of the node this end belongs to:
-                        --  the one it FACES, walking out from the node's
-                        --  middle through the end until the step lands on
-                        --  an edge's tiles.
+                        --  Which ARM of the node this end belongs to is
+                        --  the BAND it is a lane of.  The walk splits a
+                        --  slab where it meets an interchange, so each
+                        --  way into a node is a band of its own and its
+                        --  six lanes are the six ends of that arm.
                         --
-                        --  This is right for a node whose glob is square
-                        --  and wrong for some that are not: an arm of an
-                        --  L can lie off the line from the middle, and
-                        --  its ends are then charged to the arm beside
-                        --  it.  What would settle it is not more
-                        --  geometry -- nearest edge, nearest edge cell,
-                        --  outward from the nearest cell and clustering
-                        --  the ends were all tried and each trades one
-                        --  node's failure for another's -- but the lane
-                        --  fan saying which END OF WHICH BAND an end is.
-                        --  The pipeline knows; the script is guessing.
-                        local nd  = nodes[k]
-                        local eds = nd.edges
-                        local ox, oy = sub(px, nd.x), sub(py, nd.y)
-                        local ol = sqrt(f32(f32(ox * ox) + f32(oy * oy)))
-                        local arm = nil
-                        if ol > 1e-4 then
-                            ox, oy = ox / ol, oy / ol
-                            for step = 0.0, 3.0, 0.5 do
-                                local qc = math.floor(px + ox * step)
-                                local qr = math.floor(py + oy * step)
-                                if qc >= 0 and qr >= 0 and qc < size and qr < size then
-                                    local qt = qr * size + qc
-                                    for ei = 1, #eds do
-                                        for _, q in ipairs(eds[ei].cells) do
-                                            if q == qt then arm = ei break end
-                                        end
-                                        if arm then break end
-                                    end
-                                end
-                                if arm then break end
-                            end
-                        end
-                        if not arm then
-                            local bd = 1e9
-                            for ei = 1, #eds do
-                                for _, q in ipairs(eds[ei].cells) do
-                                    local ddx = sub(px, (q % size) + 0.5)
-                                    local ddy = sub(py, (q // size) + 0.5)
-                                    local dd = f32(f32(ddx * ddx) + f32(ddy * ddy))
-                                    if dd < bd then bd, arm = dd, ei end
-                                end
-                            end
-                        end
-                        if arm then
-                            local e = {li = li, x = px, y = py, dx = dx, dy = dy,
-                                       w = l.w, band = l.band, arm = arm}
-                            if which == 1 then g.out[#g.out + 1] = e
-                            else g.inn[#g.inn + 1] = e end
-                            g.bands[arm] = true
-                        end
+                        --  The band is exact where geometry can only
+                        --  guess.  An arm of an L-shaped node lies off
+                        --  the line from the node's middle, so walking
+                        --  outward through an end charges it to the arm
+                        --  beside it: the node then holds one arm with
+                        --  six ends arriving and another with none, and
+                        --  owes movements it has no lane left to lay.
+                        local e = {li = li, x = px, y = py, dx = dx, dy = dy,
+                                   w = l.w, band = l.band, arm = l.band}
+                        if which == 1 then g.out[#g.out + 1] = e
+                        else g.inn[#g.inn + 1] = e end
+                        g.bands[l.band] = true
                     end
                 end
             end
@@ -252,20 +216,20 @@ arc.rules.links = function (x)
         for band in pairs(g.bands) do bands[#bands + 1] = band end
         table.sort(bands)
 
-        --  An edge of the node the MAP has but no lane end reached is
-        --  invisible to everything above: it is not an arm, so no
-        --  movement is owed to it and nothing reports it missing.  That
-        --  is the one failure a count of unserved movements cannot see,
-        --  so it is looked for against the map itself.
+        --  An arm the MAP has but no lane end reached is invisible to
+        --  everything above: no band carries it, so no movement is owed
+        --  to it and nothing reports it missing.  That is the one
+        --  failure a count of unserved movements cannot see, so the arms
+        --  are counted against the edges the node is made of.
         local eds = nodes[k].edges
-        local bare = {}
-        for ei = 1, #eds do
-            if not g.bands[ei] then
-                --  Say what the nearest slab lane end to it is, and how
-                --  far: an edge with none near it is a band that does not
-                --  end here, and an edge with one just out of reach is a
-                --  catchment too tight.  The two want different fixes.
-                local nd, nw, no = 1e9, nil, nil
+        if #bands < #eds then
+            --  Say what the nearest slab lane end to each edge is, and
+            --  how far.  An edge with none near it is a band that does
+            --  not end here, and an edge with one just out of reach is a
+            --  catchment too tight.  The two want different fixes.
+            local near = {}
+            for ei = 1, #eds do
+                local nd, no = 1e9, nil
                 for lj = 0, n - 1 do
                     local r = x:lane(lj)
                     if r and r.slab then
@@ -274,25 +238,23 @@ arc.rules.links = function (x)
                             local ddx, ddy = sub(qx, eds[ei].x), sub(qy, eds[ei].y)
                             local dd = f32(f32(ddx * ddx) + f32(ddy * ddy))
                             if dd < nd then
-                                nd, nw, no = dd, wh,
-                                    string.format("lane %d %s at %.2f,%.2f open %s",
-                                        lj, wh == 1 and "end" or "start", qx, qy,
-                                        tostring(wh == 1 and r.open1 or r.open0))
+                                nd, no = dd, string.format(
+                                    "lane %d %s at %.2f,%.2f open %s",
+                                    lj, wh == 1 and "end" or "start", qx, qy,
+                                    tostring(wh == 1 and r.open1 or r.open0))
                             end
                         end
                     end
                 end
-                bare[#bare + 1] = string.format("%d,%d [nearest %s, %.2f away]",
+                near[#near + 1] = string.format("%d,%d [nearest %s, %.2f away]",
                     math.floor(eds[ei].x), math.floor(eds[ei].y),
                     no or "none", math.sqrt(nd))
             end
-        end
-        if #bare > 0 then
             local c1 = nodes[k].cells[1]
             say(string.format(
-                "interchange %d,%d: %d of its %d edges have NO lane end reaching "
-                .. "the node, so nothing can be joined to them (%s)",
-                c1 % size, c1 // size, #bare, #eds, table.concat(bare, " ")))
+                "interchange %d,%d: %d bands reach it but the node has %d edges, "
+                .. "so an arm has nothing to join (%s)",
+                c1 % size, c1 // size, #bands, #eds, table.concat(near, " ")))
         end
 
         --  Every movement, one lane apiece.
@@ -306,15 +268,57 @@ arc.rules.links = function (x)
             end
         end
 
-        --  Then the ends left over, straightest first.
+        --  Then the ends left over, straightest first.  A pair is
+        --  only taken where the two ends are on DIFFERENT arms: an out
+        --  and an in of one arm face back the way they came, which is a
+        --  U-turn and no movement at all.
+        --
+        --  Straightest first is a greedy choice, and a greedy choice can
+        --  strand the last pair: with three arms left holding one out
+        --  and one in apiece, taking the two straightest can leave the
+        --  third arm's out facing its own in.  Both are then spent on
+        --  nothing.  So an end that finds no partner looks for a pair
+        --  already made that it can TAKE OVER, and hands that pair's
+        --  out the end it was refused.  The search carries on through as
+        --  many pairs as it must.  That is the difference between eight
+        --  of a node's nine ways and all nine.
+        local legal = {}
+        for i = 1, #g.out do
+            legal[i] = {}
+            if not taken["o" .. i] then
+                for j = 1, #g.inn do
+                    if not taken["i" .. j] then
+                        local a, b = g.out[i], g.inn[j]
+                        if a.arm ~= b.arm
+                           and x:route(a.x, a.y, a.dx, a.dy, b.x, b.y, b.dx, b.dy) then
+                            legal[i][j] = dot(a.dx, a.dy, b.dx, b.dy)
+                        end
+                    end
+                end
+            end
+        end
+
+        --  Each out's ins, straightest first, so the search prefers the
+        --  same pairs a plain sweep would have taken.
+        local want = {}
+        for i = 1, #g.out do
+            local o = {}
+            for j = 1, #g.inn do
+                if legal[i][j] then o[#o + 1] = j end
+            end
+            table.sort(o, function (p, q)
+                if legal[i][p] ~= legal[i][q] then return legal[i][p] > legal[i][q] end
+                return p < q
+            end)
+            want[i] = o
+        end
+
+        --  The straightest pairs, taken while they are free.
+        local match, held = {}, {}
         local rank = {}
         for i = 1, #g.out do
-            for j = 1, #g.inn do
-                local a, b = g.out[i], g.inn[j]
-                if a.arm ~= b.arm then
-                    rank[#rank + 1] = {i = i, j = j,
-                                       dot = dot(a.dx, a.dy, b.dx, b.dy)}
-                end
+            for _, j in ipairs(want[i]) do
+                rank[#rank + 1] = {i = i, j = j, dot = legal[i][j]}
             end
         end
         table.sort(rank, function (p, q)
@@ -323,12 +327,34 @@ arc.rules.links = function (x)
             return p.j < q.j
         end)
         for _, pr in ipairs(rank) do
-            if not taken["o" .. pr.i] and not taken["i" .. pr.j] then
-                local a, b = g.out[pr.i], g.inn[pr.j]
-                if x:route(a.x, a.y, a.dx, a.dy, b.x, b.y, b.dx, b.dy) then
-                    lay(pr.i, pr.j)
+            if not held[pr.i] and not match[pr.j] then
+                match[pr.j], held[pr.i] = pr.i, true
+            end
+        end
+
+        --  Then the ends that got nothing take a pair over.
+        local seen
+        local function take(i)
+            for _, j in ipairs(want[i]) do
+                if not seen[j] then
+                    seen[j] = true
+                    if not match[j] or take(match[j]) then
+                        match[j] = i
+                        return true
+                    end
                 end
             end
+            return false
+        end
+        for i = 1, #g.out do
+            if not taken["o" .. i] and not held[i] then
+                seen = {}
+                if take(i) then held[i] = true end
+            end
+        end
+
+        for j = 1, #g.inn do
+            if match[j] then lay(match[j], j) end
         end
 
         --  What the node did, and what it could not.  A movement with no
@@ -406,10 +432,27 @@ arc.rules.links = function (x)
                                 if in_li then
                                     local psx, psy, dsx, dsy = x:station(in_li, which, back)
                                     local pax, pay, dax, day = x:station(li, which, f32(back + d.taper_gap))
+                                    --  The taper claims THIS lane's end and
+                                    --  nothing of the inner one.  It meets
+                                    --  the inner lane at a STATION along it,
+                                    --  not at either of its ends, and an end
+                                    --  a join does not touch is passed as -1.
+                                    --
+                                    --  Claiming it costs the band both ways.
+                                    --  A lane end names one other and one
+                                    --  only, so the middle lane and the outer
+                                    --  lane, tapering into the same inner
+                                    --  lane, would ask for the same end and
+                                    --  the second would be refused.  And the
+                                    --  end asked for is at the FAR side of
+                                    --  the band, where a node has usually
+                                    --  spent it already, so the first is
+                                    --  refused as well and both lanes are
+                                    --  left stopping in mid-air.
                                     if which == 1 then
-                                        join(pax, pay, dax, day, psx, psy, dsx, dsy, l.w, li, in_li, l.band)
+                                        join(pax, pay, dax, day, psx, psy, dsx, dsy, l.w, li, -1, l.band)
                                     else
-                                        join(psx, psy, dsx, dsy, pax, pay, dax, day, l.w, in_li, li, l.band)
+                                        join(psx, psy, dsx, dsy, pax, pay, dax, day, l.w, -1, li, l.band)
                                     end
                                 end
                             end

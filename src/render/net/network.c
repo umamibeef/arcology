@@ -21,6 +21,7 @@
 #include "mesh/internal.h"
 #include "pipeline.h"
 
+#include "net/net.h"
 /*  Room for every walked family's list at once.  A run is at most
  *  MAX_PTS cells and a city's segments are counted in thousands. */
 #define DISC_MAX   16384
@@ -226,42 +227,42 @@ int net_run_edge(const NetRun *r)
  *  Each band carries the cell it was started from and the way it was
  *  walked.  This together are its key in the segment table across
  *  builds. */
-#define HW_BANDS 512
+#define BAND_RUNS_MAX 512
 
 static struct
 {
-    HwRun   run;
+    BandRun   run;
     int32_t col, row;
     int     ew, sign;
-} s_hwb_run[HW_BANDS];
-static int s_n_hwb_run;
+} s_band_run[BAND_RUNS_MAX];
+static int s_n_band_run;
 
-void net_hw_disc_reset(void)
+void net_band_disc_reset(void)
 {
-    s_n_hwb_run = 0;
+    s_n_band_run = 0;
 }
 
-int net_hw_disc_add(const HwRun *r, int32_t col, int32_t row, int ew, int sign)
+int net_band_disc_add(const BandRun *r, int32_t col, int32_t row, int ew, int sign)
 {
-    if (!r || r->n < 1 || s_n_hwb_run >= HW_BANDS)
+    if (!r || r->n < 1 || s_n_band_run >= BAND_RUNS_MAX)
         return 0;
-    s_hwb_run[s_n_hwb_run].run  = *r;
-    s_hwb_run[s_n_hwb_run].col  = col;
-    s_hwb_run[s_n_hwb_run].row  = row;
-    s_hwb_run[s_n_hwb_run].ew   = ew;
-    s_hwb_run[s_n_hwb_run].sign = sign;
-    ++s_n_hwb_run;
+    s_band_run[s_n_band_run].run  = *r;
+    s_band_run[s_n_band_run].col  = col;
+    s_band_run[s_n_band_run].row  = row;
+    s_band_run[s_n_band_run].ew   = ew;
+    s_band_run[s_n_band_run].sign = sign;
+    ++s_n_band_run;
     return 1;
 }
 
-int net_hw_disc_get(int i, const HwRun **r, int32_t *col, int32_t *row, int *ew, int *sign)
+int net_band_disc_get(int i, const BandRun **r, int32_t *col, int32_t *row, int *ew, int *sign)
 {
-    if (i < 0 || i >= s_n_hwb_run)
+    if (i < 0 || i >= s_n_band_run)
         return 0;
-    *r    = &s_hwb_run[i].run;
-    *col  = s_hwb_run[i].col;
-    *row  = s_hwb_run[i].row;
-    *ew   = s_hwb_run[i].ew;
-    *sign = s_hwb_run[i].sign;
+    *r    = &s_band_run[i].run;
+    *col  = s_band_run[i].col;
+    *row  = s_band_run[i].row;
+    *ew   = s_band_run[i].ew;
+    *sign = s_band_run[i].sign;
     return 1;
 }

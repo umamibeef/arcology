@@ -15,6 +15,7 @@
 #include "mesh/internal.h"
 #include "pipeline.h"
 
+#include "net/net.h"
 /*  A grid corner's height off the station that owns it.  It is the
  *  line's height AT THE CORNER'S OWN PROJECTION on the centerline, not
  *  the nearest station's.  So the two corners across the band come out

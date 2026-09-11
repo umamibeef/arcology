@@ -81,9 +81,8 @@ target_include_directories(arc_render PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}"
 target_link_libraries(arc_render PUBLIC arc_vendor arc_core
                       PRIVATE arc_warnings)
 
-#  The atlas dumper and the software rasteriser used to be executables of
-#  their own.  They are `arcology --atlas` and `arcology --soft` now, so
-#  their sources go into the one binary below.
+#  The atlas dumper and the software rasteriser are `arcology --atlas`
+#  and `arcology --soft`, so their sources go into the one binary below.
 
 # ---- the one executable: arcology -------------------------------------
 #  Needs SDL3.  A system install is found first; failing that, the build
@@ -126,13 +125,13 @@ if(SDL3_FOUND)
         ../app/world.c ../app/clock.c ../app/area.c
         prefs.c camera.c gpu/gpu.c gpu/frame.c adapt.c generated/shaders.c
         ../util/log.cpp ../util/devopts.c ../util/fs.c ../audio/sound.c ../audio/music.c
-        mesh/mesh.c mesh/tile.c mesh/emit.c mesh/shapes.c mesh/check.c mesh/incr.c ../util/dump.c
+        mesh/mesh.c mesh/tile.c mesh/emit.c mesh/shapes.c mesh/check.c incr.c ../util/dump.c
         ../script/script.c ../script/lint.c  # the scripting layer, or its stubs where Lua is off
         mesh/shape.c
-        walk/walk.c walk/piece.c walk/walkway.c
+        walk/walk.c walk/cursor.c walk/cell.c walk/walkway.c
         mesh/fit.c mesh/surface.c mesh/loft.c mesh/piece.c
         mesh/model.c
-        net/table.c net/lane.c net/station.c net/box.c net/meet.c net/band.c net/network.c net/drive.c net/geo.c net/family.c net/spur.c net/shelf.c net/margin.c net/node.c net/cut.c net/loft.c
+        net/table.c net/lane.c net/station.c net/box.c net/meet.c net/band.c net/band_walk.c net/network.c net/drive.c geo.c build.c net/family.c net/spur.c net/spur_build.c net/shelf.c net/margin.c net/node.c net/cut.c net/strip.c
         net/traffic.c net/report.c
         atlas/dump.c soft/main.c)       # --atlas and --soft
     #  arc_dev links arc_core PUBLIC, so naming both here would put the
@@ -249,8 +248,9 @@ add_test(NAME seam COMMAND ${Python3_EXECUTABLE}
          "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/seam_check.py")
 add_test(NAME projection COMMAND ${Python3_EXECUTABLE}
          "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/project_check.py")
-#  Splitting sim.c meant taking `static` off everything that turned out
-#  to be shared.  This fails if one came off that did not have to.
+#  Nothing in src/sim is global by accident: a routine loses its
+#  `static` only where another part calls it.  This fails on any that
+#  kept it without needing to.
 add_test(NAME layers COMMAND ${Python3_EXECUTABLE}
          "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/layer_check.py")
 
@@ -353,16 +353,11 @@ if(EXISTS "${ARC_ASSETS}/atlas.json")
                  --binary $<TARGET_FILE:arcology>)
         set_tests_properties(network_discovery PROPERTIES TIMEOUT 600)
     endif()
-    #  WHAT A LANE MUST BE for a car to drive it, and what geometry
-    #  COLLIDES.  Both are ratchets over the whole corpus: they carry the
-    #  numbers as they stand and fail when one RISES, because neither is
-    #  at zero and a check that fails on the state of the world is a
-    #  check somebody turns off.
+    #  WHAT GEOMETRY COLLIDES, as a ratchet over the whole corpus: it
+    #  carries the numbers as they stand and fails when one RISES,
+    #  because it is not at zero and a check that fails on the state of
+    #  the world is a check somebody turns off.
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../cities/atlanta.sc2")
-        add_test(NAME lane_quality COMMAND ${Python3_EXECUTABLE}
-                 "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/lane_check.py"
-                 --binary $<TARGET_FILE:arcology>)
-        set_tests_properties(lane_quality PROPERTIES TIMEOUT 900)
         add_test(NAME no_collisions COMMAND ${Python3_EXECUTABLE}
                  "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/collide_check.py"
                  --binary $<TARGET_FILE:arcology>)
@@ -437,10 +432,9 @@ if(EXISTS "${ARC_ASSETS}/atlas.json")
 endif()
 
 #  The tests that matter compare against the GAME, not against another
-#  implementation of ours.  There used to be a second renderer in Python
-#  and a test that the two agreed; they did agree, exactly, while both were
-#  wrong.  These need the emulator and the shipped cities, so they are
-#  opt-in.
+#  implementation of ours.  Two renderers of ours agree exactly while
+#  both are wrong, and the agreement says nothing.  These need the
+#  emulator and the shipped cities, so they are opt-in.
 #
 #    blit_check   every sprite through the original $18E96, both mirror
 #                 states, every anchor

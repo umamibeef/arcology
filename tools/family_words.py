@@ -62,6 +62,33 @@ PAT = re.compile(r"(?<![A-Za-z])(" + "|".join(WORDS) + r")(?![A-Za-z])", re.I)
 #  one of the words above, and it may never go back on it.
 ALLOW = set()  # every file is clean: a word coming back is a fault
 
+#  A family word also gets in ABBREVIATED, where the list above cannot
+#  see it.  `hw` is the one that did: `HwSpur`, `s_hw_st`, `HW_MAX_ST`
+#  and `s_hwfit_q` all named the same family in two letters.
+#
+#  A bare `hw` is a HALF WIDTH, which every fit and loft takes, so the
+#  test is the SHAPE of the name rather than the letters.  An identifier
+#  of one part named `hw` is a half width and passes.  A part of a longer
+#  name that starts with `hw` is the family and is a fault.
+IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+HALF_WIDTH = {"hw", "hw_end", "SPUR_HW"}  # the half widths, each read as one
+
+
+def parts(name):
+    """The name in its parts, over both underscores and case changes."""
+    out = []
+    for chunk in name.split("_"):
+        out += re.findall(r"[A-Z]+(?![a-z])|[A-Z][a-z0-9]*|[a-z0-9]+", chunk) or [chunk]
+    return out
+
+
+def abbreviated(name):
+    """True where a part of a longer name abbreviates a family."""
+    if name in HALF_WIDTH:
+        return False
+    p = parts(name)
+    return len(p) > 1 and any(q.lower().startswith("hw") for q in p)
+
 
 def files():
     for dirpath, dirnames, names in os.walk(TREE):
@@ -79,15 +106,16 @@ def main():
     for rel in files():
         nfiles += 1
         base = os.path.basename(rel)
-        if PAT.search(base):
+        if PAT.search(base) or abbreviated(os.path.splitext(base)[0]):
             bad_name.append(rel)
         n = 0
         with open(os.path.join(TREE, rel), errors="replace") as f:
             for i, line in enumerate(f, 1):
-                for m in PAT.finditer(line):
-                    n += 1
-                    if a.list and rel not in ALLOW:
-                        print("%s:%d: %s" % (rel, i, line.rstrip()[:120]))
+                hits = [m.group(0) for m in PAT.finditer(line)]
+                hits += [t for t in IDENT.findall(line) if abbreviated(t)]
+                n += len(hits)
+                if hits and a.list and rel not in ALLOW:
+                    print("%s:%d: %s" % (rel, i, line.rstrip()[:120]))
         if n:
             counts[rel] = n
         elif rel in ALLOW:

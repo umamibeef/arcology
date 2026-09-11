@@ -2,20 +2,22 @@
  *  See mesh/internal.h. */
 #include "mesh/internal.h"
 #include "pipeline.h"
+#include "incr.h"
 
 #include <stdarg.h>
 #include <stdio.h>
 
 /* ---- emitting ---------------------------------------------------------- */
 
-static int grow(RMeshVert **v, uint32_t *n, uint32_t *cap, uint32_t need)
+/*  Room for one more triangle, which is the only thing the emitter adds. */
+static int grow(RMeshVert **v, uint32_t *n, uint32_t *cap)
 {
     uint32_t   c;
     RMeshVert *nv;
-    if (*n + need <= *cap)
+    if (*n + 3u <= *cap)
         return 0;
     c = *cap ? *cap : 4096u;
-    while (c < *n + need)
+    while (c < *n + 3u)
         c *= 2u;
     nv = (RMeshVert *)realloc(*v, (size_t)c * sizeof *nv);
     if (!nv)
@@ -129,7 +131,7 @@ void mesh_origins_clear_wanted(void)
     int32_t col, row;
     for (row = 0; row < R_MAP; ++row)
         for (col = 0; col < R_MAP; ++col)
-            if (mesh_want_tile(col, row))
+            if (incr_want_tile(col, row))
                 s_origin[row * R_MAP + col].n = 0;
 }
 
@@ -254,10 +256,10 @@ int put_tri_r2_at(const char *where, const char *who, RMesh *m, const float p[3]
         return 0;
     if (m->to_water)
     {
-        if (grow(&m->water, &m->n_water, &m->cap_water, 3) != 0)
+        if (grow(&m->water, &m->n_water, &m->cap_water) != 0)
             return -1;
     }
-    else if (grow(&m->land, &m->n_land, &m->cap_land, 3) != 0)
+    else if (grow(&m->land, &m->n_land, &m->cap_land) != 0)
         return -1;
     if (!m->to_water)
     {
@@ -651,7 +653,7 @@ void mesh_emit_free(void)
 static int      s_coe_n, s_coe_cap, s_coe_hn;
 
 static int gix_weld_grid = -1, gix_thin_grid = -1, gix_thin_tol = -1, gix_weld_split_end = -1;
-#define CO_GRID net_geo(&gix_weld_grid, "weld_grid") /* the weld's grid, in parts of a tile */
+#define CO_GRID geo_num(&gix_weld_grid, "weld_grid") /* the weld's grid, in parts of a tile */
 
 static uint32_t co_mix(uint32_t h, uint32_t v)
 {
@@ -795,7 +797,7 @@ static float co_on_edge(const float a[3], const float b[3], const float p[3])
     for (k = 0; k < 3; ++k)
         t += w[k] * d[k];
     t /= len2;
-    end = net_geo(&gix_weld_split_end, "weld_split_end");
+    end = geo_num(&gix_weld_split_end, "weld_split_end");
     if (t <= end || t >= 1.0f - end)
         return -1.0f;
     for (k = 0; k < 3; ++k)
@@ -815,8 +817,8 @@ static float co_on_edge(const float a[3], const float b[3], const float p[3])
  *  out as the few edges the eye can tell apart.  The ends are welded on
  *  a coarser grid than the triangles were.  This is because a cut
  *  piece's end is an interpolation and not the vertex it stands for. */
-#define THIN_GRID net_geo(&gix_thin_grid, "thin_grid")
-#define THIN_TOL  net_geo(&gix_thin_tol, "thin_tol")
+#define THIN_GRID geo_num(&gix_thin_grid, "thin_grid")
+#define THIN_TOL  geo_num(&gix_thin_tol, "thin_tol")
 typedef struct
 {
     int32_t a, b;

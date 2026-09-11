@@ -586,7 +586,7 @@ arc.rules.spur_span = function (r)
     return {top = top, foot = foot, total = total, along = ds}
 end
 
---  Where a band band's walk begins, and which way it runs.
+--  Where a band's walk begins, and which way it runs.
 --
 --  A band is walked from an END, away from it.  So a cell with nothing
 --  behind it is walked forward, and a cell with nothing ahead is walked

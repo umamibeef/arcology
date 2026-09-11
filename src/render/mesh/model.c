@@ -52,7 +52,7 @@ int net_model_shape(int model, float size, const ModelHead **head, const ModelPa
     }
     if (!s_have[model] || s_size[model] != size)
     {
-        s_n[model] = script_model_build(model, size, &s_head[model], s_part[model], MODEL_PARTS);
+        s_n[model] = script_model_build(model, size, &s_head[model], s_part[model]);
         s_size[model] = size;
         s_have[model] = 1;
     }
@@ -65,10 +65,13 @@ int net_model_shape(int model, float size, const ModelHead **head, const ModelPa
  *  facing and `d` along it, so a prop turned to face another way keeps
  *  its shape.  With the facings on the tile's own axes that is the two
  *  swapping over. */
+/*  A model stood on the ground, at its own size and with no phase and no
+ *  group.  A caller that wants any of those three asks net_model_put_on,
+ *  which is the same call with them. */
 int net_model_put(int model, RMesh *m, const RCity *c, uint8_t mask_bit, float order,
-                  float x, float y, float fx, float fy, float size, float phase, float group)
+                  float x, float y, float fx, float fy)
 {
-    return net_model_put_on(model, m, c, mask_bit, order, x, y, fx, fy, size, phase, group, 0.0f, 0.0f, 0);
+    return net_model_put_on(model, m, c, mask_bit, order, x, y, fx, fy, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0);
 }
 
 int net_model_put_on(int model, RMesh *m, const RCity *c, uint8_t mask_bit, float order,

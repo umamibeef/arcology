@@ -1,4 +1,4 @@
---  stair.lua -- the points a band band's fit is given.
+--  stair.lua -- the points a band's fit is given.
 --
 --  A band is a run of cells, and most of them become a point of the
 --  chain the fit works on.  The exception is a STAIRCASE.

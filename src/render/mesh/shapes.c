@@ -10,6 +10,7 @@
 #include "mesh/internal.h"
 #include "pipeline.h"
 
+#include "net/net.h"
 static int gix_foot_sink = -1, gix_wire_w = -1;
 
 /*  One quad of a strip between two cross-sections.  Each is given by its
@@ -297,9 +298,9 @@ int put_tri_draped_n_at(const char *where, const char *who, RMesh *m, const RCit
  *  at all.  Each piece it is cut into takes the drawn surface of the
  *  tile it lands in.  A junction's fill is drawn this way, as a
  *  segment's band is. */
-int put_tri_ground_at(const char *where, const char *who, RMesh *m, const RCity *c, uint8_t mask_bit, float order, const float tri[3][3], const float *nrm, const float col[3], const float ref[3], const float ref2[3])
+int put_tri_ground_at(const char *where, const char *who, RMesh *m, const RCity *c, uint8_t mask_bit, float order, const float tri[3][3], const float col[3], const float ref[3], const float ref2[3])
 {
-    return draped_tri(where, who, m, c, mask_bit, order, tri, nrm, col, ref, ref2, 1);
+    return draped_tri(where, who, m, c, mask_bit, order, tri, NULL, col, ref, ref2, 1); /* the ground's own normal */
 }
 
 static int put_tri_draped(RMesh *m, const RCity *c, uint8_t mask_bit, float order, const float tri[3][3], const float col[3], const float ref[3], const float ref2[3])
@@ -410,7 +411,7 @@ int put_cyl(RMesh *m, const RCity *c, uint8_t mask_bit, float order, float cx, f
         float a = -6.2831853f * ((float)k + 0.5f) / (float)N;
         px[k]   = cx + r * cosf(a);
         py[k]   = cy + r * sinf(a);
-        pz[k]   = surface_at_world(c, mask_bit, px[k], py[k]) - net_geo(&gix_foot_sink, "foot_sink");
+        pz[k]   = surface_at_world(c, mask_bit, px[k], py[k]) - geo_num(&gix_foot_sink, "foot_sink");
         if (pz[k] > hi - 0.02f)
             pz[k] = hi - 0.02f;
     }
@@ -579,7 +580,7 @@ int put_wire_paint(RMesh *m, const RCity *c, uint8_t mask_bit, float order, floa
         return 0; /* the grading pass draws nothing */
     const float col3[3] = {paint < 0.0f ? 0.0f : paint, 0.0f, paint < 0.0f ? MAT_PROP : MAT_VEHICLE};
     const int   n       = 4;
-    float       w       = net_geo(&gix_wire_w, "wire_w");
+    float       w       = geo_num(&gix_wire_w, "wire_w");
     float       dx = x1 - x0, dy = y1 - y0, len = sqrtf(dx * dx + dy * dy);
     float       nx = -dy / len * w, ny = dx / len * w;
     float       ga = surface_at_world(c, mask_bit, x0, y0);
@@ -715,7 +716,7 @@ int put_fascia(RMesh *m, const RCity *c, uint8_t mask_bit, float order, const fl
     static const float conc[3]  = {1.0f, 0.0f, MAT_PIER}; /* cast concrete, plain */
     static const float shade[3] = {1.0f, 1.0f, MAT_PIER};
     static int         gix_slab_parapet    = -1;
-    const float        pw       = net_geo(&gix_slab_parapet, "slab_parapet");
+    const float        pw       = geo_num(&gix_slab_parapet, "slab_parapet");
     float              ia[2]    = {ea[0] - nrm[0] * pw, ea[1] - nrm[1] * pw};
     float              ib[2]    = {eb[0] - nrm[0] * pw, eb[1] - nrm[1] * pw};
     float              inn[3] = {-nrm[0], -nrm[1], 0.0f}, up[3] = {0.0f, 0.0f, 1.0f};

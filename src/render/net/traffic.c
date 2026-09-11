@@ -1,10 +1,20 @@
-/*  traffic.c: the traffic: cars, trains, signals and gates.  Split out
- *  of mesh.c.  See mesh/internal.h. */
+/*  traffic.c: THE MOVING WORLD'S STORES.
+ *
+ *  The movers a beat steps, the signals and gates they answer to, and
+ *  the mesh they are drawn into.  A beat is offered to the script as a
+ *  reading.  It says how far a mover may go, what stands in its way and
+ *  which lap holds it.  The answer is taken back.
+ *
+ *  Nothing here decides any of it.  How fast a mover runs, which way it
+ *  turns at a junction, what a signal shows and when a gate falls are
+ *  the scripts'.  What is left in this file is the keeping and the
+ *  offering. */
 #include <string.h>
 
 #include "dump.h"
 #include "mesh/internal.h"
 #include "pipeline.h"
+#include "net/net.h"
 #include "mesh/model.h"
 #include "script.h"
 
@@ -297,10 +307,6 @@ static struct
     int      live;
 } s_tstep;
 
-void net_beat_step_reset(void)
-{
-    s_tstep.live = 0;
-}
 
 /*  THE ARMS AT A THREAD NODE, gathered for the rule that chooses between
  *  them.
@@ -405,7 +411,7 @@ static int box_curve(float ex, float ey, float hx, float hy, float xx, float xy,
      *  straight through rather than a turn is the SCRIPT'S
      *  (arc.geo.box_straight_dot).  It is a property of what reads as a
      *  turn, not of this arithmetic. */
-    if (hx * gx + hy * gy > net_geo(&gix_box_straight, "box_straight_dot"))
+    if (hx * gx + hy * gy > geo_num(&gix_box_straight, "box_straight_dot"))
         return 0;
     if (!line_meet((V2){ex, ey}, (V2){hx, hy}, (V2){xx, xy}, (V2){gx, gy}, &c))
         return 0;
@@ -1107,6 +1113,8 @@ int net_beat_draws(void)
     return s_beat.draw;
 }
 
+static int traffic_build(RTraffic *t, const RMesh *m, const RCity *c);
+
 /*  The geometry of everything that moves, laid when the frame asks for
  *  it: the cars, the trains, the thread signals' aspects. */
 int net_beat_build(void)
@@ -1388,7 +1396,7 @@ int net_beat_reading(float *speed, int *have_gap, float *gap, int *have_ctrl, fl
  *  arc.rules.signal_group).  Both are settled before anything is built,
  *  so the shader's signal and the rule that holds a car cannot drift
  *  apart. */
-int net_signal_stagger(int32_t col, int32_t row)
+static int net_signal_stagger(int32_t col, int32_t row)
 {
     return (int)((col * 7 + row * 13) % 8);
 }
@@ -1406,16 +1414,6 @@ void net_signal_group_is(int e, float group)
 {
     if (e >= 0 && e < 4)
         s_sig_group[e] = group;
-}
-
-float net_signal_phase(int k)
-{
-    return k >= 0 && k < 8 ? s_sig_phase[k] : 0.0f;
-}
-
-float net_signal_group(int e)
-{
-    return e >= 0 && e < 4 ? s_sig_group[e] : 0.0f;
 }
 
 /*  The signal at the junction the car in hand faces.  There the control
@@ -1522,7 +1520,7 @@ void traffic_digest(const RTraffic *t, const RMesh *m)
           (unsigned)t->n, (unsigned)t->n_trains, (unsigned)t->scratch.n_land, h);
 }
 
-int traffic_build(RTraffic *t, const RMesh *m, const RCity *c)
+static int traffic_build(RTraffic *t, const RMesh *m, const RCity *c)
 {
     const RNet *net      = &m->net;
     const uint8_t   mask_bit = city_corner_mask(c->rotation);
@@ -1586,7 +1584,7 @@ int traffic_build(RTraffic *t, const RMesh *m, const RCity *c)
                 car_place(net, &probe, &px, &py, &pz, &phx, &phy);
                 zf = pz;
             }
-            /*  The car's own shape is the model's (scripts/models.lua).
+            /*  The car's own shape is the model's (scripts/models).
              *  Where it stands and which way it points is this. */
             if (net_model_put_on(net_model_find("car"), &t->scratch, c, mask_bit, order,
                                  x, y, hx, hy, 0.0f, car->paint, 0.0f, zb, zf, 1) != 0)
@@ -1724,8 +1722,8 @@ int net_movers_gate(int i, float *x, float *y, float *fx, float *fy, float *angl
     *angle = s_beat.t->gate[i / 2];
     /*  The arm reaches across the line it stops, so a line that
      *  carries more lanes gets the longer one. */
-    *len   = line_class(s_beat.c, g->col, g->row) > 0.5f ? net_geo(&gix_gate_arm_wide, "gate_arm_wide")
-                                                        : net_geo(&gix_gate_arm, "gate_arm");
+    *len   = line_class(s_beat.c, g->col, g->row) > 0.5f ? geo_num(&gix_gate_arm_wide, "gate_arm_wide")
+                                                        : geo_num(&gix_gate_arm, "gate_arm");
     *order = tile_order(s_beat.c, g->col, g->row, s_beat.mask_bit) + 0.3f;
     return 1;
 }

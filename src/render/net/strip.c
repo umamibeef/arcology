@@ -1,4 +1,4 @@
-/*  loft.c: THE LOFT AS THE NETWORK DRIVES IT.
+/*  strip.c: THE LOFT AS THE NETWORK DRIVES IT.
  *
  *  `w:loft(pieces, profile)` is the generic service and lives in
  *  mesh/loft.c: it knows a chain of pieces and a cross-section and
@@ -17,29 +17,21 @@
 #include "mesh/internal.h"
 #include "opt.h"
 #include "pipeline.h"
+#include "net/net.h"
 #include "script.h"
 
 static const char *s_lx_furn_rule; /* the props rule the family named, for the take */
 
-/*  Which rule the furniture stage last asked for, so the answer is read
- *  in the shape that rule answers in. */
 
-const char *net_loft_furniture_rule(void)
-{
-    return s_lx_furn_rule;
-}
-
-
-/*  The strip the loft finished, held for the composer, and the shape its
- *  triangles belong to: left open until the slab is laid. */
-/*  The strip whose SLAB is still to be laid: the loft leaves its shape
- *  open and the drive lays the slab inside it.  So the slab's triangles
- *  belong to the strip like every other stage's. */
-Loft    s_slab_x;
+/*  The strip whose SLAB is still to be laid, and the shape its triangles
+ *  belong to.  The loft leaves that shape open and the drive lays the
+ *  slab inside it.  So the slab's triangles belong to the strip like
+ *  every other stage's. */
+static Loft    s_slab_x;
 int     s_slab_ready;
 uint32_t s_slab_sh;
-double  s_slab_tp;
-int     s_slab_records_only;
+static double  s_slab_tp;
+static int     s_slab_records_only;
 /*  The corridor's profile over the ground, gathered: arc.rules.ground
  *  spurs it between the nodes at its ends. */
 static void loft_ground_fan(Loft *x, GroundFan *out)
@@ -451,6 +443,8 @@ int net_loft_recorded(void)
     return 0;
 }
 
+static int net_loft_draws(void);
+
 /*  The strip the loft just worked out, for whoever composes it: the same
  *  record the loft's own stages read, still standing.  Answers 0 where
  *  the loft drew nothing worth composing. */
@@ -461,7 +455,7 @@ Loft *net_loft_strip(void)
 
 /*  And the slab itself, once it is composed: the profile the pass keeps
  *  is the slab's.  So it is closed here rather than by the composer. */
-void net_loft_slab_done(double tp)
+static void net_loft_slab_done(double tp)
 {
     double tq = prof_now();
     net_prof_add(NET_PROF_SLAB, tq - tp);
@@ -471,7 +465,7 @@ void net_loft_slab_done(double tp)
 }
 
 /*  Whether the slab is drawn at all: the grading pass lays no triangles. */
-int net_loft_draws(void)
+static int net_loft_draws(void)
 {
     return !grade_only(g_dev.grade_loft);
 }
@@ -614,7 +608,7 @@ int loft_sweep(RMesh *m, const RCity *c, uint8_t mask_bit, const Piece *pc, int 
             ref2[0] = st[i].s, ref2[1] = st[i].s, ref2[2] = st[i + 1].s;
             if (flat)
             {
-                if (put_tri_ground(m, c, mask_bit, how->slot, (const float (*)[3])tri, NULL, col, ref, ref2) != 0)
+                if (put_tri_ground(m, c, mask_bit, how->slot, (const float (*)[3])tri, col, ref, ref2) != 0)
                     return -1;
             }
             else if (put_tri_line_n(m, c, mask_bit, how->slot, (const float (*)[3])tri, NULL, col, ref, ref2) != 0)
@@ -626,7 +620,7 @@ int loft_sweep(RMesh *m, const RCity *c, uint8_t mask_bit, const Piece *pc, int 
             ref2[0] = st[i].s, ref2[1] = st[i + 1].s, ref2[2] = st[i + 1].s;
             if (flat)
             {
-                if (put_tri_ground(m, c, mask_bit, how->slot, (const float (*)[3])tri, NULL, col, ref, ref2) != 0)
+                if (put_tri_ground(m, c, mask_bit, how->slot, (const float (*)[3])tri, col, ref, ref2) != 0)
                     return -1;
             }
             else if (put_tri_line_n(m, c, mask_bit, how->slot, (const float (*)[3])tri, NULL, col, ref, ref2) != 0)

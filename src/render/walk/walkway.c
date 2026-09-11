@@ -7,6 +7,7 @@
 
 #include "dump.h"
 #include "pipeline.h"
+#include "net/net.h"
 #include "opt.h"
 
 #define WALKNET_MAX 32768

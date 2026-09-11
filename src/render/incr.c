@@ -26,21 +26,23 @@
 #include "city.h"
 #include "dump.h"
 #include "log.h"
+#include "incr.h"
 #include "mesh/internal.h"
 #include "mesh/mesh.h"
 #include "pipeline.h"
+#include "net/net.h"
 #include "opt.h"
 #include "script.h"
 
 /*  The incremental rebuild's own scratch, kept between builds because
  *  every build wants the same three arrays at about the same size.  They
- *  are the pass's, not a mesh's: mesh_incr_free gives them back when the
+ *  are the pass's, not a mesh's: incr_free gives them back when the
  *  program is done with meshes altogether. */
 static uint16_t *s_key;
 static uint32_t *s_auxtmp;
 static uint32_t *s_idtmp;
 
-void mesh_incr_free(void)
+void incr_free(void)
 {
     free(s_key), s_key = NULL;
     free(s_auxtmp), s_auxtmp = NULL;
@@ -87,7 +89,7 @@ int mesh_want_xy(float x, float y)
 /*  A tile's faces reach a quarter step past its edges (the seabed, the
  *  water's back faces) and its walls stand on its far edge.  So a tile
  *  builds when its own chunk or any neighbor's does. */
-int mesh_want_tile(int32_t col, int32_t row)
+int incr_want_tile(int32_t col, int32_t row)
 {
     int32_t dc, dr;
     if (!s_incr_on)
@@ -211,7 +213,7 @@ int mesh_partition(RMesh *m)
 
 /* ---- the edit ----------------------------------------------------------- */
 
-int mesh_incr_begin(RMesh *m, const RCity *c, const void *key, size_t keylen)
+int incr_begin(RMesh *m, const RCity *c, const void *key, size_t keylen)
 {
     const RCity *o = m->snap;
     int32_t      i;
@@ -281,14 +283,14 @@ int mesh_incr_begin(RMesh *m, const RCity *c, const void *key, size_t keylen)
 }
 
 /*  Did the edit come within a tile of this one?  Never, in a full build. */
-int mesh_incr_near(int32_t col, int32_t row)
+int incr_near(int32_t col, int32_t row)
 {
     if (!s_incr_on || col < 0 || row < 0 || col >= R_MAP || row >= R_MAP)
         return 0;
     return s_near1[row * R_MAP + col];
 }
 
-void mesh_incr_abort(RMesh *m)
+void incr_abort(RMesh *m)
 {
     if (!s_incr_on)
         return;
@@ -300,7 +302,7 @@ void mesh_incr_abort(RMesh *m)
     s_incr_on  = 0;
 }
 
-int mesh_incr_snapshot(RMesh *m, const RCity *c, const void *key, size_t keylen)
+int incr_snapshot(RMesh *m, const RCity *c, const void *key, size_t keylen)
 {
     if (keylen > sizeof m->key)
         return -1;
@@ -317,7 +319,7 @@ int mesh_incr_snapshot(RMesh *m, const RCity *c, const void *key, size_t keylen)
     return 0;
 }
 
-int mesh_incr_dirty(void)
+int incr_dirty(void)
 {
     return s_incr_on ? s_ndirty : 0;
 }
@@ -394,7 +396,7 @@ enum
     R_N
 };
 
-void mesh_incr_closure(int lines)
+void incr_closure(int lines)
 {
     static uint8_t near2[NT], changed[NT], want_t[NT], hot[SEGS_MAX], reemit[SEGS_MAX], hotb[SEGS_MAX];
     const uint8_t *near1 = s_near1;
@@ -612,7 +614,7 @@ static int meet(RMeshVert **list, uint32_t *n, uint32_t *cap, int split, uint32_
     return 0;
 }
 
-int mesh_incr_end(RMesh *m)
+int incr_end(RMesh *m)
 {
     if (!s_incr_on)
         return -1;

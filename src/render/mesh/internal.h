@@ -115,8 +115,6 @@ typedef struct
  *  anything and neither opens a shape: both are the script's. */
 int mesh_ground_fan(int32_t col, int32_t row, TileFan *out);
 int mesh_tint_fan(int32_t col, int32_t row, TileFan *out);
-void *mesh_build_pass_next(void); /* the next pass of the build, set up and handed out */
-int   mesh_build_passes_rc(void);
 int mesh_world_nets(WorldFan *w, int what);     /* 0 the lane model, 1 the networks, 2 the bands */
 
 extern const int     EDGE_A[4];
@@ -130,6 +128,8 @@ extern float         s_h[GRID * GRID];
 extern float         s_k[GRID * GRID];
 extern float         s_b[GRID * GRID];
 extern int           s_pass;
+/*  One pass of a build composed: the body build.c runs twice. */
+int mesh_build_pass(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel *l, int underground, int rotated, int lines);
 
 typedef enum
 {
@@ -204,8 +204,6 @@ int     put_tri_r2_at(const char *where, const char *who, RMesh *m, const float 
  *  them.  Clears the origins of the tiles it builds once the closure has
  *  named them. */
 void    mesh_record(int on);
-void    mesh_origins_reset(void);
-void    mesh_origins_clear_wanted(void);
 int     put_wall_r2(RMesh *m, const float t0[3], const float t1[3], const float b0[3], const float b1[3], const float nrm[3], float order, const float col[3], float r0, float r1, float s0, float s1);
 int     put_wall_r(RMesh *m, const float t0[3], const float t1[3], const float b0[3], const float b1[3], const float nrm[3], float order, const float col[3], float r0, float r1);
 int     cut_ne_sw(int32_t code);
@@ -218,14 +216,8 @@ void    mesh_free(RMesh *m);
  *  into the chunks an edit touched and meets them into the previous
  *  mesh. */
 extern int s_incr_on; /* an edit's build is under way */
+void    mesh_origins_reset(void);
+void    mesh_origins_clear_wanted(void);
 int        mesh_chunk_of(int32_t col, int32_t row);
 int        mesh_want_xy(float x, float y);           /* the emitter: does this triangle's chunk build */
-int        mesh_want_tile(int32_t col, int32_t row); /* the terrain loop: does this tile's chunk build */
-int        mesh_incr_near(int32_t col, int32_t row); /* did the edit come within a tile of this one (never in a full build) */
-int        mesh_partition(RMesh *m);
-int        mesh_incr_begin(RMesh *m, const RCity *c, const void *key, size_t keylen); /* 1 an edit, 0 full, -1 nothing changed */
-void       mesh_incr_closure(int lines);                                              /* after the grading pass: which chunks */
-int        mesh_incr_end(RMesh *m);                                                   /* after the building pass: the meet */
-void       mesh_incr_abort(RMesh *m);                                                 /* a failed edit's build: the old mesh stands */
-int        mesh_incr_snapshot(RMesh *m, const RCity *c, const void *key, size_t keylen);
 #endif

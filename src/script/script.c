@@ -630,12 +630,14 @@ void api_rule_runaway(lua_State *L, lua_Debug *ar)
  *  the rest of the outer rule running unwatched. */
 static int s_rule_depth;
 
-int api_rule_call(lua_State *L, const char *name, int nargs, int nres)
+/*  A rule is asked for ONE answer.  A rule that wants to say more
+ *  answers a table. */
+int api_rule_call(lua_State *L, const char *name, int nargs)
 {
     int ok;
     if (s_rule_depth++ == 0)
         api_rule_watch(L, 1);
-    ok = lua_pcall(L, nargs, nres, 0) == LUA_OK;
+    ok = lua_pcall(L, nargs, 1, 0) == LUA_OK;
     if (--s_rule_depth == 0)
         api_rule_watch(L, 0);
     if (ok)
@@ -669,7 +671,7 @@ int script_rule_meet_at(int col, int row, int arm, int ctrl, int margin, float c
     lua_pushboolean(s_L, margin), lua_setfield(s_L, -2, "margin");
     lua_pushnumber(s_L, cs), lua_setfield(s_L, -2, "cos");
     lua_pushnumber(s_L, span), lua_setfield(s_L, -2, "span");
-    if (!api_rule_call(s_L, "lap_at", 1, 1))
+    if (!api_rule_call(s_L, "lap_at", 1))
         return 0;
     if (lua_isnumber(s_L, -1))
         *out = (float)lua_tonumber(s_L, -1), ok = *out > 0.0f;
@@ -688,7 +690,7 @@ float script_rule_gate(float angle, float near, float dt)
     lua_pushnumber(s_L, angle), lua_setfield(s_L, -2, "angle");
     lua_pushnumber(s_L, near), lua_setfield(s_L, -2, "near");
     lua_pushnumber(s_L, dt), lua_setfield(s_L, -2, "dt");
-    if (!api_rule_call(s_L, "gate", 1, 1))
+    if (!api_rule_call(s_L, "gate", 1))
         return angle;
     if (lua_isnumber(s_L, -1))
         v = (float)lua_tonumber(s_L, -1);
@@ -708,7 +710,7 @@ float script_rule_car_follow(float gap, float v, float stop, float free)
     lua_pushnumber(s_L, v), lua_setfield(s_L, -2, "speed");
     lua_pushnumber(s_L, stop), lua_setfield(s_L, -2, "stop");
     lua_pushnumber(s_L, free), lua_setfield(s_L, -2, "free");
-    if (!api_rule_call(s_L, "car_follow", 1, 1))
+    if (!api_rule_call(s_L, "car_follow", 1))
         return v;
     out = (float)lua_tonumber(s_L, -1);
     lua_pop(s_L, 1);
@@ -726,7 +728,7 @@ float script_rule_car_hold(float to_end, int hold, float line, float v, float dt
     lua_pushnumber(s_L, line), lua_setfield(s_L, -2, "line");
     lua_pushnumber(s_L, v), lua_setfield(s_L, -2, "speed");
     lua_pushnumber(s_L, dt), lua_setfield(s_L, -2, "step");
-    if (!api_rule_call(s_L, "car_hold", 1, 1))
+    if (!api_rule_call(s_L, "car_hold", 1))
         return v;
     out = (float)lua_tonumber(s_L, -1);
     lua_pop(s_L, 1);
@@ -769,7 +771,7 @@ int script_rule_prop(const char *name, const ScriptProp *at)
     if (!s_L || !at || !api_rule_begin(s_L, name))
         return 0;
     api_prop_push(s_L, at);
-    if (!api_rule_call(s_L, name, 1, 1))
+    if (!api_rule_call(s_L, name, 1))
         return 0;
     drew = !lua_isnil(s_L, -1) && lua_toboolean(s_L, -1);
     lua_pop(s_L, 1);
@@ -796,7 +798,7 @@ int script_rule_strip(void)
     int drew = 0;
     if (!s_L || !api_rule_begin(s_L, "strip"))
         return 0;
-    if (!api_rule_call(s_L, "strip", 0, 1))
+    if (!api_rule_call(s_L, "strip", 0))
         return 0;
     drew = !lua_isnil(s_L, -1) && lua_toboolean(s_L, -1);
     lua_pop(s_L, 1);
@@ -809,7 +811,7 @@ int script_rule_traffic(ScriptTraffic *out)
     int ok = 0;
     if (!s_L || !api_rule_begin(s_L, "traffic"))
         return 0;
-    if (!api_rule_call(s_L, "traffic", 0, 1))
+    if (!api_rule_call(s_L, "traffic", 0))
         return 0;
     if (lua_istable(s_L, -1))
     {
@@ -870,7 +872,7 @@ int script_rule_piece_tiles(unsigned char *fam, signed char *piece,
     int i;
     if (!s_L || !api_rule_begin(s_L, "piece_tiles"))
         return 0;
-    if (!api_rule_call(s_L, "piece_tiles", 0, 1))
+    if (!api_rule_call(s_L, "piece_tiles", 0))
         return 0;
     if (!lua_istable(s_L, -1))
     {
@@ -900,7 +902,7 @@ int script_rule_band_tiles(unsigned char *kind, unsigned char *ew, int n)
     int i;
     if (!s_L || !api_rule_begin(s_L, "band_tiles"))
         return 0;
-    if (!api_rule_call(s_L, "band_tiles", 0, 1))
+    if (!api_rule_call(s_L, "band_tiles", 0))
         return 0;
     if (!lua_istable(s_L, -1))
     {
@@ -951,7 +953,7 @@ int script_rule_numbers(const char *rule, const char *const *names, float *out, 
     int i;
     if (!s_L || !api_rule_begin(s_L, rule))
         return 0;
-    if (!api_rule_call(s_L, rule, 0, 1))
+    if (!api_rule_call(s_L, rule, 0))
         return 0;
     if (!lua_istable(s_L, -1))
     {
@@ -969,7 +971,7 @@ int script_rule_byte_map(const char *rule, unsigned char *map, int n)
     int i;
     if (!s_L || !api_rule_begin(s_L, rule))
         return 0;
-    if (!api_rule_call(s_L, rule, 0, 1))
+    if (!api_rule_call(s_L, rule, 0))
         return 0;
     if (!lua_istable(s_L, -1))
     {
@@ -992,7 +994,7 @@ int script_rule_byte_set(const char *rule, unsigned char *set, int n)
     int i;
     if (!s_L || !api_rule_begin(s_L, rule))
         return 0;
-    if (!api_rule_call(s_L, rule, 0, 1))
+    if (!api_rule_call(s_L, rule, 0))
         return 0;
     if (!lua_istable(s_L, -1))
     {
@@ -1016,7 +1018,7 @@ int script_rule_road_tiles(unsigned char *carries, int n)
     int i;
     if (!s_L || !api_rule_begin(s_L, "line_tiles"))
         return 0;
-    if (!api_rule_call(s_L, "line_tiles", 0, 1))
+    if (!api_rule_call(s_L, "line_tiles", 0))
         return 0;
     if (!lua_istable(s_L, -1))
     {
@@ -1175,7 +1177,7 @@ int script_rule_family(const char *fam, float width, ScriptFamily *out)
     lua_newtable(s_L);
     lua_pushstring(s_L, fam), lua_setfield(s_L, -2, "name");
     lua_pushnumber(s_L, width), lua_setfield(s_L, -2, "width");
-    if (!api_rule_call(s_L, "family", 1, 1))
+    if (!api_rule_call(s_L, "family", 1))
         return 0;
     if (lua_istable(s_L, -1))
     {
@@ -1316,7 +1318,7 @@ int script_rule_meet_frame(int col, int row, float sn, float line, float thread,
     lua_pushnumber(s_L, sn), lua_setfield(s_L, -2, "sin");
     lua_pushnumber(s_L, line), lua_setfield(s_L, -2, "line");
     lua_pushnumber(s_L, thread), lua_setfield(s_L, -2, "thread");
-    if (!api_rule_call(s_L, "lap_frame", 1, 1))
+    if (!api_rule_call(s_L, "lap_frame", 1))
         return 0;
     if (lua_istable(s_L, -1))
     {
@@ -1355,7 +1357,7 @@ int script_rule_meet_marks(float reach, float mast, float limit, float line,
     lua_pushnumber(s_L, fy), lua_setfield(s_L, -2, "fy");
     lua_pushnumber(s_L, gx), lua_setfield(s_L, -2, "gx");
     lua_pushnumber(s_L, gy), lua_setfield(s_L, -2, "gy");
-    if (!api_rule_call(s_L, "lap_marks", 1, 1))
+    if (!api_rule_call(s_L, "lap_marks", 1))
         return 0;
     if (lua_istable(s_L, -1))
     {
@@ -1456,7 +1458,7 @@ int script_rule_corner(int col, int row, float phi, float grow, float width,
         lua_pushnumber(s_L, *back), lua_setfield(s_L, -2, "back");
     if (fwd)
         lua_pushnumber(s_L, *fwd), lua_setfield(s_L, -2, "fwd");
-    if (!api_rule_call(s_L, "corner", 1, 1))
+    if (!api_rule_call(s_L, "corner", 1))
         return CORNER_SQUARE;
     if (lua_istable(s_L, -1))
     {

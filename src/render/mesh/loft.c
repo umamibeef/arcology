@@ -10,6 +10,7 @@
 #include "mesh/internal.h"
 #include "pipeline.h"
 
+#include "net/net.h"
 static int gix_loft_split_probe = -1;
 #include "opt.h"
 
@@ -342,7 +343,7 @@ static void loft_ground(Loft *x)
         const Sample *sm = &x->smp[i];
         if (sm->split)
         {
-            float d0   = net_geo(&gix_loft_split_probe, "loft_split_probe");
+            float d0   = geo_num(&gix_loft_split_probe, "loft_split_probe");
             V2    pm   = {sm->pos.x - sm->dir.x * d0, sm->pos.y - sm->dir.y * d0};
             V2    pp   = {sm->pos.x + sm->dir.x * d0, sm->pos.y + sm->dir.y * d0};
             float zm   = section_height(c, mask_bit, pm, sm->dir, h);
@@ -422,7 +423,7 @@ void loft_ground_set(GroundFan *g, int i, float z)
  *  band is, what it is made of or where it sits in the stack. */
 
 /*  And the loft still in hand, between the stages the drive walks. */
-Loft             s_lx;      /* the strip in flight, for the drive in net/loft.c */
+Loft             s_lx;      /* the strip in flight, for the drive in net/strip.c */
 int              s_lx_live;
 double           s_lx_tp;
 

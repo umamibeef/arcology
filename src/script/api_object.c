@@ -38,8 +38,11 @@
 #include "internal.h"
 #include "mesh/internal.h"
 #include "pipeline.h"
+#include "net/net.h"
 #include "mesh/model.h"
 #include "log.h"
+#include "build.h"
+#include "incr.h"
 
 #define OBJ_META "arc.object"
 
@@ -594,8 +597,7 @@ static int api_strip_prop_flat(lua_State *L)
     lua_pushboolean(L, net_model_put(net_model_find(luaL_checkstring(L, 2)), x->m, x->c, x->mask_bit,
                                      (float)luaL_checknumber(L, 3),
                                      (float)luaL_checknumber(L, 4), (float)luaL_checknumber(L, 5),
-                                     (float)luaL_checknumber(L, 6), (float)luaL_checknumber(L, 7),
-                                     0.0f, 0.0f, 0.0f) == 0);
+                                     (float)luaL_checknumber(L, 6), (float)luaL_checknumber(L, 7)) == 0);
     return 1;
 }
 
@@ -614,7 +616,7 @@ static int api_strip_rail_signal(lua_State *L)
     if (!x)
         return 0;
     if (furniture_on() &&
-        net_model_put(net_model_find(model), x->m, x->c, x->mask_bit, order, px, py, fx, fy, 0.0f, 0.0f, 0.0f) != 0)
+        net_model_put(net_model_find(model), x->m, x->c, x->mask_bit, order, px, py, fx, fy) != 0)
     {
         lua_pushboolean(L, 0);
         return 1;
@@ -740,7 +742,7 @@ static int api_junction_tri(lua_State *L)
     }
     rc[0] = 0.0f, rc[1] = 0.0f, rc[2] = j->mat;
     lua_pushboolean(L, put_tri_ground(j->jb->m, j->jb->c, j->jb->mask_bit, j->order,
-                                      (const float (*)[3])t, NULL, rc, ref, ref2) == 0);
+                                      (const float (*)[3])t, rc, ref, ref2) == 0);
     return 1;
 }
 
@@ -792,7 +794,7 @@ static int api_world_info(lua_State *L)
 static int api_world_wanted(lua_State *L)
 {
     WorldFan *w = world_of(L);
-    lua_pushboolean(L, w && (w->pass == 1 || mesh_want_tile((int32_t)luaL_checkinteger(L, 2),
+    lua_pushboolean(L, w && (w->pass == 1 || incr_want_tile((int32_t)luaL_checkinteger(L, 2),
                                                             (int32_t)luaL_checkinteger(L, 3))));
     return 1;
 }
@@ -885,16 +887,16 @@ static int api_world_net_found(lua_State *L)
 /*  The band's map, handed over for the script to walk its bands.
  *  Answers nothing where this build is replaying the bands a previous
  *  one fitted.  This is when there is nothing to discover. */
-static HwDiscFan s_world_hw;
+static BandDiscFan s_world_band_disc;
 
-static int api_world_hw_cells(lua_State *L)
+static int api_world_band_cells(lua_State *L)
 {
     WorldFan *w = world_of(L);
-    if (!w || !net_hw_replaying())
+    if (!w || !net_band_replaying())
         return 0;
-    net_hw_disc_reset();
-    s_world_hw.full = 0;
-    api_object_push(L, "bands", &s_world_hw);
+    net_band_disc_reset();
+    s_world_band_disc.full = 0;
+    api_object_push(L, "bands", &s_world_band_disc);
     return 1;
 }
 
@@ -2421,9 +2423,9 @@ static int api_world_strip_done(lua_State *L)
 }
 
 /*  THE SLAB BANDS, one at a time: the drive composes each slab between
- *  its loft and the lanes laid under it.  `w:band_band()` answers
+ *  its loft and the lanes laid under it.  `w:band_next()` answers
  *  whether there was another. */
-static int api_world_band_band(lua_State *L)
+static int api_world_band_next(lua_State *L)
 {
     WorldFan *w = world_of(L);
     int       rc;
@@ -2702,14 +2704,14 @@ static int api_world_car_density_is(lua_State *L)
 static int api_world_band_chain(lua_State *L)
 {
     StairFan *st;
-    if (!world_of(L) || (st = net_hw_chain()) == NULL)
+    if (!world_of(L) || (st = net_band_chain()) == NULL)
         return 0;
     lua_pushstring(L, "stair");
     api_object_push(L, "stair", st);
     return 2;
 }
 
-static int api_world_band_band_chained(lua_State *L)
+static int api_world_band_chained(lua_State *L)
 {
     WorldFan *w = world_of(L);
     if (!w)
@@ -2718,41 +2720,41 @@ static int api_world_band_band_chained(lua_State *L)
     return 0;
 }
 
-static int api_world_hw_fits(lua_State *L)
+static int api_world_band_fits(lua_State *L)
 {
     if (!world_of(L))
         return 0;
-    lua_pushinteger(L, net_hw_fits());
+    lua_pushinteger(L, net_band_fits());
     return 1;
 }
 
-static int api_world_hw_fit(lua_State *L)
+static int api_world_band_fit(lua_State *L)
 {
     void *h;
     if (!world_of(L))
         return 0;
-    net_hw_fit_begin((int)luaL_checkinteger(L, 2));
+    net_band_fit_begin((int)luaL_checkinteger(L, 2));
     if ((h = path_handle()) == NULL)
         return 0;
     api_object_push(L, "path", h);
     return 1;
 }
 
-static int api_world_hw_fit_done(lua_State *L)
+static int api_world_band_fit_done(lua_State *L)
 {
     if (!world_of(L))
         return 0;
-    net_hw_fit_done((int)luaL_checkinteger(L, 2));
+    net_band_fit_done((int)luaL_checkinteger(L, 2));
     return 0;
 }
 
-static int api_world_hw_fit_choice(lua_State *L)
+static int api_world_band_fit_choice(lua_State *L)
 {
     static const char *const KEY[3] = {"corners", "tight", "nodes"};
     const int               *free_, *held;
     const char              *fam;
     int                      k;
-    if (!world_of(L) || (fam = net_hw_fit_choice(&free_, &held)) == NULL)
+    if (!world_of(L) || (fam = net_band_fit_choice(&free_, &held)) == NULL)
         return 0;
     lua_newtable(L);
     lua_pushstring(L, fam), lua_setfield(L, -2, "family");
@@ -2767,17 +2769,17 @@ static int api_world_hw_fit_choice(lua_State *L)
     return 1;
 }
 
-static int api_world_hw_fit_choice_is(lua_State *L)
+static int api_world_band_fit_choice_is(lua_State *L)
 {
     const char *v = lua_tostring(L, 2);
     if (!world_of(L))
         return 0;
-    net_hw_fit_choice_is(!v || strcmp(v, "free") == 0);
+    net_band_fit_choice_is(!v || strcmp(v, "free") == 0);
     return 0;
 }
 
 /*  And the band drawn, from the pieces the drive cut for it. */
-static int api_world_band_band_cut(lua_State *L)
+static int api_world_band_cut(lua_State *L)
 {
     WorldFan *w = world_of(L);
     if (!w)
@@ -2787,7 +2789,7 @@ static int api_world_band_band_cut(lua_State *L)
     return 0;
 }
 
-static int api_world_band_band_fitted(lua_State *L)
+static int api_world_band_fitted(lua_State *L)
 {
     WorldFan *w = world_of(L);
     int       rc;
@@ -2799,7 +2801,7 @@ static int api_world_band_band_fitted(lua_State *L)
     return 0;
 }
 
-static int api_world_band_band_done(lua_State *L)
+static int api_world_band_done(lua_State *L)
 {
     WorldFan *w = world_of(L);
     int       rc;
@@ -3006,7 +3008,7 @@ static const luaL_Reg WORLD[] = {
     {"net_discover", api_world_net_discover},
     {"net_cells",    api_world_net_cells},
     {"net_found",    api_world_net_found},
-    {"hw_cells",     api_world_hw_cells},
+    {"band_cells",     api_world_band_cells},
     {"cuts",         api_world_cuts},
     {"cut",          api_world_cut},
     {"cut_done",     api_world_cut_done},
@@ -3092,7 +3094,7 @@ static const luaL_Reg WORLD[] = {
     {"curves",   api_world_curves  },
     {"strip",    api_world_strip   },
     {"strip_done", api_world_strip_done},
-    {"band_band", api_world_band_band},
+    {"band_next", api_world_band_next},
     {"car_density_is", api_world_car_density_is},
     {"road_class_is", api_world_road_class_is},
     {"signal_phase_is", api_world_signal_phase_is},
@@ -3107,15 +3109,15 @@ static const luaL_Reg WORLD[] = {
     {"spur_span",  api_world_spur_span },
     {"spur_span_is", api_world_spur_span_is},
     {"band_chain", api_world_band_chain},
-    {"band_band_chained", api_world_band_band_chained},
-    {"hw_fits",  api_world_hw_fits },
-    {"hw_fit",   api_world_hw_fit  },
-    {"hw_fit_done", api_world_hw_fit_done},
-    {"hw_fit_choice", api_world_hw_fit_choice},
-    {"hw_fit_choice_is", api_world_hw_fit_choice_is},
-    {"band_band_fitted", api_world_band_band_fitted},
-    {"band_band_cut", api_world_band_band_cut},
-    {"band_band_done", api_world_band_band_done},
+    {"band_chained", api_world_band_chained},
+    {"band_fits",  api_world_band_fits },
+    {"band_fit",   api_world_band_fit  },
+    {"band_fit_done", api_world_band_fit_done},
+    {"band_fit_choice", api_world_band_fit_choice},
+    {"band_fit_choice_is", api_world_band_fit_choice_is},
+    {"band_fitted", api_world_band_fitted},
+    {"band_cut", api_world_band_cut},
+    {"band_done", api_world_band_done},
     {"band_spurs", api_world_band_spurs},
     {"spur_next", api_world_spur_next},
     {"spur_pick",  api_world_spur_pick},
@@ -4071,9 +4073,9 @@ static ChainFan *chain_of(lua_State *L)
 }
 
 /*  Which end a call names: the start of the chain, or its goal. */
-static int chain_end(lua_State *L, int idx)
+static int chain_end(lua_State *L)
 {
-    return strcmp(luaL_checkstring(L, idx), "goal") == 0;
+    return strcmp(luaL_checkstring(L, 2), "goal") == 0;
 }
 
 static const Field CHAIN_FIELDS[] = {
@@ -4108,7 +4110,7 @@ static int api_chain_aim(lua_State *L)
 {
     ChainFan *c = chain_of(L);
     if (c && c->nr > 0)
-        path_chain_aim(c, chain_end(L, 2));
+        path_chain_aim(c, chain_end(L));
     return 0;
 }
 
@@ -4118,7 +4120,7 @@ static int api_chain_on_line(lua_State *L)
     ChainFan *c = chain_of(L);
     if (!c || c->nr <= 0)
         return 0;
-    lua_pushboolean(L, path_chain_on_line(c, chain_end(L, 2)));
+    lua_pushboolean(L, path_chain_on_line(c, chain_end(L)));
     return 1;
 }
 
@@ -4127,7 +4129,7 @@ static int api_chain_add_end(lua_State *L)
 {
     ChainFan *c = chain_of(L);
     if (c)
-        path_chain_end(c, chain_end(L, 2));
+        path_chain_end(c, chain_end(L));
     return 0;
 }
 
@@ -4372,9 +4374,9 @@ static StepFan *step_of(lua_State *L)
     return (StepFan *)rec_of(L, "step");
 }
 
-static int st_side(lua_State *L, int idx)
+static int st_side(lua_State *L)
 {
-    return strcmp(luaL_checkstring(L, idx), "ahead") == 0;
+    return strcmp(luaL_checkstring(L, 2), "ahead") == 0;
 }
 
 /*  How many of the chain's own points lie between the two lines.  It
@@ -4399,7 +4401,7 @@ static int api_step_inline(lua_State *L)
     StepFan *w = step_of(L);
     if (!w || w->gap < 1)
         return 0;
-    lua_pushboolean(L, path_step_inline(w, st_side(L, 2)));
+    lua_pushboolean(L, path_step_inline(w, st_side(L)));
     return 1;
 }
 
@@ -4427,7 +4429,7 @@ static int api_step_place(lua_State *L)
 {
     StepFan *w = step_of(L);
     if (w)
-        path_step_end(w, st_side(L, 2));
+        path_step_end(w, st_side(L));
     return 0;
 }
 
@@ -4528,7 +4530,7 @@ static int api_frame_pass(lua_State *L)
     void *w;
     if (!rec_of(L, "frame") || net_drive_what() != DRIVE_BUILD)
         return 0;
-    if ((w = mesh_build_pass_next()) == NULL)
+    if ((w = build_pass_next()) == NULL)
         return 0;
     api_object_push(L, "world", w);
     return 1;
@@ -4712,9 +4714,9 @@ static const luaL_Reg NETWORK[] = {
  *  `band` is the answer.  One run of entries, each a cell of the band or
  *  a block it turns through. */
 
-static HwDiscFan *bands_of(lua_State *L)
+static BandDiscFan *bands_of(lua_State *L)
 {
-    return (HwDiscFan *)rec_of(L, "bands");
+    return (BandDiscFan *)rec_of(L, "bands");
 }
 
 static int api_bands_info(lua_State *L)
@@ -4733,8 +4735,8 @@ static int api_bands_info(lua_State *L)
  *  make its key in the segment table across builds. */
 static int api_bands_band(lua_State *L)
 {
-    static HwRun run;
-    HwDiscFan   *d = bands_of(L);
+    static BandRun run;
+    BandDiscFan   *d = bands_of(L);
     int          n = (int)luaL_checkinteger(L, 3), i;
     int32_t      cell;
     luaL_checktype(L, 2, LUA_TTABLE);
@@ -4760,7 +4762,7 @@ static int api_bands_band(lua_State *L)
         lua_pop(L, 1);
     }
     cell = (int32_t)luaL_checkinteger(L, 4);
-    if (!net_hw_disc_add(&run, cell % R_MAP, cell / R_MAP,
+    if (!net_band_disc_add(&run, cell % R_MAP, cell / R_MAP,
                          lua_toboolean(L, 5), (int)luaL_checkinteger(L, 6)))
         d->full = 1;
     return 0;
@@ -5623,7 +5625,7 @@ static const luaL_Reg PIECES[] = {
     {NULL,       NULL       }
 };
 
-/*  ---- a band band's chain of fit points ------------------------------ */
+/*  ---- a band's chain of fit points ------------------------------ */
 
 static StairFan *stair_of(lua_State *L)
 {
@@ -6432,7 +6434,7 @@ int script_rule_object(const char *rule, const char *kind, void *rec)
         return 0;
     api_object_push(L, kind, rec);
     ++s_depth;
-    if (!api_rule_call(L, rule, 1, 1))
+    if (!api_rule_call(L, rule, 1))
     {
         --s_depth;
         return 0;

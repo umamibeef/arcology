@@ -29,6 +29,8 @@
 #include "mesh/mesh.h"
 #include "pipeline.h"
 
+#include "net/net.h"
+#include "build.h"
 /*  The city the last build was given.  A script reads the map through
  *  this and not through the network walk.  This has its own copy and is
  *  only up while a walk is running. */
@@ -248,7 +250,7 @@ static int l_faults(lua_State *L)
 
 static int l_probe(lua_State *L)
 {
-    const RMesh *m = mesh_built();
+    const RMesh *m = build_mesh();
     if (!m)
         return 0;
     mesh_probe(m, (float)luaL_checknumber(L, 1), (float)luaL_checknumber(L, 2));
