@@ -323,6 +323,11 @@ int app_advance(App *a, SDL_Window *win, float dt, float time)
             build_failed();
         else
             build_ok();
+        /*  The bar comes down with the build that raised it.  Only a
+         *  build puts it up, and the last thing it says is said while
+         *  the mesh goes to the card.  So the end of the build is where
+         *  it goes, and nothing else has to take it down. */
+        a->us.loading[0] = 0;
     }
     a->gv.time = time;
     music_update(a->mus); /* the original's scheduler, once a pass */
@@ -358,6 +363,38 @@ float app_frame_dt(App *a)
     }
     a->last_ns = now;
     return dt;
+}
+
+/*  THE BAR, MOVED FROM INSIDE THE BUILD.
+ *
+ *  A build holds the frame for a second or more.  So the only way a bar
+ *  moves while it runs is if something paints from in there.  The GPU
+ *  still holds the world the LAST build left, so what this paints is
+ *  that world under a bar that is going up.  Nothing of the build is on
+ *  the screen until it finishes, which is what a loading screen is.
+ *
+ *  The composing script names the steps (scripts/compose/world.lua), so
+ *  what the bar counts is the script's own, not a guess made here.
+ *
+ *  Never on a headless run.  There the frame is read back into an image,
+ *  and one readback a step would cost more than the build it is
+ *  reporting on. */
+static void build_bar(void *ud, const char *step, int i, int n)
+{
+    App     *a = (App *)ud;
+    RGpuView fv;
+    if (!a || !a->ui || a->offscreen)
+        return;
+    snprintf(a->us.loading, sizeof a->us.loading, "Building the world");
+    snprintf(a->us.loading_note, sizeof a->us.loading_note, "%s", step ? step : "");
+    a->us.loading_step  = i;
+    a->us.loading_steps = n;
+    /*  The state the rest of the window reads was filled on the last
+     *  frame the app drew, and the build moves none of it.  So the bar
+     *  is the only thing to put in. */
+    ui_frame(a->ui, &a->us);
+    fv = frame_view(a);
+    gpu_frame(a->gpu, &fv, backdrop(a), ui_render, a->ui);
 }
 
 int app_frame(App *a, SDL_Window *win, float dt, float time, RImage *out)
@@ -868,6 +905,7 @@ int game_main(int argc, char **argv)
     {
         a.offscreen = shot_out != NULL; /* the interface's pipeline is made for the readback's format, so every frame is read back */
         a.ui        = ui_create(win, gpu_device(a.gpu), a.offscreen ? gpu_offscreen_format() : gpu_swapchain_format(a.gpu), 1.0f, assets_dir);
+        build_watch(build_bar, &a); /* the bar moves from inside the build */
         R_DBG("ui", "%s", a.ui ? "imgui" : "none");
         if (a.ui)
         {

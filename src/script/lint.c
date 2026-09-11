@@ -1607,6 +1607,7 @@ static void rule_args(lua_State *L, const char *rule, int *nargs)
                           " mouth = function () return nil end,"
                           " mouth_is = function () end,"
                           " shelf = function () return nil end,"
+                          " progress = function () end,"
                           " controls = function () return 0 end,"
                           " control = function () return nil end,"
                           " control_is = function () end,"

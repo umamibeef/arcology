@@ -1370,6 +1370,17 @@ static int api_world_control_is(lua_State *L)
  *  reconciles the copies two corridors leave at a corner they share. */
 static ShelfFan s_world_shelf;
 
+/*  HOW FAR THE BUILD HAS GOT.  The drive names each step as it starts
+ *  it, so whatever is showing a bar can move it.  Nothing here draws:
+ *  build.c hands the name to whoever asked to be told. */
+static int api_world_progress(lua_State *L)
+{
+    if (!world_of(L))
+        return 0;
+    build_step(luaL_checkstring(L, 2), (int)luaL_checkinteger(L, 3), (int)luaL_checkinteger(L, 4));
+    return 0;
+}
+
 static int api_world_shelf(lua_State *L)
 {
     if (!world_of(L) || !shelf_ask(&s_world_shelf))
@@ -3038,6 +3049,7 @@ static const luaL_Reg WORLD[] = {
     {"junction_ring", api_world_junction_ring},
     {"trims",        api_world_trims       },
     {"shelf",    api_world_shelf   },
+    {"progress", api_world_progress},
     {"controls", api_world_controls},
     {"control",  api_world_control },
     {"control_is", api_world_control_is},

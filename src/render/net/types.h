@@ -50,7 +50,8 @@ typedef struct
     int  arm;  /* how it meets the lap beside it.  0 is not through the box, and 1 an arm every outermost lane may use.  2 is one only the lane opposite may */
 } BandSpur;
 #define MAX_SPURS 2048
-/*  A slab's stations, every band's, recorded by the loft for the spurs. */
+/*  One recorded station: a cross-section of a slab at a point along it.
+ *  The loft records every band's, and the spurs are placed from them. */
 typedef struct
 {
     V2    pos, dir;

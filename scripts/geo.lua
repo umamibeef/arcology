@@ -8,6 +8,12 @@
 --  models use those the same way (arc.model, scripts/models.lua).
 
 arc.geo.blink_duty         = 0.3
+--  The share of a signal's cycle one group of arms holds green.  The two
+--  groups take the cycle in turn, so what is left over at each changeover
+--  is the all-red clearance: at 0.45 that is nine seconds of green and one
+--  of clearance in a twenty second cycle.  It must stay under 0.5, or the
+--  two groups are green together.
+arc.geo.signal_green       = 0.45
 --  How nearly the two arms of a junction must agree before a car crosses
 --  it straight through instead of bending round the corner: about
 --  forty-five degrees.

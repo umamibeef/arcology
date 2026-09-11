@@ -1,8 +1,9 @@
 --  signal.lua -- whether the signal a car faces reads red.
 --
 --  A junction with lights runs a fixed cycle and the two groups of arms
---  take it in turn: twenty seconds round, the green held for most of it,
---  then amber and an all-red clearance before the other group starts.
+--  take it in turn: twenty seconds round, the green held for most of a
+--  group's half of it, then an all-red clearance before the other group
+--  starts.  How much of the cycle is green is arc.geo.signal_green.
 --
 --  Neighbouring junctions must not all go green together, so each takes
 --  a PHASE of its own from where it stands -- a stagger the grid decides
@@ -29,5 +30,5 @@ arc.rules.signal = function (s)
         t = f32(t + 0.5)
         t = f32(t - math.floor(t))
     end
-    return t >= arc.geo.blink_duty
+    return t >= arc.geo.signal_green
 end

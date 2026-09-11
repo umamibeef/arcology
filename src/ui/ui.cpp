@@ -1642,7 +1642,12 @@ extern "C" int ui_wants_keyboard(const RUi *u)
  *  over the black that is done, black over the white that is not.  That
  *  is how the machine this interface comes from drew one.  It is also
  *  the only way to read a label on a bar whose fill and text are both
- *  black. */
+ *  black.
+ *
+ *  The PERCENTAGE goes in those same words.  An empty overlay stops the
+ *  bar from putting its own figure at the edge of the fill.  The
+ *  centered label crosses that spot, and the two are unreadable
+ *  together. */
 static void loading_window(RUiState *s)
 {
     const ImGuiViewport *vp = ImGui::GetMainViewport();
@@ -1660,19 +1665,24 @@ static void loading_window(RUiState *s)
                          ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
                          ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoInputs))
     {
-        ImGui::ProgressBar(f, ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() + 8.0f), NULL);
+        ImGui::ProgressBar(f, ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() + 8.0f), "");
         {
+            char said[96];
+            if (s->loading_steps > 0)
+                snprintf(said, sizeof said, "%s  %d%%", s->loading, (int)(f * 100.0f + 0.5f));
+            else
+                snprintf(said, sizeof said, "%s", s->loading);
             ImVec2      mn = ImGui::GetItemRectMin(), mx = ImGui::GetItemRectMax();
-            ImVec2      ts = ImGui::CalcTextSize(s->loading);
+            ImVec2      ts = ImGui::CalcTextSize(said);
             ImVec2      at = ImVec2(mn.x + (mx.x - mn.x - ts.x) * 0.5f,
                                     mn.y + (mx.y - mn.y - ts.y) * 0.5f);
             float       cut = mn.x + (mx.x - mn.x) * f;
             ImDrawList *dl  = ImGui::GetWindowDrawList();
             dl->PushClipRect(mn, ImVec2(cut, mx.y), true);
-            dl->AddText(at, ImGui::GetColorU32(ImGuiCol_FrameBg), s->loading);
+            dl->AddText(at, ImGui::GetColorU32(ImGuiCol_FrameBg), said);
             dl->PopClipRect();
             dl->PushClipRect(ImVec2(cut, mn.y), mx, true);
-            dl->AddText(at, ImGui::GetColorU32(ImGuiCol_Text), s->loading);
+            dl->AddText(at, ImGui::GetColorU32(ImGuiCol_Text), said);
             dl->PopClipRect();
         }
         if (s->loading_note[0])

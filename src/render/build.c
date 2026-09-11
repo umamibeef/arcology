@@ -222,3 +222,20 @@ void build_reports(void)
     shape_unclaimed_report();
     spur_stats();
 }
+
+/*  ---- how far the build has got ------------------------------------- */
+
+static BuildWatcher s_watch;
+static void        *s_watch_ud;
+
+void build_watch(BuildWatcher fn, void *ud)
+{
+    s_watch    = fn;
+    s_watch_ud = ud;
+}
+
+void build_step(const char *step, int i, int n)
+{
+    if (s_watch && step)
+        s_watch(s_watch_ud, step, i, n);
+}

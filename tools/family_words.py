@@ -7,17 +7,25 @@ deck, a ramp, a sidewalk, a level crossing -- is the scripts'.  So none
 of those words may appear under the pipeline: not in a filename, not in
 an identifier, not in a comment.
 
-The generic vocabulary they are written in instead:
+The generic vocabulary they are written in instead.  Every word is
+defined by what it IS, and the repository's house rules hold the full
+table with a sentence on each:
 
-    a family        one kind of line and everything about how it is drawn
-    a line, a strip what a family lays along a run of cells
-    a band          a line two cells wide, whose spine runs on the seam
+    a family        one kind of line, and everything about how it is drawn
+    a line, a strip one cell wide, along a run of cells, on the ground
+    a lane          one way of travel inside a line or a slab
+    a band          a run of cells TWO wide, its spine along the seam
+    a slab          the raised surface a band carries, on columns
+    a station       one cross-section of a slab: point, direction, along,
+                    height.  What a column or a spur is placed by
     a node          where three or four lines meet, and the box it draws
-    a spur          a short line joining a band to a line below it
-    a margin        the band beside a line, and the kerb along its inside
-    a meeting       two families sharing one cell
-    a way across    a marked path over a line at a node's mouth
-    a surface       what a node lays inside its outline
+    an arm          one line reaching a node.  Its mouth enters the box
+    the fill        the surface a node lays inside its own outline
+    a spur          where a raised surface comes down to the ground
+    a margin        a strip beside a line, and the lip along its inside
+    a lap           one cell two families share, at the same level
+    a stripe        a marked way across a line, at a node's mouth
+    a thread        a narrow way a family draws inside its own strip
 
 Two areas are exempt and say why:
 

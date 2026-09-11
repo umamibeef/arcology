@@ -25,4 +25,19 @@ extern WorldFan s_world;
  *  once a run rather than from inside a check. */
 void build_reports(void);
 
+/*  HOW FAR THE BUILD HAS GOT, for whatever is showing a bar.
+ *
+ *  The build holds the frame for as long as it takes, so nothing draws
+ *  while it runs unless something draws from inside it.  That is what
+ *  this is for: the composing script names each step it starts, and
+ *  whoever registered a watcher may paint.  The GPU still holds the
+ *  world the last build left, so a frame drawn here shows that world
+ *  under a moving bar.
+ *
+ *  No watcher is the ordinary case and costs a null test a step. */
+typedef void (*BuildWatcher)(void *ud, const char *step, int i, int n);
+void build_watch(BuildWatcher fn, void *ud);
+/*  One step begun, as the script names it. */
+void build_step(const char *step, int i, int n);
+
 #endif /* ARC_BUILD_H */

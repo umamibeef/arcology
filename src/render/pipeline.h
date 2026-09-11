@@ -466,6 +466,11 @@ void  net_trim_done(int i);
 /*  The band one arm gave up line for, 0 for none (walk.c s_xwalk). */
 float net_cross_depth(Family f, int32_t col, int32_t row, int e);
 
+/*  A STATION: one cross-section of a strip or a slab.  It holds where
+ *  the section is, which way it faces, how far along it sits and how
+ *  high it stands.  The loft takes one every fraction of a tile, as the
+ *  family's step_run and step_arc ask.  Everything the loft carries is
+ *  placed by reading stations rather than cells. */
 typedef struct
 {
     V2    pos, dir;

@@ -22,8 +22,27 @@
 --  longer than it should says where it went without a switch having to
 --  be found first.  Every entry is the wall time between one `step` and
 --  the next, in milliseconds, in the order the drive ran them.
+--  HOW MANY STEPS THIS BUILD HAS, so the bar knows what a step is worth.
+--  A step announces itself only when it RUNS, so the count has to be
+--  what this build will actually do.  Four steps always run.  The lines
+--  add fourteen more.  The grading pass adds one to reconcile the
+--  shelves, and the building pass does not.
+--
+--  A count that is too high leaves the bar short of the end for ever.
+--  A bar that stops one step short reads as a build that stopped there,
+--  and the last step is the one a person is already waiting on.
+--
+--  Beyond that it only has to be near enough: a step that takes longer
+--  than its share moves the bar slower, which is what a bar is for.
+local function steps_of(d, pass)
+    local n = 4
+    if d.lines and not d.underground then n = n + 14 end
+    if pass == 1 then n = n + 1 end
+    return n
+end
+
 local clock = os.clock
-local step_name, step_at, said, n_said
+local step_name, step_at, said, n_said, step_w, n_step, n_steps
 
 local function step(name)
     local now = clock()
@@ -32,14 +51,38 @@ local function step(name)
         said[n_said] = ("%s %.0f"):format(step_name, (now - step_at) * 1000.0)
     end
     step_name, step_at = name, now
+    --  and told to whatever is showing a bar
+    if name and step_w then
+        n_step = n_step + 1
+        step_w:progress(name, n_step, n_steps)
+    end
 end
 
-local function step_first()
+--  THE BAR SPANS THE WHOLE BUILD, not one pass.  A pass numbered 1 is
+--  the grading half of a two pass build, so its steps and the building
+--  pass's are one total, and pass 2 goes on from where pass 1 stopped.
+--  A bar that fills, empties and fills again shows two jobs where a
+--  person is waiting for one.
+local function step_first(w, d)
     said, n_said, step_name, step_at = {}, 0, nil, nil
+    step_w = w
+    --  Pass 2 goes on from pass 1 only where pass 1 ran.  Entered on its
+    --  own, it counts from nought like any first pass.
+    if d.pass ~= 2 or not n_steps then
+        n_step  = 0
+        n_steps = steps_of(d, d.pass)
+        if d.pass == 1 then n_steps = n_steps + steps_of(d, 2) end
+    end
 end
 
 local function step_said(pass, tally)
     step(nil)
+    --  The last pass ends full.  What the pipeline does after the script
+    --  returns, and the upload of the mesh it built, are outside every
+    --  step here, and the bar holds its last reading through them.
+    if pass ~= 1 and step_w and n_steps then
+        step_w:progress("done", n_steps, n_steps)
+    end
     if n_said > 0 then
         arc.log(("pass %d: %s ms%s"):format(pass, table.concat(said, ", ", 1, n_said),
                                             tally and (" | " .. tally) or ""))
@@ -50,7 +93,7 @@ arc.rules.world = function (w)
     local d = w:info()
     local n = d.size
     local n_tile, n_junc, n_seg, n_band = 0, 0, 0, 0
-    step_first()
+    step_first(w, d)
     --  WHAT THE GROUND IS, before anything reads a tile: where every
     --  tile's top comes from.  Every later pass -- the ground faces, the
     --  walls, a strip's own samples of the surface under it -- reads the
