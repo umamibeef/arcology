@@ -25,6 +25,9 @@ local CONC = {1.0, 0.0, arc.mat.pier}
 local GORE_ALONG = 4000.0
 
 arc.slab = {}
+--  And the same reading for any other way painted as one lane of a
+--  slab, an interchange's movements among them.
+arc.slab.lane_along = GORE_ALONG
 
 function arc.slab.gore(s, d, i, pv, cu, ha, hb, order, ala, alb)
     if d.structure then return end

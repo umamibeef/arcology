@@ -213,8 +213,50 @@ arc.rules.chain = function (c)
     if head and d.ex0 and head.kind == 1 and head.first then c:aim("start") end
     if tail and d.ex1 and tail.kind == 1 and tail.last  then c:aim("goal")  end
 
-    local same0 = head ~= nil and head.first and c:on_line("start")
-    local same1 = tail ~= nil and tail.last  and c:on_line("goal")
+    --  A band's end that meets an interchange is AIMED AT THE NODE: it
+    --  keeps its place and faces the middle of the node's mass, so every
+    --  arm arrives on a line through one point and the ways leaving it
+    --  sweep from there.  The node is known from the map before any
+    --  band is fitted (arc.interchange_nodes), so the fit can be told.
+    --  A start meets the node behind it, so its line runs away from the
+    --  node; a goal meets the node ahead, so its line runs toward it.
+    local aimed0, aimed1 = false, false
+    local be = arc.band_fitting
+    if arc.geo.interchange_dump > 0.5 and be then
+        arc.dump(string.format("AIM band fitting: head %s tail %s (nr %d)", tostring(be.head), tostring(be.tail), d.nr))
+    end
+    if be and (be.head or be.tail) then
+        local nodes = arc.interchange_nodes()
+        local e = c:info()
+        local function toward(x, y, nd, away)
+            local dx, dy = nd.x - x, nd.y - y
+            if away then dx, dy = -dx, -dy end
+            local l = math.sqrt(dx * dx + dy * dy)
+            if l < 1e-6 then return nil end
+            return dx / l, dy / l
+        end
+        --  The end is carried on along the aimed line by the node's
+        --  reach, so the line and the run behind it meet a tile back
+        --  and the last stretch runs at the node's angle.
+        local reach = arc.geo.interchange_aim or 0.0
+        if be.head and nodes[be.head] then
+            local dx, dy = toward(e.sx, e.sy, nodes[be.head], true)
+            if dx then
+                c:end_at("start", e.sx - dx * reach, e.sy - dy * reach, dx, dy)
+                aimed0 = true
+            end
+        end
+        if be.tail and nodes[be.tail] then
+            local dx, dy = toward(e.gx, e.gy, nodes[be.tail], false)
+            if dx then
+                c:end_at("goal", e.gx + dx * reach, e.gy + dy * reach, dx, dy)
+                aimed1 = true
+            end
+        end
+    end
+
+    local same0 = not aimed0 and head ~= nil and head.first and c:on_line("start")
+    local same1 = not aimed1 and tail ~= nil and tail.last  and c:on_line("goal")
 
     if not same0 then c:add_end("start") end
     for i = 0, d.nr - 1 do c:add(i) end

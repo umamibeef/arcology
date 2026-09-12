@@ -432,7 +432,6 @@ void pieces_reverse(Piece *p, int np);
 void extent_add(float x, float y, float *x0, float *y0, float *x1, float *y1);
 void piece_extent(const Piece *pc, float *x0, float *y0, float *x1, float *y1);
 void piece_near(const Piece *pc, V2 p, V2 *q, V2 *dq);
-int  pose_chain(V2 A, V2 tA, V2 B, V2 tB, V2 *q, float *rad, float *tlim);
 /*  How a spur meets the meet beside it, the rule's answer for the
  *  reading in hand.  And the drive settling all sixty-four readings. */
 /*  A junction's fill as the composing script is handed it: the polygon
@@ -638,6 +637,10 @@ struct PieceFan
     const V2    *q;
     const float *rad, *tlim;
     int          n;
+    /*  A chain queued as its two POSES and no points: the script builds
+     *  the points between them (arc.rules.chain) before it cuts. */
+    int          posed;
+    V2           A, tA, B, tB;
     Piece       *out;
     int          np;
     int          over; /* the piece pool filled: nothing more goes in */

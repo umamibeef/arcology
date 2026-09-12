@@ -27,15 +27,21 @@
 static int mesh_build_passes(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel *l, int underground, int rotated, int lines, int mode);
 
 /*  What the build reads besides the tiles: a different key is a full
- *  build (mesh/incr.c diffs the tiles under the same key).  The sprite
- *  set being drawn is NOT in it.  The mesh is the world in world units.
+ *  build (incr.c diffs the tiles under the same key).  The sprite set
+ *  being drawn is NOT in it.  The mesh is the world in world units.
  *  What it reads off the artwork.  A piece's links, a building's bulk,
  *  the ground's mean color.  Are properties of a tile id and are read
  *  from the finest level whatever level is on screen.  With the level in
- *  the key, every zoom across a set boundary was a full rebuild. */
+ *  the key, every zoom across a set boundary was a full rebuild.
+ *
+ *  The SCRIPTS are in it, as the stamp that changes each time they are
+ *  read.  They decide every shape in the world, so a mesh built under
+ *  another reading is not the mesh this one describes.  Without the
+ *  stamp a city that has not changed answers "the mesh stands" and the
+ *  saved rule is read and then drawn by nothing. */
 typedef struct
 {
-    int   underground, rotated, lines, furniture;
+    int   underground, rotated, lines, furniture, script;
     float tune[19];
 } BuildKey;
 
@@ -67,6 +73,7 @@ int build_world(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel *l,
     key.rotated     = rotated;
     key.lines       = lines;
     key.furniture   = furniture_on();
+    key.script      = script_stamp();
     memcpy(key.tune, tune_array(), sizeof key.tune);
     mode = incr_begin(m, c, &key, sizeof key);
     if (mode < 0)

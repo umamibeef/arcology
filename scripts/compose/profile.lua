@@ -27,6 +27,66 @@
 
 local f32 = arc.put.f32
 
+--  Whether the strip meets an interchange beyond this end, and which:
+--  the node whose halo the end station stands in, where the end's tile
+--  or one beside it is a cell the band walk left to that node as its
+--  approach (scripts/compose/bands.lua).  Those cells lie only between
+--  a band's end and the node it meets, so an end inside a halo with
+--  none beside it is a band passing by.  Neither the strip's direction
+--  at the end nor its distance to the node is a guide: a band that
+--  begins in a curve block turns there.  A slab is faded down to the
+--  ground at its ends because that is where it usually has to meet it;
+--  an end that meets a node is carried on at the slab's height instead,
+--  and the node's ways take it from there.
+local function meets_node(x, y)
+    local near = arc.band_approach
+    if not arc.band_tiles or not near then return nil end
+    local _, of_tile, n = arc.interchange_nodes()
+    local c, r = math.floor(x), math.floor(y)
+    if c < 0 or r < 0 or c >= n or r >= n then return nil end
+    local k = of_tile[r * n + c]
+    if not k then return nil end
+    for _, s in ipairs {{0, 0}, {1, 0}, {-1, 0}, {0, 1}, {0, -1}} do
+        local cc, cr = c + s[1], r + s[2]
+        if cc >= 0 and cr >= 0 and cc < n and cr < n and near[cr * n + cc] then return k end
+    end
+    return nil
+end
+
+--  THE ARMS OF A NODE AGREE.  A band reaching a node records the lowest
+--  height its end can stand at, its ground envelope there, under the
+--  node (arc.node_floor); the node's deck is the highest of those
+--  (arc.node_deck, set from the floors when the node is laid, so the
+--  pass after reads it).  A band whose end has a deck is then brought
+--  to it over its last tiles, at the ramp's grade: down to it where the
+--  stiff profile rides higher, never below its own envelope, and up to
+--  it where it rides lower.  Four ways meeting a level apart leave no
+--  grade for one to climb over another; four meeting at one height do.
+arc.node_floor = arc.node_floor or {}
+arc.node_deck  = arc.node_deck or {}
+local function shape_to_node(k, s, z, env, n, total, at_end)
+    if k == nil or k == true then return end
+    local i_end = at_end and n - 1 or 0
+    local floor = env[i_end]
+    if not arc.node_floor[k] or floor > arc.node_floor[k] then arc.node_floor[k] = floor end
+    local deck = arc.node_deck[k]
+    if arc.geo.interchange_dump > 0.5 then
+        arc.dump(string.format("FLOOR node %d %s end: env %.3f smoothed %.3f deck %s",
+            k, at_end and "last" or "first", floor, z[i_end], deck and string.format("%.3f", deck) or "none"))
+    end
+    if not deck then return end
+    local grade = arc.geo.interchange_grade > 0 and arc.geo.interchange_grade
+                  or arc.tune.band_grade
+    for i = 0, n - 1 do
+        local back = at_end and f32(total - s[i]) or s[i]
+        local hi   = f32(deck + f32(grade * back))
+        local lo   = f32(deck - f32(grade * back))
+        if z[i] > hi then z[i] = hi end
+        if z[i] < lo then z[i] = lo end
+        if z[i] < env[i] then z[i] = env[i] end
+    end
+end
+
 arc.rules.profile = function (p)
     local d = p:info()
     local n = d.n
@@ -68,6 +128,10 @@ arc.rules.profile = function (p)
             if z[i] < lim then z[i] = lim end
         end
 
+        --  The envelope, kept: what an end can never stand below.
+        local env = {}
+        for i = 0, n - 1 do env[i] = z[i] end
+
         local w = d.stiff
         if w > 1e-3 then
             --  The running greatest height over the window.
@@ -91,13 +155,21 @@ arc.rules.profile = function (p)
                 zsm[i] = f32(sum / (b - a))
             end
             --  Faded in over a window at each end, where the slab has to
-            --  meet the ground.
+            --  meet the ground; not at an end that meets a node.
+            local x0, y0 = p:pose(0)
+            local x1, y1 = p:pose(n - 1)
+            local node0 = x0 and meets_node(x0, y0)
+            local node1 = x1 and meets_node(x1, y1)
             for i = 0, n - 1 do
-                local edge = s[i] < f32(d.total - s[i]) and s[i] or f32(d.total - s[i])
+                local e0 = node0 and 1e9 or s[i]
+                local e1 = node1 and 1e9 or f32(d.total - s[i])
+                local edge = e0 < e1 and e0 or e1
                 local fr   = f32(edge / w)
                 if fr > 1.0 then fr = 1.0 elseif fr < 0.0 then fr = 0.0 end
                 z[i] = f32(z[i] + f32(f32(zsm[i] - z[i]) * fr))
             end
+            if node0 then shape_to_node(node0, s, z, env, n, d.total, false) end
+            if node1 then shape_to_node(node1, s, z, env, n, d.total, true) end
         end
     end
 

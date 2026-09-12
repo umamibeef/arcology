@@ -27,6 +27,7 @@ void  band_stair_centre(StairFan *s, int i, int j);
 /*  A band strip's elevation, station by station: what the script
  *  reads and writes, and the easing curve a lane drop follows. */
 void  band_prof_at(const ProfFan *p, int i, float *s_at, float *z, float *ground);
+void  band_prof_pose(const ProfFan *p, int i, float *x, float *y, float *dx, float *dy);
 void  band_prof_set(ProfFan *p, int i, float z);
 /*  The lane a spur drops from a slab: the stations and the spurs, and
  *  the width each station is left with. */

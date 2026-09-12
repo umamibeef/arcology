@@ -27,7 +27,10 @@ static struct
     int first_q, n;    /* the chain, in the point arena */
     int first_p, np;   /* the pieces, in the piece arena */
     int cut, over;
+    int posed;         /* queued as two poses: the script builds the points */
+    V2  A, tA, B, tB;
 } s_cut[CUT_MAX];
+static int s_cut_open = -1; /* the chain the drive holds, for net_cut_points */
 static V2       s_cut_q[CUT_PTS];
 static float    s_cut_rad[CUT_PTS], s_cut_tlim[CUT_PTS];
 static Piece    s_cut_pc[CUT_PIECES];
@@ -63,6 +66,7 @@ int net_cut_add(const V2 *q, int n, const float *rad, const float *tlim)
     s_cut[k].np       = 0;
     s_cut[k].cut      = 0;
     s_cut[k].over     = 0;
+    s_cut[k].posed    = 0;
     for (i = 0; i < n; ++i)
     {
         s_cut_q[s_n_cut_q]      = q[i];
@@ -70,6 +74,61 @@ int net_cut_add(const V2 *q, int n, const float *rad, const float *tlim)
         s_cut_tlim[s_n_cut_q++] = tlim ? tlim[i] : 0.0f;
     }
     return k;
+}
+
+/*  One chain queued as the two POSES it runs between and nothing else.
+ *  Which points join them is the script's (arc.rules.chain), asked by the
+ *  drive before the cut, so C never lays a path between two poses. */
+int net_cut_add_poses(V2 A, V2 tA, V2 B, V2 tB)
+{
+    int k;
+    if (s_n_cut >= CUT_MAX)
+    {
+        s_cut_full = 1;
+        return -1;
+    }
+    k                = s_n_cut++;
+    s_cut[k].first_q = 0;
+    s_cut[k].n       = 0;
+    s_cut[k].first_p = 0;
+    s_cut[k].np      = 0;
+    s_cut[k].cut     = 0;
+    s_cut[k].over    = 0;
+    s_cut[k].posed   = 1;
+    s_cut[k].A = A, s_cut[k].tA = tA, s_cut[k].B = B, s_cut[k].tB = tB;
+    return k;
+}
+
+/*  The points the script built for the chain the drive holds, taken
+ *  into the arena.  Fewer than two is no chain.  The cut then makes no
+ *  pieces, and the pass that queued it reads none, as for any path the
+ *  cut refused. */
+int net_cut_points(void *fan, const V2 *q, int n, const float *rad, const float *tlim)
+{
+    PieceFan *f = (PieceFan *)fan;
+    int       i, k = s_cut_open;
+    if (f != &s_cut_fan || k < 0 || k >= s_n_cut || n < 2)
+        return -1;
+    if (s_n_cut_q + n > CUT_PTS || s_n_cut_pc + 2 * n + 2 > CUT_PIECES)
+    {
+        s_cut_full = 1;
+        f->over    = 1;
+        return -1;
+    }
+    s_cut[k].first_q = s_n_cut_q;
+    s_cut[k].n       = n;
+    for (i = 0; i < n; ++i)
+    {
+        s_cut_q[s_n_cut_q]      = q[i];
+        s_cut_rad[s_n_cut_q]    = rad ? rad[i] : 0.0f;
+        s_cut_tlim[s_n_cut_q++] = tlim ? tlim[i] : 0.0f;
+    }
+    f->q    = &s_cut_q[s_cut[k].first_q];
+    f->rad  = &s_cut_rad[s_cut[k].first_q];
+    f->tlim = &s_cut_tlim[s_cut[k].first_q];
+    f->n    = n;
+    f->cur  = q[0];
+    return 0;
 }
 
 int net_cuts(void)
@@ -92,13 +151,20 @@ void *net_cut_at(int i)
         return NULL;
     }
     memset(&s_cut_fan, 0, sizeof s_cut_fan);
-    s_cut_fan.q    = &s_cut_q[s_cut[i].first_q];
-    s_cut_fan.rad  = &s_cut_rad[s_cut[i].first_q];
-    s_cut_fan.tlim = &s_cut_tlim[s_cut[i].first_q];
-    s_cut_fan.n    = s_cut[i].n;
-    s_cut_fan.out  = &s_cut_pc[s_n_cut_pc];
-    s_cut_fan.cur  = s_cut_q[s_cut[i].first_q];
+    s_cut_fan.posed = s_cut[i].posed;
+    s_cut_fan.A = s_cut[i].A, s_cut_fan.tA = s_cut[i].tA;
+    s_cut_fan.B = s_cut[i].B, s_cut_fan.tB = s_cut[i].tB;
+    if (!s_cut[i].posed)
+    {
+        s_cut_fan.q    = &s_cut_q[s_cut[i].first_q];
+        s_cut_fan.rad  = &s_cut_rad[s_cut[i].first_q];
+        s_cut_fan.tlim = &s_cut_tlim[s_cut[i].first_q];
+        s_cut_fan.n    = s_cut[i].n;
+        s_cut_fan.cur  = s_cut_q[s_cut[i].first_q];
+    }
+    s_cut_fan.out    = &s_cut_pc[s_n_cut_pc];
     s_cut[i].first_p = s_n_cut_pc;
+    s_cut_open       = i;
     return &s_cut_fan;
 }
 
@@ -111,6 +177,7 @@ void net_cut_done(int i)
     s_cut[i].over = s_cut_fan.over;
     s_cut[i].cut  = 1;
     s_n_cut_pc += s_cut[i].np;
+    s_cut_open = -1;
 }
 
 /*  The pieces of chain i, or 0 where the drive cut none: no rule, or a

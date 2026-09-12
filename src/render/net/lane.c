@@ -780,21 +780,17 @@ int lane_turns_arm(int e, int *lanes, int *into, int *out, int *spur)
  *  junction does not have, or when the queue is full. */
 int lane_turns_want(int e, int k, int e2, int k2)
 {
-    V2    q[MAX_PTS];
-    float rad[MAX_PTS], tl[MAX_PTS];
-    int   n;
     if (!s_lj_have || e < 0 || e > 3 || e2 < 0 || e2 > 3)
         return 0;
     if (k < 0 || k >= s_lj.nl[e] || k2 < 0 || k2 >= s_lj.nl[e2])
         return 0;
     if (s_n_conn >= (int)(sizeof s_conn / sizeof s_conn[0]))
         return 0;
-    n                      = pose_chain(s_lj.pin[e][k], s_lj.din[e][k], s_lj.pout[e2][k2], s_lj.dout[e2][k2], q, rad, tl);
     s_conn[s_n_conn].e     = e;
     s_conn[s_n_conn].e2    = e2;
     s_conn[s_n_conn].k     = k;
     s_conn[s_n_conn].k2    = k2;
-    s_conn[s_n_conn++].cut = net_cut_add(q, n, rad, tl);
+    s_conn[s_n_conn++].cut = net_cut_add_poses(s_lj.pin[e][k], s_lj.din[e][k], s_lj.pout[e2][k2], s_lj.dout[e2][k2]);
     return 1;
 }
 
@@ -1052,20 +1048,17 @@ int lane_caps_merge(int i)
  *  is QUEUED for the drive to cut, like every other path. */
 int lane_caps_link(int i)
 {
-    int   end, lane, from, to, n;
-    V2    q[MAX_PTS];
-    float rad[MAX_PTS], tl[MAX_PTS];
-    int   sa, sb, li;
+    int end, lane, from, to;
+    int sa, sb, li;
     if (!lane_caps_at(i, &end, &lane, &from, &to))
         return 0;
     if (s_n_cap >= (int)(sizeof s_cap / sizeof s_cap[0]))
         return 0;
     sa = s_lcap[i].sa, sb = s_lcap[i].sb, li = s_lcap[i].li;
-    n                      = pose_chain(s_lseg.ep[sa][li][1], s_lseg.ed[sa][li][1], s_lseg.ep[sb][li][0], s_lseg.ed[sb][li][0], q, rad, tl);
-    s_cap[s_n_cap].sa      = sa;
-    s_cap[s_n_cap].sb      = sb;
-    s_cap[s_n_cap].li      = li;
-    s_cap[s_n_cap++].cut   = net_cut_add(q, n, rad, tl);
+    s_cap[s_n_cap].sa    = sa;
+    s_cap[s_n_cap].sb    = sb;
+    s_cap[s_n_cap].li    = li;
+    s_cap[s_n_cap++].cut = net_cut_add_poses(s_lseg.ep[sa][li][1], s_lseg.ed[sa][li][1], s_lseg.ep[sb][li][0], s_lseg.ed[sb][li][0]);
     return 1;
 }
 
@@ -1434,17 +1427,13 @@ static int s_n_xlink;
 
 static int link_ask(V2 A, V2 tA, V2 B, V2 tB, float w, int from, int to)
 {
-    V2    q[MAX_PTS];
-    float rad[MAX_PTS], tl[MAX_PTS];
-    int   n;
     if (s_n_xlink >= XLINK_MAX)
         return -1;
-    n                       = pose_chain(A, tA, B, tB, q, rad, tl);
     s_xlink[s_n_xlink].A    = A, s_xlink[s_n_xlink].tA = tA;
     s_xlink[s_n_xlink].B    = B, s_xlink[s_n_xlink].tB = tB;
     s_xlink[s_n_xlink].w    = w;
     s_xlink[s_n_xlink].from = from, s_xlink[s_n_xlink].to = to;
-    s_xlink[s_n_xlink++].cut = net_cut_add(q, n, rad, tl);
+    s_xlink[s_n_xlink++].cut = net_cut_add_poses(A, tA, B, tB);
     return 0;
 }
 
@@ -1588,15 +1577,6 @@ int net_links_station(int i, int which, float back, float *x, float *y, float *d
     lane_station_back(i, which, back, &p, &d);
     *x = p.x, *y = p.y, *dx = d.x, *dy = d.y;
     return 1;
-}
-
-/*  The chain between two poses, for the fit to cut.  Answers how many
- *  points, or 0 where no lane joins them. */
-int net_links_route(float ax, float ay, float adx, float ady,
-                    float bx, float by, float bdx, float bdy,
-                    V2 *q, float *rad, float *tlim)
-{
-    return pose_chain((V2){ax, ay}, (V2){adx, ady}, (V2){bx, by}, (V2){bdx, bdy}, q, rad, tlim);
 }
 
 /*  And the link laid, from the pieces the script cut for it. */

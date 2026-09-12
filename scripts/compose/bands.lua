@@ -139,6 +139,60 @@ arc.rules.bands = function (o)
     local prim, axis, block, side = readings(xbld, n, arc.band_tiles)
     local start = arc.rules.band_start
     local seen, e = {}, {}
+    --  Which node each band END meets, filed in the order the bands are
+    --  handed over: the fit reads it (scripts/compose/runs.lua) and aims
+    --  that end at the node.  An end that meets none is nil.
+    local _, of_tile = arc.interchange_nodes()
+    arc.band_ends = {}
+
+    --  THE APPROACH to a node is the node's: the cells of a band within
+    --  arc.geo.interchange_approach steps of an interchange tile are
+    --  walked but not handed over, so the slab and its lanes end that
+    --  far out and the ways through the node begin there, with that run
+    --  to climb in.  Walked, so a band is found and run the same way it
+    --  is without an approach; trimmed after, so nothing is laid on
+    --  them.  Found by stepping out from every interchange tile through
+    --  band cells, a curve block counting as one step for all four of
+    --  its cells.
+    local near = {}
+    do
+        local depth = math.floor(arc.geo.interchange_approach + 0.5)
+        local tiles = arc.band_tiles
+        local front = {}
+        for at = 0, n * n - 1 do
+            local t = tiles[xbld[at]]
+            if t and t.kind == "junction" then front[#front + 1] = at end
+        end
+        for _ = 1, depth do
+            local next_ = {}
+            for _, at in ipairs(front) do
+                local c, r = at % n, at // n
+                for _, s in ipairs {{1, 0}, {-1, 0}, {0, 1}, {0, -1}} do
+                    local cc, cr = c + s[1], r + s[2]
+                    if cc >= 0 and cr >= 0 and cc < n and cr < n then
+                        local p = cr * n + cc
+                        local u = tiles[xbld[p]]
+                        if u and u.kind ~= "junction" and not near[p] and (prim[p] or block[p]) then
+                            near[p] = true
+                            next_[#next_ + 1] = p
+                            if block[p] then
+                                local bi = block[p]
+                                local bc, br = bi % n, bi // n
+                                for _, q in ipairs {bi, bi + 1, bi + n, bi + n + 1} do
+                                    if q // n <= br + 1 and not near[q] then
+                                        near[q] = true
+                                        next_[#next_ + 1] = q
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+            front = next_
+        end
+    end
+    local walked = {}
 
     --  A cell the band may stand on: the primary of its own pair, lying
     --  the way the walk is going, and not already taken.
@@ -238,7 +292,35 @@ arc.rules.bands = function (o)
             break
             ::next::
         end
-        if k > 0 then o:band(e, k, row * n + col, ew, sign) end
+        --  The approach trimmed from each end.  The cells stay taken, so
+        --  no other walk starts inside one.  A curve block keeps the
+        --  cell it exits through: trimmed away, the band turns in the
+        --  block and ends at its middle facing along the block rather
+        --  than out of it toward the node, and every way leaving it
+        --  has to swing round first.
+        local function keep(i)
+            local c = e[i]
+            return not near[c.cell] or c.block
+                   or (i > 0 and e[i - 1].block) or (i < k - 1 and e[i + 1].block)
+        end
+        local lo, k0 = 0, k
+        while lo < k and not keep(lo) do lo = lo + 1 end
+        while k > lo and not keep(k - 1) do k = k - 1 end
+        local head = lo > 0 and of_tile[e[0].cell] or nil
+        local tail = k < k0 and of_tile[e[k0 - 1].cell] or nil
+        if lo > 0 then
+            for j = lo, k - 1 do e[j - lo] = e[j] end
+            k = k - lo
+        end
+        for j = 0, k - 1 do walked[e[j].cell] = true end
+        if k > 0 then
+            arc.band_ends[#arc.band_ends + 1] = {head = head, tail = tail}
+            if arc.geo.interchange_dump > 0.5 then
+                arc.dump(string.format("ENDS band %d from %d,%d: trimmed %d/%d, head %s tail %s",
+                    #arc.band_ends, e[0].cell % n, e[0].cell // n, lo, k0 - k - lo, tostring(head), tostring(tail)))
+            end
+            o:band(e, k, e[0].cell, e[0].ew, sign)
+        end
     end
 
     --  Every cell that could start a band, walked away from its end.
@@ -284,5 +366,17 @@ arc.rules.bands = function (o)
             end
         end
     end
+
+    --  THE CELLS THE WALKS HANDED OVER, for anything that must not draw
+    --  over a slab a band lays itself.  The approach cells were trimmed
+    --  and are not in it.  A node's own pad is the one that must:
+    --  a curve block beside an interchange belongs to that node, and
+    --  where a band turns through the block the band's slab already
+    --  covers it.  Two surfaces over one cell at two heights pass
+    --  through one another, and no painter's order separates them.
+    arc.band_walked = walked
+    --  And the approach cells, for the profile: a band end beside one of
+    --  them is an end that meets a node.
+    arc.band_approach = near
     return true
 end

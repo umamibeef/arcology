@@ -60,6 +60,16 @@ intersection draws; the lanes a road carries, from density and neighbourhood. ME
 with a rule of its own making and checks the city changes with it. *Met when each one can be replaced without a
 compile.*
 
+**6.  All routing and every pose is out of the C code.**  C is for rendering.  The chain of points a way runs
+between two poses -- an interchange movement, a band's continuation, a taper, a spur's foot and descent, a junction's
+connectors, a segment's lane joins, a dead end's cap, a level meet's crossing -- is built by a script and handed to
+`arc.fit`; C never answers "the points between these two poses", not even as a test of what can be built.  MET for
+the routing: no `pose_chain` exists.  A pass that wants a chain queues its two POSES (`net_cut_add_poses`) and the
+drive asks `arc.rules.posed` (`scripts/compose/chain.lua`, the biarc at float precision) for the points before the
+cut; the interchange and the band ends build theirs directly (`arc.chain_between`, `scripts/compose/links.lua`; the
+node's are annealed there).  The poses themselves are read off what the script laid: C evaluates where a laid piece
+ends and hands that back, and decides nothing.  *Met when `pose_chain` has no caller and every chain is a script's.*
+
 ## The constraint on all of it
 
 Every stage is proved output-identical before it is believed.  A geometry change that cannot show this has not been

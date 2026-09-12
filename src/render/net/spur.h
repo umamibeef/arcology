@@ -10,7 +10,7 @@
 
 /*  One placing of a spur's join, as far as the CHAIN it is cut from,
  *  and the placing built from the pieces the script cut. */
-const char *band_slide_chain(SlideFan *s, float u, float at, V2 *q, float *rad, float *tlim, int *n);
+const char *band_slide_poses(SlideFan *s, float u, float at, V2 *Q, V2 *tA, V2 *pos, V2 *tb);
 float       band_slide_routed(SlideFan *s, const Piece *pc, int np);
 int         band_slide_exits(SlideFan *s);
 void        band_slide_keep(SlideFan *s, float taper);

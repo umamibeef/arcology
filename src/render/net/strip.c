@@ -529,7 +529,35 @@ typedef struct
 /*  Every station along the pieces, at the density the caller asked for.
  *  A step of nought puts a station at each piece's two ends and nowhere
  *  between.  This is exact for a straight and coarse for an arc: how
- *  finely a curve reads is the caller's to say and not this file's. */
+ *  finely a curve reads is the caller's to say and not this file's.
+ *
+ *  The seat is the ground plus the lift, one height outright, or the
+ *  HEIGHTS the caller gave at distances along the chain.  Between two of
+ *  those it is eased, so the sweep leaves each one level.  Past the first
+ *  and the last it holds their height. */
+/*  The height the knots give at `at` along the chain.  The knots come
+ *  sorted by distance.  Between two the seat is the cubic that meets
+ *  each at its own height and slope, so the grade is continuous through
+ *  every knot.  A slope of nought at both ends is the eased curve. */
+static float knot_height(const LoftSweep *how, float at)
+{
+    int k;
+    if (at <= how->knot_s[0])
+        return how->knot_z[0];
+    for (k = 1; k < how->nknot; ++k)
+        if (at <= how->knot_s[k])
+        {
+            float span = how->knot_s[k] - how->knot_s[k - 1];
+            float f    = span > 1e-6f ? (at - how->knot_s[k - 1]) / span : 1.0f;
+            float f2 = f * f, f3 = f2 * f;
+            float m0 = how->knot_m ? how->knot_m[k - 1] * span : 0.0f;
+            float m1 = how->knot_m ? how->knot_m[k] * span : 0.0f;
+            return (2.0f * f3 - 3.0f * f2 + 1.0f) * how->knot_z[k - 1] + (f3 - 2.0f * f2 + f) * m0 +
+                   (-2.0f * f3 + 3.0f * f2) * how->knot_z[k] + (f3 - f2) * m1;
+        }
+    return how->knot_z[how->nknot - 1];
+}
+
 static int sweep_stations(const RCity *c, uint8_t mask_bit, const Piece *pc, int np,
                           const LoftSweep *how, SweepSt *st, int cap)
 {
@@ -550,8 +578,11 @@ static int sweep_stations(const RCity *c, uint8_t mask_bit, const Piece *pc, int
             st[ns].pos  = pos;
             st[ns].side = (V2){-dir.y, dir.x};
             st[ns].s    = s + t;
-            st[ns].seat = how->pinned ? how->z
-                                      : surface_at_world(c, mask_bit, pos.x, pos.y) + how->lift;
+            if (how->nknot > 0)
+                st[ns].seat = knot_height(how, s + t);
+            else
+                st[ns].seat = how->pinned ? how->z
+                                          : surface_at_world(c, mask_bit, pos.x, pos.y) + how->lift;
             ++ns;
         }
         s += p->len;
@@ -583,7 +614,7 @@ int loft_sweep(RMesh *m, const RCity *c, uint8_t mask_bit, const Piece *pc, int 
      *  how a line band lies on the terrain it was graded to.  One point
      *  off the ground and the whole section keeps its own heights
      *  instead.  The two would part company along a fold. */
-    if (how->pinned || how->lift != 0.0f)
+    if (how->pinned || how->nknot > 0 || how->lift != 0.0f)
         flat = 0;
     for (k = 0; flat && k < nsec; ++k)
         if (sec[k].up != 0.0f)
@@ -604,8 +635,10 @@ int loft_sweep(RMesh *m, const RCity *c, uint8_t mask_bit, const Piece *pc, int 
             memcpy(tri[0], p[0], sizeof tri[0]);
             memcpy(tri[1], p[1], sizeof tri[1]);
             memcpy(tri[2], p[2], sizeof tri[2]);
-            ref[0] = r0->across, ref[1] = r1->across, ref[2] = r1->across;
-            ref2[0] = st[i].s, ref2[1] = st[i].s, ref2[2] = st[i + 1].s;
+            ref[0] = r0->painted ? r0->paint : r0->across;
+            ref[1] = r1->painted ? r1->paint : r1->across;
+            ref[2] = ref[1];
+            ref2[0] = how->along0 + st[i].s, ref2[1] = how->along0 + st[i].s, ref2[2] = how->along0 + st[i + 1].s;
             if (flat)
             {
                 if (put_tri_ground(m, c, mask_bit, how->slot, (const float (*)[3])tri, col, ref, ref2) != 0)
@@ -616,8 +649,10 @@ int loft_sweep(RMesh *m, const RCity *c, uint8_t mask_bit, const Piece *pc, int 
             memcpy(tri[0], p[0], sizeof tri[0]);
             memcpy(tri[1], p[2], sizeof tri[1]);
             memcpy(tri[2], p[3], sizeof tri[2]);
-            ref[0] = r0->across, ref[1] = r1->across, ref[2] = r0->across;
-            ref2[0] = st[i].s, ref2[1] = st[i + 1].s, ref2[2] = st[i + 1].s;
+            ref[0] = r0->painted ? r0->paint : r0->across;
+            ref[1] = r1->painted ? r1->paint : r1->across;
+            ref[2] = ref[0];
+            ref2[0] = how->along0 + st[i].s, ref2[1] = how->along0 + st[i + 1].s, ref2[2] = how->along0 + st[i + 1].s;
             if (flat)
             {
                 if (put_tri_ground(m, c, mask_bit, how->slot, (const float (*)[3])tri, col, ref, ref2) != 0)

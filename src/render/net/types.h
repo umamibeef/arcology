@@ -153,6 +153,8 @@ typedef struct
     float across; /* tiles from the centerline, left positive */
     float up;     /* tiles above the seat                     */
     float mat;    /* the face from here to the next point     */
+    float paint;  /* the across the material is TOLD, where `painted`.  A material marks itself by where across the way it is.  So a narrow way can be painted as one lane of a wide one */
+    int   painted;
 } LoftRung;
 typedef struct
 {
@@ -160,6 +162,11 @@ typedef struct
     float lift;               /* the seat, that far over the ground under the centerline */
     float z;                  /* ... or at this height outright, where `pinned` */
     int   pinned;
+    const float *knot_s;      /* ... or at these heights, each at a distance along the chain, a cubic */
+    const float *knot_z;      /*     from one to the next and held flat past the first and the last */
+    const float *knot_m;      /*     and the SLOPE the seat has at each, so a way can leave a slab at the slab's own grade */
+    int          nknot;
+    float along0;             /* the along the material is told at the chain's start: a material reads its mode off the thousands */
     float slot;               /* the painter's slot the faces take inside their own tile */
     int   closed;             /* the section's last point joins its first: a tube rather than a ribbon */
 } LoftSweep;

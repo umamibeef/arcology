@@ -346,14 +346,8 @@ static int spur_route(Spur *x)
     /*  The descent's chain, queued to be cut: the cut is
      *  arc.rules.pieces's and the drive makes it, so this stops here and
      *  spur_routed takes the pieces. */
-    {
-        V2    q[MAX_PTS];
-        float rad[MAX_PTS], tl[MAX_PTS];
-        int   n;
-        net_cut_reset();
-        n      = pose_chain(A, tA, F, tF, q, rad, tl);
-        x->cut = n >= 2 ? net_cut_add(q, n, rad, tl) : -1;
-    }
+    net_cut_reset();
+    x->cut = net_cut_add_poses(A, tA, F, tF);
     x->A  = A;
     x->tA = tA;
     x->F  = F;
@@ -393,10 +387,7 @@ static int spur_routed(Spur *x)
  *  every other path, and taken once it has. */
 static int spur_legs_ask(V2 F, V2 tF, V2 B, V2 tB)
 {
-    V2    q[MAX_PTS];
-    float rad[MAX_PTS], tl[MAX_PTS];
-    int   n = pose_chain(F, tF, B, tB, q, rad, tl);
-    return n >= 2 ? net_cut_add(q, n, rad, tl) : -1;
+    return net_cut_add_poses(F, tF, B, tB);
 }
 
 static int spur_legs_take(Spur *x, Piece *out, int *np, float *rmin)
@@ -533,26 +524,30 @@ int band_slide_snap(SlideFan *s, float at)
     return lane_snap_ask(P, s->trav, s->snap);
 }
 
-const char *band_slide_chain(SlideFan *s, float u, float at, V2 *q, float *rad, float *tlim, int *n)
+/*  One placing, as the two POSES its chain runs between.  The first is
+ *  the point on the slab `u` along it, with the slab's direction.  The
+ *  second is the point on the lane picked at `at`, with the direction
+ *  the chain arrives there.  The chain itself is the script's to build.
+ *  Answers "off" where the lane picked is not the one aimed at, which
+ *  ends the slide. */
+const char *band_slide_poses(SlideFan *s, float u, float at, V2 *Q, V2 *tA, V2 *pos, V2 *tb)
 {
     const Spur *x = (const Spur *)s->spur;
-    V2          Q = {x->A.x + x->tA.x * u, x->A.y + x->tA.y * u};
-    V2          pos, d2, tb;
+    V2          d2;
     float       dist;
-    s->r = 1e9f;
+    s->r  = 1e9f;
+    *Q    = (V2){x->A.x + x->tA.x * u, x->A.y + x->tA.y * u};
+    *tA   = x->tA;
     /*  The lane the rule picked at this placing, from the candidates
      *  band_slide_snap offered it.  Another lane than the one aimed at
      *  ends the slide: further along the line only goes further off. */
-    if (lane_snap_take(&pos, &d2, &dist) != s->lane)
+    if (lane_snap_take(pos, &d2, &dist) != s->lane)
         return "off";
-    tb = x->rp->off ? d2 : (V2){-d2.x, -d2.y}; /* construction: against an ON spur's travel */
-    *n = pose_chain(Q, x->tA, pos, tb, q, rad, tlim);
-    if (*n < 2)
-        return "unroutable";
+    *tb     = x->rp->off ? d2 : (V2){-d2.x, -d2.y}; /* construction: against an ON spur's travel */
     s->lead = u;
-    s->Q    = Q;
-    s->pos  = pos;
-    s->dir  = tb;
+    s->Q    = *Q;
+    s->pos  = *pos;
+    s->dir  = *tb;
     s->at   = at;
     return NULL;
 }

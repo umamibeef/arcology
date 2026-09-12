@@ -56,6 +56,13 @@ const char *script_error(void);
  *  what the console shows so a reload is visible. */
 int script_generation(void);
 
+/*  WHAT THE SCRIPTS DESCRIBE, as a number.  It changes on every reading
+ *  of them and on every arc.rebuild.  A build puts it in its key, so a
+ *  mesh built under another reading is never taken as one that still
+ *  stands.  Saving a rule is what draws the world again, and that works
+ *  only while the build can tell two readings apart. */
+int script_stamp(void);
+
 /*  The materials a script declared with arc.mat.define, as a run of four
  *  floats each: the color, and roughness in the fourth.  The frame hands
  *  them to the shaders, which shade anything numbered from

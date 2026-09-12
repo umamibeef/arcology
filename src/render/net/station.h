@@ -14,5 +14,6 @@
 extern BandSt s_band_st[BAND_MAX_ST];
 void net_station_reset(void);
 int  net_station_record(const Loft *x);
+int  net_station_near(V2 p, float *z, float *away);
 
 #endif /* ARC_NET_STATION_H */

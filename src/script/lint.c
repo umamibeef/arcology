@@ -101,6 +101,7 @@ static const struct
     {"world",      "boolean"},
     {"sweep",     "boolean"},
     {"pieces",    "boolean"},
+    {"posed",     "boolean"},
     {"stair",     "boolean"},
     {"profile", "boolean"},
     {"slide", "boolean"},
@@ -1087,8 +1088,9 @@ static void rule_args(lua_State *L, const char *rule, int *nargs)
          *  its goal, so both ends are asked about. */
         if (luaL_dostring(L,
                           "return {kind = 'chain',"
-                          " info = function () return {nr = 2, ex0 = true, ex1 = true} end,"
+                          " info = function () return {sx = 64.0, sy = 64.0, gx = 70.0, gy = 64.0, nr = 2, ex0 = true, ex1 = true} end,"
                           " run = function (_, i) return {kind = 1, first = i == 0, last = i == 1} end,"
+                          " end_at = function () end,"
                           " aim = function () end,"
                           " on_line = function () return false end,"
                           " add_end = function () end,"
@@ -1183,13 +1185,35 @@ static void rule_args(lua_State *L, const char *rule, int *nargs)
         }
         *nargs = 1;
     }
+    else if (strcmp(rule, "posed") == 0)
+    {
+        /*  A chain queued as two poses, one a turn from the other, so
+         *  the points the rule builds are read back. */
+        if (luaL_dostring(L,
+                          "return {kind = 'pieces',"
+                          " info = function () return {n = 0, posed = true,"
+                          "   ax = 64.0, ay = 64.0, adx = 1.0, ady = 0.0,"
+                          "   bx = 66.0, by = 66.0, bdx = 0.0, bdy = 1.0} end,"
+                          " points = function () return true end,"
+                          " corner = function () return nil end,"
+                          " straight = function () end,"
+                          " arc = function () end,"
+                          " tail = function () end}") != LUA_OK)
+        {
+            bad("the lint's own posed chain: %s", lua_tostring(L, -1));
+            lua_pop(L, 1);
+            lua_pushnil(L);
+        }
+        *nargs = 1;
+    }
     else if (strcmp(rule, "pieces") == 0)
     {
         /*  Four vertices: one corner with room and one with none, so
          *  both arms of the cut are walked. */
         if (luaL_dostring(L,
                           "return {kind = 'pieces',"
-                          " info = function () return {n = 4} end,"
+                          " info = function () return {n = 4, posed = false} end,"
+                          " points = function () return true end,"
                           " corner = function (_, i) return {radius = i == 1 and 1.2 or 0.0,"
                           "   tangent = 0.8, tan_half = 1.0, room = 0.9, leaving = 1.0} end,"
                           " straight = function () end,"
@@ -1233,6 +1257,7 @@ static void rule_args(lua_State *L, const char *rule, int *nargs)
                           "   lane_piece = false, lane_off = false, flat = false, slab_above = 1.0,"
                           "   taper0 = 1.0, taper1 = 1.0, grade = 0.3, stiff = 2.0, lift = 1.5} end,"
                           " at = function (_, i) return i - 1.0, 4.0 end,"
+                          " pose = function (_, i) return i + 0.5, 4.5, 1.0, 0.0 end,"
                           " set = function () end,"
                           " ease = function (_, t) return t end}") != LUA_OK)
         {
@@ -1249,8 +1274,8 @@ static void rule_args(lua_State *L, const char *rule, int *nargs)
         if (luaL_dostring(L,
                           "return {kind = 'slide',"
                           " info = function () return {reach = 2.0, merge = 1.0, taper = 0.6} end,"
-                          " route = function (_, u, at) if at > 0.5 then return nil, 'off' end"
-                          "   return nil, 'unroutable' end,"
+                          " poses = function (_, u, at) if at > 0.5 then return nil, 'off' end"
+                          "   return 64.0, 64.0, 1.0, 0.0, 66.0, 64.0, 1.0, 0.0 end,"
                           /*  Two line lanes at the join, so the lip-side pick the
                            *  slide shares with the spur's foot is walked. */
                           " snap = function (_, at) if at > 0.5 then return nil end"
@@ -1582,6 +1607,7 @@ static void rule_args(lua_State *L, const char *rule, int *nargs)
                           "   lines = true, underground = false} end,"
                           " wanted = function () return true end,"
                           " shape = function () end,"
+                          " slab_near = function () return 5.0, 0.5 end,"
                           " loft = function () return 0 end,"
                           " net_discover = function () return 0 end,"
                           " net_cells = function () return nil end,"
@@ -1844,8 +1870,6 @@ static void rule_args(lua_State *L, const char *rule, int *nargs)
                           " lane = function (_, i) return l[i] end,"
                           " pose = function (_, i) return 64.0 + i, 64.0, 1.0, 0.0 end,"
                           " station = function () return 64.0, 64.0, 1.0, 0.0 end,"
-                          " route = function () return {{x = 64, y = 64}, {x = 66, y = 64}},"
-                          "   {0.0, 0.0}, {0.0, 0.0} end,"
                           " link = function () return true end,"
                           " note = function () end}") != LUA_OK)
         {

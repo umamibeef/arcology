@@ -954,6 +954,17 @@ void band_prof_at(const ProfFan *p, int i, float *s_at, float *z, float *ground)
     *ground           = smp[i].z;
 }
 
+/*  Station i: where it is and which way it runs.  A rule shaping the
+ *  heights can look at the map beyond the strip's own ends with it. */
+void band_prof_pose(const ProfFan *p, int i, float *x, float *y, float *dx, float *dy)
+{
+    const Sample *smp = (const Sample *)p->smp;
+    *x                = smp[i].pos.x;
+    *y                = smp[i].pos.y;
+    *dx               = smp[i].dir.x;
+    *dy               = smp[i].dir.y;
+}
+
 void band_prof_set(ProfFan *p, int i, float z)
 {
     ((Sample *)p->smp)[i].z = z;

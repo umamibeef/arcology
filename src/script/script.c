@@ -30,6 +30,11 @@ static char       s_err[1024];
  *  rather than a progress to watch while it happens. */
 static int        s_files;
 static int        s_gen;
+/*  A number that changes whenever what the scripts describe changes: a
+ *  reading of them, or one of them asking for the world again.  A build
+ *  carries it in its key, so a mesh built under another reading is
+ *  never taken as one that still stands. */
+static int        s_stamp;
 static int        s_reloading;
 
 int script_on(void)
@@ -50,6 +55,11 @@ const char *script_error(void)
 int script_generation(void)
 {
     return s_gen;
+}
+
+int script_stamp(void)
+{
+    return s_stamp;
 }
 
 /*  What the script asked to be told.  A message goes through the log,
@@ -120,6 +130,7 @@ static int l_rebuild(lua_State *L)
 {
     (void)L;
     s_dirty = 1;
+    ++s_stamp;
     return 0;
 }
 
@@ -364,6 +375,7 @@ static int run_file(const char *path)
     }
     s_err[0] = 0;
     ++s_gen;
+    ++s_stamp;
     ++s_files;
     return 0;
 }

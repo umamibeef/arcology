@@ -61,17 +61,22 @@ arc.rules.slide = function (sl)
             --  the placing is off the moment it answers another lane.
             local sn = sl:snap(at)
             if sn then sn:is(arc.lip_lane(sn, sn:info())) end
-            --  The chain this placing would be cut from, cut here: the
-            --  cut is arc.rules.pieces's like every other path's, and
-            --  the placing is built from the pieces it answers.
-            local q, rad, tlim = sl:route(u, at)
+            --  The chain this placing is cut from is the script's: the
+            --  two poses are read, the chain is built between them
+            --  (arc.chain_between, scripts/compose/links.lua), and the
+            --  cut is arc.rules.pieces's like every other path's.  The
+            --  placing is built from the pieces it answers.
+            local qx, qy, tax, tay, px, py, tbx, tby = sl:poses(u, at)
             local r
-            if not q and rad == "off" then
+            if not qx and qy == "off" then
                 --  Off the lane aimed at: no further along the line.
                 off = off + 1
                 break
             end
-            if q then r = sl:routed(arc.fit(q, rad, tlim)) end
+            if qx then
+                local q, rad, tlim = arc.chain_between(qx, qy, tax, tay, px, py, tbx, tby)
+                if q then r = sl:routed(arc.fit(q, rad, tlim)) end
+            end
             if not r then
                 unroutable = unroutable + 1
             elseif r <= f32(best * MARGIN) then

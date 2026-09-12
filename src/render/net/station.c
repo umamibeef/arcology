@@ -11,6 +11,7 @@
  *  its loft filed, and one that does not is not.  So no family lends a
  *  stage for it.  A STRUCTURE files none: a viaduct's own slab is what a
  *  spur looks for, and its columns are not stations of it. */
+#include <math.h>
 #include <string.h>
 
 #include "mesh/internal.h"
@@ -44,4 +45,33 @@ int net_station_record(const Loft *x)
         ++s_band_nst;
     }
     return 0;
+}
+
+/*  The nearest station to a point, whatever band laid it: how high the
+ *  slab stands there, and how far away that station is.  Answers 0 where
+ *  the store holds none at all, and then writes nothing.
+ *
+ *  This is how a place that joins several slabs finds the height they
+ *  arrive at.  The store is the only record of it.  A lane carries no
+ *  height.  The ground under the point says how high the land is, not
+ *  how far over the land the slab was carried. */
+int net_station_near(V2 p, float *z, float *away)
+{
+    float best = 1e9f, bz = 0.0f;
+    int   k, have = 0;
+    for (k = 0; k < s_band_nst; ++k)
+    {
+        float dx = s_band_st[k].pos.x - p.x;
+        float dy = s_band_st[k].pos.y - p.y;
+        float d  = dx * dx + dy * dy;
+        if (d < best)
+            best = d, bz = s_band_st[k].z, have = 1;
+    }
+    if (!have)
+        return 0;
+    if (z)
+        *z = bz;
+    if (away)
+        *away = sqrtf(best);
+    return 1;
 }

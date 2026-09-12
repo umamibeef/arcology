@@ -14,6 +14,8 @@
  *  has been round. */
 void net_cut_reset(void);
 int  net_cut_add(const V2 *q, int n, const float *rad, const float *tlim);
+int  net_cut_add_poses(V2 A, V2 tA, V2 B, V2 tB);
+int  net_cut_points(void *fan, const V2 *q, int n, const float *rad, const float *tlim);
 int  net_cuts(void);
 int  net_cut_full(void);
 void *net_cut_at(int i);

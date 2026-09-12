@@ -1069,6 +1069,7 @@ static int api_world_cut_done(lua_State *L)
  *  Nothing about a line reaches this: a script that wants a line lofts a
  *  line's section, and one that wants a canal lofts a canal's. */
 #define LOFT_SEC_MAX 64
+#define LOFT_KNOT_MAX 64
 
 static int api_world_loft(lua_State *L)
 {
@@ -1076,6 +1077,7 @@ static int api_world_loft(lua_State *L)
     static Piece pc[MAX_PIECES];
     LoftRung     sec[LOFT_SEC_MAX];
     LoftSweep    how;
+    float        knot_s[LOFT_KNOT_MAX], knot_z[LOFT_KNOT_MAX], knot_m[LOFT_KNOT_MAX];
     int          np = 0, nsec = 0, i, faces;
     if (!w || !lua_istable(L, 2) || !lua_istable(L, 3))
         return 0;
@@ -1116,6 +1118,10 @@ static int api_world_loft(lua_State *L)
             sec[i].across = api_field_num(L, "across", 0.0f);
             sec[i].up     = api_field_num(L, "up", 0.0f);
             sec[i].mat    = api_field_num(L, "mat", (float)MAT_LINE);
+            lua_getfield(L, -1, "paint");
+            sec[i].painted = lua_isnumber(L, -1);
+            sec[i].paint   = sec[i].painted ? (float)lua_tonumber(L, -1) : sec[i].across;
+            lua_pop(L, 1);
         }
         lua_pop(L, 1);
     }
@@ -1127,9 +1133,35 @@ static int api_world_loft(lua_State *L)
         how.step_arc = api_field_num(L, "step_arc", how.step_run);
         how.lift     = api_field_num(L, "lift", 0.0f);
         how.slot     = api_field_num(L, "slot", 0.0f);
+        how.along0   = api_field_num(L, "along_at", 0.0f);
         lua_getfield(L, -1, "z");
         how.pinned = lua_isnumber(L, -1);
         how.z      = how.pinned ? (float)lua_tonumber(L, -1) : 0.0f;
+        lua_pop(L, 1);
+        /*  `along` is the seat as HEIGHTS at distances along the chain,
+         *  a list of {s, z, dz} in order of s.  `dz` is the slope there,
+         *  and nought where it is left out.  A way that climbs, crosses
+         *  over another and comes down again is a sweep with four of
+         *  them.  Read into arrays of this call's own. */
+        lua_getfield(L, -1, "along");
+        if (lua_istable(L, -1))
+        {
+            int nk = (int)lua_rawlen(L, -1), ki;
+            if (nk > LOFT_KNOT_MAX)
+                nk = LOFT_KNOT_MAX;
+            for (ki = 0; ki < nk; ++ki)
+            {
+                lua_rawgeti(L, -1, ki + 1);
+                knot_s[ki] = api_field_num(L, "s", 0.0f);
+                knot_z[ki] = api_field_num(L, "z", 0.0f);
+                knot_m[ki] = api_field_num(L, "dz", 0.0f);
+                lua_pop(L, 1);
+            }
+            how.knot_s = knot_s;
+            how.knot_z = knot_z;
+            how.knot_m = knot_m;
+            how.nknot  = nk;
+        }
         lua_pop(L, 1);
         lua_getfield(L, -1, "closed");
         how.closed = lua_toboolean(L, -1);
@@ -1143,6 +1175,33 @@ static int api_world_loft(lua_State *L)
     }
     lua_pushinteger(L, faces);
     return 1;
+}
+
+/*  HOW HIGH A SLAB STANDS near a point, read off the stations the lofts
+ *  filed (net/station.c).  Answers the height and how far away the
+ *  station that carries it is, and nothing at all where the store is
+ *  empty.
+ *
+ *  A place that joins several slabs has no other way to find the height
+ *  they arrive at.  The ground under it says how high the land is.  It
+ *  does not say how far over the land the slab was carried, and the lane
+ *  model keeps no height at all.
+ *
+ *  How far away the reading was taken is handed back with it.  A reading
+ *  from the far side of the map is no answer, and only the caller knows
+ *  what near enough is. */
+static int api_world_slab_near(lua_State *L)
+{
+    V2    p;
+    float z, away;
+    if (!world_of(L))
+        return 0;
+    p.x = (float)luaL_checknumber(L, 2);
+    p.y = (float)luaL_checknumber(L, 3);
+    if (!net_station_near(p, &z, &away))
+        return 0;
+    lua_pushnumber(L, z), lua_pushnumber(L, away);
+    return 2;
 }
 
 /*  The SHAPE a script composes into: what the inspector names the
@@ -3015,6 +3074,7 @@ static const luaL_Reg WORLD[] = {
     {"tile",     api_world_tile    },
     {"zone",     api_world_zone    },
     {"shape",    api_world_shape   },
+    {"slab_near", api_world_slab_near},
     {"loft",     api_world_loft    },
     {"net_discover", api_world_net_discover},
     {"net_cells",    api_world_net_cells},
@@ -4091,9 +4151,13 @@ static int chain_end(lua_State *L)
 }
 
 static const Field CHAIN_FIELDS[] = {
-    {"nr",  FLD_INT,  offsetof(ChainFan, nr)},
-    {"ex0", FLD_BOOL, offsetof(ChainFan, ex0)},
-    {"ex1", FLD_BOOL, offsetof(ChainFan, ex1)},
+    {"nr",  FLD_INT,  offsetof(ChainFan, nr)     },
+    {"ex0", FLD_BOOL, offsetof(ChainFan, ex0)    },
+    {"ex1", FLD_BOOL, offsetof(ChainFan, ex1)    },
+    {"sx",  FLD_NUM,  offsetof(ChainFan, start.x)},
+    {"sy",  FLD_NUM,  offsetof(ChainFan, start.y)},
+    {"gx",  FLD_NUM,  offsetof(ChainFan, goal.x) },
+    {"gy",  FLD_NUM,  offsetof(ChainFan, goal.y) },
     {NULL, FLD_NUM, 0}
 };
 
@@ -4123,6 +4187,26 @@ static int api_chain_aim(lua_State *L)
     ChainFan *c = chain_of(L);
     if (c && c->nr > 0)
         path_chain_aim(c, chain_end(L));
+    return 0;
+}
+
+/*  An end put where the script says, facing the way it says.  The
+ *  point is where the chain starts or finishes.  The direction is the
+ *  one its own line runs along there.  Which pose that is, such as an
+ *  arm's end aimed at the node it meets, is the rule's.  This only takes
+ *  it. */
+static int api_chain_end_at(lua_State *L)
+{
+    ChainFan *c = chain_of(L);
+    V2        p, d;
+    if (!c)
+        return 0;
+    p.x = (float)luaL_checknumber(L, 3), p.y = (float)luaL_checknumber(L, 4);
+    d.x = (float)luaL_checknumber(L, 5), d.y = (float)luaL_checknumber(L, 6);
+    if (chain_end(L))
+        c->goal = p, c->st1 = d;
+    else
+        c->start = p, c->st0 = d;
     return 0;
 }
 
@@ -4158,6 +4242,7 @@ static const luaL_Reg CHAIN[] = {
     {"info",    api_chain_info   },
     {"run",     api_chain_run    },
     {"aim",     api_chain_aim    },
+    {"end_at",  api_chain_end_at },
     {"on_line", api_chain_on_line},
     {"add_end", api_chain_add_end},
     {"add",     api_chain_add    },
@@ -5470,40 +5555,6 @@ static int api_links_station(lua_State *L)
     return 4;
 }
 
-/*  The chain between two poses, for arc.fit to cut: the points, the
- *  radius each corner may sweep and the tangent each may spend.  Nothing
- *  at all where no lane joins them, which is B behind A. */
-static int api_links_route(lua_State *L)
-{
-    V2    q[MAX_PTS];
-    float rad[MAX_PTS], tlim[MAX_PTS];
-    int   n, k;
-    if (!rec_of(L, "links"))
-        return 0;
-    n = net_links_route((float)luaL_checknumber(L, 2), (float)luaL_checknumber(L, 3),
-                        (float)luaL_checknumber(L, 4), (float)luaL_checknumber(L, 5),
-                        (float)luaL_checknumber(L, 6), (float)luaL_checknumber(L, 7),
-                        (float)luaL_checknumber(L, 8), (float)luaL_checknumber(L, 9),
-                        q, rad, tlim);
-    if (n < 2)
-        return 0;
-    lua_createtable(L, n, 0);
-    for (k = 0; k < n; ++k)
-    {
-        lua_createtable(L, 0, 2);
-        lua_pushnumber(L, q[k].x), lua_setfield(L, -2, "x");
-        lua_pushnumber(L, q[k].y), lua_setfield(L, -2, "y");
-        lua_rawseti(L, -2, k + 1);
-    }
-    lua_createtable(L, n, 0);
-    for (k = 0; k < n; ++k)
-        lua_pushnumber(L, rad[k]), lua_rawseti(L, -2, k + 1);
-    lua_createtable(L, n, 0);
-    for (k = 0; k < n; ++k)
-        lua_pushnumber(L, tlim[k]), lua_rawseti(L, -2, k + 1);
-    return 3;
-}
-
 /*  The link laid, from the pieces the script cut: which lane it leaves,
  *  which it arrives at, how wide, and the band it belongs to. */
 static int api_links_link(lua_State *L)
@@ -5558,7 +5609,6 @@ static const luaL_Reg LINKS[] = {
     {"lane",    api_links_lane   },
     {"pose",    api_links_pose   },
     {"station", api_links_station},
-    {"route",   api_links_route  },
     {"link",    api_links_link   },
     {"note",    api_links_note   },
     {NULL,      NULL             }
@@ -5572,9 +5622,56 @@ static PieceFan *piece_of(lua_State *L)
 }
 
 static const Field PIECES_FIELDS[] = {
-    {"n", FLD_INT,  offsetof(PieceFan, n)},
+    {"n",     FLD_INT,  offsetof(PieceFan, n)    },
+    {"posed", FLD_BOOL, offsetof(PieceFan, posed)},
+    {"ax",    FLD_NUM,  offsetof(PieceFan, A.x)  },
+    {"ay",    FLD_NUM,  offsetof(PieceFan, A.y)  },
+    {"adx",   FLD_NUM,  offsetof(PieceFan, tA.x) },
+    {"ady",   FLD_NUM,  offsetof(PieceFan, tA.y) },
+    {"bx",    FLD_NUM,  offsetof(PieceFan, B.x)  },
+    {"by",    FLD_NUM,  offsetof(PieceFan, B.y)  },
+    {"bdx",   FLD_NUM,  offsetof(PieceFan, tB.x) },
+    {"bdy",   FLD_NUM,  offsetof(PieceFan, tB.y) },
     {NULL, FLD_NUM, 0}
 };
+
+/*  The points of a chain that was queued as two poses: what the script
+ *  built between them.  Each point carries the radius its corner may
+ *  sweep and the tangent it may spend.  Taken before the cut. */
+static int api_pieces_points(lua_State *L)
+{
+    PieceFan *p = piece_of(L);
+    V2        q[MAX_PTS];
+    float     rad[MAX_PTS], tlim[MAX_PTS];
+    int       n, k;
+    if (!p || !p->posed || !lua_istable(L, 2))
+        return 0;
+    n = (int)lua_rawlen(L, 2);
+    if (n > MAX_PTS)
+        n = MAX_PTS;
+    for (k = 0; k < n; ++k)
+    {
+        lua_rawgeti(L, 2, k + 1);
+        q[k].x = api_field_num(L, "x", 0.0f);
+        q[k].y = api_field_num(L, "y", 0.0f);
+        lua_pop(L, 1);
+        rad[k] = tlim[k] = 0.0f;
+        if (lua_istable(L, 3))
+        {
+            lua_rawgeti(L, 3, k + 1);
+            rad[k] = (float)luaL_optnumber(L, -1, 0.0);
+            lua_pop(L, 1);
+        }
+        if (lua_istable(L, 4))
+        {
+            lua_rawgeti(L, 4, k + 1);
+            tlim[k] = (float)luaL_optnumber(L, -1, 0.0);
+            lua_pop(L, 1);
+        }
+    }
+    lua_pushboolean(L, net_cut_points(p, q, n, rad, tlim) == 0);
+    return 1;
+}
 
 static int api_pieces_info(lua_State *L)
 {
@@ -5630,6 +5727,7 @@ static int api_pieces_tail(lua_State *L)
 
 static const luaL_Reg PIECES[] = {
     {"info",     api_pieces_info    },
+    {"points",   api_pieces_points  },
     {"corner",   api_pieces_corner  },
     {"straight", api_pieces_straight},
     {"arc",      api_pieces_arc     },
@@ -5762,6 +5860,21 @@ static int api_profile_at(lua_State *L)
     return 2;
 }
 
+/*  Where station i is and which way it runs.  A rule reads the map
+ *  beyond the strip's end with it: what a slab's end meets is not in
+ *  the strip. */
+static int api_profile_pose(lua_State *L)
+{
+    ProfFan *p = prof_of(L);
+    int      i = (int)luaL_checkinteger(L, 2);
+    float    x, y, dx, dy;
+    if (!p || i < 0 || i >= p->n)
+        return 0;
+    band_prof_pose(p, i, &x, &y, &dx, &dy);
+    lua_pushnumber(L, x), lua_pushnumber(L, y), lua_pushnumber(L, dx), lua_pushnumber(L, dy);
+    return 4;
+}
+
 /*  The height the station is given. */
 static int api_profile_set(lua_State *L)
 {
@@ -5784,6 +5897,7 @@ static int api_profile_ease(lua_State *L)
 static const luaL_Reg PROFILE[] = {
     {"info", api_profile_info},
     {"at",   api_profile_at  },
+    {"pose", api_profile_pose},
     {"set",  api_profile_set },
     {"ease", api_profile_ease},
     {NULL,   NULL   }
@@ -5812,42 +5926,27 @@ static int api_slide_info(lua_State *L)
     return 1;
 }
 
-/*  One placing, as far as the CHAIN it is cut from: the points, the
- *  radius each corner may sweep and the tangent each may spend.  Nothing
- *  and the reason where there is no placing at all: "off" the lane it
- *  aimed at, or "unroutable". */
-static int api_slide_route(lua_State *L)
+/*  One placing, as the two POSES its chain runs between: on the slab,
+ *  and on the lane picked.  The chain between them is the script's to
+ *  build and cut.  Nothing and the reason where there is no placing:
+ *  "off" the lane it aimed at. */
+static int api_slide_poses(lua_State *L)
 {
     SlideFan   *s = slide_of(L);
-    V2          q[MAX_PTS];
-    float       rad[MAX_PTS], tlim[MAX_PTS];
+    V2          Q, tA, pos, tb;
     const char *why;
-    int         n = 0, k;
     if (!s)
         return 0;
-    why = band_slide_chain(s, (float)luaL_checknumber(L, 2), (float)luaL_checknumber(L, 3),
-                            q, rad, tlim, &n);
+    why = band_slide_poses(s, (float)luaL_checknumber(L, 2), (float)luaL_checknumber(L, 3), &Q, &tA, &pos, &tb);
     if (why)
     {
         lua_pushnil(L);
         lua_pushstring(L, why);
         return 2;
     }
-    lua_createtable(L, n, 0);
-    for (k = 0; k < n; ++k)
-    {
-        lua_createtable(L, 0, 2);
-        lua_pushnumber(L, q[k].x), lua_setfield(L, -2, "x");
-        lua_pushnumber(L, q[k].y), lua_setfield(L, -2, "y");
-        lua_rawseti(L, -2, k + 1);
-    }
-    lua_createtable(L, n, 0);
-    for (k = 0; k < n; ++k)
-        lua_pushnumber(L, rad[k]), lua_rawseti(L, -2, k + 1);
-    lua_createtable(L, n, 0);
-    for (k = 0; k < n; ++k)
-        lua_pushnumber(L, tlim[k]), lua_rawseti(L, -2, k + 1);
-    return 3;
+    lua_pushnumber(L, Q.x), lua_pushnumber(L, Q.y), lua_pushnumber(L, tA.x), lua_pushnumber(L, tA.y);
+    lua_pushnumber(L, pos.x), lua_pushnumber(L, pos.y), lua_pushnumber(L, tb.x), lua_pushnumber(L, tb.y);
+    return 8;
 }
 
 /*  The lanes within reach of the join at this placing, for the rule that
@@ -5941,7 +6040,7 @@ static int api_slide_note(lua_State *L)
 
 static const luaL_Reg SLIDE[] = {
     {"info",  api_slide_info },
-    {"route",  api_slide_route },
+    {"poses",  api_slide_poses },
     {"snap",   api_slide_snap  },
     {"routed", api_slide_routed},
     {"exits", api_slide_exits},

@@ -24,7 +24,6 @@ int   net_links_count(void);
 int   net_links_lane(int i, int *slab, int *line, int *band, float *off, float *w, float *len, int *open0, int *open1);
 int   net_links_pose(int i, int which, float *x, float *y, float *dx, float *dy);
 int   net_links_station(int i, int which, float back, float *x, float *y, float *dx, float *dy);
-int   net_links_route(float ax, float ay, float adx, float ady, float bx, float by, float bdx, float bdy, V2 *q, float *rad, float *tlim);
 int   net_links_add(const Piece *pc, int np, float w, int from, int to, int band);
 void  net_links_note(const char *what, int n);
 /*  lane.c: lanes as primitives: the router, and the lanes at an

@@ -109,54 +109,6 @@ void pieces_reverse(Piece *p, int np)
 }
 
 
-/*  The chain the router lays between two poses: two points where B lies
- *  dead ahead of A, else the equal-tangent biarc's four: A, A + d tA, B
- *  - d tB, B, with the same tangent length at both ends.  Answers how
- *  many points, or 0 where there is no such lane, which is B behind A.
- *  Cutting the chain into pieces is arc.rules.pieces's and happens
- *  elsewhere: nothing is decided here. */
-int pose_chain(V2 A, V2 tA, V2 B, V2 tB, V2 *q, float *rad, float *tlim)
-{
-    V2    v  = {B.x - A.x, B.y - A.y};
-    float vv = v.x * v.x + v.y * v.y, vl = sqrtf(vv);
-    float cr = tA.x * v.y - tA.y * v.x, dt = tA.x * tB.x + tA.y * tB.y, dv = tA.x * v.x + tA.y * v.y;
-    if (vv < 1e-10f)
-        return 0;
-    if (fabsf(cr) < 1e-4f * vl && dt > 0.9999f && dv > 0.0f)
-    {
-        q[0] = A, q[1] = B;
-        rad[0] = rad[1] = 0.0f;
-        tlim[0] = tlim[1] = 0.0f;
-        return 2;
-    }
-    {
-        V2         s2 = {tA.x + tB.x, tA.y + tB.y};
-        float      c = dt, vs = v.x * s2.x + v.y * s2.y, kk = 2.0f * (1.0f - c), d;
-        static int gix_chain_rmax = -1;
-        float      cap = geo_num(&gix_chain_rmax, "lane_route_rmax");
-        if (kk < 1e-5f)
-        {
-            if (vs <= 1e-6f)
-                return 0;
-            d = vv / (2.0f * vs);
-        }
-        else
-            d = (-vs + sqrtf(vs * vs + kk * vv)) / kk;
-        if (d <= 1e-4f)
-            return 0;
-        q[0]    = A;
-        q[1]    = (V2){A.x + tA.x * d, A.y + tA.y * d};
-        q[2]    = (V2){B.x - tB.x * d, B.y - tB.y * d};
-        q[3]    = B;
-        rad[0] = rad[3] = 0.0f;
-        rad[1] = rad[2] = cap;
-        tlim[0] = tlim[3] = 0.0f;
-        tlim[1] = tlim[2] = d;
-        return 4;
-    }
-}
-
-
 void extent_add(float x, float y, float *x0, float *y0, float *x1, float *y1)
 {
     if (x < *x0)

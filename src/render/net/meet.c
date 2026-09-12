@@ -159,15 +159,11 @@ static int s_n_thread, s_thread_at;
 
 static void thread_route_ask(V2 A, V2 tA, V2 B, V2 tB)
 {
-    V2    q[MAX_PTS];
-    float rad[MAX_PTS], tl[MAX_PTS];
-    int   n;
     if (s_n_thread >= THREADS)
         return;
-    n                     = pose_chain(A, tA, B, tB, q, rad, tl);
-    s_thread[s_n_thread].A  = A;
-    s_thread[s_n_thread].B  = B;
-    s_thread[s_n_thread++].cut = net_cut_add(q, n, rad, tl);
+    s_thread[s_n_thread].A     = A;
+    s_thread[s_n_thread].B     = B;
+    s_thread[s_n_thread++].cut = net_cut_add_poses(A, tA, B, tB);
 }
 
 static float thread_route(Piece *pc, int *np)

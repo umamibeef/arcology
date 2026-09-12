@@ -300,11 +300,18 @@ arc.rules.world = function (w)
         --  And every fitted path cut into the pieces a strip is lofted
         --  from.  The cut is arc.rules.pieces's, and the passes that
         --  need one queue the path rather than asking for themselves.
+        --  A path queued as two POSES has its points built first: that
+        --  is arc.rules.posed's (scripts/compose/chain.lua), and a chain
+        --  it builds none for is cut into nothing.
         local pieces = arc.rules.pieces
+        local posed  = arc.rules.posed
         local function cut()
             for i = 0, w:cuts() - 1 do
                 local o = w:cut(i)
-                if o and pieces then pieces(o) end
+                if o then
+                    if posed and o:info().posed then posed(o) end
+                    if pieces then pieces(o) end
+                end
                 w:cut_done(i)
             end
         end
@@ -513,6 +520,9 @@ arc.rules.world = function (w)
         w:bands()
         while w:band_next() do
             n_band = n_band + 1
+            --  Which node each end of this band meets, for the fit's
+            --  chain stage: it aims that end at the node.
+            arc.band_fitting = arc.band_ends and arc.band_ends[n_band] or nil
             --  The points the fit is given, picked from the band the
             --  walk read: the straight cells', a lone block's corner,
             --  and nothing of a staircase.
@@ -535,6 +545,7 @@ arc.rules.world = function (w)
             lofted()
             w:band_done()
         end
+        arc.band_fitting = nil
         step("spur spans")
 
         --  And where each spur's descent runs along its slab, which

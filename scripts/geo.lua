@@ -288,10 +288,90 @@ arc.geo.lane_arrow_every   = 2.0
 arc.geo.lane_arrow_len     = 0.16
 arc.geo.lane_arrow_wing    = 0.10
 
---  Half the width of a movement's own ribbon across an interchange: one
---  lane of the slab, since a movement carries one lane from one arm to
---  another.
-arc.geo.interchange_lane_w = 0.30
+--  Half the width of one movement's way across an interchange: one lane
+--  of the slab, and a hair under it.  A slab's lane ends stand about
+--  0.17 of a tile apart where they leave the slab, and two ways out of
+--  one arm run abreast from lanes side by side, so a way wider than
+--  that pitch overlaps the next one's and the two pass through each
+--  other wherever their heights differ.
+arc.geo.interchange_lane_w = 0.07
+
+--  How far one movement stands OVER another where the two cross, in
+--  levels of altitude: the whole of what makes a node an interchange
+--  rather than a crossing.  Each movement is a way of its own, and two
+--  that cross are put on different levels, this far apart -- as far as
+--  the grade allows.  A way can only climb so much over its length, so
+--  a node whose ways are short takes the largest gap they can all
+--  reach, and says so when that is under the least gap a car clears.
+arc.geo.interchange_over      = 0.5
+arc.geo.interchange_over_min  = 0.2
+--  The steepest a movement may climb or fall, in levels of altitude per
+--  tile: fifteen in a hundred, a ramp's grade.  0 takes the slab's own
+--  grade (arc.tune.band_grade) instead.
+arc.geo.interchange_grade     = 0.15
+--  How many cells short of an interchange a band STOPS, so that its
+--  lanes end there and the node's ways have those cells to climb in.
+--  A way that must cross another a level higher needs the run to get
+--  there, and a node four tiles across has none to spare: the approach
+--  is where an interchange's ramps part from the deck, and here they
+--  do.  0 runs the slab to the node's edge.
+arc.geo.interchange_approach  = 2
+
+--  How far a band's end is carried on toward the node it meets, along
+--  the line from that end to the middle of the node's mass, in tiles.
+--  The end's line and the run behind it then meet a tile back, and the
+--  slab's last stretch runs at the node's own angle; carried nowhere,
+--  the aimed line passes through the end and bends nothing.
+arc.geo.interchange_aim       = 1.0
+
+--  A movement whose two end lines meet is a CORNER and is laid as one
+--  arc: the lines must cross at more than this sine of the angle between
+--  them (about ten degrees), and the meet must lie at least this far
+--  ahead of the one pose and behind the other, in tiles.
+arc.geo.interchange_corner_sin = 0.17
+arc.geo.interchange_corner_leg = 0.3
+
+--  How far a movement runs STRAIGHT off the slab before it bends, and
+--  straight into the slab it reaches after its last bend, in tiles.  A
+--  left turn that bends at once crosses its own arm's opposing lanes
+--  within the first half tile, where no ramp has climbed anything; a
+--  tile of straight run puts that crossing where the grade has bought
+--  the clearance.
+arc.geo.interchange_lead      = 1.0
+
+--  WHERE THE WAYS RUN is searched for, not taken from a router.  Each
+--  movement is a chain the script builds: its straight leads, and a
+--  middle waypoint bowed sideways from the chord by a BULGE, out from
+--  the node's middle.  The bulges are annealed: this many trials per
+--  node, each moving one way's bulge by a step that shrinks as the
+--  search cools, kept when the node weaves better -- fewer crossings
+--  that cannot be lifted at the grade, less climb, no ground it may
+--  not cross -- and sometimes when it does not, while the search is
+--  hot.  0 trials lays every way on its chord.  The search is seeded
+--  by the node's own cells, so a build is the same build every time.
+arc.geo.interchange_anneal      = 150
+arc.geo.interchange_anneal_heat = 3.0
+arc.geo.interchange_anneal_step = 0.3
+arc.geo.interchange_bulge       = 2.5
+--  What one change of a way's turning sign costs the search, in the
+--  same coin as a radian of turning beyond the unavoidable: none is the
+--  ideal, one is borne, and two is the most a way may carry.
+arc.geo.interchange_sign_cost   = 0.5
+arc.geo.interchange_bulge_in    = 0.5
+
+--  A way's VERTICAL CURVES: how many passes of rounding its profile
+--  takes, each a knot averaged with its neighbours a quarter tile
+--  either side, and how far either side of a crossing the way it is
+--  lifted over is held flat, so the rounding leaves the clearance whole.
+arc.geo.interchange_round     = 3
+arc.geo.interchange_crest     = 0.5
+
+--  How far back along a slab its grade is read where a way leaves it,
+--  so the way leaves at that grade and the profile has no crease.
+arc.geo.interchange_tangent   = 0.25
+
+--  How closely a movement is sampled when the crossings are looked for.
+arc.geo.interchange_sample = 0.1
 
 --  How near two lane ends at an interchange must be to belong to the
 --  same arm.  A way is two tiles across and its ends stand
@@ -303,9 +383,30 @@ arc.geo.interchange_arm_apart = 1.6
 --  edge, so an end of one lies about a tile and a half out.
 arc.geo.interchange_reach  = 1.75
 
---  And how wide the turn through an interchange sweeps: the corner at
---  the block's middle, where one arm is carried round into another.
-arc.geo.interchange_radius = 0.9
+--  How wide a movement's turns sweep, in tiles.  A movement is three
+--  corners at most -- off the slab, at its bowed middle, onto the far
+--  slab -- so its curvature changes sign twice at most: a slight turn,
+--  one big circle, a slight turn back.  Each corner may sweep this
+--  radius but no more than half its legs allow, so with a radius wider
+--  than any leg the arcs take the whole of their legs and meet, and the
+--  way is one continuous sweep with no straight between tight corners.
+arc.geo.interchange_radius = 12.0
+--  And the tightest arc a movement may carry.  A bowed midpoint on a
+--  short chord bends the middle corner through most of a half turn on a
+--  radius of nothing -- a hairpin, two sign changes and all -- so a
+--  chain the fit cuts with an arc under this is no way the search may
+--  keep.  The way on its chord is laid whatever its arcs, so no
+--  movement is lost to it.
+arc.geo.interchange_rmin   = 0.5
+
+--  How far one movement across an interchange is stacked over the one
+--  before it.  Two movements of a node cross, and two ribbons at one
+--  height are one surface drawn twice: the depth test then settles them
+--  differently from pixel to pixel and the node speckles.  A driver
+--  crossing on one goes over or under the other, so the step is what the
+--  world does, taken as small as the mesh can hold and still tell two
+--  surfaces apart.
+arc.geo.interchange_stack  = 0.006
 
 arc.geo.slab_parapet       = 0.035
 arc.geo.slab_ground_margin = 0.06
