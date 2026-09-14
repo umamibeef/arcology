@@ -166,6 +166,10 @@ typedef struct
     const float *knot_z;      /*     from one to the next and held flat past the first and the last */
     const float *knot_m;      /*     and the SLOPE the seat has at each, so a way can leave a slab at the slab's own grade */
     int          nknot;
+    const float *wide_s;      /* the WIDTH of the section, as a factor on its across, each side, at distances along the */
+    const float *wide_r;      /*     chain: a straight line from one to the next, and one where none is given.  So a */
+    const float *wide_l;      /*     way can leave a slab as wide as the slab's lane and narrow to its own width */
+    int          nwide;
     float along0;             /* the along the material is told at the chain's start: a material reads its mode off the thousands */
     float slot;               /* the painter's slot the faces take inside their own tile */
     int   closed;             /* the section's last point joins its first: a tube rather than a ribbon */

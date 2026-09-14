@@ -104,3 +104,6 @@ end
 --  The line-under-a-power-line meets are not this: a power line has
 --  no altitude of its own to agree about.
 arc.bytes("lap_tiles", {[0x45] = true, [0x46] = true})
+--  And the same two for the pose store, with the line's piece: 0 runs
+--  east and west, 1 north and south.
+arc.lap_tiles = {[0x45] = {line = 0}, [0x46] = {line = 1}}

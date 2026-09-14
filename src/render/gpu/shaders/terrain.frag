@@ -468,15 +468,19 @@ void main()
         float px   = fwidth(v_col.r);
         float line = clamp(px, 0.012f, 0.05f);
         /*  The along coordinate carries the lane drop (spec 7.3) in its
-         *  thousands: +1000 the negative side narrowed to two lanes, +2000
-         *  the positive, +4000 a ramp lane on its own, 0.70 to 1.0 across.
+         *  thousands, as bits: 1 the negative side narrowed to two lanes,
+         *  2 the positive, 4 a ramp lane on its own, 0.70 to 1.0 across,
+         *  8 the negative side narrowed to ONE lane and 16 the positive.
          *  Whole thousands leave the dashes' phase alone. */
         float gg    = v_col.g;
         int   kn    = int(floor(gg / 1000.0 + 0.001));
-        bool  strip = kn >= 4;
-        bool  nl    = (kn - (strip ? 4 : 0)) >= 2;
-        bool  nr    = (kn - (strip ? 4 : 0) - (nl ? 2 : 0)) >= 1;
+        bool  strip = (kn & 4) != 0;
+        bool  nl    = (kn & 2) != 0;
+        bool  nr    = (kn & 1) != 0;
+        bool  ol    = (kn & 16) != 0;
+        bool  onr   = (kn & 8) != 0;
         bool  narrow = (v_col.r < 0.0 && nr) || (v_col.r > 0.0 && nl);
+        bool  single = (v_col.r < 0.0 && onr) || (v_col.r > 0.0 && ol);
         float lit  = (fr.sun.w + fr.params.x * d) /
                     max(fr.sun.w + fr.params.x * max(normalize(fr.sun.xyz).z, 0.0), 1e-3);
         lit        = 1.0 + 0.35 * (lit - 1.0);
@@ -492,11 +496,13 @@ void main()
         }
         else if (x < 0.11)
             c = vec3(0.70, 0.69, 0.67); /* the median barrier, as the art has it: no yellow on the deck */
-        else if (abs(x - 0.40) < 0.5 * line && dash)
+        else if (single && x > 0.40 - line && x < 0.40)
+            c = vec3(0.92); /* one lane on this side: the edge line where the second lane was */
+        else if (!single && abs(x - 0.40) < 0.5 * line && dash)
             c = vec3(0.92);
         else if (narrow && x > 0.70 - line && x < 0.70)
             c = vec3(0.92); /* two lanes on this side: the edge line where the third lane was */
-        else if (!narrow && abs(x - 0.70) < 0.5 * line && dash)
+        else if (!narrow && !single && abs(x - 0.70) < 0.5 * line && dash)
             c = vec3(0.92);
         else if (x > 0.94 - line && x < 0.94)
             c = vec3(0.92);

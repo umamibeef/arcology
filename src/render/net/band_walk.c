@@ -669,7 +669,9 @@ int build_band_done(void)
     if (rc != 0 || !s_band_hold_live)
         return rc;
     s_band_hold_live = 0;
-    return lane_slab(s_band_hold.m, s_band_hold.c, s_band_hold.mask_bit, s_band_hold.pieces, s_band_hold.np, s_tune.band_w, s_band_of_hold);
+    rc = lane_slab(s_band_hold.m, s_band_hold.c, s_band_hold.mask_bit, s_band_hold.pieces, s_band_hold.np, s_tune.band_w, s_band_of_hold);
+    band_lane_cut_clear();
+    return rc;
 }
 
 /*  The band the walk fitted, held while the drive runs its fit. */

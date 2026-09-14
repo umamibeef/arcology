@@ -308,7 +308,10 @@ static int put_tri_draped(RMesh *m, const RCity *c, uint8_t mask_bit, float orde
     return put_tri_line_n(m, c, mask_bit, order, tri, NULL, col, ref, ref2);
 }
 
-int strip_quad_z_at(const char *where, const char *who, RMesh *m, const RCity *c, uint8_t mask_bit, float order, const float a0[2], const float a1[2], const float b0[2], const float b1[2], float za, float zb, float across0, float across1, float along_a, float along_b, float mat)
+/*  The across at each corner: across0 and across1 at the near station's
+ *  right and left, across0b and across1b at the far station's.  A quad
+ *  between two widths keeps the material true to the lanes at both. */
+int strip_quad_z_at(const char *where, const char *who, RMesh *m, const RCity *c, uint8_t mask_bit, float order, const float a0[2], const float a1[2], const float b0[2], const float b1[2], float za, float zb, float across0, float across1, float across0b, float across1b, float along_a, float along_b, float mat)
 {
     /*  A height below zero at both ends means the quad lies on the
      *  ground: its corners take the drawn surface.  The pieces it is cut
@@ -330,7 +333,7 @@ int strip_quad_z_at(const char *where, const char *who, RMesh *m, const RCity *c
     memcpy(tri[2], p[2], sizeof tri[2]);
     ref[0]  = across0;
     ref[1]  = across1;
-    ref[2]  = across1;
+    ref[2]  = across1b;
     ref2[0] = along_a;
     ref2[1] = along_a;
     ref2[2] = along_b;
@@ -340,8 +343,8 @@ int strip_quad_z_at(const char *where, const char *who, RMesh *m, const RCity *c
     memcpy(tri[1], p[2], sizeof tri[1]);
     memcpy(tri[2], p[3], sizeof tri[2]);
     ref[0]  = across0;
-    ref[1]  = across1;
-    ref[2]  = across0;
+    ref[1]  = across1b;
+    ref[2]  = across0b;
     ref2[0] = along_a;
     ref2[1] = along_b;
     ref2[2] = along_b;
@@ -350,7 +353,7 @@ int strip_quad_z_at(const char *where, const char *who, RMesh *m, const RCity *c
 
 int strip_quad_at(const char *where, const char *who, RMesh *m, const RCity *c, uint8_t mask_bit, float order, const float a0[2], const float a1[2], const float b0[2], const float b1[2], float across0, float across1, float along_a, float along_b, float mat)
 {
-    return strip_quad_z_at(where, who, m, c, mask_bit, order, a0, a1, b0, b1, -1.0f, -1.0f, across0, across1, along_a, along_b, mat);
+    return strip_quad_z_at(where, who, m, c, mask_bit, order, a0, a1, b0, b1, -1.0f, -1.0f, across0, across1, across0, across1, along_a, along_b, mat);
 }
 
 /*  A fan of triangles about a point, from angle t0 at radius r0 to t1 at

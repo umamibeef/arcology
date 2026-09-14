@@ -339,7 +339,7 @@ int mesh_check_collide(const RMesh *m, int verbose)
                         continue;
                     ++hits;
                     here = 1;
-                    if (verbose && shown < 40)
+                    if (verbose && shown < 4000)
                     {
                         ++shown;
                         dumpf("collide   %d,%d: %s through %s, at %.3f,%.3f,%.3f\n", (int)col, (int)row,

@@ -92,6 +92,9 @@ end
 arc.rules.world = function (w)
     local d = w:info()
     local n = d.size
+    --  Which pass this is, for a rule that has to know (the grading
+    --  pass and the building pass read a spur differently).
+    arc.current_pass = d.pass
     local n_tile, n_junc, n_seg, n_band = 0, 0, 0, 0
     step_first(w, d)
     --  WHAT THE GROUND IS, before anything reads a tile: where every
@@ -196,6 +199,7 @@ arc.rules.world = function (w)
         --  and the class pass, the measure and the drawing all read the
         --  list it produced, in the order it produced it.
         local network = arc.rules.network
+        arc.net_planes, arc.spur_records = {}, {}
         for fk = 0, w:net_discover() - 1 do
             network(w:net_cells(fk))
             w:net_found()
@@ -281,6 +285,11 @@ arc.rules.world = function (w)
             local cnt = w:seg_class(i)
             if cnt and seg_class then w:seg_class_is(i, seg_class(cnt)) end
         end
+
+        --  EVERY POSE the network meets at, settled from the map and the
+        --  walks above before any path is fitted: the fits below are
+        --  fitted to them (scripts/compose/poses.lua).
+        arc.poses_build()
 
         step("fit")
 
@@ -516,13 +525,19 @@ arc.rules.world = function (w)
 
         --  The bands, and then their bands' open ends carried across
         --  the meets into the lanes facing them before the bands are
-        --  joined to the lines they become.
+        --  joined to the lines they become.  What the bands' ends
+        --  record of the interchange arms they meet is this pass's
+        --  (scripts/compose/profile.lua, scripts/compose/runs.lua): a
+        --  band of an earlier build that no longer meets a node must
+        --  not stand as an arm.
+        arc.arm_floor, arc.arm_node = {}, {}
+        if d.pass == 1 then arc.arm_pose = {} end
         w:bands()
         while w:band_next() do
             n_band = n_band + 1
-            --  Which node each end of this band meets, for the fit's
-            --  chain stage: it aims that end at the node.
-            arc.band_fitting = arc.band_ends and arc.band_ends[n_band] or nil
+            --  Which band this is, for the fit's chain stage: the pose
+            --  store holds where its ends that meet a node face.
+            arc.band_fitting = n_band
             --  The points the fit is given, picked from the band the
             --  walk read: the straight cells', a lone block's corner,
             --  and nothing of a staircase.
@@ -613,9 +628,11 @@ arc.rules.world = function (w)
         if lk and links then links(lk) end
         w:band_links_done()
 
-        --  And the slab each 2x2 interchange is crossed on, swept from
-        --  the map (scripts/compose/interchange.lua).
-        arc.interchange_slabs(w)
+        --  And the ways each interchange is crossed on, swept from the
+        --  map (scripts/compose/interchange.lua): the grading pass
+        --  settles the heights its arms arrive at, the building pass
+        --  lays the ways.
+        arc.interchange_slabs(w, d.pass)
 
         step("margins")
 
@@ -666,6 +683,15 @@ arc.rules.world = function (w)
     --  and two corridors that share a corner leave two heights there.
     --  Reconciling them is the last thing the pass does: the world is
     --  built on the answer.
+    --  The chains' ends, as the cut witnessed them (scripts/compose/pieces.lua).
+    if arc.geo.pose_dump > 0.5 then
+        for kind, g in pairs(arc.g2 or {}) do
+            arc.dump(string.format("G2 pass %d %s chains: %d, %d of %d ends on an arc",
+                d.pass, kind, g.chains, g.on_arc, 2 * g.chains))
+        end
+    end
+    arc.g2 = {}
+
     if d.pass == 1 then
         step("shelf")
         local shelf, s = arc.rules.shelf, w:shelf()

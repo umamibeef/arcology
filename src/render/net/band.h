@@ -36,6 +36,11 @@ int   band_drop_spur(const DropFan *d, int r, V2 *c0, V2 *tile, V2 *along, int *
 void  band_drop_clear(DropFan *d);
 void  band_drop_width(DropFan *d, int i, int side, float w);
 void  band_drop_gore(DropFan *d, int i, int side);
+/*  Where each lane of the slab in hand runs along it, as the rule says,
+ *  and the reading the lane model takes of it. */
+void  band_drop_cut(DropFan *d, int side, int k, float s0, float s1);
+int   band_lane_cut(int side, int k, float *s0, float *s1);
+void  band_lane_cut_clear(void);
 int build_bands(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit, int comp);
 int  build_band_next(void);
 int  build_band_chained(void);

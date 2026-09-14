@@ -309,7 +309,7 @@ static int api_strip_quad(lua_State *L)
 {
     Loft *x = strip_of(L);
     float a0[2], a1[2], b0[2], b1[2];
-    float za, zb, ac0, ac1, al0, al1, mat, order;
+    float za, zb, ac0, ac1, ac0b, ac1b, al0, al1, mat, order;
     if (!x)
     {
         lua_pushboolean(L, 0);
@@ -324,7 +324,10 @@ static int api_strip_quad(lua_State *L)
     al0 = (float)luaL_checknumber(L, 14), al1 = (float)luaL_checknumber(L, 15);
     mat = (float)luaL_checknumber(L, 16);
     order = (float)luaL_checknumber(L, 17);
-    lua_pushboolean(L, strip_quad_z(x->m, x->c, x->mask_bit, order, a0, a1, b0, b1, za, zb, ac0, ac1, al0, al1, mat) == 0);
+    /* the across at the far station, where the quad's two widths differ.  The near station's otherwise. */
+    ac0b = (float)luaL_optnumber(L, 18, ac0);
+    ac1b = (float)luaL_optnumber(L, 19, ac1);
+    lua_pushboolean(L, strip_quad_z(x->m, x->c, x->mask_bit, order, a0, a1, b0, b1, za, zb, ac0, ac1, ac0b, ac1b, al0, al1, mat) == 0);
     return 1;
 }
 
@@ -757,7 +760,7 @@ static int api_junction_quad(lua_State *L)
     }
     lua_pushboolean(L, strip_quad_z(j->jb->m, j->jb->c, j->jb->mask_bit, j->order,
                                     j->a0, j->a1, j->b0, j->b1, j->zj, j->zj,
-                                    0.5f, 0.5f, -1.0f, -1.0f, j->mat) == 0);
+                                    0.5f, 0.5f, 0.5f, 0.5f, -1.0f, -1.0f, j->mat) == 0);
     return 1;
 }
 
@@ -1064,7 +1067,11 @@ static int api_world_cut_done(lua_State *L)
  *  a straight and an arc are stationed.  `lift`, how far the section
  *  stands over the ground under the centerline, or `z` for a height
  *  outright.  `slot`, where in the tile's painter stack the faces go.
- *  And `closed` to join the section's last point back to its first.
+ *  `along`, the seat as heights at distances along the chain.  `width`,
+ *  a list of {s, wr, wl}: the factor the section's across is scaled by
+ *  on the right and on the left at that distance.  Between two entries
+ *  the factor is a straight line from one to the next.  And `closed` to
+ *  join the section's last point back to its first.
  *
  *  Nothing about a line reaches this: a script that wants a line lofts a
  *  line's section, and one that wants a canal lofts a canal's. */
@@ -1078,6 +1085,7 @@ static int api_world_loft(lua_State *L)
     LoftRung     sec[LOFT_SEC_MAX];
     LoftSweep    how;
     float        knot_s[LOFT_KNOT_MAX], knot_z[LOFT_KNOT_MAX], knot_m[LOFT_KNOT_MAX];
+    float        wide_s[LOFT_KNOT_MAX], wide_r[LOFT_KNOT_MAX], wide_l[LOFT_KNOT_MAX];
     int          np = 0, nsec = 0, i, faces;
     if (!w || !lua_istable(L, 2) || !lua_istable(L, 3))
         return 0;
@@ -1161,6 +1169,29 @@ static int api_world_loft(lua_State *L)
             how.knot_z = knot_z;
             how.knot_m = knot_m;
             how.nknot  = nk;
+        }
+        lua_pop(L, 1);
+        /*  `width` is the section's width each side, as a factor on its
+         *  across, at distances along the chain.  It is a list of {s,
+         *  wr, wl} in order of s.  A side left out keeps its width. */
+        lua_getfield(L, -1, "width");
+        if (lua_istable(L, -1))
+        {
+            int nw = (int)lua_rawlen(L, -1), wi;
+            if (nw > LOFT_KNOT_MAX)
+                nw = LOFT_KNOT_MAX;
+            for (wi = 0; wi < nw; ++wi)
+            {
+                lua_rawgeti(L, -1, wi + 1);
+                wide_s[wi] = api_field_num(L, "s", 0.0f);
+                wide_r[wi] = api_field_num(L, "wr", 1.0f);
+                wide_l[wi] = api_field_num(L, "wl", 1.0f);
+                lua_pop(L, 1);
+            }
+            how.wide_s = wide_s;
+            how.wide_r = wide_r;
+            how.wide_l = wide_l;
+            how.nwide  = nw;
         }
         lua_pop(L, 1);
         lua_getfield(L, -1, "closed");
@@ -3317,6 +3348,7 @@ static int api_margin_quad(lua_State *L)
                                     a0, a1, b0, b1,
                                     (float)luaL_checknumber(L, 10), (float)luaL_checknumber(L, 11),
                                     (float)luaL_checknumber(L, 12), (float)luaL_checknumber(L, 13),
+                                    (float)luaL_checknumber(L, 12), (float)luaL_checknumber(L, 13),
                                     (float)luaL_checknumber(L, 14), (float)luaL_checknumber(L, 15),
                                     (float)luaL_checknumber(L, 17)) == 0);
     return 1;
@@ -3376,7 +3408,7 @@ static int api_margin_wire(lua_State *L)
     lua_pushboolean(L, strip_quad_z((RMesh *)f->m, (const RCity *)f->c, f->mask_bit,
                                     tile_order((const RCity *)f->c, tc, tr, f->mask_bit) + slot,
                                     q0, q1, r0, r1, za + over, zb + over,
-                                    paint, paint, 0.0f, 0.0f, MAT_VEHICLE) == 0);
+                                    paint, paint, paint, paint, 0.0f, 0.0f, MAT_VEHICLE) == 0);
     return 1;
 }
 
@@ -3554,7 +3586,7 @@ static int api_panel_quad(lua_State *L)
     lua_pushboolean(L, strip_quad_z(f->m, f->c, f->mask_bit, (float)luaL_checknumber(L, 4),
                                     a0, a1, b0, b1,
                                     (float)luaL_checknumber(L, 2), (float)luaL_checknumber(L, 3),
-                                    -1.0f, 1.0f, 0.0f, 1.0f, MAT_XPANEL) == 0);
+                                    -1.0f, 1.0f, -1.0f, 1.0f, 0.0f, 1.0f, MAT_XPANEL) == 0);
     return 1;
 }
 
@@ -4158,6 +4190,12 @@ static const Field CHAIN_FIELDS[] = {
     {"sy",  FLD_NUM,  offsetof(ChainFan, start.y)},
     {"gx",  FLD_NUM,  offsetof(ChainFan, goal.x) },
     {"gy",  FLD_NUM,  offsetof(ChainFan, goal.y) },
+    {"at0", FLD_INT,  offsetof(ChainFan, at0)    },
+    {"at1", FLD_INT,  offsetof(ChainFan, at1)    },
+    {"s0x", FLD_NUM,  offsetof(ChainFan, st0.x)  },
+    {"s0y", FLD_NUM,  offsetof(ChainFan, st0.y)  },
+    {"s1x", FLD_NUM,  offsetof(ChainFan, st1.x)  },
+    {"s1y", FLD_NUM,  offsetof(ChainFan, st1.y)  },
     {NULL, FLD_NUM, 0}
 };
 
@@ -6136,6 +6174,17 @@ static int api_drop_gore(lua_State *L)
     return 0;
 }
 
+/*  Lane k on a side runs from s0 to s1 along the slab and no further:
+ *  the lane model lays that much of it. */
+static int api_drop_cut(lua_State *L)
+{
+    DropFan *d = drop_of(L);
+    if (d)
+        band_drop_cut(d, (int)luaL_checkinteger(L, 2), (int)luaL_checkinteger(L, 3),
+                      (float)luaL_checknumber(L, 4), (float)luaL_checknumber(L, 5));
+    return 0;
+}
+
 static const luaL_Reg DROP[] = {
     {"info",    api_drop_info   },
     {"station", api_drop_station},
@@ -6143,6 +6192,7 @@ static const luaL_Reg DROP[] = {
     {"clear",   api_drop_clear  },
     {"width",   api_drop_width  },
     {"gore",    api_drop_gore   },
+    {"cut",     api_drop_cut    },
     {NULL,      NULL      }
 };
 

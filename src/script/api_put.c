@@ -171,7 +171,7 @@ static void put_flush(void)
         case PUT_QUAD:
         {
             float a0[2] = {a[0], a[1]}, a1[2] = {a[2], a[3]}, b0[2] = {a[4], a[5]}, b1[2] = {a[6], a[7]};
-            strip_quad_z(s_m, s_c, s_mask, r->order, a0, a1, b0, b1, a[8], a[9], a[10], a[11], a[12], a[13], a[14]);
+            strip_quad_z(s_m, s_c, s_mask, r->order, a0, a1, b0, b1, a[8], a[9], a[10], a[11], a[10], a[11], a[12], a[13], a[14]);
             break;
         }
         case PUT_TRI:

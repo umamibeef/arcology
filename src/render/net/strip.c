@@ -519,12 +519,34 @@ float width_factor(float dx, float dy, int compensate)
  *  ================================================================== */
 
 /*  Where the section stands at one station: the seat, and the two
- *  vectors the section's across and up run along. */
+ *  vectors the section's across and up run along.  The across is scaled
+ *  by a factor of its own on each side. */
 typedef struct
 {
     V2    pos, side;
-    float seat, s;
+    float seat, s, wr, wl;
 } SweepSt;
+
+/*  The width factor the caller's list gives one side at `at` along the
+ *  chain.  Between two entries it is a straight line from one to the
+ *  next.  Before the first entry it is that entry's own value, and after
+ *  the last it is the last one's.  One where there is no list. */
+static float wide_at(const float *ws, const float *wv, int n, float at)
+{
+    int k;
+    if (n < 1 || !ws || !wv)
+        return 1.0f;
+    if (at <= ws[0])
+        return wv[0];
+    for (k = 1; k < n; ++k)
+        if (at <= ws[k])
+        {
+            float span = ws[k] - ws[k - 1];
+            float f    = span > 1e-6f ? (at - ws[k - 1]) / span : 1.0f;
+            return wv[k - 1] + (wv[k] - wv[k - 1]) * f;
+        }
+    return wv[n - 1];
+}
 
 /*  Every station along the pieces, at the density the caller asked for.
  *  A step of nought puts a station at each piece's two ends and nowhere
@@ -578,6 +600,8 @@ static int sweep_stations(const RCity *c, uint8_t mask_bit, const Piece *pc, int
             st[ns].pos  = pos;
             st[ns].side = (V2){-dir.y, dir.x};
             st[ns].s    = s + t;
+            st[ns].wr   = wide_at(how->wide_s, how->wide_r, how->nwide, s + t);
+            st[ns].wl   = wide_at(how->wide_s, how->wide_l, how->nwide, s + t);
             if (how->nknot > 0)
                 st[ns].seat = knot_height(how, s + t);
             else
@@ -590,12 +614,14 @@ static int sweep_stations(const RCity *c, uint8_t mask_bit, const Piece *pc, int
     return ns;
 }
 
-/*  One point of the section, stood up at one station. */
+/*  One point of the section, stood up at one station.  The across is
+ *  scaled by the station's own factor on that side. */
 static void sweep_point(const SweepSt *st, const LoftRung *r, float out[3])
 {
-    out[0] = st->pos.x + st->side.x * r->across;
-    out[1] = st->pos.y + st->side.y * r->across;
-    out[2] = st->seat + r->up;
+    float across = r->across * (r->across < 0.0f ? st->wr : st->wl);
+    out[0]       = st->pos.x + st->side.x * across;
+    out[1]       = st->pos.y + st->side.y * across;
+    out[2]       = st->seat + r->up;
 }
 
 int loft_sweep(RMesh *m, const RCity *c, uint8_t mask_bit, const Piece *pc, int np,

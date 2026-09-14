@@ -152,17 +152,55 @@ void band_drop_clear(DropFan *d)
     }
 }
 
-/*  The width a station is left with on one side: the narrowest any spur
- *  asks for. */
+/*  The width a station has on one side, as the rule says.  It is less
+ *  than 1 where a lane is taken from the slab, and more than 1 where a
+ *  lane is added beside it.  How the spurs' asks are settled against
+ *  each other is the rule's own. */
 void band_drop_width(DropFan *d, int i, int side, float w)
 {
     Sample *smp = (Sample *)d->smp;
     if (i < 0 || i >= d->n)
         return;
     if (side)
-        smp[i].wl = w < smp[i].wl ? w : smp[i].wl;
+        smp[i].wl = w;
     else
-        smp[i].wr = w < smp[i].wr ? w : smp[i].wr;
+        smp[i].wr = w;
+}
+
+/*  WHERE EACH LANE OF THE SLAB RUNS, along it, as the rule says.  A
+ *  lane the rule ends short of the slab's end is laid that far and no
+ *  further (lane.c).  The slab's edge behind it is the rule's own width.
+ *  Kept for the band in hand, from its lane drop until its lanes are
+ *  laid, and cleared with them. */
+#define BAND_LANES 8
+static struct
+{
+    float s0, s1;
+    int   set;
+} s_band_cut[2][BAND_LANES];
+
+void band_drop_cut(DropFan *d, int side, int k, float s0, float s1)
+{
+    (void)d;
+    if (side < 0 || side > 1 || k < 0 || k >= BAND_LANES)
+        return;
+    s_band_cut[side][k].s0  = s0;
+    s_band_cut[side][k].s1  = s1;
+    s_band_cut[side][k].set = 1;
+}
+
+int band_lane_cut(int side, int k, float *s0, float *s1)
+{
+    if (side < 0 || side > 1 || k < 0 || k >= BAND_LANES || !s_band_cut[side][k].set)
+        return 0;
+    *s0 = s_band_cut[side][k].s0;
+    *s1 = s_band_cut[side][k].s1;
+    return 1;
+}
+
+void band_lane_cut_clear(void)
+{
+    memset(s_band_cut, 0, sizeof s_band_cut);
 }
 
 /*  The gore: where the spur's own sliver of lane sits beside the slab. */
@@ -188,6 +226,7 @@ void band_lane_stations(Sample *smp, int ns)
     d.reach  = s_tune.band_reach;
     d.narrow = BAND_LANE_IN;
     s_drop   = d;
+    band_lane_cut_clear();
     net_stage_hand(&s_drop, "drop");
 }
 

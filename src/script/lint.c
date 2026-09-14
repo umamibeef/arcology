@@ -1088,7 +1088,7 @@ static void rule_args(lua_State *L, const char *rule, int *nargs)
          *  its goal, so both ends are asked about. */
         if (luaL_dostring(L,
                           "return {kind = 'chain',"
-                          " info = function () return {sx = 64.0, sy = 64.0, gx = 70.0, gy = 64.0, nr = 2, ex0 = true, ex1 = true} end,"
+                          " info = function () return {sx = 64.0, sy = 64.0, gx = 70.0, gy = 64.0, at0 = -1, at1 = 8264, s0x = 1.0, s0y = 0.0, s1x = 1.0, s1y = 0.0, nr = 2, ex0 = true, ex1 = true} end,"
                           " run = function (_, i) return {kind = 1, first = i == 0, last = i == 1} end,"
                           " end_at = function () end,"
                           " aim = function () end,"
@@ -1309,6 +1309,7 @@ static void rule_args(lua_State *L, const char *rule, int *nargs)
                           "   ax = 1.0, ay = 0.0, len = 2, leaves = r == 1} end,"
                           " clear = function () end,"
                           " width = function () end,"
+                          " cut = function () end,"
                           " gore = function () end}") != LUA_OK)
         {
             bad("the lint's own drop: %s", lua_tostring(L, -1));

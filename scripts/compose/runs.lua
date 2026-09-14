@@ -221,16 +221,13 @@ arc.rules.chain = function (c)
     --  A start meets the node behind it, so its line runs away from the
     --  node; a goal meets the node ahead, so its line runs toward it.
     local aimed0, aimed1 = false, false
-    local be = arc.band_fitting
-    if arc.geo.interchange_dump > 0.5 and be then
-        arc.dump(string.format("AIM band fitting: head %s tail %s (nr %d)", tostring(be.head), tostring(be.tail), d.nr))
-    end
+    local be = arc.band_fitting and arc.poses.band_end
+                and arc.poses.band_end[arc.band_fitting]
     if be and (be.head or be.tail) then
-        local nodes = arc.interchange_nodes()
         local e = c:info()
-        local function toward(x, y, nd, away)
-            local dx, dy = nd.x - x, nd.y - y
-            if away then dx, dy = -dx, -dy end
+        local function toward(x, y, pose)
+            local dx, dy = pose.nx - x, pose.ny - y
+            if pose.away then dx, dy = -dx, -dy end
             local l = math.sqrt(dx * dx + dy * dy)
             if l < 1e-6 then return nil end
             return dx / l, dy / l
@@ -238,19 +235,69 @@ arc.rules.chain = function (c)
         --  The end is carried on along the aimed line by the node's
         --  reach, so the line and the run behind it meet a tile back
         --  and the last stretch runs at the node's angle.
+        --  The pose each end arrives on is kept (arc.arm_pose, by band
+        --  and end): the node's arms are settled in height over the
+        --  ways between those poses (scripts/compose/interchange.lua).
         local reach = arc.geo.interchange_aim or 0.0
-        if be.head and nodes[be.head] then
-            local dx, dy = toward(e.sx, e.sy, nodes[be.head], true)
+        arc.arm_pose = arc.arm_pose or {}
+        if be.head then
+            local dx, dy = toward(e.sx, e.sy, be.head)
             if dx then
-                c:end_at("start", e.sx - dx * reach, e.sy - dy * reach, dx, dy)
+                local x, y = e.sx - dx * reach, e.sy - dy * reach
+                c:end_at("start", x, y, dx, dy)
+                arc.arm_pose[arc.band_fitting * 2] = {x = x, y = y, dx = dx, dy = dy, away = true}
                 aimed0 = true
             end
         end
-        if be.tail and nodes[be.tail] then
-            local dx, dy = toward(e.gx, e.gy, nodes[be.tail], false)
+        if be.tail then
+            local dx, dy = toward(e.gx, e.gy, be.tail)
             if dx then
-                c:end_at("goal", e.gx + dx * reach, e.gy + dy * reach, dx, dy)
+                local x, y = e.gx + dx * reach, e.gy + dy * reach
+                c:end_at("goal", x, y, dx, dy)
+                arc.arm_pose[arc.band_fitting * 2 + 1] = {x = x, y = y, dx = dx, dy = dy, away = false}
                 aimed1 = true
+            end
+        end
+    end
+
+    --  A segment's end at a JUNCTION takes the mouth's pose from the
+    --  store (scripts/compose/poses.lua): the node's middle, facing
+    --  along the arm the segment leaves or arrives by.  The arm is
+    --  named by the step the chain takes there.  Behind pose_mouths,
+    --  so the two ways of ending can be compared.
+    if arc.geo.pose_mouths > 0.5 and arc.poses.mouth_at then
+        local e = c:info()
+        local function edge(dx, dy)
+            if math.abs(dx) >= math.abs(dy) then return dx > 0 and 1 or 3 end
+            return dy > 0 and 2 or 0
+        end
+        --  A pose that faces the way the step already runs adds no
+        --  line of its own: the run's line reaches it, and a second
+        --  line along the same one has no meet with the first.  Only a
+        --  pose that faces elsewhere is a line the fit must turn onto.
+        local function turned(dx, dy, sx, sy)
+            local l = math.max(1e-6, math.sqrt(sx * sx + sy * sy))
+            return dx * sx / l + dy * sy / l < 0.9999
+        end
+        --  A slope's arm arrives at its own angle, which `aim` above
+        --  settled: the pose store's axis is not its line, so it keeps
+        --  the fit's own end.
+        local slope0 = head and head.kind == 1 and head.first
+        local slope1 = tail and tail.kind == 1 and tail.last
+        if e.at0 >= 0 and not slope0 then
+            --  the start leaves the node by the step's edge
+            local m = arc.poses.mouth_at[e.at0 * 4 + edge(e.s0x, e.s0y)]
+            if m then
+                c:end_at("start", m.x, m.y, -m.dx, -m.dy)
+                aimed0 = turned(-m.dx, -m.dy, e.s0x, e.s0y)
+            end
+        end
+        if e.at1 >= 0 and not slope1 then
+            --  the goal enters the node against its last step
+            local m = arc.poses.mouth_at[e.at1 * 4 + edge(-e.s1x, -e.s1y)]
+            if m then
+                c:end_at("goal", m.x, m.y, m.dx, m.dy)
+                aimed1 = turned(m.dx, m.dy, e.s1x, e.s1y)
             end
         end
     end

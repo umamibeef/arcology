@@ -58,6 +58,55 @@ arc.rules.strip = function (s)
     local cut, dip = fam.strip.cut, fam.strip.dip
     local app = fam.approach
 
+    --  A RAMP'S STRIP IS ONE LANE, painted as a lane of the slab on its
+    --  own (the slab's material marks a lane told it is 0.70 to 0.94
+    --  across, past every ordinary along: scripts/compose/deck.lua).
+    --  And a lane drop is drawn from its gore outward only: over the
+    --  merge lane and the taper the slab itself is the surface, a lane
+    --  wider there (scripts/compose/drop.lua), and the strip's own quads
+    --  would lie on it.  The slab end is the end nearer the slab.
+    --  And where the lane runs BESIDE ITS SLAB, over the merge lane, the
+    --  climb and as the descent draws away, the lane's own strip carries
+    --  no body: its inner edge lies against the slab's, widened or not,
+    --  and a girder there would share the slab's fascia plane.  Beside
+    --  is measured from the slab's own stations, to the merge lane's
+    --  outer edge.  A lane whose gore the pose store could not hand a
+    --  slab's stations (scripts/compose/profile.lua) leaves its slab
+    --  through the slab's edge, and carries no body at all.
+    local skip_to, skip_from, slab_of
+    if d.lane_piece then
+        local a, b = station(s, 0), station(s, n - 1)
+        local ga = arc.merge_of(a.x, a.y, "q", 0.5)
+        local gb = not ga and arc.merge_of(b.x, b.y, "q", 0.5)
+        local g  = ga or gb
+        if g then
+            local over = g.merge.len + g.merge.taper + 0.02
+            if ga then skip_to = over else skip_from = f32(d.len - over) end
+        end
+        --  the slab it leaves, with or without a merge lane
+        local h = g or arc.gore_of(a.x, a.y) or arc.gore_of(b.x, b.y)
+        slab_of = h and h.parent
+    end
+    --  A slab's fascia OPENS where a lane leaves it through its edge: a
+    --  ramp with no room beside the slab for a merge lane
+    --  (scripts/compose/drop.lua) runs its lane off the outer lane and
+    --  over the edge line somewhere along its own tiles, and a fascia
+    --  there is a wall across it.  The gores of this slab say where, by
+    --  side and by the stations the tiles span, half a tile more each way.
+    local open = {}
+    if d.slab and arc.poses and arc.poses.gore then
+        local s0 = station(s, 0)
+        for _, g in pairs(arc.poses.gore) do
+            local pa = g.parent
+            if pa and g.slab_top and g.slab_at and not g.merge
+               and math.abs(pa.x[0] - s0.x) < 1e-4 and math.abs(pa.y[0] - s0.y) < 1e-4 then
+                for i = math.min(g.slab_at, g.slab_top) - 8, math.max(g.slab_at, g.slab_top) + 8 do
+                    open[i * 2 + g.slab_side] = true
+                end
+            end
+        end
+    end
+
     for i = 1, n - 1 do
         local pv, cu = station(s, i - 1), station(s, i)
         --  The ground's own line at the two STATIONS, which a pair cut
@@ -78,23 +127,47 @@ arc.rules.strip = function (s)
         end
         if d.cross0 > 0 and pv.s < d.cross0 then pv = lerp(pv, cu, d.cross0) end
         if d.cross1 > 0 and cu.s > far then cu = lerp(pv, cu, far) end
+        if (skip_to and cu.s <= skip_to) or (skip_from and pv.s >= skip_from) then
+            goto next
+        end
 
         do
             local ha = arc.band_half(d.half, s:width(pv.dx, pv.dy), inset)
             local hb = arc.band_half(d.half, s:width(cu.dx, cu.dy), inset)
             --  a0/b0 the right-hand edge (across negative), a1/b1 the
-            --  left; a slab's may be narrowed where a spur took a lane
-            local a0x, a0y = arc.band_edge(pv.x, pv.y, pv.dx, pv.dy, ha, pv.wr, 1)
-            local a1x, a1y = arc.band_edge(pv.x, pv.y, pv.dx, pv.dy, ha, pv.wl, -1)
-            local b0x, b0y = arc.band_edge(cu.x, cu.y, cu.dx, cu.dy, hb, cu.wr, 1)
-            local b1x, b1y = arc.band_edge(cu.x, cu.y, cu.dx, cu.dy, hb, cu.wl, -1)
-            local acr = arc.f32(arc.f32(-0.5 * arc.f32(pv.wr + cu.wr)) * inset)
-            local acl = arc.f32(arc.f32(0.5 * arc.f32(pv.wl + cu.wl)) * inset)
+            --  left.  A slab's own quad runs to the edge of the LANES IT
+            --  CARRIES at the station, so the material's across stays
+            --  true to them: the full width, or the edge of the lanes
+            --  still on it behind a lane drop at an interchange
+            --  (scripts/compose/drop.lua, arc.fan_lane_w).  Whatever the
+            --  slab is beyond that is a quad of its own beside it: a
+            --  merge lane's widening painted as a ramp's lane, or the
+            --  exit lane tapering to nothing, painted as the lane it is,
+            --  its edge line converging on the lane line.
+            local function lane_w(i0, side)
+                local t = d.slab and arc.fan_lane_w
+                return t and t[i0 * 2 + side] or 1.0
+            end
+            local pwr, pwl = math.min(pv.wr, lane_w(i - 1, 0)), math.min(pv.wl, lane_w(i - 1, 1))
+            local cwr, cwl = math.min(cu.wr, lane_w(i, 0)), math.min(cu.wl, lane_w(i, 1))
+            local a0x, a0y = arc.band_edge(pv.x, pv.y, pv.dx, pv.dy, ha, pwr, 1)
+            local a1x, a1y = arc.band_edge(pv.x, pv.y, pv.dx, pv.dy, ha, pwl, -1)
+            local b0x, b0y = arc.band_edge(cu.x, cu.y, cu.dx, cu.dy, hb, cwr, 1)
+            local b1x, b1y = arc.band_edge(cu.x, cu.y, cu.dx, cu.dy, hb, cwl, -1)
+            --  the across at each station: the slab's edge as a fraction
+            --  of its full half width, so a quad between two widths keeps
+            --  the material true to the lanes at both ends
+            local acr, acl = arc.f32(-pwr * inset), arc.f32(pwl * inset)
+            local acr_b, acl_b = arc.f32(-cwr * inset), arc.f32(cwl * inset)
             local mx = arc.f32(0.5 * arc.f32(pv.x + cu.x))
             local my = arc.f32(0.5 * arc.f32(pv.y + cu.y))
             local order = s:order(mx, my)
             local mat, ala, alb = d.mat, pv.s, cu.s
             local cls = 0
+            if d.structure then
+                acr, acl, acr_b, acl_b = 0.70, 0.94, 0.70, 0.94
+                ala, alb = f32(ala + arc.slab.lane_along), f32(alb + arc.slab.lane_along)
+            end
 
             --  A line's own pair: the class it carries, and its one
             --  marking -- the approach to a level meet, whose along
@@ -108,6 +181,28 @@ arc.rules.strip = function (s)
             end
 
             if d.slab then arc.slab.gore(s, d, i, pv, cu, ha, hb, order, ala, alb) end
+
+            --  A slab narrowed on a side -- a lane ended short of the
+            --  band's end (scripts/compose/drop.lua) -- says so in its
+            --  quad's along, in the thousands the material reads as
+            --  bits: 1 the right side narrowed to two lanes, 2 the left,
+            --  8 the right side narrowed to one lane, 16 the left; the
+            --  edge line is then drawn where the lane was.  A quad
+            --  between two widths takes the narrower.  Whole thousands
+            --  leave the dashes' phase alone.
+            --  No edge line where the exit lane still tapers beside the
+            --  quad: the lane line there is the exit lane's own.
+            local qla, qlb = ala, alb
+            local taper_r = pv.wr > pwr + 1e-4 or cu.wr > cwr + 1e-4
+            local taper_l = pv.wl > pwl + 1e-4 or cu.wl > cwl + 1e-4
+            if d.slab and not d.structure then
+                local one = arc.geo.slab_lane1 - arc.geo.interchange_lane_w / arc.tune.band_w + 1e-3
+                local code = 0
+                local wr, wl = math.min(pwr, cwr), math.min(pwl, cwl)
+                if wr < 0.9999 and not taper_r then code = code + (wr <= one and 8000 or 1000) end
+                if wl < 0.9999 and not taper_l then code = code + (wl <= one and 16000 or 2000) end
+                if code > 0 then qla, qlb = f32(ala + code), f32(alb + code) end
+            end
 
             --  A quad in a cut, the line below the ground at a corner,
             --  is flagged in its class (4 and up) so the clipping check
@@ -130,11 +225,45 @@ arc.rules.strip = function (s)
             local qa = d.flies and pv.z or -1.0
             local qb = d.flies and cu.z or -1.0
             s:quad(a0x, a0y, a1x, a1y, b0x, b0y, b1x, b1y,
-                   qa, qb, acr, acl, ala, alb, mat, order + slot)
+                   qa, qb, acr, acl, qla, qlb, mat, order + slot, acr_b, acl_b)
             s:class(cls)
 
             if d.slab then
-                arc.slab.under(s, d, i, n, pv, cu, a0x, a0y, a1x, a1y, b0x, b0y, b1x, b1y, order)
+                --  the lane beside the slab's own, where the slab is wider
+                --  than the lanes it carries on a side, and the structure
+                --  under the whole of it
+                local e0x, e0y, e1x, e1y, f0x, f0y, f1x, f1y = a0x, a0y, a1x, a1y, b0x, b0y, b1x, b1y
+                --  a merge lane, wider than the slab, is a ramp's lane;
+                --  an exit lane, within the slab's width, is the slab's
+                --  outer lane running out, in the slab's own paint
+                if taper_r then
+                    e0x, e0y = arc.band_edge(pv.x, pv.y, pv.dx, pv.dy, ha, pv.wr, 1)
+                    f0x, f0y = arc.band_edge(cu.x, cu.y, cu.dx, cu.dy, hb, cu.wr, 1)
+                    if pv.wr > 1.0001 or cu.wr > 1.0001 then
+                        s:quad(e0x, e0y, a0x, a0y, f0x, f0y, b0x, b0y, qa, qb, 0.70, 0.94,
+                               f32(ala + arc.slab.lane_along), f32(alb + arc.slab.lane_along), mat, order + slot)
+                    else
+                        s:quad(e0x, e0y, a0x, a0y, f0x, f0y, b0x, b0y, qa, qb, -0.94, -pwr,
+                               ala, alb, mat, order + slot, -0.94, -cwr)
+                    end
+                end
+                if taper_l then
+                    e1x, e1y = arc.band_edge(pv.x, pv.y, pv.dx, pv.dy, ha, pv.wl, -1)
+                    f1x, f1y = arc.band_edge(cu.x, cu.y, cu.dx, cu.dy, hb, cu.wl, -1)
+                    if pv.wl > 1.0001 or cu.wl > 1.0001 then
+                        s:quad(a1x, a1y, e1x, e1y, b1x, b1y, f1x, f1y, qa, qb, 0.94, 0.70,
+                               f32(ala + arc.slab.lane_along), f32(alb + arc.slab.lane_along), mat, order + slot)
+                    else
+                        s:quad(a1x, a1y, e1x, e1y, b1x, b1y, f1x, f1y, qa, qb, pwl, 0.94,
+                               ala, alb, mat, order + slot, cwl, 0.94)
+                    end
+                end
+                local bare = d.lane_piece and (not slab_of or arc.slab_away(slab_of, mx, my)
+                                         < arc.tune.band_w * (1.0 + arc.geo.ramp_lane_w) + d.half + 0.05)
+                if not bare then
+                    arc.slab.under(s, d, i, n, pv, cu, e0x, e0y, e1x, e1y, f0x, f0y, f1x, f1y, order,
+                                   open[(i - 1) * 2] or open[i * 2], open[(i - 1) * 2 + 1] or open[i * 2 + 1])
+                end
             end
         end
         ::next::

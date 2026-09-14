@@ -157,6 +157,8 @@ local function orient(o, xbld, n, col, row, pass)
     if rside and rside ~= dside and rside ~= back then
         off = (DC[rside] * ax + DR[rside] * ay) > 0
     end
+    --  and the gore, for the pose store
+    if arc.poses_gore then arc.poses_gore(col, row, dside, ax, ay, off) end
 
     --  How many lines lie along the slab's axis: one, and the taper has
     --  to fall away from it.
@@ -175,13 +177,13 @@ local function orient(o, xbld, n, col, row, pass)
     local fwd  = room(xbld, n, d0c, d0r, off and -ax or ax, off and -ay or ay)
     local free = along_roads ~= 1
     local bwd  = free and room(xbld, n, d0c, d0r, off and ax or -ax, off and ay or -ay) or -1
-    --  WHICH PASS.  The grading pass lays the corridors out and the
-    --  building pass notches them in, and the two have never agreed
-    --  about this: the grading pass takes the far side whatever the
-    --  line says.  Reproduced here because the world is built on it --
-    --  the grading is what the ground's shelves come from -- and making
-    --  the two agree is a change to the look, not a tidy-up.
-    local keep = pass == 2 and (not free or fwd >= bwd) or false
+    --  BOTH PASSES READ THE RAMP THE SAME WAY.  The grading pass lays
+    --  the corridors out and the building pass notches them in, and the
+    --  ground under a ramp is graded to the lane the grading pass laid:
+    --  a ramp read differently in the two passes stands on a shelf cut
+    --  for another lane, and its height reads as an accident.
+    local keep = not free or fwd >= bwd
+    local _ = pass
 
     --  `keep` says the taper stays on the side the line put it; the
     --  other side reverses the spur.  Written out rather than with

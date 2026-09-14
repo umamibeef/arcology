@@ -126,6 +126,29 @@ arc.geo.spur_merge_along   = 0.45
 arc.geo.spur_outer         = 0.85
 arc.geo.spur_snap          = 0.35
 arc.geo.spur_taper         = 0.6
+--  A RAMP MERGES.  The slab keeps its lanes, and the ramp's lane runs
+--  beside it as a MERGE LANE for ramp_merge tiles from the gore, joined
+--  to the outer lane over ramp_taper tiles at its far end, where the
+--  slab's edge runs out to take it; ramp_lane_w is the lane's width as
+--  a fraction of the slab's half width.  The far end keeps ramp_clear
+--  tiles from an interchange's arm, and the lane is shortened to no
+--  less than ramp_merge_min to keep clear (scripts/compose/drop.lua).
+arc.geo.ramp_merge         = 2.0
+arc.geo.ramp_taper         = 1.0
+arc.geo.ramp_merge_min     = 1.0
+arc.geo.ramp_lane_w        = 0.30
+arc.geo.ramp_clear         = 4.0
+--  How far a ramp's lane may run on beside the slab past its tiles'
+--  top, climbing, so the lane holds the grade (arc.geo.interchange_grade)
+--  where the tiles alone are too short for the height it climbs, and
+--  only as far as the room beside the slab allows (a road, a wire or
+--  a building beside the highway stops it).  0 keeps the climb to the
+--  tiles the map gave the ramp.
+arc.geo.ramp_climb         = 6.0
+--  The gap a ramp's lane keeps from the next ramp's tiles on the same
+--  side of the slab, in tiles; two ramps whose lanes run toward each
+--  other share the room between them.
+arc.geo.ramp_gap           = 1.0
 --  How near a station must be to a tile's centre to count as standing AT
 --  the level meet on it.  The strip is sampled far more finely than
 --  a tile, so this picks the one station that is really on the meet
@@ -268,7 +291,8 @@ arc.geo.slab_lift          = 1.0
 --  ends that reached it and the movements it served.  Off by default,
 --  because it is one line a node on every build; a movement it could NOT
 --  serve is reported whatever this says.
-arc.geo.interchange_dump   = 0
+arc.geo.interchange_dump      = 0
+arc.geo.pose_dump          = 0    -- the gores' slab readings and the branches from them
 
 --  WHAT A LANE MUST BE for a car to drive it, checked over every piece
 --  of every lane (net/lane.c lane_check_curves).  The shortest piece
@@ -295,20 +319,39 @@ arc.geo.lane_arrow_wing    = 0.10
 --  that pitch overlaps the next one's and the two pass through each
 --  other wherever their heights differ.
 arc.geo.interchange_lane_w = 0.07
+--  And the depth of the girder under it, in tiles: the slab's own is
+--  0.11, and a one-lane way carries a lighter one.
+arc.geo.interchange_girder = 0.08
 
---  How far one movement stands OVER another where the two cross, in
---  levels of altitude: the whole of what makes a node an interchange
---  rather than a crossing.  Each movement is a way of its own, and two
---  that cross are put on different levels, this far apart -- as far as
---  the grade allows.  A way can only climb so much over its length, so
---  a node whose ways are short takes the largest gap they can all
---  reach, and says so when that is under the least gap a car clears.
-arc.geo.interchange_over      = 0.5
-arc.geo.interchange_over_min  = 0.2
+--  THE KEEP-OUT.  Over every surface a car drives on stands an
+--  invisible tunnel a car's height tall, in levels of altitude, that
+--  nothing may be built into: where one movement crosses over another
+--  its girder's underside stands that far above the lower way's
+--  surface.  The whole of what makes a node an interchange rather than
+--  a crossing.  A crossing the grade cannot lift that far is lifted as
+--  far as it can and said; one it cannot lift even interchange_over_min
+--  is not lifted at all, since two ways that close are one surface, and
+--  it is said too.
+arc.geo.keep_out              = 0.30
+arc.geo.interchange_over      = arc.geo.keep_out + arc.geo.interchange_girder
+arc.geo.interchange_over_min  = 0.20
 --  The steepest a movement may climb or fall, in levels of altitude per
---  tile: fifteen in a hundred, a ramp's grade.  0 takes the slab's own
---  grade (arc.tune.band_grade) instead.
-arc.geo.interchange_grade     = 0.15
+--  tile.  A node's ways are as short as the map's tiles make them, and
+--  a way has to lift a car's keep-out over what it crosses within that
+--  length: at forty in a hundred every crossing in a node two tiles
+--  across is lifted, at fifteen most are not.  A ramp's tiles are as
+--  steep.  0 takes the slab's own grade (arc.tune.band_grade) instead.
+arc.geo.interchange_grade     = 0.40
+--  How far the arms of an interchange may be RAISED above the highest
+--  of their floors (the slabs' envelopes where they arrive), in levels
+--  of altitude, so a way between them clears the ground it crosses.
+--  The arms are settled together in the grading pass, and rise only as
+--  far as a way asks (scripts/compose/interchange.lua).
+arc.geo.interchange_rise      = 1.0
+--  How far off an arm's line the way the grading pass lays between two
+--  arms runs, in tiles, on the traffic's side: a slab lane's offset
+--  from the spine, so the ways stand where the lanes' ways will.
+arc.geo.interchange_lane_off  = 0.33
 --  How many cells short of an interchange a band STOPS, so that its
 --  lanes end there and the node's ways have those cells to climb in.
 --  A way that must cross another a level higher needs the run to get
@@ -316,6 +359,31 @@ arc.geo.interchange_grade     = 0.15
 --  is where an interchange's ramps part from the deck, and here they
 --  do.  0 runs the slab to the node's edge.
 arc.geo.interchange_approach  = 2
+--  THE FAN: at an arm each lane ends its own distance short of the
+--  band's end, this many tiles per lane from the inside out -- the
+--  inner lane at the end, the middle lane this far before it, the outer
+--  twice as far.  A way that leaves from further back is longer, and a
+--  longer way has more run to climb over what it crosses; the outer
+--  lane, which turns off the arm, gains the most.  0 ends every lane at
+--  the band's end.
+arc.geo.interchange_fan       = 0.5
+--  THE LANE DROP behind a lane's end: the slab's edge tapers to the next
+--  lane line over this many tiles toward the node, never more than a
+--  step of the fan, and the lane's way runs on that taper, level, before
+--  its own ribbon begins at the nose.  Nought is a step: the way's
+--  ribbon begins at the lane's end, as wide as the lane, and narrows to
+--  a ramp's width over its lead (scripts/compose/interchange.lua).
+arc.geo.interchange_gore      = 0
+
+--  THE NOSE past a lane's end: a way leaves the slab as wide as its
+--  lane, its edge touching the ribbon beside it, and once that one has
+--  parted the way narrows to a ramp's width over this many tiles.
+arc.geo.interchange_nose      = 0.5
+
+--  Whether a segment's end at a junction takes its pose from the pose
+--  store -- the node's middle, along the arm's axis -- rather than the
+--  fit's own end.  1 does, 0 leaves the fit to its own.
+arc.geo.pose_mouths           = 1
 
 --  How far a band's end is carried on toward the node it meets, along
 --  the line from that end to the middle of the node's mass, in tiles.
@@ -336,7 +404,8 @@ arc.geo.interchange_corner_leg = 0.3
 --  left turn that bends at once crosses its own arm's opposing lanes
 --  within the first half tile, where no ramp has climbed anything; a
 --  tile of straight run puts that crossing where the grade has bought
---  the clearance.
+--  the clearance.  The fit rounds the corner at the lead's end with a
+--  tangent of up to half the lead.
 arc.geo.interchange_lead      = 1.0
 
 --  WHERE THE WAYS RUN is searched for, not taken from a router.  Each
@@ -349,7 +418,7 @@ arc.geo.interchange_lead      = 1.0
 --  not cross -- and sometimes when it does not, while the search is
 --  hot.  0 trials lays every way on its chord.  The search is seeded
 --  by the node's own cells, so a build is the same build every time.
-arc.geo.interchange_anneal      = 150
+arc.geo.interchange_anneal      = 600
 arc.geo.interchange_anneal_heat = 3.0
 arc.geo.interchange_anneal_step = 0.3
 arc.geo.interchange_bulge       = 2.5
@@ -365,6 +434,12 @@ arc.geo.interchange_bulge_in    = 0.5
 --  lifted over is held flat, so the rounding leaves the clearance whole.
 arc.geo.interchange_round     = 3
 arc.geo.interchange_crest     = 0.5
+--  LEVELS AS PLATEAUS (1) or lifts at each crossing (0).  As plateaus,
+--  a way leaves its deck, climbs once at the grade to its level, holds
+--  it and descends once: the levels are whole steps of interchange_over
+--  above the upper deck and below the lower one, and a through way is
+--  flat at its own deck.  The two decks stand the gap apart.
+arc.geo.interchange_plateau   = 1
 
 --  How far back along a slab its grade is read where a way leaves it,
 --  so the way leaves at that grade and the profile has no crease.

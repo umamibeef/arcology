@@ -177,7 +177,7 @@ int   eff_links(const RCity *c, const RAtlasLevel *l, int32_t col, int32_t row, 
 int   put_tri_draped_n_at(const char *where, const char *who, RMesh *m, const RCity *c, uint8_t mask_bit, float order, const float tri[3][3], const float *nrm, const float col[3], const float ref[3], const float ref2[3]);
 #define put_tri_line_n(...) put_tri_draped_n_at(__FILE__ ":" R_STR(__LINE__), __func__, __VA_ARGS__)
 int   put_tri_ground_at(const char *where, const char *who, RMesh *m, const RCity *c, uint8_t mask_bit, float order, const float tri[3][3], const float col[3], const float ref[3], const float ref2[3]); /* ... laid on the drawn surface */
-int   strip_quad_z_at(const char *where, const char *who, RMesh *m, const RCity *c, uint8_t mask_bit, float order, const float a0[2], const float a1[2], const float b0[2], const float b1[2], float za, float zb, float across0, float across1, float along_a, float along_b, float mat);
+int   strip_quad_z_at(const char *where, const char *who, RMesh *m, const RCity *c, uint8_t mask_bit, float order, const float a0[2], const float a1[2], const float b0[2], const float b1[2], float za, float zb, float across0, float across1, float across0b, float across1b, float along_a, float along_b, float mat);
 int   strip_quad_at(const char *where, const char *who, RMesh *m, const RCity *c, uint8_t mask_bit, float order, const float a0[2], const float a1[2], const float b0[2], const float b1[2], float across0, float across1, float along_a, float along_b, float mat);
 #define strip_quad(...) strip_quad_at(__FILE__ ":" R_STR(__LINE__), __func__, __VA_ARGS__)
 int   strip_fan_z(RMesh *m, const RCity *c, uint8_t mask_bit, float order, float cx, float cy, float t0, float t1, float r0, float r1, float across_c, float mat, int n, float lift);
@@ -429,6 +429,7 @@ V2   l_right(V2 d);
 void l_piece_at(const Piece *p, float t, V2 *pos, V2 *dir);
 void piece_offset(const Piece *p, float off, Piece *o);
 void pieces_reverse(Piece *p, int np);
+int  pieces_cut(const Piece *pc, int np, float s0, float s1, Piece *out);
 void extent_add(float x, float y, float *x0, float *y0, float *x1, float *y1);
 void piece_extent(const Piece *pc, float *x0, float *y0, float *x1, float *y1);
 void piece_near(const Piece *pc, V2 p, V2 *q, V2 *dq);
@@ -701,6 +702,7 @@ struct ChainFan
     Run      *runs, *lines;
     int       nr, nl, nt, ns;
     int       ex0, ex1;       /* a junction's tile at that end of the chain */
+    int32_t   at0, at1;       /* that tile's index, or -1: the pose store is keyed by it */
     V2        start, goal;    /* the ends, which `aim` may move */
     V2        st0, st1;       /* the first and last steps, which their lines run along */
 };

@@ -85,6 +85,48 @@ void piece_offset(const Piece *p, float off, Piece *o)
 }
 
 
+/*  The part of a chain between arc lengths s0 and s1 along it, as
+ *  pieces of its own.  A piece inside the window is copied.  A piece an
+ *  end of the window falls in is shortened to that end.  A piece outside
+ *  it is left out.  Answers how many pieces the part has. */
+int pieces_cut(const Piece *pc, int np, float s0, float s1, Piece *out)
+{
+    float s = 0.0f;
+    int   k, n = 0;
+    for (k = 0; k < np; ++k)
+    {
+        const Piece *p = &pc[k];
+        float        a = s0 - s, b = s1 - s; /* the window in this piece's own arc length */
+        s += p->len;
+        if (b <= 1e-6f || a >= p->len - 1e-6f)
+            continue;
+        if (a < 0.0f)
+            a = 0.0f;
+        if (b > p->len)
+            b = p->len;
+        out[n] = *p;
+        if (a > 0.0f || b < p->len)
+        {
+            V2 pa, pb, d;
+            l_piece_at(p, a, &pa, &d);
+            l_piece_at(p, b, &pb, &d);
+            out[n].a = pa;
+            out[n].b = pb;
+            if (p->arc)
+            {
+                float f0 = p->len > 1e-6f ? a / p->len : 0.0f;
+                float f1 = p->len > 1e-6f ? b / p->len : 1.0f;
+                out[n].t0 = p->t0 + (p->t1 - p->t0) * f0;
+                out[n].t1 = p->t0 + (p->t1 - p->t0) * f1;
+            }
+            out[n].len = b - a;
+        }
+        ++n;
+    }
+    return n;
+}
+
+
 void pieces_reverse(Piece *p, int np)
 {
     int i;

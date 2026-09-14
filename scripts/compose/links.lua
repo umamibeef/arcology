@@ -56,13 +56,29 @@ end
 --  arc.fit cuts it into pieces, and a chain it can cut into none is a
 --  link that cannot be laid, so nothing is answered for one.  The spur's
 --  slide builds its placings with this too (scripts/compose/slide.lua).
+--  A chain that FOLDS is no chain.  Where the far pose lies behind the
+--  near one along its own line, the chord between the two leads runs
+--  back against a lead, the corner there is a turn of nearly half a
+--  circle, and the fit answers it with a fillet of no radius and a
+--  piece of enormous length that nothing downstream can walk to the
+--  end of.  So a corner at either lead sharper than FOLD is refused.
+local FOLD = -0.94
 function arc.chain_between(ax, ay, adx, ady, bx, by, bdx, bdy)
     local far  = dist(ax, ay, bx, by)
     local lead = math.min(arc.geo.interchange_lead or 0.0, 0.3 * far)
     local q = {{x = ax, y = ay}}
     if lead > 1e-3 then
-        q[#q + 1] = {x = ax + adx * lead, y = ay + ady * lead}
-        q[#q + 1] = {x = bx - bdx * lead, y = by - bdy * lead}
+        local ax2, ay2 = ax + adx * lead, ay + ady * lead
+        local bx2, by2 = bx - bdx * lead, by - bdy * lead
+        local cx, cy = bx2 - ax2, by2 - ay2
+        local cl = math.sqrt(cx * cx + cy * cy)
+        if cl < 1e-6 then return nil end
+        cx, cy = cx / cl, cy / cl
+        if cx * adx + cy * ady < FOLD or cx * bdx + cy * bdy < FOLD then return nil end
+        q[#q + 1] = {x = ax2, y = ay2}
+        q[#q + 1] = {x = bx2, y = by2}
+    elseif far > 1e-6 and ((bx - ax) * adx + (by - ay) * ady) / far < FOLD then
+        return nil
     end
     q[#q + 1] = {x = bx, y = by}
     local rad, tlim = {}, {}
@@ -174,15 +190,35 @@ arc.rules.links = function (x)
     local at_node = {}
     for i = 1, #nodes do at_node[i] = {out = {}, inn = {}, bands = {}} end
 
+    local band_end = arc.poses and arc.poses.band_end
     for li = 0, n - 1 do
         local l = x:lane(li)
         if l and l.slab then
             for which = 0, 1 do
                 if (which == 1 and l.open1) or (which == 0 and l.open0) then
                     local px, py, dx, dy = x:pose(li, which)
-                    local tc, tr = math.floor(px), math.floor(py)
-                    local k = (tc >= 0 and tr >= 0 and tc < size and tr < size)
-                              and of_tile[tr * size + tc] or nil
+                    --  WHICH NODE this end stands at is what the pose
+                    --  store says of its band (scripts/compose/poses.lua):
+                    --  a lane on the band's right runs with it, so its
+                    --  finish is at the band's tail and its start at the
+                    --  head; one on the left runs back.  A band the store
+                    --  has no record of is filed by its tile, under the
+                    --  node whose catchment it lies in.  The store is
+                    --  exact where the catchment can only guess: an arm's
+                    --  lanes end anywhere over the fan, and two nodes a
+                    --  few tiles apart have catchments that overlap.
+                    local k
+                    local be = band_end and band_end[l.band]
+                    if be then
+                        local at_tail = (which == 1) == (l.off > 0.0)
+                        local rec
+                        if at_tail then rec = be.tail else rec = be.head end
+                        k = rec and rec.node
+                    else
+                        local tc, tr = math.floor(px), math.floor(py)
+                        k = (tc >= 0 and tr >= 0 and tc < size and tr < size)
+                            and of_tile[tr * size + tc] or nil
+                    end
                     local g = k and at_node[k]
                     if g then
                         --  Which ARM of the node this end belongs to is
@@ -199,7 +235,7 @@ arc.rules.links = function (x)
                         --  six ends arriving and another with none, and
                         --  owes movements it has no lane left to lay.
                         local e = {li = li, x = px, y = py, dx = dx, dy = dy,
-                                   w = l.w, band = l.band, arm = l.band}
+                                   w = l.w, off = l.off, band = l.band, arm = l.band}
                         if which == 1 then g.out[#g.out + 1] = e
                         else g.inn[#g.inn + 1] = e end
                         g.bands[l.band] = true
@@ -232,6 +268,30 @@ arc.rules.links = function (x)
             return bi, bj
         end
 
+        --  Which lane of its slab an end is, from the inside out: the
+        --  slab lane whose offset its own lies nearest.
+        local function lane_of(e)
+            local best, k = 1e9, 0
+            if not e.off then return 0 end
+            for kk, o in ipairs {arc.geo.slab_lane0, arc.geo.slab_lane1, arc.geo.slab_lane2} do
+                local dd = math.abs(math.abs(e.off) - o * e.w)
+                if dd < best then best, k = dd, kk - 1 end
+            end
+            return k
+        end
+        --  How far a way runs on its slab at each end, level with it,
+        --  before it is a ribbon of its own: the lane drop's taper
+        --  behind the lane's end (scripts/compose/drop.lua, arc.fan_nose).
+        --  Beyond the taper the slab has drawn in past the lane, and the
+        --  way beside it is a ribbon of its own, free to climb.
+        local function nose(e, which)
+            local F = arc.fan_nose and arc.fan_nose[e.band]
+            if not F or not e.off then return 0.0 end
+            local at_tail = (which == 1) == (e.off > 0.0)
+            local side = e.off > 0.0 and 0 or 1
+            return F[((at_tail and 1 or 0) * 2 + side) * 4 + lane_of(e)] or 0.0
+        end
+
         --  A movement through the node is only RECORDED here: which out
         --  end goes to which in end.  Where it runs is settled for the
         --  whole node at once, below, once every movement is known.
@@ -241,7 +301,7 @@ arc.rules.links = function (x)
             taken["o" .. i], taken["i" .. j] = true, true
             x:note("band_links")
             made = made + 1
-            moves[#moves + 1] = {a = a, b = b}
+            moves[#moves + 1] = {a = a, b = b, hold_a = nose(a, 1), hold_b = nose(b, 0)}
         end
 
         local bands = {}
@@ -342,10 +402,20 @@ arc.rules.links = function (x)
                 table.sort(targets, function (p, q) return p.side > q.side end)
                 out_for[fb] = {}
                 --  the targets spread over the lanes: three of each, one
-                --  apiece; fewer targets take the lanes from the sides in
+                --  apiece; fewer targets take the lanes from the sides in,
+                --  the leftmost target the leftmost lane and the rightmost
+                --  target the rightmost, so a turn leaves from the side it
+                --  turns to and the lanes between are the leftovers'
                 for k, t in ipairs(targets) do
-                    local li = math.floor((k - 1) * #lanes / math.max(1, #targets)) + 1
+                    local li = #targets > 1 and math.floor((k - 1) * (#lanes - 1) / (#targets - 1) + 0.5) + 1 or 1
                     out_for[fb][t.tb] = lanes[li] and lanes[li].i
+                end
+                if arc.geo.interchange_dump > 0.5 then
+                    local ls, ts = {}, {}
+                    for _, l in ipairs(lanes) do ls[#ls + 1] = string.format("%d@%+.2f", l.i, l.lat) end
+                    for _, t in ipairs(targets) do ts[#ts + 1] = string.format("%d@%+.2f->lane %s", t.tb, t.side, tostring(out_for[fb][t.tb])) end
+                    arc.dump(string.format("LANES node %d,%d arm %d out at %.2f,%.2f heading %.2f,%.2f: lanes by left %s; targets by side %s",
+                        nodes[k].cells[1] % size, nodes[k].cells[1] // size, fb, cx, cy, dx, dy, table.concat(ls, " "), table.concat(ts, " ")))
                 end
             end
         end
@@ -372,7 +442,7 @@ arc.rules.links = function (x)
                 table.sort(sources, function (p, q) return p.side > q.side end)
                 in_for[tb] = {}
                 for k, src in ipairs(sources) do
-                    local li = math.floor((k - 1) * #lanes / math.max(1, #sources)) + 1
+                    local li = #sources > 1 and math.floor((k - 1) * (#lanes - 1) / (#sources - 1) + 0.5) + 1 or 1
                     in_for[tb][src.fb] = lanes[li] and lanes[li].j
                 end
             end
@@ -520,6 +590,14 @@ arc.rules.links = function (x)
             if t < arc.geo.interchange_corner_leg or -u < arc.geo.interchange_corner_leg then return nil end
             return a.x + a.dx * t, a.y + a.dy * t, t, -u
         end
+        --  Every way LEAVES ITS ARM ON A STRAIGHT, as the slab arrives
+        --  on one: the curvature is nought on both sides of the pose,
+        --  so the way is smooth through it and not merely tangent.  A
+        --  corner's arc is kept `lead` short of each pose where the
+        --  legs have the room, half the shorter leg where they do not,
+        --  and never so short that the arc falls under the least
+        --  radius: a legal arc comes before the straight.  A bowed
+        --  chain's leads are straights of their own.
         local function chain(mv, bulge, strict)
             local a, b = mv.a, mv.b
             local q, rad, tlim
@@ -529,9 +607,14 @@ arc.rules.links = function (x)
                 --  inmost bulge, less as the bulge grows
                 local f = 1.0 - (bulge + arc.geo.interchange_bulge_in) /
                                 (arc.geo.interchange_bulge + arc.geo.interchange_bulge_in) * 0.7
+                local leg  = math.min(da, db)
+                local cosn = math.max(-1.0, math.min(1.0, a.dx * b.dx + a.dy * b.dy))
+                local tan_half = math.sqrt(math.max(0.0, (1.0 - cosn) / math.max(1e-6, 1.0 + cosn)))
+                local keep = math.min(lead, 0.5 * leg, leg - arc.geo.interchange_rmin * tan_half / f)
+                if keep < 0.0 then keep = 0.0 end
                 q    = {{x = a.x, y = a.y}, {x = px, y = py}, {x = b.x, y = b.y}}
                 rad  = {0.0, radius, 0.0}
-                tlim = {0.0, f * math.min(da, db), 0.0}
+                tlim = {0.0, f * (leg - keep), 0.0}
             else
                 local ax2, ay2 = a.x + a.dx * lead, a.y + a.dy * lead
                 local bx2, by2 = b.x - b.dx * lead, b.y - b.dy * lead
@@ -567,18 +650,31 @@ arc.rules.links = function (x)
         local over, over_min = arc.geo.interchange_over, arc.geo.interchange_over_min
         local step = arc.geo.interchange_anneal_step
         local xbld = arc.city.plane("xbld")
+        --  The deck an end stands on, as the grading pass settled it
+        --  (scripts/compose/interchange.lua, arc.arm_z): the plateau
+        --  model plans from the two decks.
+        local function deck_of(e, which)
+            if not arc.arm_z or not e.off then return 0.0 end
+            local at_tail = (which == 1) == (e.off > 0.0)
+            return arc.arm_z[e.band * 2 + (at_tail and 1 or 0)] or 0.0
+        end
+        local plateau = arc.geo.interchange_plateau > 0.5
         local function cost_of()
             local ms = {}
             for _, mv in ipairs(moves) do
                 if mv.pc then
                     local pts, len = arc.weave.sample(mv.pc, step)
-                    ms[#ms + 1] = {pts = pts, len = len, za = 0.0, zb = 0.0,
-                                   ma = 0.0, mb = 0.0, tc = 0, tr = 0}
+                    ms[#ms + 1] = {pts = pts, len = len, za = deck_of(mv.a, 1), zb = deck_of(mv.b, 0),
+                                   ma = 0.0, mb = 0.0, tc = 0, tr = 0,
+                                   hold_a = mv.hold_a, hold_b = mv.hold_b}
                 end
             end
             local st = arc.weave.plan(ms, {grade = grade, over = over, over_min = over_min,
                                            lift = 0.0, round = 0, stack = 0.0,
-                                           crest = arc.geo.interchange_crest})
+                                           crest = arc.geo.interchange_crest, plateau = plateau,
+                                           ground = plateau and function (x, y)
+                                               return arc.city.at("surface", math.floor(x), math.floor(y)) end or nil,
+                                           near = 2.0 * arc.geo.interchange_lane_w + 0.01})
             --  What a layout costs.  A crossing that cannot be weaved is
             --  the worst thing; then one lifted short of the gap; then
             --  ground a way may not cross.  BENDING costs more than
@@ -620,7 +716,10 @@ arc.rules.links = function (x)
                     end
                 end
             end
+            --  and, as plateaus, a crossing on a climb and a way that
+            --  cannot reach its level
             return 10.0 * st.unweavable + 4.0 * st.short + 2.0 * (over - st.least)
+                   + 2.0 * (st.knee or 0) + 4.0 * (st.low or 0)
                    + 0.1 * climb + 2.0 * bad + 3.0 * bend
         end
         for _, mv in ipairs(moves) do
@@ -690,14 +789,18 @@ arc.rules.links = function (x)
             end
             return r
         end
-        local wiggly, tight = 0, 0
+        --  And on every way's ends: one that begins or ends on an arc
+        --  meets its arm's straight with a curve, and the pose has a
+        --  kink in curvature if not in direction.
+        local wiggly, tight, curved = 0, 0, 0
         for _, mv in ipairs(moves) do
             if mv.pc and wiggles(mv.pc) > 2 then wiggly = wiggly + 1 end
             if mv.pc and tightest(mv.pc) < arc.geo.interchange_rmin then tight = tight + 1 end
+            if mv.pc and (mv.pc[1].arc or mv.pc[#mv.pc].arc) then curved = curved + 1 end
         end
-        if wiggly > 0 or tight > 0 then
-            arc.log(string.format("interchange %d,%d: of %d movements, %d change their turn more than twice and %d carry an arc under %.1f tiles",
-                nd.cells[1] % size, nd.cells[1] // size, #moves, wiggly, tight, arc.geo.interchange_rmin))
+        if wiggly > 0 or tight > 0 or curved > 0 then
+            arc.log(string.format("interchange %d,%d: of %d movements, %d change their turn more than twice, %d carry an arc under %.1f tiles and %d begin or end on an arc",
+                nd.cells[1] % size, nd.cells[1] // size, #moves, wiggly, tight, arc.geo.interchange_rmin, curved))
         end
         if arc.geo.interchange_dump > 0.5 then
             local bs = {}
@@ -710,6 +813,11 @@ arc.rules.links = function (x)
         for _, mv in ipairs(moves) do
             if mv.pc then
                 x:link(mv.pc, mv.a.w, mv.a.li, mv.b.li, mv.a.band)
+                --  the node, and how far each end is held on its slab,
+                --  for the ways to be planned and laid by
+                --  (scripts/compose/interchange.lua)
+                mv.pc.node, mv.pc.hold_a, mv.pc.hold_b = k, mv.hold_a, mv.hold_b
+                mv.pc.lane_a, mv.pc.lane_b = lane_of(mv.a), lane_of(mv.b)
                 turns[#turns + 1] = mv.pc
             else
                 x:note("link_fail")

@@ -27,64 +27,124 @@
 
 local f32 = arc.put.f32
 
---  Whether the strip meets an interchange beyond this end, and which:
---  the node whose halo the end station stands in, where the end's tile
---  or one beside it is a cell the band walk left to that node as its
---  approach (scripts/compose/bands.lua).  Those cells lie only between
---  a band's end and the node it meets, so an end inside a halo with
---  none beside it is a band passing by.  Neither the strip's direction
---  at the end nor its distance to the node is a guide: a band that
---  begins in a curve block turns there.  A slab is faded down to the
---  ground at its ends because that is where it usually has to meet it;
---  an end that meets a node is carried on at the slab's height instead,
---  and the node's ways take it from there.
-local function meets_node(x, y)
-    local near = arc.band_approach
-    if not arc.band_tiles or not near then return nil end
-    local _, of_tile, n = arc.interchange_nodes()
-    local c, r = math.floor(x), math.floor(y)
-    if c < 0 or r < 0 or c >= n or r >= n then return nil end
-    local k = of_tile[r * n + c]
-    if not k then return nil end
-    for _, s in ipairs {{0, 0}, {1, 0}, {-1, 0}, {0, 1}, {0, -1}} do
-        local cc, cr = c + s[1], r + s[2]
-        if cc >= 0 and cr >= 0 and cc < n and cr < n and near[cr * n + cc] then return k end
-    end
-    return nil
-end
-
---  THE ARMS OF A NODE AGREE.  A band reaching a node records the lowest
---  height its end can stand at, its ground envelope there, under the
---  node (arc.node_floor); the node's deck is the highest of those
---  (arc.node_deck, set from the floors when the node is laid, so the
---  pass after reads it).  A band whose end has a deck is then brought
---  to it over its last tiles, at the ramp's grade: down to it where the
---  stiff profile rides higher, never below its own envelope, and up to
---  it where it rides lower.  Four ways meeting a level apart leave no
---  grade for one to climb over another; four meeting at one height do.
-arc.node_floor = arc.node_floor or {}
-arc.node_deck  = arc.node_deck or {}
-local function shape_to_node(k, s, z, env, n, total, at_end)
-    if k == nil or k == true then return end
+--  THE ARMS OF A NODE AGREE.  A band whose end meets an interchange
+--  (the pose store says which, scripts/compose/poses.lua) records the
+--  height its slab arrives at, stiffened over the ground, with the
+--  slab's lift over it (arc.arm_floor, by band and end), and the
+--  node it meets (arc.arm_node).  The grading pass settles every arm's
+--  height over the node's ways, with the arms free to rise
+--  (scripts/compose/interchange.lua, arc.arm_z), and the band is then
+--  brought to it over its last tiles at the ramp's grade: down to it
+--  where the stiff profile rides higher, never below its own envelope,
+--  and up to it where it rides lower.  A slab is faded down to the
+--  ground at its ends because that is where it usually has to meet
+--  it; an end that meets a node is carried on at the slab's height
+--  instead, and the node's ways take it from there.
+arc.arm_floor = arc.arm_floor or {}
+arc.arm_node  = arc.arm_node or {}
+arc.arm_z     = arc.arm_z or {}
+local function shape_to_node(k, key, s, z, env, n, total, lift, at_end)
     local i_end = at_end and n - 1 or 0
-    local floor = env[i_end]
-    if not arc.node_floor[k] or floor > arc.node_floor[k] then arc.node_floor[k] = floor end
-    local deck = arc.node_deck[k]
+    --  The floor an arm records is the slab AS IT ARRIVES, stiffened
+    --  over the ground, not the bare envelope under it: a node's deck
+    --  is the highest arriving slab, so no arm dips into the node and
+    --  climbs out of it again, and the lower arms rise to meet it.  The
+    --  arm arrives over the FAN'S length (scripts/compose/drop.lua): its
+    --  lanes end anywhere along that, and every way leaves at the deck's
+    --  height, so the floor is the highest the slab stands over it and
+    --  the arm is held level at the deck that far back.
+    local reach = arc.fan_reach() + 0.125 -- and a station's step, as a lane's end snaps to one
+    local floor = z[i_end]
+    for i = 0, n - 1 do
+        local back = at_end and f32(total - s[i]) or s[i]
+        if back <= reach + 1e-4 and z[i] > floor then floor = z[i] end
+    end
+    floor = f32(floor + lift)
+    arc.arm_floor[key], arc.arm_node[key] = floor, k
+    local deck = arc.arm_z[key]
     if arc.geo.interchange_dump > 0.5 then
-        arc.dump(string.format("FLOOR node %d %s end: env %.3f smoothed %.3f deck %s",
-            k, at_end and "last" or "first", floor, z[i_end], deck and string.format("%.3f", deck) or "none"))
+        arc.dump(string.format("FLOOR node %d arm %d %s end: env %.3f smoothed %.3f deck %s",
+            k, key, at_end and "last" or "first", floor, z[i_end] + lift, deck and string.format("%.3f", deck) or "none"))
     end
     if not deck then return end
+    deck = f32(deck - lift)
     local grade = arc.geo.interchange_grade > 0 and arc.geo.interchange_grade
                   or arc.tune.band_grade
     for i = 0, n - 1 do
         local back = at_end and f32(total - s[i]) or s[i]
+        back = math.max(0.0, f32(back - reach))
         local hi   = f32(deck + f32(grade * back))
         local lo   = f32(deck - f32(grade * back))
         if z[i] > hi then z[i] = hi end
         if z[i] < lo then z[i] = lo end
         if z[i] < env[i] then z[i] = env[i] end
     end
+end
+
+--  A SPUR IS A BRANCH OF ITS SLAB.  A lane drop's descent begins on the
+--  slab's stations, wherever along them the slide put it, and the slab
+--  does not stand at ground plus lift there: it is stiffened over the
+--  dips, and an arm of a node is brought to the node's deck.  So a slab's
+--  profile, once settled, hands every gore beside it the slab's finished
+--  stations (arc.poses.gore[cell].parent), and the descent reads its
+--  slab end's height and grade off them.  The gore itself keeps the
+--  slab's height and grade there, for whatever settles heights over the
+--  poses.  A gore is beside a slab when a station stands within
+--  GORE_NEAR of it: the gore is a tile from the seam, and the next slab
+--  over is two or more.
+local GORE_NEAR = 1.3
+local function hand_gores(p, s, z, n)
+    local P = arc.poses
+    if not P or not P.gore or not next(P.gore) then return end
+    local xs, ys, dxs, dys = {}, {}, {}, {}
+    local x0, y0, x1, y1 = 1e9, 1e9, -1e9, -1e9
+    for i = 0, n - 1 do
+        local x, y, dx, dy = p:pose(i)
+        xs[i], ys[i], dxs[i], dys[i] = x, y, dx, dy
+        if x < x0 then x0 = x end
+        if x > x1 then x1 = x end
+        if y < y0 then y0 = y end
+        if y > y1 then y1 = y end
+    end
+    local parent = {n = n, x = xs, y = ys, dx = dxs, dy = dys, z = z, s = s}
+    for cell, g in pairs(P.gore) do
+        if g.x >= x0 - GORE_NEAR and g.x <= x1 + GORE_NEAR and
+           g.y >= y0 - GORE_NEAR and g.y <= y1 + GORE_NEAR then
+            local best, k = GORE_NEAR * GORE_NEAR, nil
+            for i = 0, n - 1 do
+                local ex, ey = xs[i] - g.x, ys[i] - g.y
+                local dd = ex * ex + ey * ey
+                if dd < best then best, k = dd, i end
+            end
+            if k then
+                local a, b = k > 0 and k - 1 or k, k < n - 1 and k + 1 or k
+                g.parent = parent
+                g.at     = k
+                g.z      = z[k]
+                g.grade  = s[b] > s[a] and (z[b] - z[a]) / (s[b] - s[a]) or 0.0
+                if arc.geo.pose_dump > 0.5 then
+                    arc.dump(string.format("GORE %d,%d: slab station %d of %d at %.2f,%.2f, %.3f high, grade %.3f",
+                        cell % P.n, cell // P.n, k, n, xs[k], ys[k], z[k], g.grade))
+                end
+            end
+        end
+    end
+end
+
+--  The slab's height where the descent leaves it, and its grade along
+--  the descent's way out: read off the parent's station nearest the
+--  slab end, in the direction the descent runs away from it.
+local function slab_end(g, x, y, ax, ay)
+    local pa = g.parent
+    local best, k = 1e9, nil
+    for i = 0, pa.n - 1 do
+        local ex, ey = pa.x[i] - x, pa.y[i] - y
+        local dd = ex * ex + ey * ey
+        if dd < best then best, k = dd, i end
+    end
+    local a, b = k > 0 and k - 1 or k, k < pa.n - 1 and k + 1 or k
+    local grade = pa.s[b] > pa.s[a] and (pa.z[b] - pa.z[a]) / (pa.s[b] - pa.s[a]) or 0.0
+    return pa.z[k], grade * (pa.dx[k] * ax + pa.dy[k] * ay), math.sqrt(best)
 end
 
 arc.rules.profile = function (p)
@@ -103,10 +163,71 @@ arc.rules.profile = function (p)
         --  off; a plain spur meets the ground at both ends.
         local z0 = f32(z[0] + ((d.lane_piece and not d.lane_off) and 0.0 or d.slab_above))
         local z1 = f32(z[n - 1] + ((d.lane_piece and d.lane_off) and 0.0 or d.slab_above))
+        --  A lane drop whose gore has its slab's stations leaves the slab
+        --  at the slab's own height and grade there, and eases down to
+        --  the line: a cubic between the two ends, the slab's slope at
+        --  one and level at the other.  A lane with a MERGE LANE
+        --  (scripts/compose/drop.lua) runs on the slab's own surface
+        --  from the taper's far end to the gore, so it stands at the
+        --  slab's height, station for station, that far, and the cubic
+        --  runs from the gore.
+        local branch, zs, ms, hold, mg
+        if d.lane_piece and d.total > 1e-6 then
+            local i_slab, i_line = d.lane_off and 0 or n - 1, d.lane_off and n - 1 or 0
+            local g = arc.gore_of(p:pose(i_line))
+            local x, y, dx, dy = p:pose(i_slab)
+            mg = arc.merge_of(x, y, "q", 0.5)
+            if mg then
+                hold = mg.merge.len + mg.merge.taper
+                if hold > f32(d.total - 0.05) then hold = f32(d.total - 0.05) end
+                local zg, gg = arc.slab_z_at(mg.parent, mg.merge.s_g)
+                zs, ms, branch = zg, -mg.merge.m * gg, true
+                --  The slope the lane leaves with is kept to what a cubic
+                --  can carry down to the line without dipping under it on
+                --  the way: at most three times the mean fall, and never
+                --  the other way.
+                local zl  = d.lane_off and z1 or z0
+                local run = math.max(0.05, d.total - hold - arc.geo.spur_taper)
+                local most = 3.0 * (zl - zs) / run
+                if zs > zl then ms = math.max(most, math.min(0.0, ms))
+                else ms = math.min(most, math.max(0.0, ms)) end
+            elseif g then
+                local ax, ay = dx, dy
+                if not d.lane_off then ax, ay = -dx, -dy end
+                local away
+                zs, ms, away = slab_end(g, x, y, ax, ay)
+                branch, hold = true, 0.0
+                if arc.geo.pose_dump > 0.5 then
+                    arc.dump(string.format("BRANCH %s at %.2f,%.2f: slab %.3f (ground and lift %.3f), grade %.3f, station %.2f away",
+                        d.lane_off and "off" or "on", x, y, zs, d.lane_off and z0 or z1, ms, away))
+                end
+            end
+        end
         for i = 0, n - 1 do
             local t = d.total > 1e-6 and f32(s[i] / d.total) or 0.0
             local lin
-            if d.lane_piece then
+            if branch then
+                --  how far from the slab end this station lies
+                local sf = d.lane_off and s[i] or f32(d.total - s[i])
+                local zl = d.lane_off and z1 or z0
+                if mg and sf <= hold then
+                    lin = f32((arc.slab_z_at(mg.parent, mg.merge.s_q - mg.merge.m * sf)))
+                else
+                    --  down to the line's level by the foot, and level
+                    --  along the join beyond it, which is the line's
+                    local run = f32(d.total - hold - (mg and arc.geo.spur_taper or 0.0))
+                    if run < 0.05 then run = 0.05 end
+                    local ts  = f32(f32(sf - hold) / run)
+                    if ts < 0.0 then ts = 0.0 end
+                    if ts > 1.0 then ts = 1.0 end
+                    local t2 = f32(ts * ts)
+                    local t3 = f32(t2 * ts)
+                    local h00 = f32(f32(2.0 * t3) - f32(3.0 * t2) + 1.0)
+                    local h10 = f32(t3 - f32(2.0 * t2) + ts)
+                    local h01 = f32(f32(3.0 * t2) - f32(2.0 * t3))
+                    lin = f32(f32(zs * h00) + f32(f32(ms * run) * h10) + f32(zl * h01))
+                end
+            elseif d.lane_piece then
                 if d.lane_off then
                     lin = f32(z1 + f32(f32(z0 - z1) * p:ease(f32(1.0 - t))))
                 else
@@ -156,10 +277,10 @@ arc.rules.profile = function (p)
             end
             --  Faded in over a window at each end, where the slab has to
             --  meet the ground; not at an end that meets a node.
-            local x0, y0 = p:pose(0)
-            local x1, y1 = p:pose(n - 1)
-            local node0 = x0 and meets_node(x0, y0)
-            local node1 = x1 and meets_node(x1, y1)
+            local be = arc.band_fitting and arc.poses and arc.poses.band_end
+                       and arc.poses.band_end[arc.band_fitting]
+            local node0 = be and be.head and be.head.node
+            local node1 = be and be.tail and be.tail.node
             for i = 0, n - 1 do
                 local e0 = node0 and 1e9 or s[i]
                 local e1 = node1 and 1e9 or f32(d.total - s[i])
@@ -168,8 +289,8 @@ arc.rules.profile = function (p)
                 if fr > 1.0 then fr = 1.0 elseif fr < 0.0 then fr = 0.0 end
                 z[i] = f32(z[i] + f32(f32(zsm[i] - z[i]) * fr))
             end
-            if node0 then shape_to_node(node0, s, z, env, n, d.total, false) end
-            if node1 then shape_to_node(node1, s, z, env, n, d.total, true) end
+            if node0 then shape_to_node(node0, arc.band_fitting * 2, s, z, env, n, d.total, d.lift, false) end
+            if node1 then shape_to_node(node1, arc.band_fitting * 2 + 1, s, z, env, n, d.total, d.lift, true) end
         end
     end
 
@@ -181,7 +302,11 @@ arc.rules.profile = function (p)
             local back = f32(f32(d.total - s[i]) / d.taper1)
             if back < lift then lift = back end
         end
-        p:set(i, f32(z[i] + f32(d.lift * lift)))
+        z[i] = f32(z[i] + f32(d.lift * lift))
+        p:set(i, z[i])
     end
+
+    --  A slab's finished stations, to the gores beside it.
+    if not d.spur and n > 2 then hand_gores(p, s, z, n) end
     return true
 end

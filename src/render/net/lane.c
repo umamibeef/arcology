@@ -1140,14 +1140,16 @@ int lane_segment(RMesh *m, const RCity *c, uint8_t mask_bit, Family f, const Pie
  *  count.  So a way of another width is a script edit and not a compile.
  *  No offsets is a slab carrying no lanes.  Recorded under the band the
  *  loft records its stations under, so a spur can find the outer lane it
- *  leaves. */
+ *  leaves.  HOW FAR each lane runs is the script's as well.  A lane its
+ *  lane drop ended short of the slab's end (band_lane_cut) is laid that
+ *  far.  Its end stands there for the script that joins the ends. */
 int lane_slab(RMesh *m, const RCity *c, uint8_t mask_bit, const Piece *pc, int np, float hw, int band)
 {
     if (grade_only(g_dev.grade_lanes))
         return 0; /* the grading pass: lanes are the building pass's */
     const float *OFF = net_line_rules()->slab_lane;
     const int    n   = net_line_rules()->slab_lanes;
-    static Piece       tmp[MAX_PIECES];
+    static Piece       tmp[MAX_PIECES], part[MAX_PIECES];
     int                side, k, q;
     if (np < 1 || np > MAX_PIECES)
         return 0;
@@ -1155,17 +1157,26 @@ int lane_slab(RMesh *m, const RCity *c, uint8_t mask_bit, const Piece *pc, int n
     for (side = 0; side < 2; ++side)
         for (k = 0; k < n; ++k)
         {
-            float off = OFF[k] * hw * (side ? -1.0f : 1.0f), rmin = 1e9f;
-            for (q = 0; q < np; ++q)
-                piece_offset(&pc[q], off, &tmp[q]);
+            float        off = OFF[k] * hw * (side ? -1.0f : 1.0f), rmin = 1e9f, s0, s1;
+            const Piece *src = pc;
+            int          ns  = np;
+            if (band_lane_cut(side, k, &s0, &s1))
+            {
+                ns  = pieces_cut(pc, np, s0, s1, part);
+                src = part;
+                if (ns < 1)
+                    continue; /* a lane cut to nothing is no lane */
+            }
+            for (q = 0; q < ns; ++q)
+                piece_offset(&src[q], off, &tmp[q]);
             if (side)
-                pieces_reverse(tmp, np);
-            for (q = 0; q < np; ++q)
+                pieces_reverse(tmp, ns);
+            for (q = 0; q < ns; ++q)
                 if (tmp[q].arc && tmp[q].r < rmin)
                     rmin = tmp[q].r;
-            if (lane_add(LC_SLAB, net_band->f, tmp, np, hw, rmin, rmin < LANE_RMIN, LE_OPEN, -1, LE_OPEN, -1, band, off) != 0)
+            if (lane_add(LC_SLAB, net_band->f, tmp, ns, hw, rmin, rmin < LANE_RMIN, LE_OPEN, -1, LE_OPEN, -1, band, off) != 0)
                 return -1;
-            if (lane_wires(m, c, mask_bit, tmp, np, net_line_rules()->lane_wire, net_band->lane_paint, band) != 0)
+            if (lane_wires(m, c, mask_bit, tmp, ns, net_line_rules()->lane_wire, net_band->lane_paint, band) != 0)
                 return -1;
         }
     return 0;

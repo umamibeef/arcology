@@ -67,8 +67,15 @@ connectors, a segment's lane joins, a dead end's cap, a level meet's crossing --
 the routing: no `pose_chain` exists.  A pass that wants a chain queues its two POSES (`net_cut_add_poses`) and the
 drive asks `arc.rules.posed` (`scripts/compose/chain.lua`, the biarc at float precision) for the points before the
 cut; the interchange and the band ends build theirs directly (`arc.chain_between`, `scripts/compose/links.lua`; the
-node's are annealed there).  The poses themselves are read off what the script laid: C evaluates where a laid piece
-ends and hands that back, and decides nothing.  *Met when `pose_chain` has no caller and every chain is a script's.*
+node's are annealed there).  The poses are the script's own: `scripts/compose/poses.lua` settles every one from the
+map before any fit -- a junction's mouths, a band's arms, a spur's gore, a level meet -- and the fits are fitted TO
+them (`c:end_at`).  Heights ride on the same poses: a slab hands its gore its finished stations and the ramp leaves
+at the slab's height and grade (`scripts/compose/profile.lua`); a node's arms and the knots of its ways are one
+relaxation over one graph of heights (`scripts/compose/relax.lua`, `arc.weave.plan`), settled in the grading pass
+over the ways the node expects and again in the building pass over the lanes' real ways.  Every chain the scripts
+build leaves a pose on a straight, so the curvature is nought on both sides of it; the cut counts the ends that are
+not (`arc.g2`, the `G2` lines under `pose_dump`).  C evaluates where a laid piece ends and hands that back, and
+decides nothing.  *Met when `pose_chain` has no caller and every chain is a script's.*
 
 ## The constraint on all of it
 

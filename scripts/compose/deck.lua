@@ -55,8 +55,14 @@ function arc.slab.gore(s, d, i, pv, cu, ha, hb, order, ala, alb)
     end
 end
 
-function arc.slab.under(s, d, i, n, pv, cu, a0x, a0y, a1x, a1y, b0x, b0y, b1x, b1y, order)
-    if d.flat or arc.geo.slab_underside < 0.5 then return end
+--  A lane piece -- a ramp's lane between the slab and the line -- is a
+--  structure too: a girder half the slab's under it and a fascia each
+--  side, so that where it stands over the ground it reads as the deck
+--  it is and not as paint in the air.  It has no parapet and no end
+--  walls: it meets the slab at one end and the line at the other.
+function arc.slab.under(s, d, i, n, pv, cu, a0x, a0y, a1x, a1y, b0x, b0y, b1x, b1y, order, open0, open1)
+    if arc.geo.slab_underside < 0.5 then return end
+    if d.flat and not d.lane_piece then return end
     --  Behind the slab in the painter's order: depth here is the sweep's
     --  slot, not a height, so a soffit at the same order as the line it
     --  hangs under would draw through it in stripes.  Every face goes
@@ -65,6 +71,13 @@ function arc.slab.under(s, d, i, n, pv, cu, a0x, a0y, a1x, a1y, b0x, b0y, b1x, b
     --  way.
     local gd = d.lane_piece and 0.5 * d.girder or d.girder
     local u0z, v0z = pv.z - gd, cu.z - gd
+    --  No body where its soffit would be under the ground at a corner:
+    --  a lane piece's lower part and a slab's end lie on the ground
+    --  they come down to, and a girder there is a girder in the earth.
+    if u0z <= s:ground(a0x, a0y) or u0z <= s:ground(a1x, a1y)
+       or v0z <= s:ground(b0x, b0y) or v0z <= s:ground(b1x, b1y) then
+        return
+    end
     s:tri_n(a0x, a0y, u0z, b1x, b1y, v0z, a1x, a1y, u0z, 0, 0, -1,
             CONC[1], CONC[2], CONC[3], order)
     s:tri_n(a0x, a0y, u0z, b0x, b0y, v0z, b1x, b1y, v0z, 0, 0, -1,
@@ -85,15 +98,17 @@ function arc.slab.under(s, d, i, n, pv, cu, a0x, a0y, a1x, a1y, b0x, b0y, b1x, b
                    nx, ny, 0, order, CONC[1], CONC[2], CONC[3])
         end
     end
-    --  The girder's fascia down from the way and the parapet up
-    --  from it, on each side; a turn-out on the ground has neither.
-    if not d.lane_piece then
-        for side = 0, 1 do
+    --  The girder's fascia down from the way on each side, and the
+    --  parapet up from it on a slab; a lane piece has the fascia alone.
+    --  A side told to OPEN has no fascia: a lane leaves the slab through
+    --  its edge there (scripts/compose/strip.lua).
+    for side = 0, 1 do
+        if not (side == 0 and open0 or side == 1 and open1) then
             local eax, eay = side == 1 and a1x or a0x, side == 1 and a1y or a0y
             local ebx, eby = side == 1 and b1x or b0x, side == 1 and b1y or b0y
             local nx = side == 1 and -cu.dy or cu.dy
             local ny = side == 1 and cu.dx or -cu.dx
-            s:edge(eax, eay, ebx, eby, pv.z, cu.z, nx, ny, d.girder, false, order)
+            s:edge(eax, eay, ebx, eby, pv.z, cu.z, nx, ny, gd, false, order)
         end
     end
 end

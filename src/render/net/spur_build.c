@@ -457,11 +457,14 @@ static void spur_join_target(const Spur *x, V2 *B, V2 *tB, V2 *trav)
 /*  Whether a route leaves the spur tile across its line edge, which is
  *  the edge in direction `rd` from the tile's center.  It also gives the
  *  length of the route beyond that meet.  The spur tile is the hard
- *  rule: a lane that misses that edge is not this spur's. */
+ *  rule: a lane that misses that edge is not this spur's.  The route
+ *  may begin far along the slab, on either side of the edge's line.
+ *  So the LAST time it passes out through that line is the exit, and
+ *  the earlier passes say nothing. */
 static int spur_exits(const Piece *pc, int np, V2 centre, V2 rd, float *beyond)
 {
     float total = 0.0f, run = 0.0f, ps = 0.0f, pl = 0.0f;
-    int   k, first = 1;
+    int   k, first = 1, found = 0;
     for (k = 0; k < np; ++k)
         total += pc[k].len;
     for (k = 0; k < np; ++k)
@@ -479,10 +482,8 @@ static int spur_exits(const Piece *pc, int np, V2 centre, V2 rd, float *beyond)
             if (!first && side > 0.0f && ps <= 0.0f)
             {
                 float f = ps / (ps - side), l = pl + (lat - pl) * f;
-                if (fabsf(l) > 0.5f)
-                    return 0; /* out past the tile's corner, not across its line edge */
+                found   = fabsf(l) <= 0.5f; /* out past the tile's corner is not across its line edge */
                 *beyond = total - (run + t);
-                return 1;
             }
             first = 0, ps = side, pl = lat;
             if (t >= pc[k].len)
@@ -490,7 +491,7 @@ static int spur_exits(const Piece *pc, int np, V2 centre, V2 rd, float *beyond)
         }
         run += pc[k].len;
     }
-    return 0;
+    return found;
 }
 
 /*  The join as a slide.  The route runs from the slab pose to the line's

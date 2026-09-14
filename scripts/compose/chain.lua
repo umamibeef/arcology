@@ -50,10 +50,41 @@ function arc.biarc_chain(ax, ay, tax, tay, bx, by, tbx, tby)
            {0.0, cap, cap, 0.0}, {0.0, d, d, 0.0}
 end
 
+--  A chain that begins at a ramp's top begins with its MERGE LANE
+--  (scripts/compose/drop.lua, arc.merge_points): the lane's points
+--  from the far end of its taper to the gore, and the biarc from the
+--  gore on to the far pose.  A ramp whose line is a junction's arm
+--  queues its descent this way rather than sliding it
+--  (scripts/compose/slide.lua), and the two lay the same lane.
 arc.rules.posed = function (p)
     local d = p:info()
     if not d.posed then return true end
-    local q, rad, tlim = arc.biarc_chain(d.ax, d.ay, d.adx, d.ady, d.bx, d.by, d.bdx, d.bdy)
+    local g = arc.merge_of(d.ax, d.ay, "top", 0.3)
+    local q, rad, tlim
+    if g then
+        local gdx, gdy
+        q, gdx, gdy = arc.merge_points(g)
+        local q2, rad2, tlim2 = arc.biarc_chain(q[#q].x, q[#q].y, gdx, gdy, d.bx, d.by, d.bdx, d.bdy)
+        if not q2 then return true end
+        rad, tlim = {}, {}
+        for i = 1, #q do
+            rad[i] = arc.geo.interchange_radius
+            local d1 = i > 1 and arc.dist(q[i - 1].x, q[i - 1].y, q[i].x, q[i].y) or 1e9
+            local d2 = arc.dist(q[i].x, q[i].y, i < #q and q[i + 1].x or q2[2].x, i < #q and q[i + 1].y or q2[2].y)
+            tlim[i] = 0.5 * math.min(d1, d2)
+        end
+        for i = 2, #q2 do
+            q[#q + 1], rad[#rad + 1], tlim[#tlim + 1] = q2[i], rad2[i], tlim2[i]
+        end
+        if arc.geo.pose_dump > 0.5 then
+            local qs = {}
+            for _, pt in ipairs(q) do qs[#qs + 1] = string.format("%.2f,%.2f", pt.x, pt.y) end
+            arc.dump(string.format("POSED merge %d,%d: A %.2f,%.2f dir %.2f,%.2f to B %.2f,%.2f dir %.2f,%.2f | %s",
+                math.floor(g.x), math.floor(g.y), d.ax, d.ay, d.adx, d.ady, d.bx, d.by, d.bdx, d.bdy, table.concat(qs, " ")))
+        end
+    else
+        q, rad, tlim = arc.biarc_chain(d.ax, d.ay, d.adx, d.ady, d.bx, d.by, d.bdx, d.bdy)
+    end
     if q then p:points(q, rad, tlim) end
     return true
 end

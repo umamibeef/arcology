@@ -1072,6 +1072,8 @@ ChainFan *path_chain(void)
     s_tf_chainfan.ns    = x->ns;
     s_tf_chainfan.ex0   = x->ex0 >= 0;
     s_tf_chainfan.ex1   = x->ex1 >= 0;
+    s_tf_chainfan.at0   = x->ex0;
+    s_tf_chainfan.at1   = x->ex1;
     s_tf_chainfan.start = x->start;
     s_tf_chainfan.goal  = x->goal;
     s_tf_chainfan.st0   = x->st[0];

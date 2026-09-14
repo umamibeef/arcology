@@ -57,6 +57,10 @@ arc.rules.network = function (o)
         node[i] = COUNT[art[i]] >= 3 and 2 or COUNT[links[i]] == 1 and 1 or 0
     end
     o:nodes(node)
+    --  And kept, for the poses every mouth is settled from
+    --  (scripts/compose/poses.lua).
+    arc.net_planes = arc.net_planes or {}
+    arc.net_planes[#arc.net_planes + 1] = {node = node, links = links}
 
     --  One run, from a cell out along an edge: cell by cell to the next
     --  node, and the cells and the marks it leaves behind.  Every edge

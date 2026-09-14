@@ -293,15 +293,21 @@ arc.rules.bands = function (o)
             ::next::
         end
         --  The approach trimmed from each end.  The cells stay taken, so
-        --  no other walk starts inside one.  A curve block keeps the
-        --  cell it exits through: trimmed away, the band turns in the
-        --  block and ends at its middle facing along the block rather
-        --  than out of it toward the node, and every way leaving it
-        --  has to swing round first.
+        --  no other walk starts inside one.  A curve block inside the
+        --  approach goes with it: a band that turns through a block
+        --  against the interchange ends on the straight before the
+        --  block, and the node's way turns through the block's corner
+        --  to reach it, with the room to do so.  A block beyond the
+        --  approach keeps the cell it exits through: trimmed away, the
+        --  band turns in the block and ends at its middle facing along
+        --  the block rather than out of it toward the node, and every
+        --  way leaving it has to swing round first.
         local function keep(i)
             local c = e[i]
-            return not near[c.cell] or c.block
-                   or (i > 0 and e[i - 1].block) or (i < k - 1 and e[i + 1].block)
+            if not near[c.cell] then return true end
+            if c.block then return false end
+            return (i > 0 and e[i - 1].block and not near[e[i - 1].cell])
+                or (i < k - 1 and e[i + 1].block and not near[e[i + 1].cell])
         end
         local lo, k0 = 0, k
         while lo < k and not keep(lo) do lo = lo + 1 end
