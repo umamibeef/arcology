@@ -42,9 +42,9 @@ local f32 = arc.put.f32
 --  How far before a band's end the fan's furthest lane ends: the outer
 --  of three lanes, two steps back.  The profile holds an arm level over
 --  this length (scripts/compose/profile.lua), and a node's catchment
---  reaches this much further out (scripts/compose/interchange.lua).
+--  reaches this much further out (scripts/compose/interchange).
 function arc.fan_reach()
-    return 2.0 * (arc.geo.interchange_fan or 0.0)
+    return 2.0 * arc.geo.interchange_fan
 end
 
 --  Which side of the slab a point lies on, from the station's heading:
@@ -53,6 +53,11 @@ local function side_of(st, x, y)
     return f32(f32(f32(x - st.x) * st.dy) - f32(f32(y - st.y) * st.dx)) > 0.0 and 0 or 1
 end
 
+--  OVER 150 LINES, and one page on purpose: it is ONE construction.
+--  A spur's taper is settled from the stations, the gores and the
+--  widths together, and every step reads the arrays the step before it
+--  filled.  Cut in two, the two halves would hand the same arrays back
+--  and forth and nothing would be simpler.
 arc.rules.drop = function (dr)
     local d = dr:info()
     dr:clear()
@@ -278,8 +283,8 @@ arc.rules.drop = function (dr)
     --  the slab, station by station).  The lane's way is a ribbon of
     --  its own from the taper's end, the NOSE, and level with the slab
     --  until then; every nose is published by band, end, side and lane
-    --  (arc.fan_nose) for the node's ways (scripts/compose/links.lua,
-    --  scripts/compose/interchange.lua).  A ramp within the fan on a
+    --  (arc.fan_nose) for the node's ways (scripts/compose/links,
+    --  scripts/compose/interchange).  A ramp within the fan on a
     --  side keeps the outer lane it leaves or joins: that side's fan
     --  stops at the ramp's own tiles and the far end of its merge lane,
     --  whichever is nearer the arm.  A narrowing wins over a merge
@@ -288,16 +293,16 @@ arc.rules.drop = function (dr)
     arc.fan_lane_w = {}
     arc.fan_nose   = arc.fan_nose or {}
     local nose = {}
-    local fan = arc.geo.interchange_fan or 0.0
+    local fan = arc.geo.interchange_fan
     if be and fan > 0.0 and d.n > 1 then
         local lanes = {arc.geo.slab_lane0, arc.geo.slab_lane1, arc.geo.slab_lane2}
         --  the slab's edge with lanes k and out gone: the inner edge of
         --  lane k's own ribbon, so the two meet with no sliver of ground
-        --  between them (scripts/compose/interchange.lua lays a way
+        --  between them (scripts/compose/interchange lays a way
         --  interchange_lane_w to each side of its lane's centre)
         local rib = arc.geo.interchange_lane_w / arc.tune.band_w
         local edge = {lanes[2] - rib, lanes[3] - rib}
-        local gore  = math.min(arc.geo.interchange_gore or 0.0, fan)
+        local gore  = math.min(arc.geo.interchange_gore, fan)
         local cut = {[0] = {}, [1] = {}}
         for side = 0, 1 do
             for k = 0, #lanes - 1 do cut[side][k] = {0.0, total} end

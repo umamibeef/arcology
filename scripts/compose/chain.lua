@@ -8,7 +8,7 @@
 --  cut.  (arc.rules.chain is the fit's own stage, scripts/compose/
 --  runs.lua: the chain of lines a fitted path is made of.)
 --  The interchange and the band ends build theirs directly
---  (scripts/compose/links.lua) and never queue.
+--  (scripts/compose/links/chain.lua) and never queue.
 --
 --  The chain is the equal-tangent BIARC: two points where B lies dead
 --  ahead of A, else four -- A, A + d tA, B - d tB, B -- with the same
@@ -20,7 +20,7 @@
 local f32  = arc.put.f32
 local sqrt = arc.put.sqrt
 
-function arc.biarc_chain(ax, ay, tax, tay, bx, by, tbx, tby)
+local function biarc_chain(ax, ay, tax, tay, bx, by, tbx, tby)
     local vx, vy = f32(bx - ax), f32(by - ay)
     local vv = f32(f32(vx * vx) + f32(vy * vy))
     local vl = sqrt(vv)
@@ -64,7 +64,7 @@ arc.rules.posed = function (p)
     if g then
         local gdx, gdy
         q, gdx, gdy = arc.merge_points(g)
-        local q2, rad2, tlim2 = arc.biarc_chain(q[#q].x, q[#q].y, gdx, gdy, d.bx, d.by, d.bdx, d.bdy)
+        local q2, rad2, tlim2 = biarc_chain(q[#q].x, q[#q].y, gdx, gdy, d.bx, d.by, d.bdx, d.bdy)
         if not q2 then return true end
         rad, tlim = {}, {}
         for i = 1, #q do
@@ -83,7 +83,7 @@ arc.rules.posed = function (p)
                 math.floor(g.x), math.floor(g.y), d.ax, d.ay, d.adx, d.ady, d.bx, d.by, d.bdx, d.bdy, table.concat(qs, " ")))
         end
     else
-        q, rad, tlim = arc.biarc_chain(d.ax, d.ay, d.adx, d.ady, d.bx, d.by, d.bdx, d.bdy)
+        q, rad, tlim = biarc_chain(d.ax, d.ay, d.adx, d.ady, d.bx, d.by, d.bdx, d.bdy)
     end
     if q then p:points(q, rad, tlim) end
     return true

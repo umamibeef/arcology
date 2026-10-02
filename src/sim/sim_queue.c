@@ -22,45 +22,40 @@
  *  change which tiles end up powered and watered.  Giving this queue a
  *  comfortable size makes the reconstruction wrong. */
 #define QMASK 0x1FF
-static struct
-{
-    int16_t y, x;
-} q[QMASK + 1];
-static int qw, qr; /* $13B6 write, $13B8 read */
 
-void q_reset(void) { qw = qr = 0; } /* queueReset $21DD4 */
+void q_reset(City *c) { c->qw = c->qr = 0; } /* queueReset $21DD4 */
 
-void q_push(int y, int x) /* queuePush $21DF2 */
+void q_push(City *c, int y, int x) /* queuePush $21DF2 */
 {
-    q[qw].y = (int16_t)y;
-    q[qw].x = (int16_t)x;
-    qw      = (qw + 1) & QMASK;
-    if (qw == qr)
-        qr = (qw + 1) & QMASK; /* $21E26 */
+    c->q[c->qw].y = (int16_t)y;
+    c->q[c->qw].x = (int16_t)x;
+    c->qw         = (c->qw + 1) & QMASK;
+    if (c->qw == c->qr)
+        c->qr = (c->qw + 1) & QMASK; /* $21E26 */
 }
 
-void q_pop(int *y, int *x) /* queuePop $21E3A */
+void q_pop(City *c, int *y, int *x) /* queuePop $21E3A */
 {
-    *y = q[qr].y;
-    *x = q[qr].x;
-    qr = (qr + 1) & QMASK;
+    *y    = c->q[c->qr].y;
+    *x    = c->q[c->qr].x;
+    c->qr = (c->qr + 1) & QMASK;
 }
 
-int q_empty(void) { return qw == qr; }
+int q_empty(const City *c) { return c->qw == c->qr; }
 
 /*  The ring at $13B2 is a queue for the flood fills, and a stack here.
  *  So it needs both ends.  $21E66 pops the newest entry, $21E96 reads it
  *  without removing it. */
-void q_pop_back(int *y, int *x) /* queuePopBack $21E66 */
+void q_pop_back(City *c, int *y, int *x) /* queuePopBack $21E66 */
 {
-    qw = (qw + QMASK) & QMASK;
-    *y = q[qw].y;
-    *x = q[qw].x;
+    c->qw = (c->qw + QMASK) & QMASK;
+    *y    = c->q[c->qw].y;
+    *x    = c->q[c->qw].x;
 }
 
-void q_peek_back(int *y, int *x) /* queuePeekBack $21E96 */
+void q_peek_back(const City *c, int *y, int *x) /* queuePeekBack $21E96 */
 {
-    int i = (qw + QMASK) & QMASK;
-    *y    = q[i].y;
-    *x    = q[i].x;
+    int i = (c->qw + QMASK) & QMASK;
+    *y    = c->q[i].y;
+    *x    = c->q[i].x;
 }

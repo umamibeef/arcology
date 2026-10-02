@@ -16,6 +16,8 @@
 #include "city.h"
 #include "soft/soft.h"
 #include "dump.h"
+#include "log.h"
+#include "opt.h"
 
 /*  Crop then magnify, in place, for the preview sheets: a 128x128 city
  *  at the 32 px art set is 4224x2468.  So a detail has to be cut out and
@@ -99,28 +101,31 @@ int soft_main(int argc, char **argv)
 
     if (argc < 3)
     {
-        fprintf(stderr,
+        R_ERR("soft",
                 "usage: %s <assets dir> <city file> [out.png] "
                 "[--zoom 8|16|32] [--n tiles] [--view 0..11] "
                 "[--underground]\n       [--crop x,y,w,h] "
                 "[--focus row,col,pad[,dx,dy]] "
                 "[--scale N] [--phase N] "
-                "[--indexed] [--provenance out16.png] [--mesh] [--mesh-reverse] [--depth out16.png]\n",
+                "[--indexed] [--provenance out16.png] [--mesh] [--mesh-reverse] [--depth out16.png]",
                 argv[0]);
         return 2;
     }
     soft_defaults(&o);
     for (i = 3; i < argc; ++i)
     {
-        if (strcmp(argv[i], "--zoom") == 0 && i + 1 < argc)
+        /*  The four both parsers take are spelled in one table
+         *  (src/util/opt.h), so a rename reaches this loop and the
+         *  game's own options together. */
+        if (strcmp(argv[i], ARC_SWITCHES[ARC_SW_ZOOM].name) == 0 && i + 1 < argc)
             o.zoom = atoi(argv[++i]);
         else if (strcmp(argv[i], "--n") == 0 && i + 1 < argc)
             o.n = atoi(argv[++i]);
         else if (strcmp(argv[i], "--view") == 0 && i + 1 < argc)
             o.view = atoi(argv[++i]);
-        else if (strcmp(argv[i], "--underground") == 0)
+        else if (strcmp(argv[i], ARC_SWITCHES[ARC_SW_UNDERGROUND].name) == 0)
             o.underground = 1;
-        else if (strcmp(argv[i], "--no-things") == 0)
+        else if (strcmp(argv[i], ARC_SWITCHES[ARC_SW_NO_THINGS].name) == 0)
             o.draw_things = 0;
         else if (strcmp(argv[i], "--dump-blits") == 0)
             o.dump_blits = 1;
@@ -130,11 +135,11 @@ int soft_main(int argc, char **argv)
         {
             if (sscanf(argv[++i], "%d,%d,%d,%d", &cx, &cy, &cw, &ch) != 4)
             {
-                fprintf(stderr, "--crop wants x,y,w,h\n");
+                R_ERR("soft", "--crop wants x,y,w,h");
                 return 2;
             }
         }
-        else if (strcmp(argv[i], "--scale") == 0 && i + 1 < argc)
+        else if (strcmp(argv[i], ARC_SWITCHES[ARC_SW_SCALE].name) == 0 && i + 1 < argc)
             scale = atoi(argv[++i]);
         else if (strcmp(argv[i], "--provenance") == 0 && i + 1 < argc)
             prov_out = argv[++i];
@@ -157,7 +162,7 @@ int soft_main(int argc, char **argv)
                              &fpad, &fdx, &fdy);
             if (got != 3 && got != 5)
             {
-                fprintf(stderr, "--focus wants row,col,pad[,dx,dy]\n");
+                R_ERR("soft", "--focus wants row,col,pad[,dx,dy]");
                 return 2;
             }
             o.focus_row = frow;
@@ -169,7 +174,7 @@ int soft_main(int argc, char **argv)
 
     if (atlas_load(&a, argv[1]) != 0)
     {
-        fprintf(stderr, "%s\n", a.err);
+        R_ERR("soft", "%s", a.err);
         return 1;
     }
     /*  _AnimatePalette rotates two runs of the palette, 155..203 and
@@ -182,19 +187,19 @@ int soft_main(int argc, char **argv)
     if (!c)
     {
         atlas_free(&a);
-        fprintf(stderr, "out of memory\n");
+        R_ERR("soft", "out of memory");
         return 1;
     }
     if (rcity_load(c, argv[2]) != 0)
     {
-        fprintf(stderr, "%s\n", c->err);
+        R_ERR("soft", "%s", c->err);
         free(c);
         atlas_free(&a);
         return 1;
     }
     if (soft_render(&im, &a, c, &o) != 0)
     {
-        fprintf(stderr, "no %d px art set in the atlas\n", (int) o.zoom);
+        R_ERR("soft", "no %d px art set in the atlas", (int) o.zoom);
         free(c);
         atlas_free(&a);
         return 1;
@@ -221,7 +226,7 @@ int soft_main(int argc, char **argv)
     if (depth_out)
     {
         if (!o.mesh || soft_write_depth_png(&im, depth_out) != 0)
-            fprintf(stderr, "--depth needs --mesh; nothing written\n");
+            R_ERR("soft", "--depth needs --mesh; nothing written");
         else
             dumpf("wrote     %s (depth, full frame)\n", depth_out);
     }
@@ -234,7 +239,7 @@ int soft_main(int argc, char **argv)
         int32_t fx, fy;
         if (!soft_focus_result(&fx, &fy))
         {
-            fprintf(stderr, "--focus tile %d,%d never drawn\n", frow, fcol);
+            R_ERR("soft", "--focus tile %d,%d never drawn", frow, fcol);
             image_free(&im);
             free(c);
             atlas_free(&a);
@@ -253,7 +258,7 @@ int soft_main(int argc, char **argv)
     {
         if (image_crop_scale(&im, cx, cy, cw, ch, scale) != 0)
         {
-            fprintf(stderr, "bad --crop/--scale for a %dx%d image\n",
+            R_ERR("soft", "bad --crop/--scale for a %dx%d image",
                     (int) im.w, (int) im.h);
             image_free(&im);
             free(c);
@@ -266,14 +271,14 @@ int soft_main(int argc, char **argv)
     if (out && (indexed ? image_write_png_indices(&im, &a, out)
                         : image_write_png(&im, out)) != 0)
     {
-        fprintf(stderr, "cannot write %s\n", out);
+        R_ERR("soft", "cannot write %s", out);
         rc = 1;
     }
     else if (out)
         dumpf("wrote     %s\n", out);
     if (prov_out && image_write_png_provenance(&im, prov_out) != 0)
     {
-        fprintf(stderr, "cannot write %s\n", prov_out);
+        R_ERR("soft", "cannot write %s", prov_out);
         rc = 1;
     }
     else if (prov_out)

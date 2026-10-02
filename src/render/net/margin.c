@@ -1,6 +1,6 @@
 /*  margin.c: THE MARGIN BANDS, gathered and offered.
  *
- *  Where they run and what they join is the network's (walk/walkway.c).
+ *  Where they run and what they join is the network's (net/walkway.c).
  *  This gathers the bands that network holds for arc.rules.margin to
  *  lay, and measures the two things a junction can only take from its
  *  own outline.  Where the fill must stop so the margin is not paved
@@ -37,6 +37,9 @@
 #include "net/net.h"
 #include "script.h"
 #include "opt.h"
+#include "net/cell.h"
+#include "net/walkway.h"
+#include "build.h"
 
 /*  The numbers this file reads, each remembering where the store
  *  put it (net/geo.c).  A name here is a name a script must set. */
@@ -248,16 +251,6 @@ void margin_stats_print(void)
     dumpf("margins  %d strips, %d junction links, %d caps; %d open ends (%d stop at a carrier, %d at a spur, %d at the map's edge)\n", strips, links, caps, open, carrier, spur, edge);
 }
 
-/*  The junction's margin.  It is the band round the box's outline, from
- *  the end of one mouth to the start of the next.  Every edge that is
- *  not a mouth, mitred at the outline's vertices.  It is in the margin
- *  material, with the line's across in it so the material draws the lip
- *  along the inner edge.  Over the box, and registered run by run. */
-/*  Which edges of the outline carry a margin, and the inward normal of
- *  each: not an arm's mouth, not a sliver.  Only while the outline is
- *  still over the junction's own tile.  Past it the ground is whatever
- *  the neighbor's is, and a level band laid over that cuts into the
- *  hillside.  The margin simply stops there, as it does at any lip. */
 /*  Which edges of a junction's ring carry a margin, which way each
  *  faces into the junction, and which arm's mouth each is: the SCRIPT'S
  *  (arc.rules.band).  The same call answers the ring moved in
@@ -380,7 +373,7 @@ static void junc_band(const JBox *jb, const V2 *poly, const JuncArm *arms, int n
 
 /*  The margins, drawn from the NETWORK: every path's band, quad by quad
  *  between its cross-sections.  The network decided where they run and
- *  what they join (walk/walkway.c).  This knows only the two edges of a
+ *  what they join (net/walkway.c).  This knows only the two edges of a
  *  band and the height it lies at.
  *
  *  One quad in the margin material, the line's across in it (1.0 at the
@@ -389,9 +382,19 @@ static void junc_band(const JBox *jb, const V2 *poly, const JuncArm *arms, int n
  *  in the map view: it rasterises to dashes.  A path whose node reaches
  *  no chunk this build draws is passed over.  Its place in the network
  *  stands either way. */
+int margin_count(void)
+{
+    return s_on ? walk_net_count() : 0;
+}
+
 /*  The network's own outline, drawn as the fitted curves are.  So what
  *  the network holds can be seen rather than inferred from the bands.
  *  It is the SCRIPT'S (arc.rules.walk_curves), one band at a time. */
+int margin_outline(void)
+{
+    return TUNE(show_curves) > 0.5f;
+}
+
 /*  ONE MARGIN, gathered and handed over: which path it is, where its
  *  stations are and what it joins.  Answers 0 where there is nothing at
  *  that place to draw.
@@ -404,16 +407,6 @@ static void junc_band(const JBox *jb, const V2 *poly, const JuncArm *arms, int n
  *  In outline the bands stand aside with the rest of the line works and
  *  the network is drawn in their place.  This is a different rule over
  *  the same paths.  `outline` says which the script should ask for. */
-int margin_count(void)
-{
-    return s_on ? walk_net_count() : 0;
-}
-
-int margin_outline(void)
-{
-    return s_tune.show_curves > 0.5f;
-}
-
 int margin_gather(RMesh *m, const RCity *c, uint8_t mask_bit, int i, WalkFan *out, ShapeId *sh)
 {
     const WalkPath *w  = walk_net_get(i);
@@ -668,6 +661,11 @@ int margin_junction_inset(const JBox *jb, const V2 *poly, const JuncArm *arms, i
     return n;
 }
 
+/*  The junction's margin.  It is the band round the box's outline, from
+ *  the end of one mouth to the start of the next.  Every edge that is
+ *  not a mouth, mitred at the outline's vertices.  It is in the margin
+ *  material, with the line's across in it so the material draws the lip
+ *  along the inner edge.  Over the box, and registered run by run. */
 int margin_junction(const JBox *jb, const V2 *poly, const JuncArm *arms, int np)
 {
     const RCity *c        = jb->c;

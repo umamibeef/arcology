@@ -69,6 +69,7 @@
 #include "net/net.h"
 #include "build.h"
 #include "incr.h"
+#include "net/walkway.h"
 
 /*  The key every letter shortcut needs: the Mac's command key, and Ctrl
  *  everywhere else.  The bare keys that remain, the digits for the
@@ -130,8 +131,6 @@ int geometry_on(const App *a)
     return a->gv.geometry || a->plan || a->gv.pitch > 30.01f || off_quarter;
 }
 
-/*  The view a frame is drawn with: the switches, the map view's
- *  overrides, and the underground, which is the ground alone. */
 /*  The camera at a quarter turn on the game's own pitch, 0 to 3.  Such a
  *  turn is a change of PERSPECTIVE and nothing else.  The grid and what
  *  stands on it are the same, the mesh is the one built once from them,
@@ -221,6 +220,8 @@ void settle_quarter_turn(App *a, SDL_Window *win)
     ui_log(&a->us, "Turned to %d degrees", view_quarter(a) * 90);
 }
 
+/*  The view a frame is drawn with: the switches, the map view's
+ *  overrides, and the underground, which is the ground alone. */
 RGpuView frame_view(const App *a)
 {
     RGpuView fv      = a->gv;
@@ -241,60 +242,39 @@ RGpuView frame_view(const App *a)
 
 /*  ---- the UI ------------------------------------------------------ */
 
-/*  The budget block's departments as sim.h names them.  The first three
- *  slots the reconstruction has not named. */
-
-/*  The camera moves rather than cuts.  One move carries both of the
- *  camera's angles at once.  They are the pitch it looks down at and the
- *  yaw it looks from.  Both ease in and out over the same fifth of a
- *  second, about the anchor.  So the point the view looks at stays under
- *  the middle of the window the whole way.  Anything that puts the
- *  camera somewhere goes through cam_go, and a headless run arrives
- *  there on the frame it asked.  The map view is that camera raised to
- *  90 and turned 45, which is what makes the city square rather than a
- *  diamond.  Leaving takes both back, to the nearest of the original's
- *  own four rotations. */
-
 /*  ==================================================================
  *  Finding things on disk
  *
  *  Where the assets are, where the cities are, and what a name on the
- *  command line resolves to.
+ *  command line resolves to.  The assets sit beside the binary or a few
+ *  directories above it, and the cities live wherever the game was
+ *  installed.  Either may be given outright instead.
  *  ================================================================== */
-/* ---- finding things ----------------------------------------------------
- *
- *  The old invocation wanted the assets directory and the city spelled
- *  out every time.  Both can be found: the assets sit beside the binary
- *  or a few directories above it, and the cities live wherever the game
- *  was installed.  Either can still be given outright.
- * ------------------------------------------------------------------ */
-
 /*  ==================================================================
  *  Startup and the frame loop
  *
  *  Options are read once, into Startup, and the loop that follows shares
  *  nothing with them.
  *  ================================================================== */
-/*  The frame loop: events, the clock, the camera, and the frame itself.
- *  It shares nothing with the startup options, checked, not assumed.  So
- *  it takes only the app and its window. */
-/*  One frame's advance of the world and the camera, the live loop's and
- *  the headless turn's alike.  It runs the clock, and redoes the sweep
- *  when the camera's quarter is not the one it was made for, the mesh
- *  rebuilt when dirty, the traffic.  Then the camera's move by `dt`
- *  seconds (none when negative) and a quarter turn come to rest settled.
- *  -1 when the sweep fails. */
 /*  The mesh build was abandoned.  A rule that raised has already named
  *  itself.  This says what became of the frame.  In the per-frame path
  *  the state holds for as long as the script stays broken.  So the line
  *  is said when it CHANGES rather than once a frame, and the build
  *  coming back says so too. */
 static int s_build_bad;
+/*  The reading of the scripts the failed build was made under.  A build
+ *  that faulted says the same thing for the same scripts.  It costs the
+ *  same seconds to say it.  So it is not tried again until they
+ *  change. */
+static int s_build_stamp;
 
 static void build_failed(void)
 {
     if (!s_build_bad)
-        R_ERR("mesh", "the build was abandoned; the mesh it would have replaced still stands");
+    {
+        R_ERR("mesh", "the build FAILED, so what it made is on the screen and "
+                      "is incomplete");
+    }
     s_build_bad = 1;
 }
 
@@ -319,8 +299,19 @@ int app_advance(App *a, SDL_Window *win, float dt, float time)
         return -1;
     if (a->mesh_dirty)
     {
-        if (remesh(a) != 0)
+        /*  A BUILD THAT FAULTED IS NOT TRIED AGAIN every frame.  The
+         *  fault stands until the scripts are read again.  A retry
+         *  spends the same seconds to reach the same fault, and fills
+         *  the log while it does.  Saving a script starts the next
+         *  one. */
+        if (s_build_bad && script_stamp() == s_build_stamp)
+            a->mesh_dirty = 0;
+        else if (remesh(a) != 0)
+        {
             build_failed();
+            s_build_stamp = script_stamp();
+            a->mesh_dirty = 0;
+        }
         else
             build_ok();
         /*  The bar comes down with the build that raised it.  Only a
@@ -332,7 +323,7 @@ int app_advance(App *a, SDL_Window *win, float dt, float time)
     a->gv.time = time;
     music_update(a->mus); /* the original's scheduler, once a pass */
     if (traffic_frame(a, a->gv.time) != 0)
-        fprintf(stderr, "traffic build failed\n");
+        R_ERR("app", "traffic build failed");
     if (dt >= 0.0f)
     {
         /*  The camera's travel, a frame's worth. */
@@ -397,6 +388,12 @@ static void build_bar(void *ud, const char *step, int i, int n)
     gpu_frame(a->gpu, &fv, backdrop(a), ui_render, a->ui);
 }
 
+/*  One frame's advance of the world and the camera, the live loop's and
+ *  the headless turn's alike.  It runs the clock, and redoes the sweep
+ *  when the camera's quarter is not the one it was made for, the mesh
+ *  rebuilt when dirty, the traffic.  Then the camera's move by `dt`
+ *  seconds (none when negative) and a quarter turn come to rest settled.
+ *  -1 when the sweep fails. */
 int app_frame(App *a, SDL_Window *win, float dt, float time, RImage *out)
 {
     RGpuView fv;
@@ -479,6 +476,9 @@ int app_frame(App *a, SDL_Window *win, float dt, float time, RImage *out)
     return rc;
 }
 
+/*  The frame loop: events, the clock, the camera, and the frame itself.
+ *  It shares nothing with the startup options, checked, not assumed.  So
+ *  it takes only the app and its window. */
 static void frame_loop(App *a, SDL_Window *win)
 {
     while (!a->quit)
@@ -528,8 +528,11 @@ static void frame_loop(App *a, SDL_Window *win)
                 else if (a->plan && (SDL_GetModState() & SDL_KMOD_SHIFT))
                 {
                     /*  Shift-drag in the map view: select an area for a
-                     *  debug report (area.c), tile to tile. */
+                     *  debug report (area.c), tile to tile.  A drag
+                     *  already in flight is dropped here.  The map must
+                     *  hold still while the area is drawn on it. */
                     pick_tile(a, e.button.x, e.button.y, win);
+                    a->drag   = 0;
                     a->sel    = a->q_col >= 0;
                     a->sel_c0 = a->sel_c1 = a->q_col;
                     a->sel_r0 = a->sel_r1 = a->q_row;
@@ -543,7 +546,8 @@ static void frame_loop(App *a, SDL_Window *win)
             else if (e.type == SDL_EVENT_MOUSE_BUTTON_UP &&
                      e.button.button == SDL_BUTTON_LEFT && a->sel)
             {
-                a->sel = 0;
+                a->sel  = 0;
+                a->drag = 0;
                 area_report_ui(a);
             }
             else if (e.type == SDL_EVENT_MOUSE_BUTTON_UP &&
@@ -551,8 +555,11 @@ static void frame_loop(App *a, SDL_Window *win)
             {
                 a->drag = 0;
                 /*  A click, not a drag: the selected tool acts on the
-                 *  tile under the pointer. */
-                if (a->drag_len < 4.0f)
+                 *  tile under the pointer.  Shift in the map view is a
+                 *  selection and never the tool, whether or not it
+                 *  found a tile to start at. */
+                if (a->drag_len < 4.0f
+                    && !(a->plan && (SDL_GetModState() & SDL_KMOD_SHIFT)))
                 {
                     pick_tile(a, e.button.x, e.button.y, win);
                     if (a->q_col >= 0)
@@ -569,7 +576,18 @@ static void frame_loop(App *a, SDL_Window *win)
                  *  Either report is enough.  The first such motion
                  *  starts the drag itself. */
                 int held = (e.motion.state & SDL_BUTTON_LMASK) || (SDL_GetMouseState(NULL, NULL) & SDL_BUTTON_LMASK);
-                if (held && !a->sel && !a->drag)
+                /*  SHIFT IN THE MAP VIEW SELECTS, AND THE MAP HOLDS
+                 *  STILL.  The test is made every motion.  A drag can
+                 *  be armed with no press in front of it.  The button
+                 *  UP that ends one is not delivered while the panel
+                 *  owns the mouse.  And macOS makes a drag out of a
+                 *  three finger motion.  Either one leaves the pan
+                 *  armed, and the map then slides under every later
+                 *  selection. */
+                int selecting = a->sel || (a->plan && (SDL_GetModState() & SDL_KMOD_SHIFT));
+                if (selecting)
+                    a->drag = 0;
+                else if (held && !a->drag)
                     a->drag = 1, a->drag_len = 0.0f;
                 if (a->drag && held)
                 {
@@ -696,6 +714,46 @@ static void frame_loop(App *a, SDL_Window *win)
             if (app_frame(a, win, dt, (float)((double)(a->last_ns - a->t0_ns) / 1e9), NULL) != 0)
                 break;
         }
+    }
+}
+
+/*  The music draws from the city's own stream, as the original's does.
+ *  src/audio knows nothing of a City.  So the city rides across as the
+ *  context the player hands back. */
+static uint16_t music_rand(void *at, uint16_t n)
+{
+    return lib_rand((City *)at, n);
+}
+
+/*  --tune name=value,name=value: the knobs, set for a headless render of
+ *  one particular setting.  A knob is NAMED here, because the list of
+ *  them is the scripts' and so is its order.  Give as many as the run
+ *  means to move.  The rest stay at the value the declaration gave them.
+ *  A name nothing declared is reported and passed over. */
+static void tune_from_args(const char *arg)
+{
+    const char *p = arg;
+    while (p && *p)
+    {
+        char        name[32];
+        const char *eq  = strchr(p, '=');
+        const char *end = strchr(p, ',');
+        size_t      len;
+        if (!eq || (end && eq > end))
+        {
+            R_WARN("tune", "--tune wants name=value: %s", p);
+            return;
+        }
+        len = (size_t)(eq - p);
+        if (len >= sizeof name)
+            len = sizeof name - 1;
+        memcpy(name, p, len);
+        name[len] = 0;
+        if (!tune_set(name, (float)atof(eq + 1)))
+            R_WARN("tune", "--tune: the scripts declare no knob named %s", name);
+        if (!end)
+            return;
+        p = end + 1;
     }
 }
 
@@ -864,7 +922,7 @@ int game_main(int argc, char **argv)
     /*  The generator's seed is not saved ($11DC never reaches MISC).  So a run starts from the clock, like the original.  Or it starts from --seed N.  Two builds can then be compared on the traffic they draw. */
     {
         int32_t seed = g_dev.seed ? (int32_t)atoi(g_dev.seed) : (int32_t)time(NULL);
-        rng_seed(seed, (uint16_t)(seed & 0xFFFF));
+        rng_seed(a.city, seed, (uint16_t)(seed & 0xFFFF));
     }
 
     t_phase = SDL_GetTicksNS();
@@ -932,9 +990,6 @@ int game_main(int argc, char **argv)
                 char g[16];
                 if (prefs_get("grid", g, sizeof g) && strcmp(g, "on") == 0)
                     a.gv.grid = 1;
-                /*  Outline too, unless --tune or --outline set it for this run. */
-                if (!g_dev.tune && !o.outline && prefs_get("curves", g, sizeof g) && strcmp(g, "on") == 0)
-                    tune_array()[9] = 1.0f;
                 /*  and the cell coordinates */
                 if (prefs_get("cells", g, sizeof g) && strcmp(g, "on") == 0)
                     a.us.show_cells = 1;
@@ -972,6 +1027,9 @@ int game_main(int argc, char **argv)
          *  none, the one beside the build. */
         char        sdir[1024];
         const char *ship = find_scripts(sdir, sizeof sdir, argv[0]) ? sdir : NULL;
+        /*  The art first: what a piece of line art joins, and how high
+         *  a structure stands, are read off the pictures by a script. */
+        script_art(&a.atlas);
         script_open(ship, g_dev.lua);
         if (ship || g_dev.lua)
             R_NOTE("lua", "%s%s%s: %d rules, %d models", ship ? ship : "",
@@ -992,7 +1050,7 @@ int game_main(int argc, char **argv)
             a.mus = music_create(assets_dir, sound_device(a.snd));
             if (a.mus)
             {
-                music_set_rand(a.mus, lib_rand); /* the game's own stream, as the original shares it */
+                music_set_rand(a.mus, music_rand, a.city); /* the game's own stream, as the original shares it */
                 /*  on unless the preference says off: the original's
                  *  Options menu starts with Music checked */
                 int want = !(prefs_get("music", on, sizeof on) && strcmp(on, "off") == 0);
@@ -1021,8 +1079,20 @@ int game_main(int argc, char **argv)
     a.t0_ns    = SDL_GetTicksNS();
     if (o.rotate_turns)
         sim_rotate(a.city, o.rotate_turns); /* --rotate N: the original's own turn, for a look at the other orientations */
+    /*  THE KNOBS, once the scripts have declared them.  Nothing may set
+     *  one before that: the store is empty until the declarations run.
+     *  --outline asks for the view outright.  Failing that --tune may
+     *  name it.  Failing both, the preference the last session left. */
+    if (g_dev.tune)
+        tune_from_args(g_dev.tune);
     if (o.outline)
-        tune_array()[9] = 1.0f; /* --outline: the view the flag asks for, preferences or none */
+        tune_set("show_curves", 1.0f);
+    else if (!g_dev.tune && a.prefs_ok)
+    {
+        char g[16];
+        if (prefs_get("curves", g, sizeof g) && strcmp(g, "on") == 0)
+            tune_set("show_curves", 1.0f);
+    }
     if (view_quarter(&a))
         settle_quarter_turn(&a, NULL); /* --angle 90/180/270: the camera at that quarter, pivoting on the map's center */
     /*  Every city opens paused.  The speed it was saved at is what
@@ -1081,9 +1151,9 @@ int game_main(int argc, char **argv)
                 a.anch_alt  = (float)rcity_alt_surface(a.view->altm[idx], a.view->xter[idx]);
                 /*  The hold turns the anchor about the view's pivot, as
                  *  the frame turns the world.  In the app the anchor IS
-                 *  the pivot (cam_anchor), and here it has to be too, or
-                 *  the tile lands where the map's center turns it (88,80
-                 *  asked, 92,58 got). */
+                 *  the pivot (cam_anchor), and here it has to be too.  With
+                 *  another pivot the tile lands where the map's center
+                 *  turns it. */
                 a.gv.pivot_c = a.anch_c;
                 a.gv.pivot_r = a.anch_r;
                 cam_hold(&a, win);
@@ -1162,7 +1232,7 @@ int game_main(int argc, char **argv)
                (int)a.anim_b);
         a.dirty = 1;
         if (resweep(&a) != 0)
-            fprintf(stderr, "sweep failed\n");
+            R_ERR("app", "sweep failed");
     }
     /*  --edit C,R[;C,R...]: build, demolish those tiles, and let the
      *  path below build again: the incremental rebuild's test
@@ -1183,7 +1253,7 @@ int game_main(int argc, char **argv)
         }
         a.dirty = 1;
         if (resweep(&a) != 0)
-            fprintf(stderr, "sweep failed\n");
+            R_ERR("app", "sweep failed");
         a.mesh_dirty = 1;
     }
     if (have_pick)
@@ -1247,7 +1317,7 @@ int game_main(int argc, char **argv)
         if (sscanf(g_dev.probe, "%f,%f", &px, &py) == 2)
             mesh_probe(&a.mesh, px, py);
         else
-            fprintf(stderr, "--probe wants X,Y in tiles\n");
+            R_ERR("app", "--probe wants X,Y in tiles");
         goto done;
     }
     if (g_dev.lua_eval)
@@ -1292,14 +1362,14 @@ int game_main(int argc, char **argv)
             build_reports();
             if (cut != 0)
                 bad = 1;
-            /*  The buried faces are counted and reported, and held from
-             *  getting worse by tools/buried_check.py.  The corpus is
-             *  not at zero, so they do not fail the run. */
+            /*  The buried faces are counted and reported, and held where
+             *  they are by tools/battery.py.  The corpus is not at zero,
+             *  so they do not fail the run. */
             mesh_check_overlap(&a.mesh, 1);
             /*  And geometry that COLLIDES: one surface driven through
-             *  another.  Held from getting worse by
-             *  tools/collide_check.py, which carries the corpus's own
-             *  counts, since the corpus is not at zero. */
+             *  another.  Held where it is by tools/battery.py, whose
+             *  reference carries the corpus's own counts, since the
+             *  corpus is not at zero. */
             mesh_check_collide(&a.mesh, 1);
             /*  A junction's outline must be a simple ring.  A spur or a
              *  meet there inverts everything taken from it, so this

@@ -70,7 +70,7 @@ function arc.poses_build()
     end
 
     --  THE ARMS: a band end that meets a node faces the middle of the
-    --  node's mass (scripts/compose/interchange.lua), so every arm
+    --  node's mass (scripts/compose/interchange), so every arm
     --  arrives on a line through one point.  A head is the band's
     --  start and runs away from the node; a tail runs toward it.
     local nodes = arc.interchange_nodes()

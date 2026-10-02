@@ -42,7 +42,7 @@ enum
     K_WATER_EDGE = 8,  /* water art on a cut edge: the mesh draws the surface  */
     K_CAR        = 10, /* a car, $19004's stencilled traffic sprite.  Off with the line mesh */
     K_TRAIN      = 11, /* a train car, thing types 10 and 11, shapes 374..378.  Off with the line mesh */
-    K_LANDMARK   = 12, /* a structure the player placed, XBLD 0xC6 and up: the plants, the civic buildings, the ports and the landmarks.  The one kind of sprite the map view keeps, drawn over the tint on its own tile */
+    K_LANDMARK   = 12, /* a structure the player placed, as arc.bytes("placed_tiles") names one: the plants, the civic buildings, the ports and the landmarks.  The one kind of sprite the map view keeps, drawn over the tint on its own tile */
     /*  K_LINE_ART is not a label.  It is the SUPPRESSION LIST.  With the
      *  mesh on, a K_LINE_ART sprite is dropped because the geometry
      *  stands in for it.  A tile left out keeps its sprite.  This is

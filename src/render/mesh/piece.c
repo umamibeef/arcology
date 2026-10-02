@@ -7,8 +7,6 @@
  *      sideways.  A run of them reversed.  The box one covers.  The
  *      nearest point on one.  The chain that joins two poses.
  *
- *
- *
  *  Nothing here knows what the piece is FOR.  A line's lane and a spur's
  *  descent are made of pieces.  So are a turnout's thread and a margin,
  *  all made of these and none of them is named in this file.  That is
@@ -23,6 +21,8 @@
 
 #include "mesh/internal.h"
 #include "pipeline.h"
+#include "mesh/piece.h"
+#include "script.h"
 
 V2 l_right(V2 d)
 {
@@ -30,9 +30,9 @@ V2 l_right(V2 d)
 }
 
 
-/*  A point on a piece at arc length t, and the direction of travel
- *  there (net/strip.c's piece_at). */
-void l_piece_at(const Piece *p, float t, V2 *pos, V2 *dir)
+
+/*  The point and unit direction at distance `t` along a piece. */
+void piece_at(const Piece *p, float t, V2 *pos, V2 *dir)
 {
     if (!p->arc)
     {
@@ -108,8 +108,8 @@ int pieces_cut(const Piece *pc, int np, float s0, float s1, Piece *out)
         if (a > 0.0f || b < p->len)
         {
             V2 pa, pb, d;
-            l_piece_at(p, a, &pa, &d);
-            l_piece_at(p, b, &pb, &d);
+            piece_at(p, a, &pa, &d);
+            piece_at(p, b, &pb, &d);
             out[n].a = pa;
             out[n].b = pb;
             if (p->arc)

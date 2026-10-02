@@ -254,11 +254,36 @@ local function orient(o, xbld, n, col, row, pass)
         else arm = 0 end
     end
 
+    --  THE FOOT: where the descent stops at the line, and the way it
+    --  heads there.  It is the middle of the spur tile's line-side edge,
+    --  square on at the line.  With the line OPPOSITE the slab it is the
+    --  far edge across the tile instead.  A through line (fork 2) is met
+    --  at its SIDE, at an angle off its own line, toward the lane the
+    --  spur merges into: the descent is built slab to line, so an OFF
+    --  spur runs with that lane and an ON spur against it.
+    local fx, fy, fdx, fdy
+    if opp then
+        fx, fy   = col + 0.5 - tx * 0.5, row + 0.5 - ty * 0.5
+        fdx, fdy = -tx, -ty
+    else
+        local s  = side_off and 0.5 or -0.5
+        fx, fy   = col + 0.5 + ax * s, row + 0.5 + ay * s
+        fdx, fdy = ax * (s * 2.0), ay * (s * 2.0)
+        if fork == 2 then
+            --  the line direction whose right-hand lane is on the spur's side
+            local dmx, dmy = fdy, -fdx
+            local ca, sa   = arc.geo.spur_meet_cos, arc.geo.spur_meet_sin
+            local tr       = side_off and 1.0 or -1.0
+            fdx, fdy = dmx * ca * tr + fdx * sa, dmy * ca * tr + fdy * sa
+        end
+    end
+
     --  `off` is the spur's, after the taper's side was chosen;
     --  `tile_off` is the tile's own reading, which the join reads.
     o:spur{ax = ax, ay = ay, tx = tx, ty = ty,
            off = side_off, tile_off = off, len = side_len, opp = opp,
-           fork = fork, arm = arm, rdx = rdx, rdy = rdy, mdx = mdx, mdy = mdy}
+           fork = fork, arm = arm, rdx = rdx, rdy = rdy, mdx = mdx, mdy = mdy,
+           fx = fx, fy = fy, fdx = fdx, fdy = fdy}
 end
 
 --  THE WALK.  Row by row, column by column, and each spur tile is named

@@ -9,6 +9,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/*  An optional log of every draw a city makes, in order.  Its dice can
+ *  then be compared with the original's under the interpreter.  rng.c
+ *  keeps it, and only while a run asks for one. */
+typedef struct RngLog RngLog;
+
 /* ------------------------------------------------------------------ *
  *  Map geometry.  The game keeps the same city at three resolutions:
  *  full 128x128 tile layers, 64x64 "data" layers that each cover a 2x2
@@ -499,6 +504,56 @@ typedef struct City
     /* --- raw MISC, so unmodelled fields survive a round trip ----- */
     int32_t misc[MISC_LONGS];
 
+    /* --- WHAT THE SIMULATION WORKS WITH --------------------------
+     *
+     *  The original keeps all of this in A5 globals, one set for the one
+     *  city it ever has.  Here it belongs to the CITY.  A region is many
+     *  cities running at once.  State shared between them would make
+     *  each city's result depend on the order the others were ticked.
+     *  The same city, ticked second, would come out differently. */
+
+    /*  A5+0x13BA: the one SCRATCH PLANE the whole of $2317E shares, 128
+     *  rows of 128 words.  Nothing ever clears it between stages, so
+     *  each stage reads whatever the last one left in the cells it
+     *  touches.  Carrying that over is part of the reconstruction, not
+     *  an untidiness.  It is the difference between land value at 89 per
+     *  cent and at 100.  Stage 4 seeds its accumulators from stage 1's
+     *  raw pollution.  It also seeds them from stage 3's building marks.
+     *  Two stages with separate arrays lose exactly that. */
+    int16_t pad[MAP_H][MAP_W];
+
+    /*  $13B2: the RING those passes walk the map with.  512 entries,
+     *  shared by the two floods, the bulldozer's run and the trip
+     *  walk. */
+    struct
+    {
+        int16_t y, x;
+    } q[512];
+    int qw, qr; /* $13B6 write, $13B8 read */
+
+    /*  THE DICE: the three generators the game draws from, and the
+     *  optional log of every draw.  A city comes up seeded at one, which
+     *  is what the A5 image holds.  city_load and arco_load do it,
+     *  beside the graph scales.  The reason is the same: the value is
+     *  not in the save file. */
+    int32_t  tb_seed; /* the Toolbox _Random seed                 */
+    uint16_t lfsr;    /* A5+0x11DC  the game's own shift register */
+    uint32_t lcg;     /* A5-0x3EDC  THINK C's library rand()      */
+    RngLog  *rng_log; /* the draws in order, or NULL for no log   */
+
+    /*  A TRACE the tooling switches on: where a trip went, tile by
+     *  tile.  The reconstruction does not print.  It calls what it was
+     *  handed, and with none it says nothing at all. */
+    void (*trace)(void *at, const char *fmt, ...);
+    void *trace_at;
+
+    /*  HOW MUCH OF THE GROWTH SCAN IS NOT RECONSTRUCTED YET: the
+     *  structural-change routines it wanted and did not find.  They are
+     *  counted rather than ignored, so the coverage figure in the
+     *  report is measured and not asserted. */
+    int32_t growth_todo;
+    int32_t growth_stub[8];
+
     /* --- chunks we do not model yet, kept verbatim --------------- */
     uint8_t *xlab;
     size_t   xlab_len; /* 6400  */
@@ -603,48 +658,48 @@ const uint8_t *sim_rot_table(int layer);                                        
 void           sim_rotate_thing(uint8_t *rec); /* one XTHG record, 12 bytes, turned a quarter in place: rotate.c */ /* the map turned a quarter clockwise, `turns` times ($3AECA): rotate.c */ /* buildChurch $32830 */
 int            sim_trip(City *c, int y, int x, int zone, int tier, int budget);                                                                                                                /* tripGenerate $245E8 */
 void           sim_growth_scan(City *c, int y0, int x0);                                                                                                                                       /* growthScan $3170E, phases 3-18 */
-int32_t        sim_growth_unimplemented(void);
-int32_t        sim_growth_stub(int i);
-extern int     trip_mark_log;
+int32_t        sim_growth_unimplemented(const City *c);
+int32_t        sim_growth_stub(const City *c, int i);
 void           sim_overlay_averages(City *c); /* $224BA, inside $22330 */
 void           sim_graph_pass(City *c);       /* $22330 one month      */
 void           sim_economy(City *c);          /* economyPass $34D04, phase 21 */
-/*  $101AC.  The year-end microsimulation: every special building on the
- *  map gets its turn.  budgetPass calls it from the January settlement,
- *  right after the departments are reconciled. */
 /*  $EEAE.  Give a newly placed special building its XMIC record and
  *  answer the marker XTXT carries for it (the slot plus 0x33).  0 if the
  *  building keeps no record.  Exposed so tools/micro_alloc_check.py can
  *  drive it against the original. */
 int sim_alloc_micro(City *c, int y, int x, int bld);
 
+/*  $101AC.  The year-end microsimulation: every special building on the
+ *  map gets its turn.  budgetPass calls it from the January settlement,
+ *  right after the departments are reconciled. */
 void    sim_microsim(City *c);
 void    sim_budget(City *c);               /* budgetPass $263C8, phase 0  */
 int     sim_opinion_poll(City *c);         /* $3152A February poll  */
 int32_t sim_map_population(const City *c); /* $31DDA rule */
 
 /* ---- rng.c ------------------------------------------------------- */
-void     rng_seed(int32_t toolbox_seed, uint16_t lfsr_seed);
-int16_t  Random(void);          /* Toolbox _Random, 329 call sites */
-uint16_t game_rand(uint16_t n); /* $20F30 LFSR, 34 call sites      */
-uint16_t lib_rand(uint16_t n);  /* $20EE6 THINK C rand()           */
+void     rng_seed(City *c, int32_t toolbox_seed, uint16_t lfsr_seed);
+int16_t  Random(City *c);                /* Toolbox _Random, 329 call sites */
+uint16_t game_rand(City *c, uint16_t n); /* $20F30 LFSR, 34 call sites */
+uint16_t lib_rand(City *c, uint16_t n);  /* $20EE6 THINK C rand()      */
 
 /*  The same shift register reduced by a mask instead of a divide.
  *  $20F4C..$20FAC are one routine repeated with a different andi.w.
  *  They all advance the shared state.  So call order is part of the
  *  behavior. */
-uint16_t game_rand1(void);   /* $20F4C  & 1   */
-uint16_t game_rand3(void);   /* $20F64  & 3   */
-uint16_t game_rand15(void);  /* $20F7C  & 15  */
-uint16_t game_rand63(void);  /* $20F94  & 63  */
-uint16_t game_rand127(void); /* $20FAC  & 127 */
+uint16_t game_rand1(City *c);   /* $20F4C  & 1   */
+uint16_t game_rand3(City *c);   /* $20F64  & 3   */
+uint16_t game_rand15(City *c);  /* $20F7C  & 15  */
+uint16_t game_rand63(City *c);  /* $20F94  & 63  */
+uint16_t game_rand127(City *c); /* $20FAC  & 127 */
 
-void     rng_log_start(void);
-void     rng_log_mark(int32_t v);
-int      rng_log_count(void);
-int      rng_log_entry(int i, int32_t *v);
-uint16_t rng_lfsr(void); /* current $11DC, for the oracle */
-int32_t  rng_toolbox_seed(void);
+void     rng_log_start(City *c);
+void     rng_log_free(City *c);
+void     rng_log_mark(City *c, int32_t v);
+int      rng_log_count(const City *c);
+int      rng_log_entry(const City *c, int i, int32_t *v);
+uint16_t rng_lfsr(const City *c); /* current $11DC, for the oracle */
+int32_t  rng_toolbox_seed(const City *c);
 
 /* ---- tables.c (generated) ---------------------------------------- */
 extern const uint8_t WEATHER_CLOUD[12];     /* A5+0x0A4E             */

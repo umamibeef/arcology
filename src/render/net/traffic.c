@@ -65,29 +65,54 @@ static struct
 } s_beat;
 #include "opt.h"
 #include "project.h"
+#include "mesh/fit.h"
+#include "mesh/surface.h"
 
 /*  How the moving world behaves, asked of the script once and kept until
  *  the scripts are read again.  A frame steps thousands of things and
  *  none of them is worth a call of its own. */
 static int gix_gate_arm = -1, gix_gate_arm_wide = -1;
+/*  A car's color and a train's, which the script names (arc.geo). */
+static int gix_car_first = -1, gix_car_n = -1;
+static int gix_train_engine = -1, gix_train_first = -1, gix_train_n = -1;
+
+
+static ScriptTraffic s_tr;
+
+/*  Each number the moving world is run by, beside the field it fills.
+ *  A name the script leaves out keeps the default set below. */
+static const ScriptNumber TR_NUMBERS[] = {
+    {"blink",        &s_tr.blink       },
+    {"train_speed",  &s_tr.train_speed },
+    {"train_spread", &s_tr.train_spread},
+    {"train_len",    &s_tr.train_len   },
+    {"trail_step",   &s_tr.trail_step  },
+    {"lap_find",     &s_tr.lap_find    },
+    {"gate_up",      &s_tr.gate_up     },
+    {"gate_watch",   &s_tr.gate_watch  },
+    {"density",      &s_tr.density     },
+    {"car_len",      &s_tr.car_len     },
+    {"gap_stop",     &s_tr.gap_stop    },
+    {"gap_free",     &s_tr.gap_free    },
+    {"stop_junc",    &s_tr.stop_junc   },
+    {"stop_hold",    &s_tr.stop_hold   },
+    {"creep",        &s_tr.creep       },
+    {"probe",        &s_tr.probe       },
+    {"step_max",     &s_tr.step_max    },
+    {"slot",         &s_tr.slot        },
+    {"block_back",   &s_tr.block_back  },
+    {"block_ahead",  &s_tr.block_ahead },
+};
 
 static const ScriptTraffic *tr_rules(void)
 {
-    /*  The names are the struct's own order, so the two read as one
-     *  list.  A name the script leaves out keeps the default set below. */
-    static const char *const KEYS[] = {
-        "blink",      "train_speed", "train_spread", "train_len",  "trail_step",
-        "lap_find",  "gate_up",     "gate_watch",   "density",    "car_len",
-        "gap_stop",   "gap_free",    "stop_junc",    "stop_hold",  "creep",
-        "probe",      "step_max",    "slot",         "block_back", "block_ahead"};
-    static ScriptTraffic s_tr;
-    static int           s_gen = -1;
+    static int s_gen = -1;
     if (s_gen != script_generation())
     {
         memset(&s_tr, 0, sizeof s_tr);
         s_tr.gap_free = s_tr.step_max = s_tr.trail_step = 1.0f;
-        script_numbers("traffic", KEYS, &s_tr.blink,
-                       (int)(sizeof KEYS / sizeof KEYS[0]));
+        script_numbers_at("traffic", TR_NUMBERS,
+                          (int)(sizeof TR_NUMBERS / sizeof TR_NUMBERS[0]));
         s_gen = script_generation();
     }
     return &s_tr;
@@ -102,6 +127,15 @@ static uint32_t car_rand(uint32_t *st)
 {
     *st = *st * 1664525u + 1013904223u;
     return *st >> 8;
+}
+
+/*  One paint of a run, drawn at random: the first of the run plus one
+ *  of however many there are.  A run of none is the first paint alone. */
+static float paint_of(int *first, const char *fname, int *count, const char *cname, uint32_t *rng)
+{
+    float lo = geo_num(first, fname);
+    int   n  = (int)geo_num(count, cname);
+    return n > 0 ? lo + (float)(car_rand(rng) % (uint32_t)n) : lo;
 }
 
 static float car_frand(uint32_t *st)
@@ -567,11 +601,16 @@ static int trains_init(RTraffic *t, const RMesh *m, const RCity *c)
         n = R_MAX_THINGS;
     for (i = 0; i < n; ++i)
         tile_of[i] = -1;
-    for (k = 0; k < R_MAP * R_MAP; ++k)
+    /*  Which text byte marks which record is arc.bytes("thing_marks")'s,
+     *  and it answers one past the place so that nought means none. */
     {
-        int32_t v = c->xtxt[k];
-        if (v >= 0xC9 && v <= 0xF0 && v - 0xC9 < n)
-            tile_of[v - 0xC9] = k;
+        const unsigned char *mark = script_bytes("thing_marks");
+        for (k = 0; k < R_MAP * R_MAP; ++k)
+        {
+            int32_t v = mark[c->xtxt[k]];
+            if (v > 0 && v - 1 < n)
+                tile_of[v - 1] = k;
+        }
     }
     for (i = 0; i < n; ++i)
     {
@@ -627,7 +666,8 @@ static int trains_init(RTraffic *t, const RMesh *m, const RCity *c)
             tr->d      = 0.0f;
             tr->rng    = rng;
             for (q = 0; q < cars; ++q)
-                tr->paint[q] = q == 0 ? 0.0f : (float)(1 + (int)(car_rand(&rng) % 3u));
+                tr->paint[q] = q == 0 ? geo_num(&gix_train_engine, "train_paint_engine")
+                                     : paint_of(&gix_train_first, "train_paint_first", &gix_train_n, "train_paint_n", &rng);
             if (train_prefill(tr, net) != 0)
                 return -1;
         }
@@ -925,7 +965,7 @@ int traffic_init(RTraffic *t, const RMesh *m, const RCity *c)
             car->dir   = (k & 1) ? -1 : 1;
             car->lane  = (sg->cls > 0 && (k % 3) == 2) ? 1 : 0;
             car->speed = 0.8f + 0.5f * car_frand(&rng); /* tiles a second */
-            car->paint = 4.0f + (float)(car_rand(&rng) % 5u);
+            car->paint = paint_of(&gix_car_first, "car_paint_first", &gix_car_n, "car_paint_n", &rng);
             car->rng   = rng ^ ((uint32_t)k * 2654435761u);
         }
     }
@@ -1063,16 +1103,12 @@ int traffic_moving(RTraffic *t, const RMesh *m, const RCity *c, float dt, float 
     return net_drive_move();
 }
 
-/*  One beat of it, which the script asks for as many of as the clock
- *  owes.
- *
- *      The trains first.
- *      On their own threads.
- *      Then the gates and the cars.
- *      Which are the script's. */
-/*  One beat of the moving world, or as much of it as runs before a train
- *  reaches a junction.  Answers 1 where it stopped to have an arm chosen
- *  and must be entered again once the rule has answered. */
+/*  One beat of the moving world, which the script asks for as many of as
+ *  the clock owes.  The trains first, on their own threads.  Then the
+ *  gates and the cars, which are the script's.  It runs as much of the
+ *  beat as comes before a train reaches a junction.  Answers 1 where it
+ *  stopped to have an arm chosen and must be entered again once the rule
+ *  has answered. */
 int net_beat_run(void)
 {
     return s_beat.t ? trains_step(s_beat.t, s_beat.m, s_beat.dt) : 0;
@@ -1466,9 +1502,6 @@ void net_beat_car_is(int i, float v)
     car->s    = car->dir > 0 ? 0.0f : sg->total;
 }
 
-/*  The cars as geometry (spec 6).  A car is 4.5 by 1.8 m and 1.5 m tall,
- *  at the line's scale of about seventeen meters to the tile.  It is a
- *  body and a cabin set back on it, painted by the car. */
 /*  THE MOVING WORLD, hashed: every car's segment, direction, lane,
  *  distance, speed and waiting, and every gate's angle, in the order the
  *  world holds them.  A headless frame does not draw the movers, so this
@@ -1660,8 +1693,6 @@ static int traffic_build(RTraffic *t, const RMesh *m, const RCity *c)
     return 0;
 }
 
-/*  How many gate arms there are to draw: one at each of a meet's two
- *  approaches. */
 /*  THE THREAD SIGNALS, offered to the rule before the movers are drawn.
  *  How near the nearest car is each way along the block, and the aspect
  *  it answered with. */
@@ -1703,6 +1734,8 @@ void net_signal_is(int i, const char *model)
     s_rsig_aspect[i] = (uint8_t)s_n_aspect++;
 }
 
+/*  How many gate arms there are to draw: one at each of a meet's two
+ *  approaches. */
 int net_movers_gates(void)
 {
     return s_beat.t && s_beat.t->gate ? (int)s_beat.m->n_laps * 2 : 0;

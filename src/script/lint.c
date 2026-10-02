@@ -24,13 +24,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 
+#include "generated/lint_stub.h"
 #include "internal.h"
 #include "mesh/internal.h"
 #include "pipeline.h"
 
 #include "net/net.h"
+#include "mesh/loft.h"
+#include "mesh/piece.h"
 /*  One run's faults, said as they are found and counted for the exit. */
 static int         s_bad;
 static const char *s_file;
@@ -55,10 +59,33 @@ static int own_at(const char *name)
     return -1;
 }
 
+/*  The state a fault is being read in.  A fault inside a `require` is
+ *  reported against the file that holds it, not the one that required
+ *  it.  The layer is entered through a single init.lua, so without this
+ *  every fault in ninety files would name that one. */
+static lua_State *s_where;
+
 static void bad(const char *fmt, ...)
 {
-    va_list ap;
-    fprintf(stderr, "%s: ", s_file);
+    va_list     ap;
+    lua_Debug   ar;
+    const char *at   = NULL;
+    int         line = 0;
+    if (!s_where)
+        goto plain;
+    /*  The first LUA frame up the stack.  Level 0 is the C function that
+     *  found the fault, and it has no line of its own. */
+    {
+        int lv;
+        for (lv = 0; !at && lv < 12 && lua_getstack(s_where, lv, &ar); ++lv)
+            if (lua_getinfo(s_where, "Sl", &ar) && ar.currentline > 0)
+                at = ar.short_src, line = ar.currentline;
+    }
+plain:
+    if (at)
+        fprintf(stderr, "%s:%d: ", at, line);
+    else
+        fprintf(stderr, "%s: ", s_file);
     va_start(ap, fmt);
     vfprintf(stderr, fmt, ap);
     va_end(ap);
@@ -66,8 +93,10 @@ static void bad(const char *fmt, ...)
     ++s_bad;
 }
 
-/*  The rules the C asks for, and what each answers.  A rule not on this
- *  list is one nothing will ever call. */
+/*  The rules the C asks for.  A rule not on this list is one nothing
+ *  will ever call, and a name written to arc.rules that is not here is a
+ *  fault.  The second column says what the rule answers, for the reader:
+ *  rule_answer below is where each answer is checked. */
 static const struct
 {
     const char *name;
@@ -180,17 +209,7 @@ static int l_get(lua_State *L)
 
 static int l_set(lua_State *L)
 {
-    const char *(*name)(int, float *) = (const char *(*)(int, float *))lua_touserdata(L, lua_upvalueindex(1));
     const char *key = lua_tostring(L, 2);
-    int         i, found = 0;
-    for (i = 0; key && !found; ++i)
-    {
-        float       v;
-        const char *n = name(i, &v);
-        if (!n)
-            break;
-        found = strcmp(n, key) == 0;
-    }
     if (!lua_isnumber(L, 3))
         bad("%s.%s wants a number", (const char *)lua_touserdata(L, lua_upvalueindex(2)), key ? key : "?");
     else if (key)
@@ -203,8 +222,9 @@ static int l_set(lua_State *L)
         }
         if (at >= 0)
             s_ownv[at] = (float)lua_tonumber(L, 3);
+        else
+            bad("%s.%s: the lint holds no more names", (const char *)lua_touserdata(L, lua_upvalueindex(2)), key);
     }
-    (void)found;
     return 0;
 }
 
@@ -419,8 +439,8 @@ static int l_pieces_push(lua_State *L)
             }
             lua_getfield(L, -1, "family");
             fam = lua_tostring(L, -1);
-            if (!fam || (strcmp(fam, "power") != 0 && strcmp(fam, "line") != 0 && strcmp(fam, "thread") != 0))
-                bad("arc.pieces gave byte %d a family that is none of power, line or thread", (int)b);
+            if (net_tile_family(fam) < 0)
+                bad("arc.pieces gave byte %d a family no tile family is called: %s", (int)b, fam ? fam : "nothing");
             lua_pop(L, 1);
             lua_getfield(L, -1, "piece");
             if (!lua_isnumber(L, -1) || lua_tointeger(L, -1) < 0 || lua_tointeger(L, -1) > 14)
@@ -492,16 +512,74 @@ static int l_numbers_push(lua_State *L)
 }
 
 /*  arc.bytes(name, t [, "number"]).  A table keyed by the city's own
- *  byte.  So a key outside 0..255 is a byte nothing will ever look up
- *  and nearly always a typo. */
+ *  byte.  A key outside 0..255 is a byte nothing looks up, and nearly
+ *  always a typo.
+ *
+ *  The NAME and the SHAPE are held to script_byte_kinds, the one place
+ *  a reader's side of the contract is written.  Three faults each leave
+ *  a table that is there and does nothing.  A name nothing reads.  A
+ *  flag where a number is wanted.  A value past what the concept
+ *  allows. */
 static int l_bytes_push(lua_State *L)
+{
+    const char           *name   = lua_tostring(L, 1);
+    int                   number = lua_isstring(L, 3) && strcmp(lua_tostring(L, 3), "number") == 0;
+    const ScriptByteKind *kind;
+    if (!name)
+    {
+        bad("arc.bytes wants a name");
+        return 0;
+    }
+    if (!lua_istable(L, 2))
+    {
+        bad("arc.bytes(%s) wants a table, not %s", name, luaL_typename(L, 2));
+        return 0;
+    }
+    if ((kind = script_byte_kind(name)) == NULL)
+        bad("arc.bytes(%s): no reader asks for that table", name);
+    else if (kind->number != number)
+        bad("arc.bytes(%s) is %s, and %s reads it as %s", name,
+            number ? "pushed as a number" : "pushed as a flag", kind->what,
+            kind->number ? "a number" : "a flag");
+    /*  One line a table, not one a byte: a ceiling set too low reports
+     *  every byte of the map otherwise, and the first is enough. */
+    int said_key = 0, said_val = 0;
+    lua_pushnil(L);
+    while (lua_next(L, 2))
+    {
+        lua_Integer b = lua_tointeger(L, -2);
+        if (!lua_isnumber(L, -2) || b < 0 || b > 255)
+        {
+            if (!said_key++)
+                bad("arc.bytes(%s) keyed an entry on %s, not a byte of the city",
+                    name, luaL_typename(L, -2));
+        }
+        else if (kind && number && !said_val)
+        {
+            lua_Integer v = lua_tointeger(L, -1);
+            if (!lua_isnumber(L, -1))
+                said_val = 1, bad("arc.bytes(%s) answered %s for byte %02x, not a number",
+                                  name, luaL_typename(L, -1), (unsigned)b);
+            else if (v < 0 || v > kind->high)
+                said_val = 1, bad("arc.bytes(%s) answers %d for byte %02x, and %s runs to %d",
+                                  name, (int)v, (unsigned)b, kind->what, kind->high);
+        }
+        lua_pop(L, 1);
+    }
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
+/*  arc.names(name, t).  A word per byte of the city, keyed the same way
+ *  arc.bytes is, and answering a string rather than a number. */
+static int l_names_push(lua_State *L)
 {
     const char *name = lua_tostring(L, 1);
     if (!name)
-        bad("arc.bytes wants a name");
+        bad("arc.names wants a name");
     if (!lua_istable(L, 2))
     {
-        bad("arc.bytes(%s) wants a table, not %s", name ? name : "?", luaL_typename(L, 2));
+        bad("arc.names(%s) wants a table, not %s", name ? name : "?", luaL_typename(L, 2));
         return 0;
     }
     lua_pushnil(L);
@@ -509,12 +587,59 @@ static int l_bytes_push(lua_State *L)
     {
         lua_Integer b = lua_tointeger(L, -2);
         if (!lua_isnumber(L, -2) || b < 0 || b > 255)
-            bad("arc.bytes(%s) keyed an entry on %s, not a byte of the city",
+            bad("arc.names(%s) keyed an entry on %s, not a byte of the city",
                 name ? name : "?", luaL_typename(L, -2));
+        else if (!lua_isstring(L, -1))
+            bad("arc.names(%s) answered %s for byte %d, not a word",
+                name ? name : "?", luaL_typename(L, -1), (int)b);
         lua_pop(L, 1);
     }
     lua_pushboolean(L, 1);
     return 1;
+}
+
+/*  arc.floats(name, t).  Keyed by a byte of the city like arc.bytes,
+ *  and answering a number no byte could hold. */
+static int l_floats_push(lua_State *L)
+{
+    const char *name = lua_tostring(L, 1);
+    if (!name)
+        bad("arc.floats wants a name");
+    if (!lua_istable(L, 2))
+    {
+        bad("arc.floats(%s) wants a table, not %s", name ? name : "?", luaL_typename(L, 2));
+        return 0;
+    }
+    lua_pushnil(L);
+    while (lua_next(L, 2))
+    {
+        lua_Integer b = lua_tointeger(L, -2);
+        if (!lua_isnumber(L, -2) || b < 0 || b > 255)
+            bad("arc.floats(%s) keyed an entry on %s, not a byte of the city",
+                name ? name : "?", luaL_typename(L, -2));
+        else if (!lua_isnumber(L, -1))
+            bad("arc.floats(%s) answered %s for byte %d, not a number",
+                name ? name : "?", luaL_typename(L, -1), (int)b);
+        lua_pop(L, 1);
+    }
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
+/*  arc.art: no art at all.  The lint reads no pictures.  A script that
+ *  reads them takes the path a run with none takes.  That path is what
+ *  gets checked. */
+static int l_art_none(lua_State *L)
+{
+    lua_pushinteger(L, 0);
+    return 1;
+}
+
+/*  And every other reading of the art: nothing to read. */
+static int l_art_nil(lua_State *L)
+{
+    (void)L;
+    return 0;
 }
 
 /*  arc.family.define, reading the declaration exactly as the program
@@ -605,6 +730,15 @@ static void arc_open(lua_State *L)
 {
     lua_newtable(L);
     settings_open(L, "tune", tune_name);
+    /*  A knob is DECLARED, and the declaration goes to the real store.
+     *  A family's width is bound to a knob by name while its own
+     *  declaration is checked.  So the store must hold the names by
+     *  then.  The same C reads it as the running program. */
+    lua_getfield(L, -1, "tune");
+    lua_pushstring(L, "declare");
+    lua_pushcfunction(L, api_tune_declare);
+    lua_rawset(L, -3);
+    lua_pop(L, 1);
     settings_open(L, "geo", geo_name);
     lua_newtable(L); /* rules */
     lua_newtable(L);
@@ -653,8 +787,18 @@ static void arc_open(lua_State *L)
      *  every key in it is a byte the city can hold. */
     lua_pushcfunction(L, l_bytes_push), lua_setfield(L, -2, "bytes");
     lua_pushcfunction(L, l_numbers_push), lua_setfield(L, -2, "numbers");
+    lua_pushcfunction(L, l_names_push), lua_setfield(L, -2, "names");
+    lua_pushcfunction(L, l_floats_push), lua_setfield(L, -2, "floats");
     lua_pushcfunction(L, l_pieces_push), lua_setfield(L, -2, "pieces");
     lua_pushcfunction(L, l_bands_push), lua_setfield(L, -2, "bands");
+    /*  arc.art, with no art behind it. */
+    lua_newtable(L);
+    lua_pushcfunction(L, l_art_none), lua_setfield(L, -2, "levels");
+    lua_pushcfunction(L, l_art_nil), lua_setfield(L, -2, "level");
+    lua_pushcfunction(L, l_art_nil), lua_setfield(L, -2, "tile");
+    lua_pushcfunction(L, l_art_nil), lua_setfield(L, -2, "pixel");
+    lua_pushcfunction(L, l_art_nil), lua_setfield(L, -2, "row");
+    lua_setfield(L, -2, "art");
     /*  The families, declared and CHECKED, but never entered in the
      *  registry: the lint runs beside a program that may be drawing. */
     lua_newtable(L);
@@ -761,12 +905,12 @@ static void rule_args(lua_State *L, const char *rule, int *nargs)
         lua_pushinteger(L, 15), lua_setfield(L, -2, "links");
         lua_pushboolean(L, 1), lua_setfield(L, -2, "busy");
         lua_newtable(L);
-        for (e = 1; e <= 4; ++e)
+        for (e = 0; e < 4; ++e)
         {
             lua_newtable(L);
-            lua_pushinteger(L, e - 1), lua_setfield(L, -2, "class");
+            lua_pushinteger(L, e), lua_setfield(L, -2, "class");
             lua_pushinteger(L, 128), lua_setfield(L, -2, "traffic");
-            lua_rawseti(L, -2, e);
+            lua_rawseti(L, -2, e); /* by edge, from nought */
         }
         lua_setfield(L, -2, "arms");
         *nargs = 1;
@@ -822,16 +966,6 @@ static void rule_args(lua_State *L, const char *rule, int *nargs)
         }
         *nargs = 1;
     }
-    else if (strcmp(rule, "water_tiles") == 0 ||
-             strcmp(rule, "slope_codes") == 0 || strcmp(rule, "built_tiles") == 0 ||
-             strcmp(rule, "sloped_tiles") == 0 || strcmp(rule, "structure_tints") == 0 ||
-             strcmp(rule, "building_tiles") == 0 || strcmp(rule, "elevated_tiles") == 0 ||
-             strcmp(rule, "levelling_tiles") == 0 || strcmp(rule, "saddle_tiles") == 0 ||
-             strcmp(rule, "open_tiles") == 0 ||
-             strcmp(rule, "slab_air") == 0 ||
-             strcmp(rule, "carrier_tiles") == 0 ||
-             strcmp(rule, "lap_tiles") == 0)
-        *nargs = 0;
     else if (strcmp(rule, "line_class") == 0)
     {
         lua_pushinteger(L, 200); /* a busy tile: the arm that is a boulevard */
@@ -860,7 +994,7 @@ static void rule_args(lua_State *L, const char *rule, int *nargs)
         if (luaL_dostring(L,
                           "return {kind = 'signs',"
                           " info = function () return {col = 40, row = 60, half = 0.5,"
-                          "   arms = {{control = 2, edge = 0}, {control = 1, edge = 1},"
+                          "   arms = {[0] = {control = 2, edge = 0}, {control = 1, edge = 1},"
                           "           {control = 0, edge = 2}, {control = 0, edge = 3}}} end}") != LUA_OK)
         {
             bad("the lint's own junction signs: %s", lua_tostring(L, -1));
@@ -941,6 +1075,11 @@ static void rule_args(lua_State *L, const char *rule, int *nargs)
     }
     else if (strcmp(rule, "band_start") == 0)
     {
+        /*  Which way a band is walked from a cell that could start one.
+         *  `back` and `on` say whether the band carries on the two ways
+         *  along it from this cell.  The rule answers forward or
+         *  backward.  It answers nothing for a cell it leaves to the
+         *  sweep that walks a band with no end at all. */
         lua_newtable(L);
         lua_pushboolean(L, 0), lua_setfield(L, -2, "back");
         lua_pushboolean(L, 1), lua_setfield(L, -2, "on");
@@ -1601,149 +1740,32 @@ static void rule_args(lua_State *L, const char *rule, int *nargs)
         /*  The build itself.  Its primitives draw nothing here.  There
          *  is no mesh.  So what this exercises is the DRIVE: the loops,
          *  the bounds it reads out of info, and every name it reaches
-         *  for on the handle. */
+         *  for on the handle.
+         *
+         *  The handle is GENERATED from the pipeline's own WORLD[], so a
+         *  method added there is here with no edit.  Every generated one
+         *  answers "there is none".  What follows writes over the ones
+         *  that must answer otherwise, and a later key wins in a Lua
+         *  table.  Each is here to open a pass the drive must walk, or
+         *  to name what it reads on the way. */
         if (luaL_dostring(L,
-                          "return {kind = 'world',"
+                          "return {kind = 'world'," LINT_WORLD_STUB
                           " info = function () return {size = 8, pass = 2,"
                           "   lines = true, underground = false} end,"
                           " wanted = function () return true end,"
-                          " shape = function () end,"
-                          " slab_near = function () return 5.0, 0.5 end,"
-                          " loft = function () return 0 end,"
-                          " net_discover = function () return 0 end,"
-                          " net_cells = function () return nil end,"
                           " net_found = function () return true end,"
-                          " band_cells = function () return nil end,"
-                          " gate_rest = function () end,"
-                          " tile = function () return nil end,"
-                          " zone = function () return nil end,"
-                          " power = function () return nil end,"
-                          " margins = function () return 0, false end,"
-                          " margin = function () return nil end,"
-                          " junctions = function () return 0 end,"
-                          " junction = function () return nil end,"
-                          " junction_ring = function () end,"
-                          " trims = function () return 0 end,"
-                          " junction_bands = function () return 0 end,"
-                          " junction_band = function () return nil end,"
-                          " junction_band_done = function () return 0 end,"
-                          " junction_trim = function () end,"
-                          " box_band = function () return nil end,"
-                          " box_band_done = function () return 0 end,"
-                          " box_fill = function () return nil end,"
-                          " mouth = function () return nil end,"
-                          " mouth_is = function () end,"
-                          " shelf = function () return nil end,"
-                          " progress = function () end,"
-                          " controls = function () return 0 end,"
-                          " control = function () return nil end,"
-                          " control_is = function () end,"
-                          " xwalk = function () return nil end,"
-                          " xwalk_deep = function () end,"
-                          " lap = function () return nil end,"
-                          " lap_frame = function () end,"
-                          " lap_panel = function () return nil end,"
-                          " lap_approaches = function () return true end,"
-                          " lap_approach = function () return nil end,"
-                          " lap_mark = function () return true end,"
-                          " networks_draw = function () return true end,"
-                          " net_families = function () return 0 end,"
-                          " junction_boxes = function () end,"
-                          " junction_box = function () return nil end,"
-                          " junction_box_done = function () end,"
-                          " junction_lanes = function () end,"
-                          " junction_turns = function () return nil end,"
-                          " node_threads = function () return nil end,"
-                          " rail_threads_done = function () end,"
-                          " box_paving = function () end,"
-                          " box_paving_done = function () end,"
-                          " junction_signs = function () return nil end,"
-                          " junction_signs_done = function () end,"
-                          " segment_caps = function () return nil end,"
-                          " spur_target = function () return nil end,"
-                          " box_lofts = function () return 0 end,"
-                          " box_loft = function () end,"
-                          " segments = function () end,"
-                          " segment = function () return false end,"
-                          " segment_done = function () end,"
-                          " networks_drawn = function () end,"
-                          " emitted = function () end,"
-                          " lanes = function () return true end,"
-                          " lane_runs = function () return 0 end,"
+                          " slab_near = function () return 5.0, 0.5 end,"
                           " lane_run = function () return 'line', 0 end,"
-                          " lane_run_is = function () end,"
-                          " traffic_runs = function () return 0 end,"
-                          " traffic_run = function () return nil end,"
-                          " traffic_run_is = function () end,"
-                          " flies_runs = function () return 0 end,"
-                          " flies_run = function () return nil end,"
-                          " flies_run_is = function () end,"
+                          " lanes = function () return true end,"
                           " networks = function () return true end,"
-                          " seg_classes = function () return 0 end,"
-                          " fits = function () return 0 end,"
-                          " fit = function () return nil end,"
-                          " fit_done = function () return nil end,"
-                          " fit_choice_is = function () end,"
-                          " seg_class = function () return nil end,"
-                          " seg_class_is = function () end,"
-                          " loft_taper = function () return nil end,"
-                          " loft_profile = function () return nil end,"
-                          " loft_dropped = function () return nil end,"
-                          " loft_works = function () return nil end,"
-                          " loft_record = function () return nil end,"
-                          " loft_record_is = function () end,"
-                          " loft_furniture = function () return nil end,"
-                          " loft_furniture_is = function () end,"
-                          " loft_recorded = function () end,"
-                          " curves = function () return nil end,"
-                          " strip = function () return nil end,"
-                          " strip_done = function () end,"
-                          " band_next = function () return false end,"
-                          " car_density_is = function () end,"
-                          " road_class_is = function () end,"
-                          " control_prop_is = function () end,"
-                          " signal_phase_is = function () end,"
-                          " signal_group_is = function () end,"
-                          " spurs = function () return nil end,"
-                          " terrain = function () return nil end,"
-                          " field = function () end,"
-                          " spur_shares = function () return 0 end,"
-                          " spur_share = function () return nil end,"
-                          " spur_share_is = function () end,"
-                          " spur_spans = function () return 0 end,"
-                          " spur_span = function () return nil end,"
-                          " spur_span_is = function () end,"
-                          " band_chain = function () return nil end,"
-                          " band_chained = function () end,"
-                          " band_fits = function () return 0 end,"
-                          " band_fit = function () return nil end,"
-                          " band_fit_done = function () end,"
-                          " band_fit_choice = function () return nil end,"
-                          " band_fit_choice_is = function () end,"
-                          " band_fitted = function () end,"
-                          " band_cut = function () end,"
-                          " cuts = function () return 0 end,"
-                          " cut = function () return nil end,"
-                          " cut_done = function () end,"
-                          " band_done = function () end,"
+                          " networks_draw = function () return true end,"
+                          " bands = function () return true end,"
                           " band_spurs = function () return true end,"
-                          " spur_next = function () return false end,"
-                          " spur_pick = function () return nil end,"
+                          " lap_approaches = function () return true end,"
+                          " lap_mark = function () return true end,"
                           " spur_routed = function () return true end,"
                           " spur_joined = function () return true end,"
-                          " spur_slid = function () return true end,"
-                          " spur_slide = function () return nil end,"
-                          " spur_done = function () end,"
-                          " spur_lofts = function () return 0 end,"
-                          " spur_loft = function () end,"
-                          " wires = function () return 0 end,"
-                          " wire = function () return nil end,"
-                          " wire_done = function () end,"
-                          " lane_cross_done = function () end,"
-                          " lane_cross = function () return nil end,"
-                          " band_links = function () return nil end,"
-                          " band_links_done = function () end,"
-                          " bands = function () return true end}") != LUA_OK)
+                          " spur_slid = function () return true end}") != LUA_OK)
         {
             bad("the lint's own world: %s", lua_tostring(L, -1));
             lua_pop(L, 1);
@@ -1866,7 +1888,7 @@ static void rule_args(lua_State *L, const char *rule, int *nargs)
                           "return {kind = 'links',"
                           " info = function () return {n = n, reach = 1.0, abreast = 0.1,"
                           "   outer = 0.5, taper_far = 2.0, taper_near = 1.0, taper_room = 1.0,"
-                          "   taper_gap = 0.5, road_dot = 0.7, band_reach = 6.0, band_dot = 0.7,"
+                          "   taper_gap = 0.5, line_dot = 0.7, band_reach = 6.0, band_dot = 0.7,"
                           "   band_ahead = 0.0, band_aside = 2.0, band_apart = 0.1} end,"
                           " lane = function (_, i) return l[i] end,"
                           " pose = function (_, i) return 64.0 + i, 64.0, 1.0, 0.0 end,"
@@ -2040,7 +2062,7 @@ static void rule_args(lua_State *L, const char *rule, int *nargs)
                           " meets = function () return {8.0} end,"
                           " order = function () return 4.0 end,"
                           " prop_flat = function () return true end,"
-                          " thread_signal = function () return 'rail_aspect_red' end}") != LUA_OK)
+                          " thread_signal = function () return 'thread_aspect_red' end}") != LUA_OK)
         {
             bad("the lint's own thread marks: %s", lua_tostring(L, -1));
             lua_pop(L, 1);
@@ -2096,14 +2118,15 @@ static void rule_answer(lua_State *L, const char *rule)
             bad("arc.rules.control must answer a table of four, not %s", luaL_typename(L, -1));
             return;
         }
-        for (e = 1; e <= 4; ++e)
+        /*  Keyed by edge, from nought, as the arms it was handed are. */
+        for (e = 0; e < 4; ++e)
         {
             lua_rawgeti(L, -1, e);
             if (!lua_isnumber(L, -1))
-                bad("arc.rules.control answered no code for arm %d", e - 1);
+                bad("arc.rules.control answered no code for arm %d", e);
             else if (lua_tointeger(L, -1) < 0 || lua_tointeger(L, -1) > 2)
                 bad("arc.rules.control answered %d for arm %d: 0 none, 1 stop, 2 signal",
-                    (int)lua_tointeger(L, -1), e - 1);
+                    (int)lua_tointeger(L, -1), e);
             lua_pop(L, 1);
         }
     }
@@ -2149,21 +2172,6 @@ static void rule_answer(lua_State *L, const char *rule)
     {
         if (!lua_isnumber(L, -1))
             bad("arc.rules.gate must answer the arm's angle, not %s", luaL_typename(L, -1));
-    }
-    else if (strcmp(rule, "traffic") == 0)
-    {
-        const char *k[5] = {"train_speed", "gap_stop", "gap_free", "step_max", "car_len"};
-        int         i;
-        if (!lua_istable(L, -1))
-            bad("arc.rules.traffic must answer how the moving world behaves, not %s", luaL_typename(L, -1));
-        else
-            for (i = 0; i < 5; ++i)
-            {
-                lua_getfield(L, -1, k[i]);
-                if (!lua_isnumber(L, -1))
-                    bad("arc.rules.traffic answered no %s", k[i]);
-                lua_pop(L, 1);
-            }
     }
     else if (strcmp(rule, "family") == 0)
     {
@@ -2232,28 +2240,6 @@ static void rule_answer(lua_State *L, const char *rule)
                 lua_getfield(L, -1, k[i]);
                 if (!lua_isnumber(L, -1))
                     bad("arc.rules.corner answered a lip return with no %s", k[i]);
-                lua_pop(L, 1);
-            }
-        }
-    }
-    else if (strcmp(rule, "open_tiles") == 0 || strcmp(rule, "slab_air") == 0 ||
-             strcmp(rule, "carrier_tiles") == 0 || strcmp(rule, "lap_tiles") == 0 ||
-             strcmp(rule, "water_tiles") == 0 || strcmp(rule, "built_tiles") == 0 ||
-             strcmp(rule, "sloped_tiles") == 0 || strcmp(rule, "slope_codes") == 0 ||
-             strcmp(rule, "structure_tints") == 0 || strcmp(rule, "building_tiles") == 0 ||
-             strcmp(rule, "elevated_tiles") == 0 || strcmp(rule, "levelling_tiles") == 0 ||
-             strcmp(rule, "saddle_tiles") == 0)
-    {
-        if (!lua_istable(L, -1))
-            bad("arc.rules.%s must answer a table keyed by the city's building byte, not %s", rule, luaL_typename(L, -1));
-        else
-        {
-            lua_pushnil(L);
-            while (lua_next(L, -2))
-            {
-                lua_Integer b = lua_tointeger(L, -2);
-                if (!lua_isnumber(L, -2) || b < 0 || b > 255)
-                    bad("arc.rules.%s keyed an entry on %s, not a building byte", rule, luaL_typename(L, -2));
                 lua_pop(L, 1);
             }
         }
@@ -2348,38 +2334,23 @@ static void rule_answer(lua_State *L, const char *rule)
         if (!lua_isnumber(L, -1) && !lua_isnil(L, -1))
             bad("arc.rules.spur_share must answer a taper length or nothing, not %s", luaL_typename(L, -1));
     }
-    else if (strcmp(rule, "line_tiles") == 0)
-    {
-        if (!lua_istable(L, -1))
-            bad("arc.rules.line_tiles must answer a table keyed by the city's building byte, not %s", luaL_typename(L, -1));
-        else
-        {
-            lua_pushnil(L);
-            while (lua_next(L, -2))
-            {
-                lua_Integer b = lua_tointeger(L, -2);
-                const char *k = lua_tostring(L, -1);
-                if (!lua_isnumber(L, -2) || b < 0 || b > 255)
-                    bad("arc.rules.line_tiles keyed an entry on %s, not a building byte", luaL_typename(L, -2));
-                if (!k || (strcmp(k, "line") != 0 && strcmp(k, "meet") != 0 && strcmp(k, "under") != 0))
-                    bad("arc.rules.line_tiles gave byte %d a line that is none of line, meet or under", (int)b);
-                lua_pop(L, 1);
-            }
-        }
-    }
     else if (!lua_isboolean(L, -1))
         bad("arc.rules.%s must answer whether it drew the prop, not %s", rule, luaL_typename(L, -1));
 }
 
-/*  Every file named, in ONE state and in the order given.  This is
- *  because that is how the program reads them.  A name geo.lua sets is a
- *  name models.lua may use, and linting each on its own would call the
- *  second a typo.  The rules are called once the lot has been read. */
+/*  Every file named, in ONE state and in the order given, which is how
+ *  the program reads them.  A name geo.lua sets is a name a model may
+ *  use, and linting each on its own would call the second a typo.  The
+ *  rules are called once the lot has been read.
+ *
+ *  Answers how many files were READ, which is not how many were named.
+ *  A folder is entered through one init.lua and the rest arrive through
+ *  `require`.  Counting the paths would say one where it read ninety. */
 static int lint_all(char **paths, int n)
 {
     lua_State *L = luaL_newstate();
     size_t     i;
-    int        k, before = s_bad;
+    int        k, read;
     if (!L)
         return 1;
     luaL_openlibs(L);
@@ -2392,6 +2363,26 @@ static int lint_all(char **paths, int n)
     lua_setfield(L, -2, "__newindex");
     lua_setmetatable(L, -2);
     lua_pop(L, 1);
+    /*  Where `require` looks: the folder each path sits in, so an
+     *  init.lua reaches the layer it names.  The program sets the same
+     *  thing, and a lint that cannot follow a require reads one file of
+     *  ninety-one. */
+    {
+        char        path[4096];
+        int         at = 0;
+        for (k = 0; k < n && at < (int)sizeof path - 600; ++k)
+        {
+            const char *slash = strrchr(paths[k], '/');
+            int         len   = slash ? (int)(slash - paths[k]) : 1;
+            at += snprintf(path + at, sizeof path - (size_t)at, "%s%.*s/?.lua;%.*s/?/init.lua",
+                           at ? ";" : "", len, paths[k], len, paths[k]);
+        }
+        lua_getglobal(L, "package");
+        lua_pushstring(L, path);
+        lua_setfield(L, -2, "path");
+        lua_pop(L, 1);
+    }
+    s_where = L;
     for (k = 0; k < n; ++k)
     {
         s_file = paths[k];
@@ -2401,7 +2392,36 @@ static int lint_all(char **paths, int n)
             lua_pop(L, 1);
         }
     }
+    /*  Every module `require` kept that is not Lua's own, plus the files
+     *  named outright, which is what was actually read.  The count is
+     *  apart from `n`, which is how many paths the array holds. */
+    read = n;
+    {
+        static const char *const STDLIB[] = {"_G", "coroutine", "table", "io", "os",
+                                             "string", "math", "utf8", "debug", "package"};
+        lua_getglobal(L, "package");
+        lua_getfield(L, -1, "loaded");
+        lua_pushnil(L);
+        while (lua_next(L, -2))
+        {
+            const char *m = lua_tostring(L, -2);
+            size_t      j;
+            for (j = 0; m && j < sizeof STDLIB / sizeof STDLIB[0]; ++j)
+                if (strcmp(m, STDLIB[j]) == 0)
+                    break;
+            if (m && j == sizeof STDLIB / sizeof STDLIB[0])
+                ++read;
+            lua_pop(L, 1);
+        }
+        lua_pop(L, 2);
+    }
     s_file = n > 0 ? paths[n - 1] : "?";
+    /*  The knobs the RENDERER reads itself, against what the scripts
+     *  declared.  A name they do not declare would draw a nought where a
+     *  width belongs.  The program says so when it reads them, and the
+     *  lint says it first. */
+    if (!tune_bind())
+        bad("a knob the renderer reads is not declared; the message above names it");
     unknown_rules();
     models_check(L);
     stages_check(L);
@@ -2433,27 +2453,111 @@ static int lint_all(char **paths, int n)
         lua_pop(L, 3);
     }
     lua_close(L);
-    return s_bad != before;
+    return read;
+}
+
+/*  The scripts named on the command line.  A file is read as given.  A
+ *  FOLDER is read as the program itself reads it: every .lua under it,
+ *  in the program's order.  A lint that lists a folder in an order of
+ *  its own passes a script that reads a setting before the file that
+ *  declares it. */
+static int lint_paths(int argc, char **argv, char ***out, char ***owned, int *n_owned)
+{
+    char **paths = NULL, **mine = NULL, **sub = NULL;
+    int    i, k, n = 0, cap = 0, nm = 0, ns = 0;
+    for (i = 1; i < argc; ++i)
+    {
+        struct stat st;
+        int         first = nm, add = 1, is_dir = 0;
+        if (argv[i][0] == '-')
+            continue;
+        if (stat(argv[i], &st) == 0 && S_ISDIR(st.st_mode))
+        {
+            void       *p;
+            char        init[1300];
+            struct stat ist;
+            /*  A folder with an init.lua IS that file.  The program
+             *  reads it and nothing else, and a lint that walked the
+             *  folder would read files the layer does not name. */
+            snprintf(init, sizeof init, "%s/init.lua", argv[i]);
+            if (stat(init, &ist) == 0 && S_ISREG(ist.st_mode))
+            {
+                char *one = strdup(init);
+                if (!one)
+                    goto fail;
+                sub = (char **)malloc(sizeof *sub);
+                if (!sub)
+                {
+                    free(one);
+                    goto fail;
+                }
+                sub[0] = one;
+                ns     = 1;
+            }
+            else
+                ns = script_dir_paths(argv[i], &sub);
+            if (ns < 0)
+                goto fail;
+            /*  The folder's paths are owned here from this point, so a
+             *  failure below frees them once, from `mine`. */
+            p = realloc(mine, (size_t)(nm + ns) * sizeof *mine);
+            if (!p)
+                goto fail;
+            mine = (char **)p;
+            for (k = 0; k < ns; ++k)
+                mine[nm++] = sub[k];
+            free(sub);
+            sub = NULL;
+            add    = ns;
+            ns     = 0;
+            is_dir = 1;
+        }
+        for (k = 0; k < add; ++k)
+        {
+            if (n == cap)
+            {
+                void *p = realloc(paths, (size_t)(cap ? cap * 2 : 64) * sizeof *paths);
+                if (!p)
+                    goto fail;
+                paths = (char **)p;
+                cap   = cap ? cap * 2 : 64;
+            }
+            paths[n++] = is_dir ? mine[first + k] : argv[i];
+        }
+    }
+    *out     = paths;
+    *owned   = mine;
+    *n_owned = nm;
+    return n;
+fail:
+    for (k = 0; sub && k < ns; ++k)
+        free(sub[k]);
+    free(sub);
+    for (k = 0; k < nm; ++k)
+        free(mine[k]);
+    free(mine);
+    free(paths);
+    return -1;
 }
 
 int lua_lint_main(int argc, char **argv)
 {
-    char **paths = NULL;
-    int    i, n = 0;
-    paths = (char **)malloc((size_t)(argc > 0 ? argc : 1) * sizeof *paths);
-    if (!paths)
+    char **paths = NULL, **owned = NULL;
+    int    i, n, n_owned = 0;
+    n = lint_paths(argc, argv, &paths, &owned, &n_owned);
+    if (n < 0)
         return 2;
-    for (i = 1; i < argc; ++i)
-        if (argv[i][0] != '-')
-            paths[n++] = argv[i];
     if (!n)
     {
         free(paths);
-        fprintf(stderr, "arcology --lua-lint: name the scripts to read\n");
+        fprintf(stderr, "arcology --lua-lint: name the scripts or the folder to read\n");
         return 2;
     }
     s_nown = s_n_stage = s_n_unknown = 0;
-    lint_all(paths, n);
+    n = lint_all(paths, n);
+    for (i = 0; i < n_owned; ++i)
+        free(owned[i]);
+    free(owned);
     free(paths);
     printf("lua lint  %d script%s read together, %d fault%s\n",
            n, n == 1 ? "" : "s", s_bad, s_bad == 1 ? "" : "s");

@@ -5,11 +5,10 @@
 #include "log.h"
 #include "mesh/internal.h"
 #include "pipeline.h"
-#include "build.h"
-#include "net/net.h"
 #include "opt.h"
 #include "script.h"
 #include "incr.h"
+#include "net/shelf.h" /* whether a tile is a corridor's, for the ground fan */
 #include <time.h>
 
 /*  --times: where a build's time goes, for review.  Wall clock, ms. */
@@ -28,14 +27,6 @@ void tnote(const char *what, double t0)
         dumpf("time  pass %d  %-28s %7.1f ms\n", s_pass, what, tms() - t0);
 }
 
-
-/*  A mesh is built in two passes when there are lines.  The first
- *  GRADES: it walks every network and records the surface each corridor
- *  wants (the shelves, s_tilez), and draws nothing.  Every emitter is a
- *  no-op under s_pass 1.  The second BUILDS the world on those shelves.
- *  They are the same pass body, mesh_build_pass, told which it is. */
-
-
 /*  What a tile's composition wants beyond its own place: set once a
  *  pass.  So one tile's ground can be composed from anywhere: the loop
  *  below, or the script that drives the build. */
@@ -49,56 +40,31 @@ static struct
     int32_t      dump_r, dump_c;
 } s_tp;
 
-/*  THE FIELD, built when the DRIVE asks for it: after the rule has said
- *  where every tile's top comes from.  This is because a water tile's
- *  bed is clamped under the surface drawn over it and that surface is
- *  the rule's answer. */
-void mesh_field(void)
+/*  What a pass composes its tiles from, set once a pass by the build
+ *  (build.c).  The mesh, the city, the ground's mean color and the tile
+ *  --mesh-dump names.  The mesh's own counters start at nought. */
+void mesh_pass_begin(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel *l, int underground, int32_t dump_r, int32_t dump_c)
 {
-    const RCity *c = s_tp.c;
-    if (!c)
-        return;
-    build_field(c);
-    /*  --plan-dump 1 writes the world as numbers for tools/plan.py.
-     *  This draws a city from above: the field's heights, what each tile
-     *  carries, and (with the paths) the corridors and their
-     *  centerlines.  A plan view is how this is inspected. */
-    if (s_pass != 1 && g_dev.plan_dump)
-    {
-        int32_t gx, gy;
-        dumpf("FIELD %d\n", GRID);
-        for (gy = 0; gy < GRID; ++gy)
-        {
-            for (gx = 0; gx < GRID; ++gx)
-                dumpf("%s%.3f", gx ? " " : "", (double)s_h[gy * GRID + gx]);
-            dumpf("\n");
-        }
-        /*  The corridors' shelves, four corners a tile in the order NW
-         *  NE SE SW, 1e9 where a tile has none.  What a network tile is
-         *  drawn from (tile.c tile_top).  So continuity along a corridor
-         *  can be measured. */
-        dumpf("SHELF %d\n", R_MAP);
-        for (gy = 0; gy < R_MAP; ++gy)
-        {
-            for (gx = 0; gx < R_MAP; ++gx)
-                dumpf("%s%.3f %.3f %.3f %.3f", gx ? " " : "", (double)s_tilez[(gy * R_MAP + gx) * 4 + NW], (double)s_tilez[(gy * R_MAP + gx) * 4 + NE], (double)s_tilez[(gy * R_MAP + gx) * 4 + SE], (double)s_tilez[(gy * R_MAP + gx) * 4 + SW]);
-            dumpf("\n");
-        }
-        dumpf("XBLD %d\n", R_MAP);
-        for (gy = 0; gy < R_MAP; ++gy)
-        {
-            for (gx = 0; gx < R_MAP; ++gx)
-                dumpf("%s%02x", gx ? " " : "", (unsigned)c->xbld[gy * R_MAP + gx]);
-            dumpf("\n");
-        }
-        dumpf("XTER %d\n", R_MAP);
-        for (gy = 0; gy < R_MAP; ++gy)
-        {
-            for (gx = 0; gx < R_MAP; ++gx)
-                dumpf("%s%02x", gx ? " " : "", (unsigned)c->xter[gy * R_MAP + gx]);
-            dumpf("\n");
-        }
-    }}
+    /*  Which picture the ground's mean color is taken from is the
+     *  script's (arc.geo).  So is what a run whose art set has no such
+     *  picture falls back on.  The mean itself is arithmetic. */
+    static int gix_art = -1, gix_r = -1, gix_g = -1, gix_b = -1;
+    float      land_fb[3];
+    float      land_col[3];
+    m->n_land   = 0;
+    m->n_water  = 0;
+    m->to_water = 0;
+    m->n_walls  = 0;
+    land_fb[0]  = geo_num(&gix_r, "ground_red");
+    land_fb[1]  = geo_num(&gix_g, "ground_green");
+    land_fb[2]  = geo_num(&gix_b, "ground_blue");
+    tile_colour(a, l, (int32_t)geo_num(&gix_art, "ground_art"), land_col, land_fb);
+    land_col[2] = MAT_GROUND;
+    s_tp.m = m, s_tp.c = c, s_tp.mask_bit = city_corner_mask(c->rotation);
+    memcpy(s_tp.land, land_col, sizeof s_tp.land);
+    s_tp.underground = underground;
+    s_tp.dump_r = dump_r, s_tp.dump_c = dump_c;
+}
 
 /*  ONE TILE'S GROUND, gathered.
  *
@@ -220,7 +186,18 @@ int mesh_tint_fan(int32_t col, int32_t row, TileFan *out)
     if (s_pass != 1 && !incr_want_tile(col, row))
         return 0;
     int32_t idx  = row * R_MAP + col;
-    int     zone = c->xzon[idx] & 0x0Fu;
+    /*  Which half of a zoning byte is the zone is the script's:
+     *  arc.bytes("zone_of").  Read once a generation, since every tile
+     *  of the map is looked up in it. */
+    static unsigned char zone_of[256];
+    static int           zone_gen = -1;
+    int                  zone;
+    if (zone_gen != script_generation())
+    {
+        zone_gen = script_generation();
+        memcpy(zone_of, script_bytes("zone_of"), sizeof zone_of);
+    }
+    zone = zone_of[c->xzon[idx]];
     float   z[4];
     Kind    kind;
     /*  A tile something was PLACED on carries its own code rather than
@@ -248,162 +225,6 @@ int mesh_tint_fan(int32_t col, int32_t row, TileFan *out)
         *out = t;
     }
     return 1;
-}
-
-int mesh_build_pass(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel *l, int underground, int rotated, int lines)
-{
-    static const float land_fb[3] = {0.45f, 0.62f, 0.30f};
-    float              land_col[3];
-    const uint8_t      mask_bit = city_corner_mask(c->rotation);
-    int                dump_r = -1, dump_c = -1;
-    s_check_xbld                = lines ? c->xbld : NULL;
-    m->net.n_pts                  = 0;
-    m->net.n_segs                 = 0;
-    m->threadnet.n_pts              = 0;
-    m->threadnet.n_segs             = 0;
-    m->n_laps                    = 0;
-    m->n_rsigs                    = 0;
-    if (s_pass != 2)
-    {
-        /*  The junction controls are stage three's, worked out with the
-         *  trims and the meets that turn on them (walk/walk.c).  So they
-         *  are cleared where those are and the building pass reads what
-         *  the grading pass left. */
-        memset(s_junc_ctrl, 0, sizeof s_junc_ctrl);
-        fit_stats_reset(); /* the building pass fits nothing: keep the grading pass's count */
-    }
-    m->n_land   = 0;
-    m->n_water  = 0;
-    m->to_water = 0;
-    m->n_walls  = 0;
-    if (s_pass == 2)
-    {
-        /*  A corridor tile must be graded on all four corners or its
-         *  surface tilts through the line.  Where several segments meet,
-         *  one corner could keep the hillside's height while its
-         *  neighbors took the line's.  So a tile the script names as a
-         *  corridor's (`corridor_fill`), with any graded corner, has the
-         *  rest filled in.  They take the mean of those it has, twice
-         *  over so it carries across a junction. */
-        int32_t pass2, col2, row2;
-        for (pass2 = 0; pass2 < 2; ++pass2)
-            for (row2 = 0; row2 < R_MAP; ++row2)
-                for (col2 = 0; col2 < R_MAP; ++col2)
-                {
-                    int32_t gi[4] = {row2 * GRID + col2, row2 * GRID + col2 + 1, (row2 + 1) * GRID + col2, (row2 + 1) * GRID + col2 + 1};
-                    float   sum = 0.0f, low = 1e9f;
-                    int     k2, have        = 0;
-                    if (!script_bytes("corridor_fill")[c->xbld[row2 * R_MAP + col2]])
-                        continue; /* the script names no corridor here */
-                    for (k2 = 0; k2 < 4; ++k2)
-                        if (s_corr[gi[k2]] == 1 && s_zcap[gi[k2]] < 1e8f)
-                        {
-                            sum += s_zcap[gi[k2]];
-                            if (s_zlow[gi[k2]] < low)
-                                low = s_zlow[gi[k2]];
-                            ++have;
-                        }
-                    if (!have || have == 4)
-                        continue;
-                    for (k2 = 0; k2 < 4; ++k2)
-                        if (s_corr[gi[k2]] != 1)
-                        {
-                            /*  A corner filled in from its tile's others
-                             *  inherits their ceiling too, or the
-                             *  smoothing will lift it over the line. */
-                            s_zcap[gi[k2]] = sum / (float)have;
-                            if (low < s_zlow[gi[k2]])
-                                s_zlow[gi[k2]] = low;
-                            s_corr[gi[k2]] = 1;
-                        }
-                }
-    }
-
-    /*  THE ORDER the world is composed in is the SCRIPT'S
-     *  (scripts/compose/world.lua): which tiles, in what order, and
-     *  which of the network passes run at all.  There is no C loop
-     *  behind it: a build with no rule composes nothing, and says so
-     *  rather than drawing an empty city.
-     *
-     *  The pass STOPS HERE, before the field.  The drive asks
-     *  arc.rules.terrain which of six places every tile's top comes
-     *  from, and then w:field builds the field from that answer.  A
-     *  water tile's bed is clamped under the surface drawn over it.  So
-     *  the terrain has to be settled first, and it is the DRIVE that
-     *  says so rather than this file. */
-    if (g_dev.mesh_dump)
-        sscanf(g_dev.mesh_dump, "%d,%d", &dump_r, &dump_c);
-    if (s_pass == 2)
-    {
-        /*  The corridors are NOTCHED into the terrain, and a notch only
-         *  ever cuts.  So a corner the band reaches is lowered to the
-         *  corridor's height and never lifted above the ground it was
-         *  cut from.  Only corners the band itself reaches are touched
-         *  at all: the batter ring beyond them is terrain.  Terrain is
-         *  left as it is.  The wall rule closes the sides of the cut,
-         *  and the watertight check covers the corridor like any other
-         *  ground. */
-        {
-
-            /*  No global solve, and nothing written to the terrain.  The
-             *  corridor's height is its own spur between node altitudes,
-             *  which every segment computes for itself and writes into
-             *  its corners.  So two segments that meet spur to the same
-             *  node and nothing here has to reconcile them.  The
-             *  corridor carries its own surface tile by tile, the ground
-             *  stays exactly where it was, and the wall rule closes the
-             *  step between them. */
-        }
-    }
-    tile_colour(a, l, 256, land_col, land_fb);
-    land_col[2] = MAT_GROUND;
-    s_tp.m = m, s_tp.c = c, s_tp.mask_bit = mask_bit;
-    memcpy(s_tp.land, land_col, sizeof s_tp.land);
-    s_tp.underground = underground;
-    s_tp.dump_r = dump_r, s_tp.dump_c = dump_c;
-
-    memset(&s_world, 0, sizeof s_world);
-    s_world.m = m, s_world.c = c, s_world.a = a, s_world.l = l;
-    s_world.mask_bit    = mask_bit;
-    s_world.pass        = s_pass;
-    s_world.lines       = lines;
-    s_world.underground = underground;
-    s_world.rotated     = rotated;
-    return 0;
-}
-
-/*  The three network passes, as primitives the composing script asks for
- *  by name.  The lane model first, since a junction beside a spur needs
- *  which slab lane that spur takes.  Then the networks' measure, the
- *  script's own pass over the meets and the lines, the networks'
- *  drawing, and the bands over them.  Answers 0, or -1 with the reason
- *  already reported. */
-int mesh_world_nets(WorldFan *w, int what)
-{
-    if (what == 0)
-    {
-        band_lanes(w->c);
-        return 0;
-    }
-    if (what == 1)
-    {
-        /*  What follows is the networks': the frame draws the terrain's
-         *  range once a pass, and this is where it ends. */
-        w->m->n_terrain = w->m->n_land;
-        return build_networks(w->m, w->c, w->a, w->l, w->mask_bit, !w->rotated);
-    }
-    if (what == 3)
-    {
-        return build_networks_draw(w->m, w->c, w->l, w->mask_bit, !w->rotated);
-    }
-    {
-        double t0 = tms();
-        int    rc = build_bands(w->m, w->c, w->l, w->mask_bit, !w->rotated);
-        tnote("bands, spurs, lanes", t0);
-        net_prof_print(); /* the pass's network profile, stage by stage, once its networks are all built */
-        seg_table_misses_print();
-        return rc;
-    }
 }
 
 /* ---- the query tool ---------------------------------------------------- */

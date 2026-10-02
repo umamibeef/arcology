@@ -48,7 +48,7 @@ int sim_start_fire_near(City *c)
             if (fire_will_take(b) && !(c->xbit[h][v] & XBIT_WATER) &&
                 c->xtxt[h][v] == 0) /* $380E0 */
             {
-                c->xtxt[h][v] = (uint8_t)((Random() & 1) + 0xFD); /* $38118 */
+                c->xtxt[h][v] = (uint8_t)((Random(c) & 1) + 0xFD); /* $38118 */
                 /*  $3813E scrolls the view to the fire when the player
                  *  asked to follow disasters, and $3F636 is the
                  *  memory-gated redraw.  Neither is simulation. */
@@ -88,8 +88,8 @@ int sim_start_fire_near(City *c)
  * ================================================================== */
 int sim_disaster_fire(City *c)
 {
-    int h   = c->view_y + (int)((uint16_t)Random() % 40) - 20; /* $3829A */
-    int v   = c->view_x + (int)((uint16_t)Random() % 40) - 20;
+    int h   = c->view_y + (int)((uint16_t)Random(c) % 40) - 20; /* $3829A */
+    int v   = c->view_x + (int)((uint16_t)Random(c) % 40) - 20;
     int dir = 0, leg = 1, step = 0, i;
 
     while (leg < 0x40) /* $38370 */
@@ -117,8 +117,8 @@ int sim_disaster_fire(City *c)
 
     for (i = 0; i < 200; i++) /* $383C4 */
     {
-        h = (int)game_rand127(); /* $3837E */
-        v = (int)game_rand127();
+        h = (int)game_rand127(c); /* $3837E */
+        v = (int)game_rand127(c);
         if (sim_burn_tile(c, h, v, 0)) /* $38394 */
         {
             c->disaster_h = (int16_t)h; /* $383BA SetPt */
@@ -177,7 +177,7 @@ int sim_burn_tile(City *c, int y, int x, int even_bare)
         else if (t < 0xFA)
         {
             /*  $39C3C: already alight, so step the flame on. */
-            sim_set_tile(c, y, x, (uint8_t)(game_rand(4) + 1));
+            sim_set_tile(c, y, x, (uint8_t)(game_rand(c, 4) + 1));
             return 0;
         }
         else if (t == 0xFA)
@@ -362,15 +362,15 @@ int sim_disaster_volcano(City *c)
 
         /*  the treasury is this loop's counter, so log it beside the
          *  dice while a comparison is running.  Inert otherwise. */
-        rng_log_mark(c->funds);
+        rng_log_mark(c, c->funds);
 
-        ty = h + (int)((uint16_t)Random() % 5) - 2; /* $37E18 */
-        tx = v + (int)((uint16_t)Random() % 5) - 2;
+        ty = h + (int)((uint16_t)Random(c) % 5) - 2; /* $37E18 */
+        tx = v + (int)((uint16_t)Random(c) % 5) - 2;
 
         if (ty < 0 || ty >= MAP_H || tx < 0 || tx >= MAP_W)
             continue; /* $37E48, draw again without spending */
 
-        c->xtxt[ty][tx] = (uint8_t)((Random() & 1) ? 0xFF : 0xFB); /* $37E6C */
+        c->xtxt[ty][tx] = (uint8_t)((Random(c) & 1) ? 0xFF : 0xFB); /* $37E6C */
 
         if (sim_can_raise(c, ty, tx))
             sim_raise_tile(c, ty, tx); /* $37EA2, and every fourth one
@@ -378,8 +378,8 @@ int sim_disaster_volcano(City *c)
         else
             c->funds -= 1000; /* $37EBA */
 
-        by = h + (int)((uint16_t)Random() % 32) - 16; /* $37ECE */
-        bx = v + (int)((uint16_t)Random() % 32) - 16;
+        by = h + (int)((uint16_t)Random(c) % 32) - 16; /* $37ECE */
+        bx = v + (int)((uint16_t)Random(c) % 32) - 16;
         if (by >= 0 && by < MAP_H && bx >= 0 && bx < MAP_W)
             c->xtxt[by][bx] =
                 (uint8_t)((c->xbit[by][bx] & XBIT_WATER) ? 0xFB : 0xFF); /* $37F48 */
@@ -399,9 +399,8 @@ int sim_disaster_volcano(City *c)
          *  into $30E4, past the `link` and past the load of $2C42 into
          *  the frame, so the y it passes to $8E60 comes off the caller's
          *  return address.  Five call sites do it.  It is a real quirk
-         *  of the shipped binary, not a bad disassembly: an earlier note
-         *  here said otherwise and was wrong. */
-        (void)Random();
+         *  of the shipped binary, not a bad disassembly. */
+        (void)Random(c);
     }
     c->funds = saved; /* $37FA4 */
     return 1;
@@ -452,22 +451,22 @@ int sim_disaster_hurricane(City *c)
     for (done = 0; done < 0x14;) /* $37600 and its three copies */
     {
         done++;
-        fixed = (int)game_rand127(); /* $375A2 */
+        fixed = (int)game_rand127(c); /* $375A2 */
         p     = (step > 0) ? 0 : 0x7F;
 
         if (step > 0)
             while (p <= 0x7F) /* $375DE */
             {
                 if (p < 0x7F && BLD_AT(p) >= 0x0D)
-                    break;               /* $375CA */
-                p += (int)game_rand(20); /* $375D4 */
+                    break;                  /* $375CA */
+                p += (int)game_rand(c, 20); /* $375D4 */
             }
         else
             while (p >= 0) /* $3769C */
             {
                 if (p > 0 && BLD_AT(p) >= 0x0D)
                     break;
-                p -= (int)game_rand(20);
+                p -= (int)game_rand(c, 20);
             }
 
         if (step > 0 ? (p >= 0x7F) : (p <= 0))
@@ -483,7 +482,7 @@ int sim_disaster_hurricane(City *c)
 
     for (done = 0; done < W[dir].wet; done++) /* $37658 and its copies */
     {
-        fixed = (int)game_rand127(); /* $3760C */
+        fixed = (int)game_rand127(c); /* $3760C */
         p     = (step > 0) ? 0 : 0x7F;
 
         if (step > 0)
@@ -544,15 +543,15 @@ int sim_disaster_meltdown(City *c)
         {
             const int ty = y + dy, tx = x + dx;
 
-            if ((Random() & 0x1F) != 0)
+            if ((Random(c) & 0x1F) != 0)
                 continue; /* $38A0A */
             if (ty < 0 || ty >= MAP_H || tx < 0 || tx >= MAP_W)
                 continue;
 
-            if (Random() & 3) /* $38A54 */
+            if (Random(c) & 3) /* $38A54 */
             {
                 sim_demolish_tile(c, ty, tx, 0, 0); /* $38A74 */
-                if (!(Random() & 1))
+                if (!(Random(c) & 1))
                     continue; /* $38A7A */
                 if (c->xbit[ty][tx] & XBIT_WATER)
                     c->xtxt[ty][tx] = 0xFB; /* $38AC0 */
@@ -565,7 +564,7 @@ int sim_disaster_meltdown(City *c)
 
     for (dy = -1; dy <= 2; dy++)     /* $38B54 */
         for (dx = -2; dx <= 1; dx++) /* $38B4C */
-            if (Random() & 1)
+            if (Random(c) & 1)
                 sim_set_tile(c, y + dy, x + dx, 5); /* $38B42 */
     return 1;
 }
@@ -594,7 +593,7 @@ int sim_disaster_earthquake(City *c)
         {
             int ty, tx;
 
-            if ((Random() & 0x3F) != 0)
+            if ((Random(c) & 0x3F) != 0)
                 continue; /* $384B6 */
 
             ty = h + dy;
@@ -604,7 +603,7 @@ int sim_disaster_earthquake(City *c)
             if (c->xbld[ty][tx] < 0x0E)
                 continue; /* $3850A */
 
-            if (Random() & 3)
+            if (Random(c) & 3)
                 sim_demolish_tile(c, ty, tx, 0, 0); /* $38530 */
             else
                 sim_burn_tile(c, ty, tx, 0); /* $3854C */
@@ -636,8 +635,8 @@ int sim_disaster_chemical(City *c)
 
     for (i = 0; i < tries; i++) /* $37918 */
     {
-        int ty = h0 + ((uint16_t)Random() & 7) - 4; /* $378B8 */
-        int tx = v0 + ((uint16_t)Random() & 7) - 4;
+        int ty = h0 + ((uint16_t)Random(c) & 7) - 4; /* $378B8 */
+        int tx = v0 + ((uint16_t)Random(c) & 7) - 4;
 
         if (ty < 0 || ty >= MAP_H || tx < 0 || tx >= MAP_W)
             continue;
@@ -722,8 +721,8 @@ int sim_disaster_flood(City *c)
 
     for (i = 0; i < tries; i++) /* $379EA */
     {
-        int ty = h0 + ((uint16_t)Random() % 32) - 16;
-        int tx = v0 + ((uint16_t)Random() % 32) - 16;
+        int ty = h0 + ((uint16_t)Random(c) % 32) - 16;
+        int tx = v0 + ((uint16_t)Random(c) % 32) - 16;
         /*  unlike the riot, this one checks the point is on the map
          *  before it uses it ($379B4) */
         if (ty < 0 || ty >= MAP_H || tx < 0 || tx >= MAP_W)
@@ -753,8 +752,8 @@ int sim_disaster_riot(City *c)
     for (i = 0; i < tries; i++) /* $37DC6 */
     {
         /*  smod32 by 32 then less 16, so the offset runs -16 .. +15 */
-        c->disaster_h = (int16_t)(h0 + ((uint16_t)Random() % 32) - 16);
-        c->disaster_v = (int16_t)(v0 + ((uint16_t)Random() % 32) - 16);
+        c->disaster_h = (int16_t)(h0 + ((uint16_t)Random(c) % 32) - 16);
+        c->disaster_v = (int16_t)(v0 + ((uint16_t)Random(c) % 32) - 16);
         if (sim_start_fire_near(c))
             any = 1; /* $37DB8 */
     }
@@ -851,8 +850,8 @@ int sim_disaster_air_crash(City *c)
 
     do /* $38192 */
     {
-        y = (int)game_rand63() + 0x20;
-        x = (int)game_rand63() + 0x20;
+        y = (int)game_rand63(c) + 0x20;
+        x = (int)game_rand63(c) + 0x20;
     } while (c->xtxt[y][x] != 0);
 
     slot = alloc_thing(c); /* $381C6 */
@@ -920,7 +919,7 @@ int sim_disaster_microwave(City *c)
     if (y == 128 && x == 128)
         return 0; /* $38BC4 */
 
-    dir  = (int)(Random() & 7); /* $38BEA */
+    dir  = (int)(Random(c) & 7); /* $38BEA */
     left = 40;
 
     for (;;)
@@ -939,7 +938,7 @@ int sim_disaster_microwave(City *c)
         }
         y += BEAM_DY[dir]; /* $38C7A */
         x += BEAM_DX[dir];
-        dir = (int)(Random() & 7); /* $38C90 */
+        dir = (int)(Random(c) & 7); /* $38C90 */
     }
     return 1;
 }
@@ -971,16 +970,16 @@ static void disaster_at(City *c, int v, int h)
 /*  the point most arms use: anywhere but the outermost ring */
 static void disaster_anywhere(City *c)
 {
-    int v = (int)((uint16_t)Random() % 126) + 1;
-    int h = (int)((uint16_t)Random() % 126) + 1;
+    int v = (int)((uint16_t)Random(c) % 126) + 1;
+    int h = (int)((uint16_t)Random(c) % 126) + 1;
     disaster_at(c, v, h);
 }
 
 /*  and the one the arms that start downtown use */
 static void disaster_near_centre(City *c, int bias)
 {
-    int v = (int)((uint16_t)Random() & 0x1F) + c->centre_y + bias;
-    int h = (int)((uint16_t)Random() & 0x1F) + c->centre_x + bias;
+    int v = (int)((uint16_t)Random(c) & 0x1F) + c->centre_y + bias;
+    int h = (int)((uint16_t)Random(c) & 0x1F) + c->centre_x + bias;
     disaster_at(c, v, h);
 }
 
@@ -995,7 +994,7 @@ void sim_disaster_roll(City *c)
     if (odds == 0 || c->date / 25 < odds)
         return; /* $310CA, too young a city */
 
-    d3 = (int)((uint16_t)Random() % (uint16_t)odds); /* $310E2 */
+    d3 = (int)((uint16_t)Random(c) % (uint16_t)odds); /* $310E2 */
 
     /*  $310F2: two the weather brings on by itself.  These set the kind
      *  directly rather than going through the table. */
@@ -1014,7 +1013,7 @@ void sim_disaster_roll(City *c)
     if (d3 != 0)
         return; /* $3115E */
 
-    kind = (int)((uint16_t)Random() % 19); /* $31166 */
+    kind = (int)((uint16_t)Random(c) % 19); /* $31166 */
 
     switch (kind)
     {
@@ -1031,7 +1030,7 @@ void sim_disaster_roll(City *c)
             break;
 
         case 1: /* $311B4: only when it is hot enough */
-            if (((int)((uint16_t)Random() & 0x7F) + 0x7F) > c->temperature)
+            if (((int)((uint16_t)Random(c) & 0x7F) + 0x7F) > c->temperature)
                 return;
             disaster_anywhere(c);
             break;
@@ -1060,11 +1059,11 @@ void sim_disaster_roll(City *c)
                             continue; /* $31314 */
                         if (best >= v)
                             continue; /* $3131A */
-                        if (game_rand(10) != 0)
+                        if (game_rand(c, 10) != 0)
                             continue; /* $31324, one in ten */
                         best = c->xplt[hy][hx];
-                        by   = hy * 2 + (int)game_rand(10) - 5; /* $3133C */
-                        bx   = hx * 2 + (int)game_rand(10) - 5; /* $3134E */
+                        by   = hy * 2 + (int)game_rand(c, 10) - 5; /* $3133C */
+                        bx   = hx * 2 + (int)game_rand(c, 10) - 5; /* $3134E */
                     }
                 if (by < 0 || by >= MAP_H || bx < 0 || bx >= MAP_W)
                     return; /* $3137C */

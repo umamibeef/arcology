@@ -10,7 +10,7 @@
 --  and no street furniture at all.  This file drives the game.
 
 --  A junction's control, one code an arm: 0 none, 1 stop, 2 signal
---  (spec 3.4).  `arms[e + 1]` is {class = , traffic = } for an arm that
+--  (spec 3.4).  `arms[e]` is {class = , traffic = } for an arm that
 --  is there and nil for one that is not; e is 0 north, 1 east, 2 south,
 --  3 west, and the class is 0 a line, 1 an avenue, 2 a boulevard.
 --
@@ -19,11 +19,13 @@
 --  signal where the junction is busy; a local against an avenue puts the
 --  stop on the local legs; three legs with a local stem, a stop on the
 --  stem; four local legs, a two-way stop on the quieter axis.
+--  The arms arrive keyed BY EDGE, and an edge counts from nought, so the
+--  answer is keyed the same way.
 arc.rules.control = function (at)
-    local ctrl = {0, 0, 0, 0}
+    local ctrl = {[0] = 0, 0, 0, 0}
     local arms, busy = at.arms or {}, at.busy
     local n, hi, lo = 0, 0, 9
-    for e = 1, 4 do
+    for e = 0, 3 do
         if arms[e] then
             n = n + 1
             if arms[e].class > hi then hi = arms[e].class end
@@ -31,23 +33,23 @@ arc.rules.control = function (at)
         end
     end
     if hi >= 2 then
-        for e = 1, 4 do if arms[e] then ctrl[e] = 2 end end
+        for e = 0, 3 do if arms[e] then ctrl[e] = 2 end end
     elseif hi == 1 and lo == 1 then
-        for e = 1, 4 do if arms[e] then ctrl[e] = busy and 2 or 1 end end
+        for e = 0, 3 do if arms[e] then ctrl[e] = busy and 2 or 1 end end
     elseif hi == 1 then
-        for e = 1, 4 do if arms[e] and arms[e].class == 0 then ctrl[e] = 1 end end
+        for e = 0, 3 do if arms[e] and arms[e].class == 0 then ctrl[e] = 1 end end
     elseif n == 3 then
         --  the stem: the arm whose opposite is missing
-        for e = 1, 4 do
-            local opp = (e + 1) % 4 + 1
+        for e = 0, 3 do
+            local opp = (e + 2) % 4
             if arms[e] and not arms[opp] then ctrl[e] = 1 end
         end
     else
         --  four local legs: the stop goes on the axis carrying less
-        local ns = math.max(arms[1] and arms[1].traffic or 0, arms[3] and arms[3].traffic or 0)
-        local ew = math.max(arms[2] and arms[2].traffic or 0, arms[4] and arms[4].traffic or 0)
-        for e = 1, 4 do
-            local quiet = (e == 1 or e == 3) and ns <= ew or (e == 2 or e == 4) and ew < ns
+        local ns = math.max(arms[0] and arms[0].traffic or 0, arms[2] and arms[2].traffic or 0)
+        local ew = math.max(arms[1] and arms[1].traffic or 0, arms[3] and arms[3].traffic or 0)
+        for e = 0, 3 do
+            local quiet = (e == 0 or e == 2) and ns <= ew or (e == 1 or e == 3) and ew < ns
             if arms[e] and quiet then ctrl[e] = 1 end
         end
     end
@@ -391,7 +393,7 @@ arc.rules.family = function (f)
         band_taper_near = arc.geo.band_taper_near,
         band_taper_gap  = arc.geo.band_taper_gap,
         band_taper_room = arc.geo.band_taper_room,
-        band_road_dot   = arc.geo.band_road_dot,
+        band_line_dot   = arc.geo.band_line_dot,
     }
     if f.name == "thread" then
         return {junction = junction, strip = strip, lane = lane,

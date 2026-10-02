@@ -7,8 +7,9 @@ copies of one list; this makes them one.  Run it after editing the .def:
 
     python3 tools/gen_materials.py
 
-It writes src/render/generated/materials.h and materials.c, both checked
-in, so a plain build needs no Python.
+It writes src/render/generated/materials.h and materials.c and
+src/render/gpu/shaders/materials.glsl, all checked in, so a plain build
+needs no Python.
 """
 import os
 import re
@@ -47,6 +48,13 @@ def flt(v):
     """A C float literal: %g drops the point, and `0f` is not a number."""
     t = "%g" % v
     return t + (".0f" if "." not in t else "f")
+
+
+def glsl_flt(v):
+    """A GLSL float literal.  A material is a float everywhere it is read,
+    and `0` beside a float in a macro is a type the compiler may refuse."""
+    t = "%g" % v
+    return t + (".0" if "." not in t else "")
 
 
 def read():
@@ -91,11 +99,27 @@ def main():
     for value, name, lua, what in mats:
         h.append("#define MAT_%-*s %-6s /* %s */" % (wide, name, flt(value), what))
     h += ['',
+          '/*  A material is a NUMBER, and a variant is shaded from the whole',
+          ' *  number beside it.  So a test on a material is a test on the half',
+          ' *  step around it.  MAT_IS names one material with its variants.',
+          ' *  MAT_IN names a run of them, from the first to the last.',
+          ' *  MAT_ABOVE, MAT_FROM and MAT_UPTO each name everything on one',
+          ' *  side of one. */',
+          '#define MAT_IS(m, M)    ((m) > (M) -0.5f && (m) < (M) + 0.5f)',
+          '#define MAT_IN(m, A, B) ((m) > (A) -0.5f && (m) < (B) + 0.5f)',
+          '#define MAT_ABOVE(m, M) ((m) > (M) + 0.5f)',
+          '#define MAT_FROM(m, M)  ((m) > (M) -0.5f)',
+          '#define MAT_UPTO(m, M)  ((m) < (M) + 0.5f)',
+          '',
           "/*  A script's own materials are numbered from here, one per",
           " *  arc.mat.define, and shaded from their parameters rather than",
           ' *  from a branch of their own. */',
           "#define MAT_SCRIPT_BASE %s" % flt(SCRIPT_BASE),
           "#define MAT_SCRIPT_MAX  %d" % SCRIPT_MAX,
+          '',
+          '/*  How many built-in materials there are, for a table with a',
+          ' *  slot for each. */',
+          "#define MAT_COUNT %d" % len(mats),
           '',
           '/*  The built-in materials by name, for the script bridge. */',
           'typedef struct',
@@ -108,6 +132,31 @@ def main():
           '',
           '#endif']
     if not write(os.path.join(OUT, "materials.h"), "\n".join(h) + "\n", check):
+        return 1
+
+    g = ['//  GENERATED from src/render/mesh/materials.def.  Do not edit.',
+         '//',
+         "//  The shader reads a material by RANGE, so it needs the same numbers",
+         '//  and the same membership tests the C does.  gen_shaders.py splices',
+         '//  this file in where a shader asks for it.',
+         '']
+    for value, name, lua, what in mats:
+        g.append("#define MAT_%-*s %-6s // %s" % (wide, name, glsl_flt(value), what))
+    g += ['',
+          '//  A material is a NUMBER, and a variant is shaded from the whole',
+          '//  number beside it.  So a test on a material is a test on the half',
+          '//  step around it.',
+          '#define MAT_IS(m, M)    ((m) > (M) - 0.5 && (m) < (M) + 0.5)',
+          '#define MAT_IN(m, A, B) ((m) > (A) - 0.5 && (m) < (B) + 0.5)',
+          '#define MAT_ABOVE(m, M) ((m) > (M) + 0.5)',
+          '#define MAT_FROM(m, M)  ((m) > (M) - 0.5)',
+          '#define MAT_UPTO(m, M)  ((m) < (M) + 0.5)',
+          '',
+          "//  A script's own materials are numbered from here.",
+          "#define MAT_SCRIPT_BASE %s" % glsl_flt(SCRIPT_BASE),
+          "#define MAT_SCRIPT_MAX  %d" % SCRIPT_MAX]
+    if not write(os.path.join(ROOT, "src", "render", "gpu", "shaders", "materials.glsl"),
+                 "\n".join(g) + "\n", check):
         return 1
 
     c = ['/*  GENERATED from src/render/mesh/materials.def.  Do not edit. */',

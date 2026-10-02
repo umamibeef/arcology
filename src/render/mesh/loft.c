@@ -10,9 +10,19 @@
 #include "mesh/internal.h"
 #include "pipeline.h"
 
-#include "net/net.h"
+#include "net/family.h"
+#include "net/margin.h"
+#include "net/strip.h"
+#include "net/table.h"
 static int gix_loft_split_probe = -1;
 #include "opt.h"
+#include "mesh/loft.h"
+#include "mesh/piece.h"
+#include "mesh/surface.h"
+#include "mesh/tile.h"
+#include "net/cell.h"
+#include "script.h"
+#include "prof.h"
 
 /*  The numbers this file reads, each remembering where the store
  *  put it (net/geo.c).  A name here is a name a script must set. */
@@ -37,10 +47,6 @@ float section_height(const RCity *c, uint8_t mask_bit, V2 pos, V2 dir, float h)
     return surface_at_world(c, mask_bit, pos.x, pos.y);
 }
 
-/*  Loft one strip along the pieces.  The cross-sections come by arc
- *  length.  Their width is the class's, scaled by the direction, which
- *  is the snap view's compensation.  There is one quad per pair, each
- *  with the painter's order of the tile under it. */
 /*  Record a line segment's stations in the mesh's network, for the
  *  traffic.  The lane centers by class, tiles from the centerline.
  *
@@ -102,29 +108,6 @@ int net_record(RNet *net, const Sample *smp, int ns, float total, int cls, const
         q->s      = smp[i].s;
     }
     return 0;
-}
-
-/*  The point and unit direction at distance `t` along a piece. */
-void piece_at(const Piece *p, float t, V2 *pos, V2 *dir)
-{
-    if (!p->arc)
-    {
-        float f = p->len > 1e-6f ? t / p->len : 0.0f;
-        pos->x  = p->a.x + (p->b.x - p->a.x) * f;
-        pos->y  = p->a.y + (p->b.y - p->a.y) * f;
-        dir->x  = (p->b.x - p->a.x) / (p->len > 1e-6f ? p->len : 1.0f);
-        dir->y  = (p->b.y - p->a.y) / (p->len > 1e-6f ? p->len : 1.0f);
-    }
-    else
-    {
-        float f  = p->len > 1e-6f ? t / p->len : 0.0f;
-        float th = p->t0 + (p->t1 - p->t0) * f;
-        float s  = p->t1 > p->t0 ? 1.0f : -1.0f;
-        pos->x   = p->c.x + p->r * cosf(th);
-        pos->y   = p->c.y + p->r * sinf(th);
-        dir->x   = -sinf(th) * s;
-        dir->y   = cosf(th) * s;
-    }
 }
 
 
@@ -364,8 +347,9 @@ static void loft_ground(Loft *x)
  *  Two families agree at a lap because the meet is a node they share.
  *  An edit moves only the segments whose anchors moved.  The spur is
  *  eased at both ends.  So a corridor leaves a node level and picks up
- *  its grade in between rather than kinking at the join. */
-/*  Station i: how far along the strip it is.  The altitude an end is
+ *  its grade in between rather than kinking at the join.
+ *
+ *  Station i: how far along the strip it is.  The altitude an end is
  *  pinned to, and the altitude a level meet under station i pins it to.
  *  A meet is a node of BOTH networks, so the line and the families are
  *  pinned to the same number there. */
@@ -530,6 +514,10 @@ void note_add(char *buf, size_t cap, size_t *n, const char *fmt, ...)
  *  it and not merely the stage that pushed the triangles. */
 static int loft_body(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, const RLoft *desc, const Piece *pc, int np, float total);
 
+/*  Loft one strip along the pieces.  The cross-sections come by arc
+ *  length.  Their width is the class's, scaled by the direction, which
+ *  is the snap view's compensation.  There is one quad per pair, each
+ *  with the painter's order of the tile under it. */
 int loft_at(const char *where, const char *who, RMesh *m, const RCity *c, uint8_t mask_bit, int comp, const RLoft *desc, const Piece *pc, int np, float total)
 {
     ShapeId sh;
@@ -596,18 +584,18 @@ static int loft_body(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, const
      *  surface and the curve overlay.  And the slab itself. */
     double tp = prof_now(), tq;
     if (!g_dev.no_smp_cache && loft_cached(&x) == 0)
-        net_prof_add(NET_PROF_CACHED, 1.0);
+        prof_add(PROF_CACHED, 1.0);
     else
     {
         if (loft_sample(&x) != 0)
             return -1;
         loft_keep(&x);
-        net_prof_add(NET_PROF_SAMPLED, 1.0);
+        prof_add(PROF_SAMPLED, 1.0);
     }
-    net_prof_add(NET_PROF_STATIONS, (double)x.ns);
-    tq = prof_now(), net_prof_add(NET_PROF_SAMPLE, tq - tp), tp = tq;
+    prof_add(PROF_STATIONS, (double)x.ns);
+    tq = prof_now(), prof_add(PROF_SAMPLE, tq - tp), tp = tq;
     loft_ground(&x);
-    tq = prof_now(), net_prof_add(NET_PROF_GROUND, tq - tp), tp = tq;
+    tq = prof_now(), prof_add(PROF_GROUND, tq - tp), tp = tq;
     /*  Every station full width until something narrows it: the buffer
      *  is static.  A slab's lane drop is not the only thing that writes
      *  them.  So a spur lofted after a slab must not inherit the slab's

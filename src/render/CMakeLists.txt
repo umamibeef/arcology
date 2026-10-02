@@ -6,32 +6,12 @@
 #
 #      cmake -B build && cmake --build build && ctest --test-dir build
 #
-cmake_minimum_required(VERSION 3.16)
-project(arcology
-        VERSION 0.1
-        DESCRIPTION "Arcology -- assets, camera, rasteriser, and the game"
-        LANGUAGES C CXX)
+#  This is a DIRECTORY of the one project the root declares, not a
+#  project of its own: the version, the language standards, the build
+#  type, ARC_CITIES, Python3 and enable_testing() are all settled there.
 
-#  C99 without compiler extensions.  This is a portability control, not a
-#  style preference: -std=c99 rather than -std=gnu99 means a POSIX-only call
-#  such as strdup or an include of <unistd.h> fails here, on the developer's
-#  machine, instead of on someone else's platform.
-set(CMAKE_C_STANDARD 99)
-set(CMAKE_C_STANDARD_REQUIRED ON)
-set(CMAKE_C_EXTENSIONS OFF)
-#  C++ is used only to host Dear ImGui (ui.cpp); everything else is C99.
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
-
-if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
-    set(CMAKE_BUILD_TYPE Release CACHE STRING "" FORCE)
-endif()
-set_property(GLOBAL PROPERTY USE_FOLDERS ON)
-
-set(ARC_ASSETS "${CMAKE_CURRENT_SOURCE_DIR}/../../assets"
+set(ARC_ASSETS "${CMAKE_SOURCE_DIR}/assets"
     CACHE PATH "Where artpack.py wrote the atlases")
-find_package(Python3 COMPONENTS Interpreter QUIET)
 
 # ---- warnings ------------------------------------------------------------
 #  Applied to our code only.  A silent integer conversion in a renderer is a
@@ -39,10 +19,27 @@ find_package(Python3 COMPONENTS Interpreter QUIET)
 add_library(arc_warnings INTERFACE)
 target_compile_options(arc_warnings INTERFACE
     $<$<C_COMPILER_ID:GNU,Clang,AppleClang>:
-        -Wall -Wextra -Wshadow -Wconversion -Wsign-compare -Wpointer-arith>
-    $<$<C_COMPILER_ID:MSVC>:/W4>)
+        -Wall -Wextra -Wshadow -Wconversion -Wsign-compare -Wpointer-arith
+        -ffp-contract=off>
+    $<$<C_COMPILER_ID:MSVC>:/W4 /fp:precise>)
+#  No fused multiply-add.  With contraction on, a function inlined into
+#  its caller rounds differently from the same function called across a
+#  translation unit, so moving a function between files moves the mesh
+#  by a few triangles.  The battery proves a refactor output-identical,
+#  and that proof means nothing while the compiler's inlining decides
+#  the bits.  Off, the arithmetic is the source's, wherever it is placed.
 if(MSVC)
     target_compile_definitions(arc_warnings INTERFACE _CRT_SECURE_NO_WARNINGS)
+endif()
+#  A warning here is a defect: a silent integer conversion is an
+#  off-by-one on somebody's screen.  Continuous integration says so by
+#  building with this on.  It is OFF by default, because a newer compiler
+#  turning a new warning on must not stop a person building the game.
+option(ARC_WERROR "Treat compiler warnings as errors" OFF)
+if(ARC_WERROR)
+    target_compile_options(arc_warnings INTERFACE
+        $<$<C_COMPILER_ID:GNU,Clang,AppleClang>:-Werror>
+        $<$<C_COMPILER_ID:MSVC>:/WX>)
 endif()
 
 # ---- vendored third party ------------------------------------------------
@@ -104,75 +101,98 @@ endif()
 #  time (a small download the first time) and built here with its SDL3 and
 #  SDL_GPU backends.  -DARC_IMGUI=OFF builds the game without a UI.
 option(ARC_IMGUI "Build the in-game UI with Dear ImGui" ON)
-if(SDL3_FOUND)
-    #  Logging: spdlog does the parts that are tedious to get right --
-    #  colour sinks that know about terminals and the Windows console,
-    #  a stderr/stdout split, levels from the environment, and locking.
-    #  log.h keeps a small C face over it so the C sources are plain.
-    include(FetchContent)
-    FetchContent_Declare(spdlog
-        GIT_REPOSITORY https://github.com/gabime/spdlog.git
-        GIT_TAG        v1.15.1
-        GIT_SHALLOW    TRUE)
-    set(SPDLOG_BUILD_EXAMPLE OFF CACHE BOOL "" FORCE)
-    set(SPDLOG_BUILD_TESTS   OFF CACHE BOOL "" FORCE)
-    set(SPDLOG_INSTALL       OFF CACHE BOOL "" FORCE)
-    FetchContent_MakeAvailable(spdlog)
+#  Logging: spdlog does the parts that are tedious to get right --
+#  colour sinks that know about terminals and the Windows console, a
+#  stderr/stdout split, levels from the environment, and locking.  log.h
+#  keeps a small C face over it so the C sources are plain.  It needs no
+#  window, so it is here rather than behind SDL3.
+include(FetchContent)
+FetchContent_Declare(spdlog
+    GIT_REPOSITORY https://github.com/gabime/spdlog.git
+    GIT_TAG        v1.15.1
+    GIT_SHALLOW    TRUE)
+set(SPDLOG_BUILD_EXAMPLE OFF CACHE BOOL "" FORCE)
+set(SPDLOG_BUILD_TESTS   OFF CACHE BOOL "" FORCE)
+set(SPDLOG_INSTALL       OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(spdlog)
 
-    add_executable(arcology
-        ../app/main.c                     # the dispatcher
-        ../app/app.c ../app/options.cpp ../app/modes.cpp ../app/paths.c ../app/uiglue.c
-        ../app/world.c ../app/clock.c ../app/area.c
-        prefs.c camera.c gpu/gpu.c gpu/frame.c adapt.c generated/shaders.c
-        ../util/log.cpp ../util/devopts.c ../util/fs.c ../audio/sound.c ../audio/music.c
-        mesh/mesh.c mesh/tile.c mesh/emit.c mesh/shapes.c mesh/check.c incr.c ../util/dump.c
-        ../script/script.c ../script/lint.c  # the scripting layer, or its stubs where Lua is off
-        mesh/shape.c
-        walk/walk.c walk/cursor.c walk/cell.c walk/walkway.c
-        mesh/fit.c mesh/surface.c mesh/loft.c mesh/piece.c
-        mesh/model.c
-        net/table.c net/lane.c net/station.c net/box.c net/meet.c net/band.c net/band_walk.c net/network.c net/drive.c geo.c build.c net/family.c net/spur.c net/spur_build.c net/shelf.c net/margin.c net/node.c net/cut.c net/strip.c
-        net/traffic.c net/report.c
-        atlas/dump.c soft/main.c)       # --atlas and --soft
-    #  arc_dev links arc_core PUBLIC, so naming both here would put the
-    #  archive on the link line twice.
-    target_link_libraries(arcology PRIVATE arc_render arc_dev
-        SDL3::SDL3 spdlog::spdlog arc_warnings)
-    #  Lua: the scripting layer.  The numbers the geometry is tuned with
-    #  and the rules it is drawn by -- which of a junction's mouths carry
-    #  a meet, how its arms are controlled, how tight a lip return
-    #  turns -- are reachable from a script that the running program
-    #  watches, so changing one is a file save rather than a compile.
-    #  Upstream ships no CMake, so the library's own sources are named
-    #  here; lua.c and luac.c carry mains of their own and are left out.
-    #  Built without the project's warning flags, as the other vendored
-    #  code is: they are other people's sources.
-    #  There is no switch for it.  The geometry, the decisions, the
-    #  families and the drive are all in the scripts, so a build without
-    #  them would draw the terrain and nothing else -- not a smaller
-    #  city, no city.
-    include(FetchContent)
-    FetchContent_Declare(lua
-        GIT_REPOSITORY https://github.com/lua/lua.git
-        GIT_TAG        v5.4.7
-        GIT_SHALLOW    TRUE)
-    FetchContent_MakeAvailable(lua)
-    set(ARC_LUA_SRC lapi lcode lctype ldebug ldo ldump lfunc lgc llex lmem
-        lobject lopcodes lparser lstate lstring ltable ltm lundump lvm lzio
-        lauxlib lbaselib lcorolib ldblib liolib lmathlib loadlib loslib
-        lstrlib ltablib lutf8lib linit)
-    list(TRANSFORM ARC_LUA_SRC PREPEND "${lua_SOURCE_DIR}/")
-    list(TRANSFORM ARC_LUA_SRC APPEND ".c")
-    add_library(arc_lua STATIC ${ARC_LUA_SRC})
-    target_include_directories(arc_lua SYSTEM PUBLIC ${lua_SOURCE_DIR})
-    if(APPLE)
-        target_compile_definitions(arc_lua PRIVATE LUA_USE_MACOSX)
-    elseif(UNIX)
-        target_compile_definitions(arc_lua PRIVATE LUA_USE_LINUX)
-    endif()
+#  ONE executable, built whatever is installed.  These are the sources
+#  that need no window: the dispatcher, the developer modes the checkers
+#  in tools/ drive, the log, the mesh, the network and the scripting
+#  layer.  The GAME is added below, where SDL3 was found.  There is no
+#  second list of these: a source named in one branch and forgotten in
+#  the other is how a branch nobody builds stops linking.
+add_executable(arcology
+    ../app/main.c                     # the dispatcher
+    ../app/modes.cpp
+    ../util/log.cpp ../util/devopts.c ../util/fs.c ../util/dump.c
+    adapt.c
+    mesh/mesh.c mesh/tile.c mesh/emit.c mesh/shapes.c mesh/check.c incr.c
+    ../script/script.c ../script/lint.c
+    mesh/shape.c
+    walk/walk.c walk/cursor.c net/cell.c net/walkway.c prof.c net/fits.c
+    mesh/fit.c mesh/surface.c mesh/loft.c mesh/piece.c
+    mesh/model.c
+    net/table.c net/lane.c net/station.c net/box.c net/meet.c net/band.c net/band_walk.c net/network.c net/drive.c geo.c build.c net/family.c net/spur.c net/spur_build.c net/shelf.c net/margin.c net/node.c net/cut.c net/strip.c
+    net/traffic.c net/report.c
+    atlas/dump.c soft/main.c)       # --atlas and --soft
+#  arc_dev links arc_core PUBLIC, so naming both here would put the
+#  archive on the link line twice.
+target_link_libraries(arcology PRIVATE arc_render arc_dev spdlog::spdlog arc_warnings)
+install(TARGETS arcology RUNTIME DESTINATION bin)
+#  Lua: the scripting layer.  The numbers the geometry is tuned with and
+#  the rules it is drawn by -- which of a junction's mouths carry a meet,
+#  how its arms are controlled, how tight a lip return turns -- are
+#  reachable from a script that the running program watches, so changing
+#  one is a file save rather than a compile.  Upstream ships no CMake, so
+#  the library's own sources are named here; lua.c and luac.c carry mains
+#  of their own and are left out.  Built without the project's warning
+#  flags, as the other vendored code is: they are other people's sources.
+#  There is no switch for it.  The geometry, the decisions, the families
+#  and the drive are all in the scripts, so a build without them would
+#  draw the terrain and nothing else -- not a smaller city, no city.  It
+#  needs no window either, so `--lua-lint` reads the whole layer whether
+#  SDL3 is installed or not.
+FetchContent_Declare(lua
+    GIT_REPOSITORY https://github.com/lua/lua.git
+    GIT_TAG        v5.4.7
+    GIT_SHALLOW    TRUE)
+FetchContent_MakeAvailable(lua)
+set(ARC_LUA_SRC lapi lcode lctype ldebug ldo ldump lfunc lgc llex lmem
+    lobject lopcodes lparser lstate lstring ltable ltm lundump lvm lzio
+    lauxlib lbaselib lcorolib ldblib liolib lmathlib loadlib loslib
+    lstrlib ltablib lutf8lib linit)
+list(TRANSFORM ARC_LUA_SRC PREPEND "${lua_SOURCE_DIR}/")
+list(TRANSFORM ARC_LUA_SRC APPEND ".c")
+add_library(arc_lua STATIC ${ARC_LUA_SRC})
+target_include_directories(arc_lua SYSTEM PUBLIC ${lua_SOURCE_DIR})
+if(APPLE)
+    target_compile_definitions(arc_lua PRIVATE LUA_USE_MACOSX)
+elseif(UNIX)
+    target_compile_definitions(arc_lua PRIVATE LUA_USE_LINUX)
+endif()
+#  The script layer.  api_object.c is the handle and the list of kinds;
+#  each obj_*.c holds the methods of the kinds it names, and api_tile.c
+#  one tile of the ground (src/script/obj.h).
+target_sources(arcology PRIVATE
+    ../script/api_tune.c ../script/api_rules.c ../script/api_world.c ../script/api_put.c ../script/api_model.c
+    ../script/api_object.c ../script/api_tile.c ../script/api_family.c ../script/api_data.c ../script/api_art.c
+    ../script/api_fit.c
+    ../script/obj_world.c ../script/obj_strip.c ../script/obj_path.c ../script/obj_node.c
+    ../script/obj_band.c ../script/obj_lane.c ../script/obj_ground.c)
+target_link_libraries(arcology PRIVATE arc_lua)
+
+# ---- the GAME, where SDL3 was found --------------------------------------
+#  A window, a GPU device, sound and the in-game UI.  Everything above is
+#  built either way; this is what a window adds.
+if(SDL3_FOUND)
     target_sources(arcology PRIVATE
-        ../script/api_tune.c ../script/api_rules.c ../script/api_world.c ../script/api_put.c ../script/api_model.c ../script/api_object.c ../script/api_tile.c ../script/api_family.c ../script/api_data.c ../script/api_fit.c)
-    target_link_libraries(arcology PRIVATE arc_lua)
+        ../app/app.c ../app/options.cpp ../app/paths.c ../app/uiglue.c
+        ../app/world.c ../app/clock.c ../app/area.c
+        ../app/prefs.c ../app/camera.c
+        gpu/gpu.c gpu/frame.c generated/shaders.c
+        ../audio/sound.c ../audio/music.c)
+    target_link_libraries(arcology PRIVATE SDL3::SDL3)
     if(ARC_IMGUI)
         include(FetchContent)
         FetchContent_Declare(imgui
@@ -214,15 +234,11 @@ if(SDL3_FOUND)
     else()
         target_sources(arcology PRIVATE ../ui/ui_none.c)
     endif()
-    install(TARGETS arcology RUNTIME DESTINATION bin)
 else()
-    #  No SDL3, so no game -- but the developer modes must still be
+    #  No SDL3, so no game -- but the developer modes are still
     #  reachable, because that is what the checkers in tools/ drive and
     #  what ctest runs.  app/stub.c stands in for the game and says why.
-    add_executable(arcology ../app/main.c ../app/modes.cpp ../app/stub.c atlas/dump.c
-                        soft/main.c ../util/devopts.c)
-    target_link_libraries(arcology PRIVATE arc_render arc_dev arc_warnings)
-    install(TARGETS arcology RUNTIME DESTINATION bin)
+    target_sources(arcology PRIVATE ../app/stub.c)
     message(STATUS "SDL3 not found: arcology is built without the game "
                    "(install SDL3, or configure with -DARC_FETCH_SDL3=ON)")
 endif()
@@ -240,7 +256,7 @@ if(Python3_FOUND)
 endif()
 
 # ---- tests ---------------------------------------------------------------
-enable_testing()
+#  Testing is enabled once, at the root.
 #  These two need no assets and no built binary: they read the tree.
 #  Registered outside the assets check so a clone without the game's art
 #  still enforces the seam and the projection.
@@ -256,29 +272,20 @@ add_test(NAME layers COMMAND ${Python3_EXECUTABLE}
 
 if(EXISTS "${ARC_ASSETS}/atlas.json")
     add_test(NAME atlas_loads COMMAND arcology --atlas "${ARC_ASSETS}")
-    #  No segment may be broken: a hard corner (the red node in show curves)
-    #  or a segment without geometry.  A ratchet against tools/corner_baseline.json
-    #  until the corpus is at zero.
-    add_test(NAME no_broken_segments COMMAND ${Python3_EXECUTABLE}
-             "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/corner_check.py" --binary $<TARGET_FILE:arcology>)
-    #  Nothing of a line may be laid under its own margin: a junction's
-    #  fill beneath the junction's own margin, or a strip's
-    #  way beneath its own, means the two were never made to meet.
-    #  A ratchet against tools/buried_baseline.json until the corpus is at
-    #  zero.
-    add_test(NAME no_buried_margin COMMAND ${Python3_EXECUTABLE}
-             "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/buried_check.py" --binary $<TARGET_FILE:arcology>)
-    #  A junction's outline must be a simple ring: no vertex where it
-    #  doubles back on itself, no two edges meet.  A spur's inward
-    #  side points OUT of the junction, so the margin offset from it
-    #  lands outside and the fill drawn inside the margin covers it.
-    #  Zero, on every city that ships with the repository.
-    foreach(city "atlanta" "toronto" "manhattan")
-        if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../cities/${city}.sc2")
-            add_test(NAME no_junction_spurs_${city}
-                     COMMAND arcology "${CMAKE_CURRENT_SOURCE_DIR}/../../cities/${city}.sc2" --mute --mesh-check)
-        endif()
-    endforeach()
+    #  THE BATTERY: the renderer's exact check, against tools/battery_ref.json.
+    #  The gate is the eight views and Atlanta's mesh check, about a
+    #  minute, and is what a session runs between edits.  The rest is
+    #  the mesh check over eight cities, the corner sweep over every city
+    #  in cities/, and the moving world hashed.  A value that differs
+    #  from the reference fails, whichever way it moved; `--update`
+    #  records an accepted change, and the diff of the reference file is
+    #  the record of it.
+    add_test(NAME battery_gate COMMAND ${Python3_EXECUTABLE}
+             "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/battery.py" --gate --binary $<TARGET_FILE:arcology>)
+    set_tests_properties(battery_gate PROPERTIES TIMEOUT 900)
+    add_test(NAME battery_full COMMAND ${Python3_EXECUTABLE}
+             "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/battery.py" --only mesh,corners,traffic --binary $<TARGET_FILE:arcology>)
+    set_tests_properties(battery_full PROPERTIES TIMEOUT 1800)
     #  Every script the repository ships reads clean.  The linter knows
     #  the vocabulary, so a setting or a rule that is not one -- which is
     #  silent at run time and costs an iteration to notice -- is a fault
@@ -321,16 +328,6 @@ if(EXISTS "${ARC_ASSETS}/atlas.json")
                  --binary $<TARGET_FILE:arcology>)
         set_tests_properties(interchange PROPERTIES TIMEOUT 900)
     endif()
-    #  The moving world, hashed.  A headless frame does not draw the
-    #  movers, so the pixel battery says nothing about the traffic at
-    #  all: this advances the world and hashes what moved and what was
-    #  drawn, against a recorded reference.
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../cities/atlanta.sc2")
-        add_test(NAME moving_world COMMAND ${Python3_EXECUTABLE}
-                 "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/traffic_check.py"
-                 --binary $<TARGET_FILE:arcology>)
-        set_tests_properties(moving_world PROPERTIES TIMEOUT 900)
-    endif()
     #  Each interpretation is swappable: the sweep of a line through its
     #  corridor, an on-spur's climb, the pattern an intersection draws
     #  and what a line carries, each replaced by a DIFFERENT ALGORITHM in
@@ -357,12 +354,6 @@ if(EXISTS "${ARC_ASSETS}/atlas.json")
     #  carries the numbers as they stand and fails when one RISES,
     #  because it is not at zero and a check that fails on the state of
     #  the world is a check somebody turns off.
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../cities/atlanta.sc2")
-        add_test(NAME no_collisions COMMAND ${Python3_EXECUTABLE}
-                 "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/collide_check.py"
-                 --binary $<TARGET_FILE:arcology>)
-        set_tests_properties(no_collisions PROPERTIES TIMEOUT 900)
-    endif()
     #  The loft is a service: a path the SCRIPT invented, swept along a
     #  cross-section the script wrote out as numbers, read back out of
     #  the mesh -- the face count, the height, the shape and the ground
@@ -397,7 +388,6 @@ if(EXISTS "${ARC_ASSETS}/atlas.json")
     #  never used, memory that leaks on one branch.  The leak check runs
     #  the program to its end and counts what it could no longer reach,
     #  discounting the window server's own, which are not ours.
-    find_package(Python3 COMPONENTS Interpreter QUIET)
     if(Python3_FOUND)
         add_test(NAME static_analysis COMMAND ${Python3_EXECUTABLE}
                  "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/static_check.py")
@@ -421,12 +411,6 @@ if(EXISTS "${ARC_ASSETS}/atlas.json")
     #  A crosswalk is painted between two margins.  Every meet the
     #  network marks must therefore reach a margin at both of its ends,
     #  and the same run fails outright on one that does not.
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../cities/atlanta.sc2")
-        add_test(NAME meets_reach_a_margin
-                 COMMAND arcology "${CMAKE_CURRENT_SOURCE_DIR}/../../cities/atlanta.sc2" --mute --mesh-check)
-        set_tests_properties(meets_reach_a_margin PROPERTIES
-            PASS_REGULAR_EXPRESSION "0 reaching no margin")
-    endif()
     set_tests_properties(atlas_loads PROPERTIES
         PASS_REGULAR_EXPRESSION "1448 tiles across 3 levels")
 endif()
@@ -442,8 +426,7 @@ endif()
 #
 #  tools/render_diff.py and tools/pixel_diff.py go further -- blit list and
 #  pixels against the original renderer -- but they are slow enough to be
-#  run by hand rather than from ctest.
-set(ARC_CITIES "" CACHE PATH "Folder holding the shipped city files")
+#  run by hand rather than from ctest.  ARC_CITIES is the root's.
 if(Python3_FOUND AND EXISTS "${ARC_ASSETS}/atlas.json")
     add_test(NAME blit_matches_game
              COMMAND ${Python3_EXECUTABLE}
@@ -477,3 +460,29 @@ if(TARGET arcology AND ARC_CITIES AND EXISTS "${ARC_ASSETS}/atlas.json")
 endif()
 
 #  --atlas and --soft install with the one binary; nothing extra here.
+
+#  THE TIERS.  `ctest -L lint` needs no build and runs in a second;
+#  `ctest -L gate` is one build of Atlanta and about a minute, the thing
+#  a session runs between edits; `ctest -L full` is everything that
+#  needs only the repository; `ctest -L oracle` needs the game's own
+#  files.  A test carries every tier it belongs to.
+foreach(t seam projection layers)
+    if(TEST ${t})
+        set_tests_properties(${t} PROPERTIES LABELS "lint;gate;full")
+    endif()
+endforeach()
+foreach(t atlas_loads lua_lint battery_gate lua_compose fit_service map_read music_check invariants call_up)
+    if(TEST ${t})
+        set_tests_properties(${t} PROPERTIES LABELS "gate;full")
+    endif()
+endforeach()
+foreach(t battery_full incremental_rebuild lua_rules interchange swappable network_discovery loft_service static_analysis no_leaks)
+    if(TEST ${t})
+        set_tests_properties(${t} PROPERTIES LABELS "full")
+    endif()
+endforeach()
+foreach(t blit_matches_game mesh_watertight_Bayview mesh_watertight_Cape_Wells mesh_watertight_Egypt_Falls mesh_watertight_Felsenschloss)
+    if(TEST ${t})
+        set_tests_properties(${t} PROPERTIES LABELS "oracle")
+    endif()
+endforeach()

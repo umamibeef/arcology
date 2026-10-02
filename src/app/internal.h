@@ -56,6 +56,11 @@ typedef struct
     int32_t  anim_a, anim_b;
     int      dirty;      /* the city changed: sweep again          */
     int      mesh_dirty; /* the terrain changed: rebuild the mesh  */
+    /*  The world on the screen is INCOMPLETE: a build faulted and what
+     *  it had made was kept.  The movers stand still while it holds.
+     *  The lane model they read is half made.  The build is not tried
+     *  again until the scripts are. */
+    int      world_faulted;
     /*  A reading of the scripts asked for a rebuild, and the frame that
      *  announces it has not been drawn yet.  The build blocks for about
      *  a second and a half.  The reading itself takes about four
@@ -117,6 +122,8 @@ typedef struct
 
 static const char *const GRAPH_NAMES[RUI_N_GRAPH] = {
     "City size", "Residents", "Commerce", "Industry", "Traffic", "Pollution", "Land value", "Crime", "Power shortfall", "Water shortfall", "Health", "Education", "Unemployment", "National GNP", "National population", "Federal rate"};
+/*  The budget block's departments as sim.h names them.  The first three
+ *  slots the reconstruction has not named. */
 static const char *const DEPT_NAMES[RUI_N_DEPT] = {
     NULL, NULL, NULL, "Ordinances", "Bonds", "Police", "Fire", "Health", "Schools", "Colleges", "Roads", "Bands", "Subways", "Rail", "Transit", "Power"};
 

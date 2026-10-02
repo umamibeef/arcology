@@ -27,6 +27,7 @@
 #include "script.h"
 
 #include "pipeline.h"
+#include "mesh/fit.h"
 
 /*  The cut itself: the chain handed to arc.rules.pieces as the drive
  *  hands it every other, and the pieces it laid taken back.  This is the
@@ -64,8 +65,6 @@ static V2 point_at(lua_State *L, int t, int i)
     return p;
 }
 
-/*  A per-point number: the sequence's own entry, the one number the
- *  argument is, or `def` where there is neither. */
 /*  A per-point number: the sequence's own entry, the one number the
  *  argument is, or nought where there is neither. */
 static float num_at(lua_State *L, int t, int i)

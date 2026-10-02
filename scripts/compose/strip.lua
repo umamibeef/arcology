@@ -44,6 +44,11 @@ local function station(s, i)
             wl = wl, wr = wr, xd = xd, zorig = zorig}
 end
 
+--  OVER 150 LINES, and one page on purpose: it is ONE SWEEP along one
+--  strip.  Each station is drawn from the station before it, so the
+--  loop carries the whole of the strip's state.  Cut in two, both
+--  halves would walk the same stations and the second would have to be
+--  handed everything the first read.
 arc.rules.strip = function (s)
     local d = s:info()
     local n = s:count()

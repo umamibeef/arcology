@@ -64,7 +64,7 @@ typedef struct
     int32_t clut;  /* the resource the run came from  */
 } RAnim;
 
-typedef struct
+typedef struct RAtlas
 {
     RAtlasLevel level[R_MAX_LEVELS]; /* ordered 8, 16, 32            */
     int32_t     n_levels;
@@ -86,9 +86,6 @@ void atlas_free(RAtlas *a);
 const RAtlasLevel *atlas_level_for_scale(const RAtlas *a, float scale);
 const RTile       *atlas_tile(const RAtlasLevel *l, int32_t shap_id);
 
-/*  Re-resolve `indices` into `rgba` through the current palette.  Cheap
- *  enough per frame for the handful of palette-cycled tiles, which is how
- *  water shimmer and a day/night tint come for free. */
 /*  Rotate the animated runs to `phase`.  Phase 0 restores the art
  *  exactly as the atlas was built.  Rotating the palette is all the game
  *  does.  No pixel is touched.  So it is one memcpy plus a few dozen
@@ -103,6 +100,9 @@ void atlas_animate(RAtlas *a, int32_t phase);
  *  needed. */
 void atlas_animate_runs(RAtlas *a, int32_t steps_a, int32_t steps_b);
 
+/*  Re-resolve `indices` into `rgba` through the current palette.  Cheap
+ *  enough per frame for the handful of palette-cycled tiles, which is how
+ *  water shimmer and a day and night tint come for free. */
 void atlas_resolve(RAtlas *a, RAtlasLevel *l);
 void atlas_resolve_rect(RAtlas *a, RAtlasLevel *l, int32_t x, int32_t y,
                           int32_t w, int32_t h);

@@ -7,12 +7,13 @@
 #define ARC_NET_MEET_H
 
 #include "net/types.h"
+#include "script.h"
 
 /*  A LEVEL MEET, in three: the ask gathers it and opens its shape, the
  *  script measures it.  The draw lays the panel and the approaches.
  *  Every measurement follows from the angle the line and the line cross
  *  at.  This is why the script sits between the two. */
-int  build_lap(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit, int32_t col, int32_t row, int second);
+int  build_lap(RMesh *m, const RCity *c, uint8_t mask_bit, int32_t col, int32_t row, int second);
 void net_lap_ask(int32_t *col, int32_t *row, float *sine, float *line, float *thread);
 void net_lap_frame(const ScriptLap *fr);
 const LapFan *net_lap_panel(void);
@@ -28,7 +29,7 @@ int  net_threads_ask(void);
 void net_threads_info(int *col, int *row, int *links);
 int  net_thread_want(int from, int to, float raise);
 int  net_threads_done(void);
-/* ---- thread.c: the thread family */
+/* ---- net/meet.c: the thread family */
 int seg_measure_laps(Seg *x);
 int on_lap_panel(const RCity *c, int32_t tc, int32_t tr, float x, float y);
 

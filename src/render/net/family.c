@@ -24,6 +24,8 @@
 #include "net/net.h"
 #include "log.h"
 #include "script.h"
+#include "mesh/loft.h"
+#include "net/walkway.h"
 
 const char *const NET_HOOK_NAME[NET_HOOKS] = {
     "control", "record", "flies", "taper", "profile", "works", "traffic", "furniture",
@@ -201,6 +203,21 @@ static int which(const char *name, const char *const *list, int n)
     return -1;
 }
 
+/*  THE TILE FAMILIES.  The place a name sits at IS its code.  This is
+ *  the one list of them.  The declaration reading and the piece table
+ *  both ask here, so neither can file a byte at the other's slot. */
+static const char *const TILE_FAMILIES[NET_TILE_FAMS] = {"power", "line", "thread"};
+
+int net_tile_family(const char *name)
+{
+    return which(name, TILE_FAMILIES, NET_TILE_FAMS);
+}
+
+const char *net_tile_family_name(int code)
+{
+    return code >= 0 && code < NET_TILE_FAMS ? TILE_FAMILIES[code] : NULL;
+}
+
 static int decl_fault(const NetFamilyDecl *d, const char *what, const char *name)
 {
     R_ERR("net", "family %s: no %s named %s", d->name ? d->name : "?", what, name ? name : "nothing");
@@ -213,7 +230,6 @@ static int decl_fault(const NetFamilyDecl *d, const char *what, const char *name
  *  check its names and must leave the registry alone. */
 static int family_read(const NetFamilyDecl *d, NetFamily *out, int *rule, int store)
 {
-    static const char *const TILES[3] = {"power", "line", "thread"}; /* Family's own order: the place a name sits at IS the code */
     static const char *const LOFTS[4] = {"line", "thread", "slab", "spur"};
     static const char *const ENDS[3]  = {"open", "cap", "reverse"};
     NetFamily                x;
@@ -221,7 +237,7 @@ static int family_read(const NetFamilyDecl *d, NetFamily *out, int *rule, int st
     hooks_ready();
     if (!d->name || !*d->name)
         return decl_fault(d, "name", NULL);
-    if ((tiles = which(d->tiles, TILES, 3)) < 0)
+    if ((tiles = net_tile_family(d->tiles)) < 0)
         return decl_fault(d, "tile family", d->tiles);
     if ((loft = which(d->loft, LOFTS, 4)) < 0)
         return decl_fault(d, "loft kind", d->loft);
@@ -262,15 +278,11 @@ static int family_read(const NetFamilyDecl *d, NetFamily *out, int *rule, int st
     x.record_class = d->record_class;
     if (d->graph)
     {
-        if (strcmp(d->graph, "line") == 0)
-            x.graph = 0;
-        else if (strcmp(d->graph, "thread") == 0)
-            x.graph = 1;
-        else
-        {
-            R_ERR("net", "family %s: no graph is called %s", d->name, d->graph);
-            return -1;
-        }
+        static const char *const GRAPHS[2] = {"line", "thread"};
+        int                      g         = which(d->graph, GRAPHS, 2);
+        if (g < 0)
+            return decl_fault(d, "graph", d->graph);
+        x.graph = g;
     }
     x.lane_paint        = d->lane_paint;
     x.free_reach        = d->free_reach;
@@ -354,17 +366,26 @@ int net_family_define(const NetFamilyDecl *d)
         if (d->walk >= net_n_walked)
             net_n_walked = d->walk + 1;
     }
-    /*  The four the pipeline still reaches for by name.  A slab's own
-     *  stages are the band's wherever a band is lofted rather than a
-     *  tile family walked. */
-    if (strcmp(x.name, "line") == 0)
-        net_line = &s_fam[at];
-    else if (strcmp(x.name, "thread") == 0)
-        net_thread = &s_fam[at];
-    else if (strcmp(x.name, "band") == 0)
-        net_band = &s_fam[at];
-    else if (strcmp(x.name, "power") == 0)
-        net_power = &s_fam[at];
+    /*  The four the pipeline still reaches for by name, written once.
+     *  These are FAMILY names, not the tile-family slots above.  A band
+     *  is one of these and is no slot.  A slab's own stages are the
+     *  band's wherever a band is lofted, rather than a tile family's. */
+    {
+        static const struct
+        {
+            const char       *name;
+            const NetFamily **at;
+        } KNOWN[] = {
+            {"line",   &net_line  },
+            {"thread", &net_thread},
+            {"band",   &net_band  },
+            {"power",  &net_power },
+        };
+        size_t k;
+        for (k = 0; k < sizeof KNOWN / sizeof KNOWN[0]; ++k)
+            if (strcmp(x.name, KNOWN[k].name) == 0)
+                *KNOWN[k].at = &s_fam[at];
+    }
     return 0;
 }
 
@@ -449,9 +470,9 @@ int net_family_stage_primitive(const NetFamily *fam, NetHook h)
 }
 
 /*  The half of a stage that runs after the drive has answered what the
- *  first half asked for.  A stage answered in one piece has none. */
-/*  And the margin the rule laid, filed in the walk network so a
- *  junction's corners join it.  A family that named no margin rule has
+ *  first half asked for.  A stage answered in one piece has none.  The
+ *  record's half files the margin the rule laid, in the walk network so
+ *  a junction's corners join it.  A family that named no margin rule has
  *  none to file. */
 int net_family_record_done(const NetFamily *fam, Loft *x)
 {
@@ -477,10 +498,6 @@ const char *net_family_stage_rule_after(const NetFamily *fam, NetHook h)
     return h >= 0 && h < NET_HOOKS ? fam->ask_after[h] : NULL;
 }
 
-/*  The half of the box that runs BEFORE the drive cuts: a thread
- *  junction's threads are paths, and they are queued like every other. */
-/*  And the half of it that runs after the drive has composed what the
- *  first half gathered.  A family whose box is one piece has none. */
 /*  Whether a family files its strips without a stage of its own. */
 int net_family_graphed(const NetFamily *fam)
 {

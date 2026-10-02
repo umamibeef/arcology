@@ -1,9 +1,7 @@
 """Checks that hold against the city data, not against another renderer.
 
-Two earlier tests compared this renderer against another renderer of ours
--- first tools/render.py, then a Python twin -- and called agreement
-success.  Both agreed exactly while both were wrong.  A test that compares
-two renderers can only find disagreement.
+A test that compares two renderers of ours can only find disagreement:
+two that agree exactly can both be wrong.
 
 These check the renderer against what is in the city file.  For checks
 against the GAME, see tools/render_diff.py (blit list), tools/pixel_diff.py
@@ -83,9 +81,9 @@ def check(city_path, assets, png_rgb=None):
     if miss:
         bad.append("XBLD ids with no art: %s" % miss[:8])
 
-    # 3. nothing unzoned is ever discarded.  This is the one that would
-    #    have caught the original bug: roads and trees carry corner nibble
-    #    0, and the old gate threw every one of them away.
+    # 3. nothing unzoned is ever discarded.  Roads and trees carry corner
+    #    nibble 0, and a gate keyed on the nibble throws every one of them
+    #    away.
     dropped_unzoned = sum(1 for i in range(len(XB))
                           if XB[i] and XB[i] < 0x70 and (XZ[i] & 0xF0) == 0 and not draws_here(XZ[i], XB[i], mask))
     if dropped_unzoned:

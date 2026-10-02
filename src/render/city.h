@@ -18,11 +18,14 @@
 
 /*  Altitude, out of ALTM.  The word holds two heights: the land in bits
  *  0 to 4 and the water table in bits 5 to 9.  Which one a tile stands
- *  at is XTER's business.  Below 0x10 it is dry and reads the land, at
- *  or above it the surface is water and reads the table.  This was
- *  written out three times: in the sweep, in the mesh's tile code and in
- *  the app's centering tool.  Each time it was raw shifts and masks.
- *  The layout belongs next to the type it decodes. */
+ *  at is XTER's business.  Below 0x10 a tile is dry and reads the land.
+ *  At or above it the surface is water and reads the table.
+ *
+ *  That split is the SAVE FORMAT'S own.  It is written here beside the
+ *  type it decodes rather than pushed down from a script.  The script's
+ *  own arc.bytes("water_tiles") names the same boundary for the ground
+ *  the mesh draws.  The two say one thing about the format, not two
+ *  things about the world. */
 static inline int rcity_alt_ground(unsigned altm)
 {
     return (int)(altm & 0x1Fu);
@@ -74,8 +77,9 @@ typedef struct
     char    err[192];
 } RCity;
 
-/*  Read a .SC2 file.  Returns 0, or -1 with a reason in c->err.  `c` is
- *  caller-allocated.  It is about 156 KB, so allocate it, do not put it
+/*  The view read straight from a city file, through the simulation's own
+ *  reader (adapt.c).  Answers 0, or -1 with a reason in `err`.  `c` is
+ *  the caller's.  It is about 156 KB, so allocate it rather than put it
  *  on the stack. */
 int rcity_load(RCity *c, const char *path);
 

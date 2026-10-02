@@ -94,7 +94,7 @@ void sim_economy(City *c)
      *  number everything turns on is the second indicator as a
      *  percentage of the first.  Below 45 the nation is in a slump and
      *  above 75 it is booming, with two bands in between. */
-    if ((uint16_t)Random() % 10 == 0) /* $34F4C */
+    if ((uint16_t)Random(c) % 10 == 0) /* $34F4C */
     {
         float   top = x2z_sgl(z2x_i32(c->misc[MISC_NAT_INDEX2]));
         float   bot = x2z_sgl(z2x_i32(c->misc[MISC_NAT_INDEX] + 1));
@@ -107,23 +107,23 @@ void sim_economy(City *c)
         pct    = z2x_sgl(x2z_sgl(pct));      /* $34FDC, $34FEA */
         health = ext_to_i32(pct);            /* $34FF4 truncates */
 
-        if ((uint16_t)Random() % 5 < 2) /* $3501C */
+        if ((uint16_t)Random(c) % 5 < 2) /* $3501C */
         {
             /*  Two rolls against a window that widens as the mood
              *  counter grows, so a settled nation changes its mind less
              *  often than a jumpy one. */
             lim = 25 * (int16_t)c->misc[MISC_NAT_MOOD]; /* $35022 */
-            if (lim > 0 && (int32_t)((uint16_t)Random() % (uint16_t)lim) < health)
+            if (lim > 0 && (int32_t)((uint16_t)Random(c) % (uint16_t)lim) < health)
                 c->misc[MISC_NAT_MOOD]++;               /* $35044 */
             lim = 25 * (int16_t)c->misc[MISC_NAT_MOOD]; /* $35058 */
-            if (lim > 0 && (int32_t)((uint16_t)Random() % (uint16_t)lim) > health)
+            if (lim > 0 && (int32_t)((uint16_t)Random(c) % (uint16_t)lim) > health)
             {
                 c->misc[MISC_NAT_MOOD]--; /* $3507A */
                 if (c->misc[MISC_NAT_MOOD] == 0)
                     c->misc[MISC_NAT_MOOD] = 1;
             }
         }
-        if ((uint16_t)Random() % 3 == 0) /* $350AC */
+        if ((uint16_t)Random(c) % 3 == 0) /* $350AC */
         {
             int cyc = health < 0x2D ? 0 : health < 0x3C ? 1
                                       : health < 0x4B   ? 2
@@ -146,7 +146,7 @@ void sim_economy(City *c)
      *
      *  $350F0..$35460: four more indicators in the block at A5+0x1ECE,
      *  each grown the same way but at a rate jittered by the dice:
-     *  (Random() % 3) added to the national cycle.  An indicator whose
+     *  (Random(c) % 3) added to the national cycle.  An indicator whose
      *  step rounds to nothing still creeps up half the time.  This is
      *  what stops a small one from being stuck at its value for ever. */
     {
@@ -162,14 +162,14 @@ void sim_economy(City *c)
             if (v == 0)
                 continue; /* $350F8 */
 
-            jv    = x2z_sgl(z2x_i32(v));                                                  /* $3512C, via comp64 */
-            jrate = (int32_t)((uint16_t)Random() % 3) + (int16_t)c->misc[MISC_NAT_CYCLE]; /* $35146 */
-            jr    = x2z_sgl(z2x_i32(jrate));                                              /* $35164 */
-            jacc  = z2x_sgl(jr);                                                          /* $35180 */
-            jacc  = ext_mul(jacc, z2x_sgl(jv));                                           /* $3518E */
-            jacc  = ext_div(jacc, twelve_hundred);                                        /* $3519C */
-            jacc  = z2x_sgl(x2z_sgl(jacc));                                               /* $351AA then $351B8 */
-            jstep = ext_to_i32(jacc);                                                     /* $351C2 truncates */
+            jv    = x2z_sgl(z2x_i32(v));                                                   /* $3512C, via comp64 */
+            jrate = (int32_t)((uint16_t)Random(c) % 3) + (int16_t)c->misc[MISC_NAT_CYCLE]; /* $35146 */
+            jr    = x2z_sgl(z2x_i32(jrate));                                               /* $35164 */
+            jacc  = z2x_sgl(jr);                                                           /* $35180 */
+            jacc  = ext_mul(jacc, z2x_sgl(jv));                                            /* $3518E */
+            jacc  = ext_div(jacc, twelve_hundred);                                         /* $3519C */
+            jacc  = z2x_sgl(x2z_sgl(jacc));                                                /* $351AA then $351B8 */
+            jstep = ext_to_i32(jacc);                                                      /* $351C2 truncates */
 
             if (v > 0x4C4B40)
                 *slot -= jstep; /* $351EA */
@@ -177,7 +177,7 @@ void sim_economy(City *c)
                 *slot += jstep; /* $351FA */
 
             if (jstep == 0)
-                *slot += (Random() & 1); /* $35200 */
+                *slot += (Random(c) & 1); /* $35200 */
 
             /*  $3521C: then the partner series at A5+0x1ECA moves too,
              *  at a rate set by how the two stand against each other.
@@ -202,7 +202,7 @@ void sim_economy(City *c)
 
                 /*  $352FC: the nation's rate for this cycle, less how
                  *  excitable it is, less the band, plus a die. */
-                rate2 = (int32_t)((uint16_t)Random() % 5) + (NAT_RATE_TABLE[(int16_t)c->misc[MISC_NAT_CYCLE] & 0x0F] - (int16_t)c->misc[MISC_NAT_MOOD]) - band;
+                rate2 = (int32_t)((uint16_t)Random(c) % 5) + (NAT_RATE_TABLE[(int16_t)c->misc[MISC_NAT_CYCLE] & 0x0F] - (int16_t)c->misc[MISC_NAT_MOOD]) - band;
 
                 acc2 = z2x_sgl(x2z_sgl(z2x_i32(rate2)));            /* $3533C */
                 acc2 = ext_mul(acc2, z2x_sgl(x2z_sgl(z2x_i32(m)))); /* $353AC */
@@ -229,9 +229,9 @@ void sim_economy(City *c)
      *  fewer number a month and every later roll is somebody else's.
      *  Both multipliers are doubles, not singles: $354AE and $354FC pass
      *  format 0x0800 rather than 0x1000. */
-    if ((Random() & 0x3F) == 0)
+    if ((Random(c) & 0x3F) == 0)
     {
-        const int i    = (int)(Random() & 3); /* $35474 */
+        const int i    = (int)(Random(c) & 3); /* $35474 */
         int32_t  *slot = &c->misc[MISC_IND4_BASE + 4 * i];
         int32_t  *mate = &c->misc[MISC_IND4_B + 4 * i];
 
@@ -279,10 +279,10 @@ void sim_economy(City *c)
         for (k = 0; k < 11; k++)
         {
             int16_t *lvl = &c->industry_level[k];
-            int32_t  acc = 3 * (int32_t)*lvl;                                                          /* $35610 */
-            int32_t  r   = (int32_t)game_rand127() + game_rand127() + game_rand127() + game_rand127(); /* $35626.. */
-            acc += (c->industry_mix[k] * r) / 256;                                                     /* $3565E, $35666 */
-            *lvl = (int16_t)(acc / 4);                                                                 /* $35674, $3568C */
+            int32_t  acc = 3 * (int32_t)*lvl;                                                              /* $35610 */
+            int32_t  r   = (int32_t)game_rand127(c) + game_rand127(c) + game_rand127(c) + game_rand127(c); /* $35626.. */
+            acc += (c->industry_mix[k] * r) / 256;                                                         /* $3565E, $35666 */
+            *lvl = (int16_t)(acc / 4);                                                                     /* $35674, $3568C */
             /*  $356A4: the working copy is taken unconditionally... */
             c->industry_scaled[k] = *lvl;
 
@@ -368,7 +368,7 @@ void sim_economy(City *c)
                 int32_t  share = (int32_t)((uint32_t)(surplus * *w) / (uint32_t)workers_total);
                 int32_t  whole = share / 100;
                 *w -= whole;
-                if ((int32_t)((uint16_t)Random() % 100) < share - whole * 100)
+                if ((int32_t)((uint16_t)Random(c) % 100) < share - whole * 100)
                     (*w)--; /* $35BFC */
             }
         }
@@ -384,7 +384,7 @@ void sim_economy(City *c)
                 share = (int32_t)((uint32_t)(deficit * c->industry_scaled[k]) / (uint32_t)unmet);
                 whole = share / 100;
                 *w += whole;
-                if ((int32_t)((uint16_t)Random() % 100) < share - whole * 100)
+                if ((int32_t)((uint16_t)Random(c) % 100) < share - whole * 100)
                     (*w)++; /* $35CA0 */
             }
         }
@@ -524,7 +524,7 @@ void sim_economy(City *c)
             rem   = (int32_t)share - dead * 100;          /* $35F12 */
             /*  the leftover hundredth of a person is settled by a die,
              *  the same trick the labor market uses */
-            if ((int32_t)((uint16_t)Random() % 100) < rem)
+            if ((int32_t)((uint16_t)Random(c) % 100) < rem)
                 dead++; /* $35F32 */
             if ((uint32_t)dead > pool)
                 dead = (int32_t)pool; /* $35F38 */
@@ -579,7 +579,7 @@ void sim_economy(City *c)
 
             up  = pool / 60u;      /* $36004 */
             rem = pool - up * 60u; /* $36018 */
-            if ((uint32_t)((uint16_t)Random() % 60) < rem)
+            if ((uint32_t)((uint16_t)Random(c) % 60) < rem)
                 up++; /* $36038 */
             if (up > pool)
                 up = pool; /* $3603E */
@@ -640,7 +640,7 @@ void sim_economy(City *c)
              *  the effect is that the die at $3617E almost always fires
              *  and births round up.  Transcribed as written. */
             int32_t rem = fertile - (int32_t)poll_per_head * 300; /* $36166 */
-            if ((int32_t)((uint16_t)Random() % 300) < rem)
+            if ((int32_t)((uint16_t)Random(c) % 300) < rem)
                 born++; /* $36186 */
 
             if (born != 0) /* $3618A */
@@ -729,7 +729,7 @@ void sim_economy(City *c)
                     /*  the Random is drawn ONLY when the share rounds to
                      *  zero, so it must stay inside this test or the
                      *  whole stream shifts */
-                    if (go == 0 && (Random() & 3) == 0)
+                    if (go == 0 && (Random(c) & 3) == 0)
                         go = 1; /* $3640C */
                     if ((uint32_t)go > (uint32_t)pool)
                         go = pool; /* $36412 */

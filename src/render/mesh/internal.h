@@ -113,9 +113,9 @@ typedef struct
 /*  One tile's ground and one tile's zone, GATHERED for the script that
  *  composes them.  0 where this build wants no such tile.  Neither draws
  *  anything and neither opens a shape: both are the script's. */
+void mesh_pass_begin(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel *l, int underground, int32_t dump_r, int32_t dump_c);
 int mesh_ground_fan(int32_t col, int32_t row, TileFan *out);
 int mesh_tint_fan(int32_t col, int32_t row, TileFan *out);
-int mesh_world_nets(WorldFan *w, int what);     /* 0 the lane model, 1 the networks, 2 the bands */
 
 extern const int     EDGE_A[4];
 extern const int     EDGE_B[4];
@@ -128,8 +128,6 @@ extern float         s_h[GRID * GRID];
 extern float         s_k[GRID * GRID];
 extern float         s_b[GRID * GRID];
 extern int           s_pass;
-/*  One pass of a build composed: the body build.c runs twice. */
-int mesh_build_pass(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel *l, int underground, int rotated, int lines);
 
 typedef enum
 {
@@ -176,7 +174,6 @@ Kind    tile_top(const RCity *c, int32_t col, int32_t row, uint8_t mask_bit, flo
 int     water_top(const RCity *c, int32_t idx, Kind k);
 float   tile_order(const RCity *c, int32_t col, int32_t row, uint8_t mask_bit);
 void    build_field(const RCity *c);
-void    mesh_field(void); /* the field, and the plan dump over it: the DRIVE says when */
 /*  An argument a function will read and never test.  The compiler warns
  *  on a null passed to one, and the analyser stops asking whether the
  *  body should have tested it.  A face's color is the standing case.

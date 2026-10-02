@@ -39,12 +39,12 @@ The whole 25-phase monthly clock runs, and it runs *exactly*: over six shipped c
 | scalars | **5760 / 5760** |
 | random draws | **6 / 6** cities identical, draw for draw |
 
-Across all 84 readable cities, the six data layers -- pollution, land value, density, police, fire and crime -- match on
-**564821 of 564821** live cells. All fourteen disasters reproduce tile for tile, and the year-end pass over every
+Across every readable city in the collection, the six data layers -- pollution, land value, density, police, fire and
+crime -- match on every live cell. All fourteen disasters reproduce tile for tile, and the year-end pass over every
 special building on the map -- power plants ageing toward failure, the prisons that set the police radius, the
-arcologies -- is exact on **894 of 894** records.
+arcologies -- is exact on every record. The figures, and what each one proves, are in `docs/sc2k-report.rst`.
 
-"Draw for draw" is the standard that matters. The simulation consumes seven different random generators, and reproducing
+"Draw for draw" is the standard that matters. The simulation consumes three random generators, and reproducing
 the *sequence* of draws means the reconstruction is taking the same branches as the original, not merely arriving at a
 similar answer.
 
@@ -56,9 +56,11 @@ cmake --build build
 ./build/arcology
 ```
 
-SDL3 is found if installed, or fetched with `-DARC_FETCH_SDL3=ON`. Dear ImGui and spdlog are fetched at configure time.
+SDL3 is found if installed, or fetched with `-DARC_FETCH_SDL3=ON`. Dear ImGui is fetched at configure time, and so are spdlog and Lua.
 
-To run the verification suite you need your own copy of the game:
+Without SDL3 the same binary is built without the game in it: the developer modes still work, which is what the checkers in `tools/` drive. `-DARC_WERROR=ON` makes every compiler warning an error, as continuous integration builds it.
+
+To run the verification suite you need your own copy of the game. `ARC_CITIES` is the one name it is read by: the build takes it, and so do the tools and the program.
 
 ```
 cmake -B build -DARC_CITIES="/path/to/SimCity 2000 Collection"
@@ -150,11 +152,11 @@ in 1998 for a completely different program themes Arcology today.
 
 ### Cities
 
-The repository carries the 101 cities from the collection, lowercased with a `.sc2` extension, so `arcology bayview`
-works from a fresh clone with nothing else set up.
+The repository carries the collection's cities under `cities/`, lowercased with a `.sc2` extension, so
+`arcology bayview` works from a fresh clone with nothing else set up.
 
-Cities load from `.SC2` files -- the ones the game shipped, and any made since. The reader and writer round-trip all 103
-cities in the collection losslessly.
+Cities load from `.SC2` files -- the ones the game shipped, and any made since. The reader and writer round-trip every
+city in the collection losslessly.
 
 ## The `.arco` format
 
@@ -205,29 +207,37 @@ are. (Against the *original* file, 39 of 101 come back byte-exact; the other 62 
 
 ## Layout
 
+The renderer is two halves. **C draws**: it fits curves, lofts cross-sections and puts geometry in 3D. **Lua decides**:
+it reads the simulation, invents the networks, settles every pose and names what each family draws. A look that lives
+in C cannot be iterated on, so every decision that could move is a script, and a script reloads without a compile.
+
 ```
-src/sim/       the simulation, C99.  sim.c was one 8,400-line file; the
-               phases now sit by subject -- sim_scan.c (power, water,
-               pollution, land value, crime, coverage), sim_growth.c,
-               sim_map.c, sim_place.c, sim_thing.c, sim_disaster.c,
-               sim_micro.c, the ring they share in sim_queue.c -- and
-               sim.c is the clock that calls them in the original's
-               order.  sim_int.h names every crossing between them.
-src/render/    the renderer.  soft.c decides what the original draws and
-               in what order, soft_paint.c puts it down, image.c writes
-               it out; gpu.c makes the device and gpu_frame.c draws with
-               it; road.c is the corridor pipeline, deliberately one file.
-src/app/       the composition layer: it runs both sides.  options.c
-               reads the command line, app.c starts up and runs the loop,
-               clock.c paces the phases, world.c rebuilds what changed,
-               uiglue.c is the interface both ways.
-src/ui/        Dear ImGui behind a C interface, with a no-op build
-src/audio/     the sound effects and the music
-src/util/      the log, the option table, the small filesystem helpers
-src/vendor/    lodepng, shared by the renderer's PNGs and .arco's deflate
-cities/        the collection, lowercase .sc2
-tools/         the 68k interpreter, the oracle, and the checkers
-docs/          the reverse-engineering write-up and a functional reference
+src/sim/         the simulation, C99, one routine of the original at a time; sim.c is
+                 the clock, sim_scan.c, sim_growth.c, sim_map.c, sim_place.c, sim_thing.c,
+                 sim_disaster.c and sim_micro.c the phases it calls, sim_queue.c the ring
+                 they share; generated/tables.c the original's data
+src/render/      the renderer: build.c runs a build, incr.c redoes what an edit needs,
+                 geo.c holds the numbers a script tunes with, pipeline.h the vocabulary
+  walk/          a segment's stages, the pieces a tile carries, the margin network
+  net/           the stores and the plumbing: the drive (the one door into Lua),
+                 the cut, the fans that offer a reading to a rule, the family declarations
+  mesh/          every shape primitive: the fit, the loft, the emitter, the checks
+  soft/          the original's own sprite renderer, address by address
+  gpu/           the device and the frame, with the shaders under gpu/shaders/
+  atlas/         the sprite atlas the software and GPU paths share
+src/script/      the Lua bindings: handles, rules, arc.fit, arc.family, the lint
+scripts/         the decisions: compose/ (the drive, the network, the poses and chains,
+                 the lanes, the interchange, the movers), families/ (one file a family),
+                 models/ (the props), geo.lua (the numbers), rules.lua (the judgements)
+src/app/         the composition layer: options, the loop, the clock, the world, the UI glue
+src/ui/          Dear ImGui behind a C interface, with a no-op build
+src/audio/       the sound effects and the music
+src/util/        the log, the option table, the dump, the small filesystem helpers
+src/vendor/      lodepng, CLI11 and jsmn
+cities/          the collection, lowercase .sc2
+tools/           the 68k interpreter, the oracle, the battery and the checkers
+tests/           the invariants and the music check
+docs/            the reverse-engineering write-up and the renderer's reference
 ```
 
 `tools/runsim.py` is the load-bearing piece: it builds the game's own A5 world from a save file and runs the original's

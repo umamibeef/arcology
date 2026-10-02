@@ -10,7 +10,7 @@
 
 extern BandSpur s_band_spurs[MAX_SPURS];
 extern int    s_band_nspurs;
-/*  The band tiles, as arc.rules.band_tiles names them. */
+/*  The band tiles, as arc.bands names them. */
 int net_band_spur(uint8_t b);
 /*  The slab's reading of the map (net/band.c): which cells make a band,
  *  which are free air, and how far beside a band the corridor reaches. */
@@ -41,7 +41,7 @@ void  band_drop_gore(DropFan *d, int i, int side);
 void  band_drop_cut(DropFan *d, int side, int k, float s0, float s1);
 int   band_lane_cut(int side, int k, float *s0, float *s1);
 void  band_lane_cut_clear(void);
-int build_bands(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit, int comp);
+int build_bands(RMesh *m, const RCity *c, uint8_t mask_bit, int comp);
 int  build_band_next(void);
 int  build_band_chained(void);
 StairFan *net_band_chain(void);
@@ -53,7 +53,7 @@ void net_band_fit_done(int w);
 const char *net_band_fit_choice(const int **free_, const int **held);
 void net_band_fit_choice_is(int keep_free);
 int  build_band_done(void);
-int  build_band_spurs(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit, int comp);
+int  build_band_spurs(RMesh *m, const RCity *c, uint8_t mask_bit, int comp);
 void *build_band_links(RMesh *m, const RCity *c, uint8_t mask_bit);
 int   build_band_links_done(void);
 const char *band_spur_lost(int32_t col, int32_t row);             /* band.c: why the on-spur at a tile was not built this pass, or NULL */

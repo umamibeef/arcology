@@ -16,6 +16,12 @@
 #include "script.h"
 #include "opt.h"
 #include "incr.h"
+#include "mesh/loft.h"
+#include "mesh/piece.h"
+#include "mesh/surface.h"
+#include "net/cell.h"
+#include "prof.h"
+#include "build.h"
 
 /*  The numbers this file reads, each remembering where the store
  *  put it (net/geo.c).  A name here is a name a script must set. */
@@ -26,11 +32,16 @@ static int gix_junc_spur_angle = -1;
 uint8_t s_junc_ctrl[R_MAP * R_MAP]; /* per junction tile, two bits per arm: 0 none, 1 stop, 2 signal */
 float   s_trim[2][R_MAP * R_MAP * 4];
 float   s_xwalk[2][R_MAP * R_MAP * 4];
+
+/*  The band one arm gave up line for, 0 for none. */
+float net_cross_depth(Family f, int32_t col, int32_t row, int e)
+{
+    if (col < 0 || row < 0 || col >= R_MAP || row >= R_MAP || e < 0 || e > 3)
+        return 0.0f;
+    return s_xwalk[FAMX(f)][(row * R_MAP + col) * 4 + e];
+}
 RArm    s_arm[2][R_MAP * R_MAP * 4];
 
-/*  Walk one segment of a family from a node tile out through link `e`,
- *  collect its centerline, straighten, fillet and loft it.  `visited`
- *  marks (tile, link) so each segment is walked once, from either end. */
 /*  Which way a run leaves a junction, measured over a real baseline
  *  rather than from the tangent of its first piece.  How long a piece
  *  must be to give its own tangent.  How far along a shorter run the
@@ -224,18 +235,17 @@ static int jp_arms(Junc *jx)
     return 0;
 }
 
-/*  The outline itself is the SCRIPT'S (arc.rules.outline): the arms are
+/*  THE RINGS, worked out once a pass and kept.
+ *
+ *  The outline itself is the SCRIPT'S (arc.rules.outline): the arms are
  *  read off the map above, and everything worked out from them.  Their
  *  order round the junction, the corner between each pair, how far each
  *  mouth is cut back, the lip returns and the ring itself.  Is
  *  transcribed in scripts/compose/outline.lua.  With no rule a junction
- *  has no outline and nothing is drawn on it. */
-/*  THE RINGS, worked out once a pass and kept.
- *
- *  A junction's outline is the script's.  The script is asked for it in
- *  a pass of its own (scripts/compose/world.lua).  Between the measure
- *  that fills the arm table and the trims that read the ring.  Nothing
- *  in the pipeline asks for one: it looks the answer up.
+ *  has no outline and nothing is drawn on it.  The script is asked for
+ *  it in a pass of its own (scripts/compose/world.lua).  Between the
+ *  measure that fills the arm table and the trims that read the ring.
+ *  Nothing in the pipeline asks for one: it looks the answer up.
  *
  *  Keeping them is what lets the ring be worked out once and read twice.
  *  The trims want it, and so does the box drawn later.  And it is what
@@ -574,7 +584,7 @@ static void jp_fill(const Junc *jx, OutlineFan *o)
     o->col = jx->col, o->row = jx->row;
     o->cx = jx->cx, o->cy = jx->cy;
     o->w = jx->w, o->far = jx->far, o->gro = jx->gro;
-    o->cap   = s_tune.trim_cap;
+    o->cap   = TUNE(trim_cap);
     o->lips = net_family(jx->f)->lips;
     o->na    = jx->na;
     for (i = 0; i < jx->na && i < 4; ++i)
@@ -870,7 +880,7 @@ static int build_junction_body(RMesh *m, const RCity *c, uint8_t mask_bit, Famil
      *  lines that meet it. */
     x.zj           = surface_at_world(c, mask_bit, x.cx, x.cy);
     shelf_node(col, row); /* a node of the graph: every edge that meets here is at one level */
-    x.comp         = net_compensate();
+    x.comp         = build_compensate();
     m->strip_class = 0.0f; /* the box is plain fill.  A median ends at the junction */
     /*  The control.  Which arms carry a signal or a stop sign is stage
      *  three's.  It is worked out with the trims and the laps that turn
@@ -905,6 +915,6 @@ int build_junction_lanes(void)
         return 0;
     if (lane_junction_take() != 0)
         return -1;
-    net_prof_add(NET_PROF_JUNC_LANES, prof_now() - tp);
+    prof_add(PROF_JUNC_LANES, prof_now() - tp);
     return 0;
 }

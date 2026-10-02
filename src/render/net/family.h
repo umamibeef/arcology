@@ -7,6 +7,19 @@
 #define ARC_NET_FAMILY_H
 
 #include "net/types.h"
+#include "mesh/loft.h"
+
+/*  THE TILE FAMILIES, in their own order: the place a name sits at IS
+ *  its code.  A script names one when it declares a family.
+ *  It names one again when it says which family a building byte
+ *  carries.  Both readings resolve the name here.  A second list would
+ *  file every byte of a whole family at the wrong slot and say
+ *  nothing.
+ *
+ *  Answers the code, or -1 for a name no tile family has. */
+int  net_tile_family(const char *name);
+/*  And the name at one slot, for a report to print.  NULL outside. */
+const char *net_tile_family_name(int code);
 
 /*  Declare one, replacing any of the same name.  Answers 0, or -1 with
  *  the reason logged.  A name no knob, loft kind, tile family or stage
@@ -59,5 +72,7 @@ void net_hook_add_split2(NetHook h, const char *name, NetHookFn fn, NetHookFn af
 extern const NetFamily *net_walked[NET_FAM_MAX]; /* the families the walk visits, in the order their declarations asked for */
 extern int              net_n_walked;
 const NetFamily        *net_family(Family f); /* by tile family (net/family.c) */
+
+#define FAMX(x) ((x) == net_thread->f ? 1 : 0)
 
 #endif /* ARC_NET_FAMILY_H */

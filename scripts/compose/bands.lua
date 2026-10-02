@@ -132,6 +132,10 @@ arc.band_readings = readings
 arc.numbers("corridor", {reach = 3, climb = 0, spurs = 1})
 
 
+--  OVER 150 LINES, and one page on purpose: it is ONE WALK over the
+--  map.  The cells a band claims, the way it turns and where it stops
+--  are settled as the walk goes, and the walk carries its own state
+--  from cell to cell.  Cut in two, the state becomes the interface.
 arc.rules.bands = function (o)
     local d = o:info()
     local n = d.size
@@ -312,6 +316,16 @@ arc.rules.bands = function (o)
         local lo, k0 = 0, k
         while lo < k and not keep(lo) do lo = lo + 1 end
         while k > lo and not keep(k - 1) do k = k - 1 end
+        --  AN ARM SHORTER THAN THE APPROACH IS ALL APPROACH, and the
+        --  trim above takes every cell it has.  The node is then left
+        --  an edge with no band on it.  Nothing is lofted over those
+        --  cells, no station stands on the centreline, and a spur that
+        --  drops to the arm finds none.  A short arm drawn up to the
+        --  node is better than an arm that is not there, so it keeps
+        --  every cell.  Which node it meets is read from where its
+        --  lanes end (compose/links/census.lua).  That is geometry, and
+        --  it cannot name a node the arm does not reach.
+        if lo >= k then lo, k = 0, k0 end
         local head = lo > 0 and of_tile[e[0].cell] or nil
         local tail = k < k0 and of_tile[e[k0 - 1].cell] or nil
         if lo > 0 then

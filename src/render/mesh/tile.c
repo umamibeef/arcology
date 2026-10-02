@@ -7,6 +7,7 @@
 #include "pipeline.h"
 #include "net/shelf.h" /* the corridor shelves the ground is cut to */
 #include "script.h"
+#include "mesh/tile.h"
 
 /*  The tables and the field the other pieces read.  The state the
  *  segment pipeline carries across its stages. */
@@ -28,23 +29,15 @@ float s_b[GRID * GRID]; /* the bed: the seabed at a corner that   */
 
 /* ---- what a tile is ---------------------------------------------------- */
 
-/*  What a tile's two bytes mean to the ground, all four the SCRIPT'S
- *  (scripts/ground_tiles.lua) and all four looked up at every tile of
- *  the map.  Read once a generation into tables of their own: the
- *  question is asked millions of times a build and answered by the byte
- *  alone.
- *
- *  With no rule nothing is water, nothing is built and nothing slopes,
- *  which is what a run that cannot find the scripts draws. */
 /*  What a tile's two bytes mean to the ground, all of it the SCRIPT'S
  *  and pushed down by it (scripts/ground_tiles.lua).  A table of 256,
  *  read straight: the question is asked millions of times a build and
  *  answered by the byte alone.
  *
  *  With no table nothing is water, nothing is built and nothing slopes,
- *  which is what a run that cannot find the scripts draws. */
-
-/*  Water.  Submerged and shore slopes are a body at ALTM's table over a
+ *  which is what a run that cannot find the scripts draws.
+ *
+ *  Water.  Submerged and shore slopes are a body at ALTM's table over a
  *  bed at ALTM's level.  Streams, canals and the waterfall have their
  *  table at their level.  The original draws every one flat at its table
  *  (tile_alt in soft.c).  The low nibble says where the art puts its

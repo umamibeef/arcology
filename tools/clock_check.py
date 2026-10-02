@@ -2,11 +2,10 @@
 """Diff the whole 25-phase clock against $21EDE, tick for tick.
 
 Every other checker in this project drives ONE routine.  That leaves
-anything travelling between phases untested, and it hid two real bugs:
-the water-treatment flag at A5+0x2CA0, which waterGrid sets and the
-pollution stage reads, and the power ordinance boosting the capacity it
-should not have.  Both were invisible because the layers were right and
-only the scalars were wrong.
+anything travelling between phases untested: the water-treatment flag at
+A5+0x2CA0, which waterGrid sets and the pollution stage reads, or the
+power ordinance's share of the capacity.  A fault there leaves every
+layer right and only the scalars wrong.
 
 This runs sim_tick and $21EDE the same number of times from the same
 city and compares every layer and every scalar.

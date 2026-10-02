@@ -10,7 +10,13 @@
 #include "mesh/model.h"
 #include "script.h"
 #include "dump.h"
+#include "log.h"
 #include "opt.h"
+#include "mesh/fit.h"
+#include "mesh/loft.h"
+#include "mesh/piece.h"
+#include "mesh/surface.h"
+#include "net/cell.h"
 
 /*  The numbers this file reads, each remembering where the store
  *  put it (net/geo.c).  A name here is a name a script must set. */
@@ -81,15 +87,6 @@ int seg_measure_laps(Seg *x)
     return 0; /* the measuring pass draws nothing */
 }
 
-/*  One junction box's working state, handed to the stages below so each
- *  can be read on its own.
- *
- *      The tile.
- *      Its half width and the box's corners.
- *      The margin's widths.
- *
- *  The height the box stands at. */
-
 /*  A thread of the box, lofted as a segment's strip is (loft.c).  It has
  *  the family's own bed, ties and threads along the routed pieces.  Its
  *  ground is graded in the grading pass.  It is read at every tile edge
@@ -144,11 +141,12 @@ static V2 thread_mid(const ThreadEnd r[2])
     return (V2){(r[0].p.x + r[1].p.x) * 0.5f, (r[0].p.y + r[1].p.y) * 0.5f};
 }
 
-/*  A route between two poses: the equal-tangent biarc lane.c chains:
- *  QUEUED for the drive to cut, in the order the threads are laid.  A
- *  junction's threads are paths like any other, so the pieces they are
- *  drawn from are arc.rules.pieces's and nobody else's.  A route the cut
- *  refuses comes back as the straight between the two ends. */
+/*  A route between two poses: QUEUED for the drive to cut, in the order
+ *  the threads are laid.  A junction's threads are paths like any other,
+ *  so the pieces they are drawn from are arc.rules.pieces's and nobody
+ *  else's.  A route the cut refuses lays NO THREAD.  A straight put in
+ *  its place would be the one chain C decided.  The reader could not
+ *  tell it from one the script built. */
 #define THREADS 8
 static struct
 {
@@ -166,23 +164,20 @@ static void thread_route_ask(V2 A, V2 tA, V2 B, V2 tB)
     s_thread[s_n_thread++].cut = net_cut_add_poses(A, tA, B, tB);
 }
 
-static float thread_route(Piece *pc, int *np)
+/*  The pieces the drive cut for the next thread, in the order they were
+ *  asked for.  Answers 0 for a thread the cut has none for, and the
+ *  tightest arc's radius in `rmin` for one it has. */
+static int thread_route(Piece *pc, int *np, float *rmin)
 {
-    float rmin = 1e9f;
-    int   k, i = s_thread_at < s_n_thread ? s_thread_at++ : -1;
-    if (i >= 0 && s_thread[i].cut >= 0 && net_cut_pieces(s_thread[i].cut, pc, MAX_PIECES, np) == 0 && *np > 0)
-    {
-        for (k = 0; k < *np; ++k)
-            if (pc[k].arc && pc[k].r < rmin)
-                rmin = pc[k].r;
-        return rmin;
-    }
-    pc[0].arc = 0;
-    pc[0].a   = i >= 0 ? s_thread[i].A : (V2){0.0f, 0.0f};
-    pc[0].b   = i >= 0 ? s_thread[i].B : (V2){0.0f, 0.0f};
-    pc[0].len = hypotf(pc[0].b.x - pc[0].a.x, pc[0].b.y - pc[0].a.y);
-    *np       = 1;
-    return 0.0f;
+    int k, i = s_thread_at < s_n_thread ? s_thread_at++ : -1;
+    *rmin = 1e9f;
+    *np   = 0;
+    if (i < 0 || s_thread[i].cut < 0 || net_cut_pieces(s_thread[i].cut, pc, MAX_PIECES, np) != 0 || *np < 1)
+        return 0;
+    for (k = 0; k < *np; ++k)
+        if (pc[k].arc && pc[k].r < *rmin)
+            *rmin = pc[k].r;
+    return 1;
 }
 
 /*  A thread junction within its box.  Every thread is routed between the
@@ -274,7 +269,21 @@ int net_threads_done(void)
         return 0;
     for (i = 0; i < s_n_tk; ++i)
     {
-        float rmin = thread_route(pc, &np);
+        float rmin;
+        if (!thread_route(pc, &np, &rmin))
+        {
+            /*  Said once.  A cut that refuses one thread refuses every
+             *  thread of that shape, and one line of a junction is not
+             *  worth a message each. */
+            static int said;
+            if (!said++)
+                R_WARN("net", "the junction at %d,%d: the cut answered no pieces for a thread, so none is drawn",
+                       jb->col, jb->row);
+            if (g_dev.junc_dump)
+                dumpf("THREAD thread %d,%d %c-%c: no pieces\n", jb->col, jb->row,
+                      "NESW"[s_tk[i].from], "NESW"[s_tk[i].to]);
+            continue;
+        }
         if (g_dev.junc_dump)
             dumpf("THREAD thread %d,%d %c-%c: %d pieces, rmin %.2f, raise %.3f\n", jb->col, jb->row,
                   "NESW"[s_tk[i].from], "NESW"[s_tk[i].to], np, (double)rmin, (double)s_tk[i].raise);
@@ -307,19 +316,15 @@ int on_lap_panel(const RCity *c, int32_t tc, int32_t tr, float x, float y)
     return across <= LINE_W * 0.5f;
 }
 
-/*  A level meet (spec 3.15), lifted out of mesh.c.  It is a hundred and
- *  fifty lines of geometry that sat inline in the middle of
- *  build_networks.  This is otherwise a driver: it walks the families
- *  and calls out.  The meet belongs here with the rest of the furniture
- *  that stands on one, the gates and the signals.  It needs nothing from
- *  the walk but the tile it is on and the piece that crosses there. */
-/*  A level meet as it is built: the tile, the two paths that cross
- *  there, and the frame the stages below share. */
+/*  A level meet (spec 3.15) as it is built: the tile, the two paths that
+ *  cross there, and the frame the stages below share.  It needs nothing
+ *  from the walk but the tile it is on and the piece that crosses there.
+ *  The meet sits here with the rest of the furniture that stands on one,
+ *  the gates and the signals. */
 typedef struct
 {
     RMesh             *m;
     const RCity       *c;
-    const RAtlasLevel *l;
     uint8_t            mask_bit;
     int32_t            col, row, idx;
     int                second;
@@ -344,13 +349,12 @@ static int gix_lap_point = -1;
 static void lap_frame(Meet *x)
 {
     const RCity       *c      = x->c;
-    const RAtlasLevel *l      = x->l;
     int32_t            col    = x->col;
     int32_t            row    = x->row;
     int                second = x->second;
     int32_t            idx    = x->idx;
     const RCross      *xr = x->xr, *xl = x->xl;
-    int                links2 = piece_links(l, second, c->xter[idx]);
+    int                links2 = piece_links(second, c->xter[idx]);
     int                ns     = (links2 & (L_N | L_S)) == (L_N | L_S); /* the thread runs north-south */
     float              cx = (float)col + 0.5f, cy = (float)row + 0.5f;
     /* the line's way through, and the thread's */
@@ -419,11 +423,6 @@ static int lap_record(Meet *x)
     return 0;
 }
 
-/*  The panel: where the two bands actually overlap: the line's full
- *  width, cut by the thread bed's two sides.  A rectangle in the line's
- *  own frame covers too much at an angle.  It buries the ballast either
- *  side of the line, when the gravel should run up to the fill and stop.
- *  Four corners, each where a line edge meets a thread edge. */
 /*  The meet being measured: gathered by the ask, finished by the
  *  draw, with the script's own answers set between them. */
 static Meet    s_lap;
@@ -434,6 +433,11 @@ static ShapeId s_lap_sh;
 static LapFan s_lap_fan;
 static int     s_lap_has_fan;
 
+/*  The panel: where the two bands actually overlap: the line's full
+ *  width, cut by the thread bed's two sides.  A rectangle in the line's
+ *  own frame covers too much at an angle.  It buries the ballast either
+ *  side of the line, when the gravel should run up to the fill and stop.
+ *  Four corners, each where a line edge meets a thread edge. */
 static int lap_panel(Meet *x)
 {
     RMesh             *m        = x->m;
@@ -497,7 +501,6 @@ static int lap_panel(Meet *x)
 static float lap_line_limit(const Meet *x, float fx, float fy)
 {
     const RCity       *c = x->c;
-    const RAtlasLevel *l = x->l;
     float              lim = 2.0f;
     int                k;
     for (k = 1; k <= 2; ++k)
@@ -510,7 +513,7 @@ static float lap_line_limit(const Meet *x, float fx, float fy)
         float   d;
         if (nc < 0 || nr < 0 || nc >= R_MAP || nr >= R_MAP)
             return lim;
-        if (!tile_links(c, l, nc, nr, net_line->f) || node_kind(c, l, net_line->f, nc, nr) != 2)
+        if (!tile_links(c, nc, nr, net_line->f) || node_kind(c, net_line->f, nc, nr) != 2)
             continue;
         /*  The arm this junction faces the meet by, and where its
          *  strip starts: that is the mouth, and the line ends there. */
@@ -528,18 +531,17 @@ static float lap_line_limit(const Meet *x, float fx, float fy)
     return lim;
 }
 
-/*  The two line approaches, along the line's own line.  What each one
- *  carries: the gate's mast, the stop line, the second-train signs: and
- *  where each stands is arc.rules.lap_marks's.  What is left here is the
- *  frame it is placed in, and the register a gate joins so the traffic
- *  can swing its arm. */
 /*  ONE APPROACH of a meet, gathered: where its middle is.  This way the
  *  line runs and which way across it, how far the bed reaches, how far
  *  out the masts stand.  How far the line runs before a junction owns
- *  it.  Answers 0 past the second approach.
+ *  it.  Answers 0 past the second approach.  There are two approaches,
+ *  along the line's own line.  What each one carries is the gate's mast,
+ *  the stop line and the second-train signs.  Where each stands is
+ *  arc.rules.lap_marks's.  What is left here is the frame it is placed
+ *  in, and the register a gate joins so the traffic can swing its arm.
  *
- *  The mesh is opened for the marks the script decides on.  Net_meet_
- *  place puts each of them where it said. */
+ *  The mesh is opened for the marks the script decides on.
+ *  Net_lap_place puts each of them where it said. */
 static int s_ap;
 
 int net_lap_approach(int i, ScriptApproachAsk *out)
@@ -599,7 +601,7 @@ int net_lap_place(const ScriptApproach *mk)
 
 
 
-int build_lap(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit, int32_t col, int32_t row, int second)
+int build_lap(RMesh *m, const RCity *c, uint8_t mask_bit, int32_t col, int32_t row, int second)
 {
     /*  A level meet (spec 3.15): every thread is a double- thread
      *  mainline, so every line class gets gates.  It is built from the
@@ -620,7 +622,7 @@ int build_lap(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit, 
     Meet    x;
     ShapeId sh;
     memset(&x, 0, sizeof x);
-    x.m = m, x.c = c, x.l = l, x.mask_bit = mask_bit, x.col = col, x.row = row, x.second = second;
+    x.m = m, x.c = c, x.mask_bit = mask_bit, x.col = col, x.row = row, x.second = second;
     x.idx   = row * R_MAP + col;
     x.order = tile_order(c, col, row, mask_bit);
     x.xr    = &s_cross[FAMX(net_line->f)][x.idx];

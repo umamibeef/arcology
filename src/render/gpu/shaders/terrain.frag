@@ -9,12 +9,16 @@ layout(set = 2, binding = 0) uniform sampler2D t_field; /* b: tiles to water / 1
 
 layout(location = 0) out vec4 o_col;
 
-/*  A material a SCRIPT declared is numbered from MAT_SCRIPT_BASE up, and
+/*  THE MATERIALS, from the one place they are written.  A material is a
+ *  number the mesh puts in a vertex colour, and this reads it by the
+ *  half step around that number.  A second list here would drift from
+ *  the mesh's, and the two would paint different things.
+ *
+ *  A material a SCRIPT declared is numbered from MAT_SCRIPT_BASE up, and
  *  is shaded from its parameters rather than from a branch here: the
  *  shaders are built with the program and cannot grow a branch for
  *  something declared after it. */
-#define MAT_SCRIPT_BASE 32.0
-#define MAT_SCRIPT_MAX  32
+//#include "materials.glsl"
 
 layout(set = 3, binding = 0) uniform Frag
 {
@@ -140,7 +144,7 @@ vec3 wall_colour(float mat, vec3 n)
     float zw = v_wpos.z * 0.5;
     float t  = fr.params.y;
     vec3  c;
-    if (mat < 1.5)
+    if (MAT_UPTO(mat, MAT_ENG_WALL))
     {
         /*  Blocks a quarter tile long and a quarter level high in
          *  running bond, each its own shade, mortar between. */
@@ -154,7 +158,7 @@ vec3 wall_colour(float mat, vec3 n)
                        (0.94 + 0.12 * vnoise(vec2(u * 30.0, zw * 60.0)));
         c = mix(block, vec3(0.42, 0.40, 0.37), mortar);
     }
-    else if (mat < 2.5)
+    else if (MAT_UPTO(mat, MAT_SEDIMENT))
     {
         /*  Strata.  They are layers, so they are offsets of the surface
          *  the cut passes through: v_col.r is the mesh's own edge profile
@@ -181,7 +185,7 @@ vec3 wall_colour(float mat, vec3 n)
             (0.90 + 0.20 * vnoise(vec2(u * 25.0, below * 40.0)));
         c = mix(vec3(0.33, 0.24, 0.15), c, smoothstep(0.04, 0.14, below)); /* topsoil */
     }
-    else if (mat < 3.5)
+    else if (MAT_UPTO(mat, MAT_WATER))
     {
         /*  The aquarium's glass.  Seen from the side, a point on the
          *  face looks through the water behind it to the floor: from the
@@ -202,7 +206,7 @@ vec3 wall_colour(float mat, vec3 n)
         c += vec3(0.10, 0.16, 0.16) * rays * (1.0 - smoothstep(0.0, 1.2, depth));
         return c; /* lit by the water, not the sun */
     }
-    else if (mat > 4.5)
+    else if (MAT_ABOVE(mat, MAT_SEABED))
     {
         /*  The earth wedge under a network piece on a slope: bare earth
          *  with a fine grain, in the tone of the slope sprites' wedges. */
@@ -244,14 +248,14 @@ void main()
      *  the lines alone, over the base at equal depth.  The same vertices
      *  each time: a pass is a draw, not geometry. */
     int  pass    = int(fr.flags.x + 0.5);
-    bool roadmat = (v_col.b > 6.5 && v_col.b < 7.5) || (v_col.b > 9.5 && v_col.b < 10.5) || (v_col.b > 16.5 && v_col.b < 17.5);
-    bool deckmat = v_col.b > 18.5 && v_col.b < 19.5;
+    bool roadmat = MAT_IS(v_col.b, MAT_LINE) || MAT_IS(v_col.b, MAT_ZEBRA) || MAT_IS(v_col.b, MAT_XAPPROACH);
+    bool deckmat = MAT_IS(v_col.b, MAT_BAND);
     if (pass == 1 && !roadmat)
         discard;
     if (pass == 2 && !roadmat && !deckmat)
         discard;
     /* the junction's sidewalk band, built in: hidden while the sidewalk pass is off */
-    if (v_col.b > 12.5 && v_col.b < 13.5 && v_col.r > 0.5 && fr.flags.y < 0.5)
+    if (MAT_IS(v_col.b, MAT_WALK) && v_col.r > 0.5 && fr.flags.y < 0.5)
         discard;
     vec3  n = normalize(v_nrm);
     float d = max(dot(n, normalize(fr.sun.xyz)), 0.0);
@@ -276,7 +280,7 @@ void main()
         o_col = vec4(vec3(155.0, 135.0, 71.0) / 255.0, v_col.a);
         return;
     }
-    if (v_col.b > 15.5 && v_col.b < 16.5)
+    if (MAT_IS(v_col.b, MAT_XPANEL))
     {
         /*  A level crossing's surface: dark rubber panels across both
          *  tracks, seamed every panel width, over the asphalt. */
@@ -288,7 +292,7 @@ void main()
         o_col = vec4(clamp(c * (1.0 + 0.35 * ((fr.sun.w + fr.params.x * d) / max(fr.sun.w + fr.params.x * max(normalize(fr.sun.xyz).z, 0.0), 1e-3) - 1.0)), 0.0, 1.0), v_col.a);
         return;
     }
-    if (v_col.b > 14.5 && v_col.b < 15.5)
+    if (MAT_IS(v_col.b, MAT_VEHICLE))
     {
         /*  A vehicle: a train car or a road car, a painted box.  col.r
          *  picks the paint: 0 the engine, 1 to 3 freight cars, 4 to 8
@@ -309,7 +313,7 @@ void main()
         o_col      = vec4(clamp(c, 0.0, 1.0), v_col.a);
         return;
     }
-    if (v_col.b > 13.5 && v_col.b < 14.5)
+    if (MAT_IS(v_col.b, MAT_THREAD_X))
     {
         /*  A rail across a road: the two rails alone, flush in the
          *  crossing surface, the ties and ballast under the asphalt. */
@@ -322,7 +326,7 @@ void main()
         o_col = vec4(vec3(0.78, 0.78, 0.80), v_col.a);
         return;
     }
-    if (v_col.b > 12.5 && v_col.b < 13.5)
+    if (MAT_IS(v_col.b, MAT_WALK))
     {
         /*  A sidewalk: a road tile paved to its edges, concrete slabs
          *  scored every half tile both ways, under the pavement band. */
@@ -345,7 +349,7 @@ void main()
         o_col = vec4(clamp(c * lit, 0.0, 1.0), v_col.a);
         return;
     }
-    if (v_col.b > 17.5 && v_col.b < 18.5)
+    if (MAT_IS(v_col.b, MAT_PIER))
     {
         /*  A viaduct's structure: plain cast concrete, no pattern at all.
          *  col.g set means the girder's face, which lies in the deck's own
@@ -356,13 +360,13 @@ void main()
         o_col = vec4(clamp(c * (fr.sun.w + fr.params.x * d), 0.0, 1.0), v_col.a);
         return;
     }
-    if (v_col.b > 11.5 && v_col.b < 12.5)
+    if (MAT_IS(v_col.b, MAT_SKIRT))
     {
         /*  A raised road's embankment: the coursed blocks of a wall. */
         o_col = vec4(clamp(wall_colour(1.0, n), 0.0, 1.0), v_col.a);
         return;
     }
-    if (v_col.b > 10.5 && v_col.b < 11.5)
+    if (MAT_IS(v_col.b, MAT_THREAD))
     {
         /*  A railway sized against the road as the road is sized to the
          *  tile (spec 5.9's order, bottom up), to spec 6.1's dimensions at
@@ -393,17 +397,17 @@ void main()
                                                    max(fr.sun.w + fr.params.x * max(normalize(fr.sun.xyz).z, 0.0), 1e-3) - 1.0)), 0.0, 1.0), v_col.a);
         return;
     }
-    if (v_col.b > 20.25)
+    if (MAT_FROM(v_col.b, MAT_HILITE))
     {
         /*  A show-curves ground highlight: the corridor's tan, the free
-         *  air's blue, blended over the tile's own top under the roads. */
+         *  air's blue, blended over the tile's own top under the line
+         *  works.  Which paint marks what is the script's (arc.geo). */
         int pn = int(v_col.r + 0.5);
         if (pn >= 8)
         {
-            /*  The network's tiles, in the MAP VIEW only (params.w is -1
-             *  there): a ramp orange, a road grey, a rail yellow, a highway
-             *  purple ("roads highlighted in map view with some color (grey
-             *  maybe), rails with yellow, and highways with purple"). */
+            /*  The network's own tiles, in the MAP VIEW only (params.w is
+             *  -1 there).  One colour a family, so a person can tell the
+             *  families apart on a map with no art on it. */
             if (fr.params.w > -0.5)
                 discard;
             o_col = pn == 8    ? vec4(0.98, 0.50, 0.08, 0.55)
@@ -416,7 +420,7 @@ void main()
         o_col  = vec4(c, 0.38);
         return;
     }
-    if (v_col.b > 19.5)
+    if (MAT_FROM(v_col.b, MAT_ZONE))
     {
         /*  A zone, as the original's map view paints them: residential
          *  green, commercial blue, industrial yellow, the darker shade
@@ -456,7 +460,7 @@ void main()
         o_col   = vec4(c, (zn >= 10 ? 0.78 : 0.45) * clamp(v_col.g, 0.0, 1.0));
         return;
     }
-    if (v_col.b > 18.5)
+    if (MAT_FROM(v_col.b, MAT_BAND))
     {
         /*  A freeway deck (spec 7.1), two carriageways either side of a
          *  median barrier, three lanes each: across the band, -1 to 1,
@@ -513,12 +517,12 @@ void main()
         o_col = vec4(clamp(c * lit, 0.0, 1.0), v_col.a);
         return;
     }
-    if (v_col.b > 6.5 && v_col.b < 7.5 || v_col.b > 9.5 && v_col.b < 10.5 || (v_col.b > 16.5 && v_col.b < 17.5))
+    if (MAT_IS(v_col.b, MAT_LINE) || MAT_IS(v_col.b, MAT_ZEBRA) || MAT_IS(v_col.b, MAT_XAPPROACH))
     {
         /*  Approaching a level crossing (17): v_col.g is the distance
          *  to the crossing; the centre and lane lines are solid, and a
          *  large X is stencilled in each lane a tile out (spec 3.15). */
-        bool  xapp = v_col.b > 16.5 && v_col.b < 17.5;
+        bool  xapp = MAT_IS(v_col.b, MAT_XAPPROACH);
         /*  A road strip (v_col.b 7) or a crosswalk band (10).  Across the
          *  strip, -1 to 1 in v_col.r: the asphalt (the sprites' palette
          *  0x91) to 0.78, a curb, then a sidewalk of concrete with a joint
@@ -576,7 +580,7 @@ void main()
             if (x < sk + cb)
                 c = curb;
         }
-        else if (v_col.b > 9.5 && v_col.b < 10.5)
+        else if (MAT_IS(v_col.b, MAT_ZEBRA))
         {
             float t = v_col.g * 5.0; /* 0 at the junction, 1 at the band's outer end */
             if (t > 0.78 && t < 0.92)
@@ -650,7 +654,7 @@ void main()
         o_col = vec4(clamp(c * lit, 0.0, 1.0), v_col.a);
         return;
     }
-    if (v_col.b > 8.5)
+    if (MAT_FROM(v_col.b, MAT_LAMP))
     {
         /*  A signal lamp.  col.r is the junction's phase, col.g the lamp:
          *  0..2 red, amber, green on a north-south arm, 3..5 on an
@@ -705,7 +709,7 @@ void main()
         o_col = vec4(lamp == lit ? col : col * 0.18, v_col.a);
         return;
     }
-    if (v_col.b > MAT_SCRIPT_BASE - 0.5)
+    if (MAT_FROM(v_col.b, MAT_SCRIPT_BASE))
     {
         /*  A material the script declared: its own colour, and a
          *  roughness that decides how much of the sun it takes as a
@@ -717,24 +721,24 @@ void main()
         o_col       = vec4(clamp(m.rgb * (fr.sun.w + fr.params.x * d) + sheen, 0.0, 1.0), v_col.a);
         return;
     }
-    if (v_col.b > 7.5)
+    if (MAT_FROM(v_col.b, MAT_PROP))
     {
         /*  Street furniture: painted steel, lit flat. */
         o_col = vec4(vec3(0.22, 0.22, 0.24) * (fr.sun.w + fr.params.x * d), v_col.a);
         return;
     }
-    if (v_col.b > 5.5)
+    if (MAT_FROM(v_col.b, MAT_SURFACE))
     {
         o_col = vec4(clamp(water_surface(v_wpos.xy, fr.params.y, v_col.g), 0.0, 1.0), v_col.a);
         return;
     }
-    if (v_col.b > 0.5)
+    if (MAT_ABOVE(v_col.b, MAT_GROUND))
     {
         /*  The water column is blended: its cover grows with the depth
          *  below the table, so the floor shows through the shallows and
          *  the deep is water. */
         float a = v_col.a;
-        if (v_col.b > 2.5 && v_col.b < 3.5)
+        if (MAT_IS(v_col.b, MAT_WATER))
         {
             /* the glass covers by the water behind it, see wall_colour */
             float thick = max(bed_thickness(v_col.r * 0.5, v_col.g * 0.5, v_wpos.z * 0.5), 0.0);

@@ -7,6 +7,7 @@
 #define ARC_NET_SHELF_H
 
 #include "net/types.h"
+#include "mesh/internal.h"
 
 /*  The corridor field (net/shelf.c): per grid corner, what the strips
  *  passing over it ask of the ground. */

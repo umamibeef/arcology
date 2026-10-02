@@ -10,6 +10,9 @@
 
 /*  The context walk_segment sets for the segment it is drawing, read by
  *  the loft, the junction box and the passes (walk/walk.c owns them). */
+extern float          s_trim[2][R_MAP * R_MAP * 4];  /* net/node.c: how far each arm's strip is cut back from its node, per family */
+extern float          s_xwalk[2][R_MAP * R_MAP * 4]; /* net/node.c: the stripe band each arm gave up line for, tiles.  0 for none */
+float                 net_cross_depth(Family f, int32_t col, int32_t row, int e);
 extern uint8_t        s_junc_ctrl[R_MAP * R_MAP]; /* net/node.c: per junction tile, two bits per arm: 0 none, 1 stop, 2 signal */
 /*  A junction's outline must be a simple ring: no vertex where it
  *  doubles back, no two edges meet.  Counted for every junction a build

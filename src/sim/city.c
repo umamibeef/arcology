@@ -440,6 +440,11 @@ int city_load(const char *path, City *c)
 
         memset(c, 0, sizeof *c);
 
+        /*  The dice come up at one, like the graph scales below and for
+         *  the same reason.  The seeds are not in the save file, and a
+         *  shift register at nought never leaves it. */
+        rng_seed(c, 1, 1);
+
         /*  $2D594: the graph scales come up as one, not zero.  They are
          *  not in the save file, so a loaded city starts here and the
          *  running maximum climbs from the samples. */
@@ -533,6 +538,7 @@ int city_save(const char *path, const City *c)
 
 void city_free(City *c)
 {
+    rng_log_free(c);
     free(c->xlab);
     free(c->xmic);
     free(c->xthg);

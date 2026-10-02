@@ -1,4 +1,4 @@
---  thread.lua -- the railway family.
+--  rail.lua -- the railway family.
 --
 --  A line is unclassed and unliped: no lane markings, no margins, no
 --  turning head at a building.  Its junction is a TURNOUT rather than a

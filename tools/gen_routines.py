@@ -8,7 +8,7 @@ only in passing, and finally nothing -- an address with no name is still
 listed, because the appendix is meant to be the index of everything
 cited, not only of what has been named.
 """
-import re, glob, os, collections
+import re, glob, os, collections, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DOCS = os.path.join(HERE, "..", "docs")
@@ -62,8 +62,21 @@ CURATED = {
 
 #  Addresses of every instruction in CODE 2, so a citation that is really
 #  a bit mask ($FC1F) or a constant can be told apart from a routine.
+def listing_path():
+    """The symbolised listing, written from the plain one by tools/annotate.py
+    where it is not there yet: one input for the index, made the same way
+    every time."""
+    ann = os.path.join(HERE, "..", "out", "CODE_2.ann.asm")
+    plain = os.path.join(HERE, "..", "out", "CODE_2.asm")
+    if not os.path.exists(ann):
+        if not os.path.exists(plain):
+            raise SystemExit("no listing: out/CODE_2.asm is written by tools/m68kdis.py")
+        subprocess.run([sys.executable, os.path.join(HERE, "annotate.py"), plain, ann], check=True)
+    return ann
+
+
 def code_addresses():
-    lst = open(os.path.join(HERE, "..", "out", "CODE_2.ann.asm"), encoding="utf8").read()
+    lst = open(listing_path(), encoding="utf8").read()
     return set(int(x, 16) for x in re.findall(r"^([0-9A-F]{6}):", lst, re.M)), lst
 
 
@@ -120,6 +133,8 @@ def addr_key(a):
 def main():
     code, lst = code_addresses()
     names = collect(lst)
+    if not os.path.exists(os.path.join(HERE, "..", "out", "funcs.txt")):
+        raise SystemExit("no function table: out/funcs.txt is written by tools/analyze.py")
     funcs = sorted(int(x, 16) for x in
                    open(os.path.join(HERE, "..", "out", "funcs.txt")))
     cited = collections.Counter()

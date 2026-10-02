@@ -68,11 +68,11 @@ def probe(idx):
 
 def emit(w):
     """append the ordinance cost table to the tables.c writer"""
-    w('/*  ORDINANCE_COST -- what each of the twenty ordinances does to the')
+    w('/*  ORDINANCE_COST: what each of the twenty ordinances does to the')
     w(' *  treasury, as a fraction of one budget department\'s amount.  $41368')
-    w(' *  selects the formula through a jump table; the entries here were')
-    w(' *  measured by calling the routine one source at a time')
-    w(' *  (tools/gen_ordinance.py) rather than read off that table.')
+    w(' *  selects the formula through a jump table.  The entries here are not')
+    w(' *  read off that table.  They are measured by calling the routine one')
+    w(' *  source at a time (tools/gen_ordinance.py).')
     w(' *')
     w(' *  source 0..2 name a department amount, 3 means -(population +')
     w(' *  MISC A5+0x2C98), and -1 means the ordinance is free.  Negation')

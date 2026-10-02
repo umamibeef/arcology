@@ -11,6 +11,8 @@
  *  what it prints. */
 #include "modes.h"
 
+#include "dev.h"
+
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -18,51 +20,60 @@
 
 #include "CLI11.hpp"
 #include "arc_version.h"
+#include "log.h"
 
 namespace
 {
+/*  ONE ROW A MODE: its spelling, the sketch of its line, one line of
+ *  help, and what runs it.  The dev modes' rows come from src/dev's own
+ *  list, which is where their functions are.  These are the other
+ *  programs in the binary. */
 struct Mode
 {
     const char *name, *args, *help;
-    ArcMode     kind;
+    ArcRun      run;
 };
-const Mode MODES[] = {
-    {"--verify",          "<dir>...",                          "the verification report over every save in the directories",   ARC_DEV     },
-    {"--convert",         "<in> <out>",                        "a 1995 save becomes a world (.arco), or back again",           ARC_DEV     },
-    {"--clock",           "<city> <ticks> <out>",              "run the clock and dump it",                                    ARC_DEV     },
-    {"--atlas",           "<assets> [shape [out.png]]",        "dump the sprite atlas",                                        ARC_ATLAS   },
-    {"--soft",            "<assets> <city> [out.png]",         "the software rasteriser",                                      ARC_SOFT    },
-    {"--testcity",        "<template> <out.sc2>",              "a city of every network case",                                 ARC_TESTCITY},
-    {"--lua-lint",        "<script.lua>...",                   "read the scripts and say what is wrong with them",             ARC_LUALINT },
-    {"--micro",           "<city> <out>",                      "the year-end microsim pass, and what it wrote",                ARC_DEV     },
-    {"--allocmicro",      "<city>",                            "place one special building of every id and report its record", ARC_DEV     },
-    {"--riot",            "<city> <h> <v> [kind] [rng]",       "a disaster at (h,v), a riot unless told otherwise",            ARC_DEV     },
-    {"--demolish1",       "<city> <y> <x>",                    "demolish one tile",                                            ARC_DEV     },
-    {"--demolish",        "<city>",                            "demolition, city-wide",                                        ARC_DEV     },
-    {"--averages",        "<city>",                            "the city scan's averages",                                     ARC_DEV     },
-    {"--advisor",         "<city> [ticks] [plain]",            "the advisors' text after a run",                               ARC_DEV     },
-    {"--graph",           "<city> <month> <years>",            "the graphs' history",                                          ARC_DEV     },
-    {"--things",          "<city> [passes]",                   "the things pass: what stands on the tiles",                    ARC_DEV     },
-    {"--terrain",         "<city> [nb]",                       "the terrain pass",                                             ARC_DEV     },
-    {"--raise",           "<city>",                            "raise terrain",                                                ARC_DEV     },
-    {"--settile",         "<city>",                            "set a tile",                                                   ARC_DEV     },
-    {"--footprint",       "<city>",                            "the buildings' footprints",                                    ARC_DEV     },
-    {"--scenario",        "<city> [zero|hard]",                "the scenario's conditions",                                    ARC_DEV     },
-    {"--growth",          "<city>",                            "one growth pass",                                              ARC_DEV     },
-    {"--dump-growth",     "<city> <phase> <n> <out>",          "one growth scan, dumped",                                      ARC_DEV     },
-    {"--trace-growth",    "<city> <phase> <n>",                "one growth scan, traced",                                      ARC_DEV     },
-    {"--dump-growth-all", "<city> <out> [--rng | --cycles N]", "every growth phase, dumped",                                   ARC_DEV     },
-    {"--economy",         "<city>",                            "the economy model",                                            ARC_DEV     },
-    {"--budget",          "<city>",                            "the budget",                                                   ARC_DEV     },
-    {"--dump",            "<city> <out> [--pre=PHASES]",       "the city scan, dumped",                                        ARC_DEV     },
+/*  The four that are programs of their own.  Each reads the line from
+ *  its own first argument, so the mode's word is stepped over.  They are
+ *  C, and this file is the one C++ in the dispatch. */
+extern "C"
+{
+    int atlas_main(int argc, char **argv);
+    int soft_main(int argc, char **argv);
+    int testcity_main(int argc, char **argv);
+    int lua_lint_main(int argc, char **argv);
+}
+int run_atlas(int argc, char **argv) { return atlas_main(argc - 1, argv + 1); }
+int run_soft(int argc, char **argv) { return soft_main(argc - 1, argv + 1); }
+int run_testcity(int argc, char **argv) { return testcity_main(argc - 1, argv + 1); }
+int run_lua_lint(int argc, char **argv) { return lua_lint_main(argc - 1, argv + 1); }
+
+const Mode PROGRAMS[] = {
+    {"--atlas", "<assets> [shape [out.png]]",
+     "dump the sprite atlas", run_atlas},
+    {"--soft", "<assets> <city> [out.png]",
+     "the software rasteriser", run_soft},
+    {"--testcity", "<template> <out.sc2>",
+     "a city of every network case", run_testcity},
+    {"--lua-lint", "<script.lua>...",
+     "read the scripts and say what is wrong with them", run_lua_lint},
 };
+/*  What the parser settled on: the spelling it matched, how short a line
+ *  it refuses, and what runs it.  Thrown, because CLI11 tells a callback
+ *  nothing else.
+ *
+ *  A mode reads the rest of the line by position, so a line too short
+ *  for it would read past the end.  The programs of their own read
+ *  their own usage and set no minimum here. */
 struct Chosen
 {
-    const Mode *mode;
+    const char *name;
+    int         min_argc;
+    ArcRun      run;
 };
 } // namespace
 
-extern "C" ArcMode arc_mode(int argc, char **argv)
+extern "C" ArcMode arc_mode(int argc, char **argv, ArcRun *run)
 {
     CLI::App app{"arcology -- a reconstruction of the SimCity 2000 simulation.\n"
                  "Bare, it opens the load menu; with a city, that city; --help lists the "
@@ -75,24 +86,43 @@ extern "C" ArcMode arc_mode(int argc, char **argv)
     app.get_formatter()->column_width(44);
     app.allow_extras();
     app.prefix_command();
-    for (const Mode &m : MODES)
+    /*  Every mode, from the two lists that hold them: the programs above
+     *  and src/dev's own.  Neither is repeated here, so a mode cannot be
+     *  spelled one way in the parser and another where it runs. */
+    for (const Mode &m : PROGRAMS)
         app.add_flag_callback(
-               m.name, [&m] { throw Chosen{&m}; }, m.help)
+               m.name, [&m] { throw Chosen{m.name, 0, m.run}; }, m.help)
             ->option_text(m.args)
             ->trigger_on_parse()
             ->group("Developer modes");
+    for (int i = 0; i < ARC_DEV_MODE_COUNT; ++i)
+    {
+        const ArcDevMode &d = ARC_DEV_MODES[i];
+        app.add_flag_callback(
+               d.name, [&d] { throw Chosen{d.name, d.min_argc, d.run}; }, d.help)
+            ->option_text(d.args)
+            ->trigger_on_parse()
+            ->group("Developer modes");
+    }
     try
     {
         app.parse(argc, argv);
     }
     catch (const Chosen &c)
     {
-        if (argc < 2 || strcmp(argv[1], c.mode->name) != 0)
+        if (argc < 2 || strcmp(argv[1], c.name) != 0)
         {
-            fprintf(stderr, "arcology: %s is a developer mode and must come first\n", c.mode->name);
+            R_ERR("app", "arcology: %s is a developer mode and must come first", c.name);
             return ARC_BAD;
         }
-        return c.mode->kind;
+        if (argc < c.min_argc)
+        {
+            R_ERR("app", "arcology: %s wants %d words on the line, and this has %d",
+                  c.name, c.min_argc, argc);
+            return ARC_BAD;
+        }
+        *run = c.run;
+        return ARC_RUN;
     }
     catch (const CLI::CallForHelp &e)
     {

@@ -10,13 +10,27 @@
 #include "mesh/internal.h"
 #include "pipeline.h"
 
-#include "net/net.h"
-static int gix_foot_sink = -1, gix_wire_w = -1;
+#include "net/meet.h"
+#include "mesh/shapes.h"
+#include "mesh/emit.h"
+#include "mesh/surface.h"
+#include "net/cell.h"
+#include "mesh/model.h"
 
-/*  One quad of a strip between two cross-sections.  Each is given by its
- *  two end points in world tile coordinates, with the across and along
- *  values of the material.  `za`/`zb` are the sections' heights, or
- *  negative to take the ground under each corner. */
+#define ARM_TRI(A, B, C, N)                                                                                  \
+    do                                                                                                       \
+    {                                                                                                        \
+        memcpy(t3[0], (A), sizeof t3[0]);                                                                    \
+        memcpy(t3[1], (B), sizeof t3[1]);                                                                    \
+        memcpy(t3[2], (C), sizeof t3[2]);                                                                    \
+        if (put_tri_line_n(m, c, mask_bit, order + 0.05f, (const float (*)[3])t3, (N), col, ref, ref2) != 0) \
+            return -1;                                                                                       \
+    } while (0)
+static int gix_foot_sink = -1, gix_wire_w = -1;
+/*  The overlay's marks and the decal's slot, which the script names. */
+static int gix_mark_end = -1, gix_mark_arc = -1, gix_mark_corner = -1, gix_mark_lid = -1;
+static int gix_straight_dot = -1, gix_decal_slot = -1;
+
 /*  A line face clipped to the tile grid.  Each piece takes the painter's
  *  order of the tile under its own centroid (the caller's fraction of an
  *  order, a strip's small offset, carried over).  A quad that straddles
@@ -110,9 +124,9 @@ static int clip_axis(const ClipVert *in, int n, int axis, float k, int below, Cl
  *  20. */
 int curves_hidden(float mat)
 {
-    if (!(s_tune.show_curves > 0.5f))
+    if (!(TUNE(show_curves) > 0.5f))
         return 0;
-    return mat > 6.5f && mat < 19.5f && !(mat > 14.5f && mat < 15.5f);
+    return MAT_IN(mat, MAT_LINE, MAT_BAND) && !MAT_IS(mat, MAT_VEHICLE);
 }
 
 /*  A convex polygon as a fan of triangles. */
@@ -185,7 +199,7 @@ static int draped_tri(const char *where, const char *who, RMesh *m, const RCity 
         {
             uint8_t b = c->xbld[tr * R_MAP + tc];
             order     = tile_order(c, tc, tr, mask_bit) + frac;
-            if (col[2] > 10.5f && col[2] < 11.5f && net_line_lapped(b) &&
+            if (MAT_IS(col[2], MAT_THREAD) && net_line_lapped(b) &&
                 on_lap_panel(c, tc, tr, (tri[0][0] + tri[1][0] + tri[2][0]) / 3.0f, (tri[0][1] + tri[1][1] + tri[2][1]) / 3.0f))
                 pcol = xcol;
         }
@@ -250,10 +264,10 @@ static int draped_tri(const char *where, const char *who, RMesh *m, const RCity 
          *  twists, climbing and turning off the line, and the two quads
          *  interpolate different depths and the line tore into a
          *  sawtooth.  A slot's fraction outranks any height term. */
-        porder = tile_order(c, tc, tr, mask_bit) + frac + 0.004f;
+        porder = tile_order(c, tc, tr, mask_bit) + frac + geo_num(&gix_decal_slot, "decal_slot");
         /* a thread on a lapped tile: only its threads, in the lap's surface (spec 3.15) */
         pcol = col;
-        if (col[2] > 10.5f && col[2] < 11.5f && on_lap_panel(c, tc, tr, cx, cy))
+        if (MAT_IS(col[2], MAT_THREAD) && on_lap_panel(c, tc, tr, cx, cy))
             pcol = xcol;
         if (drape)
         {
@@ -308,9 +322,13 @@ static int put_tri_draped(RMesh *m, const RCity *c, uint8_t mask_bit, float orde
     return put_tri_line_n(m, c, mask_bit, order, tri, NULL, col, ref, ref2);
 }
 
-/*  The across at each corner: across0 and across1 at the near station's
- *  right and left, across0b and across1b at the far station's.  A quad
- *  between two widths keeps the material true to the lanes at both. */
+/*  One quad of a strip between two cross-sections.  Each is given by its
+ *  two end points in world tile coordinates, with the across and along
+ *  values of the material.  `za`/`zb` are the sections' heights, or
+ *  negative to take the ground under each corner.  The across at each
+ *  corner: across0 and across1 at the near station's right and left,
+ *  across0b and across1b at the far station's.  A quad between two
+ *  widths keeps the material true to the lanes at both. */
 int strip_quad_z_at(const char *where, const char *who, RMesh *m, const RCity *c, uint8_t mask_bit, float order, const float a0[2], const float a1[2], const float b0[2], const float b1[2], float za, float zb, float across0, float across1, float across0b, float across1b, float along_a, float along_b, float mat)
 {
     /*  A height below zero at both ends means the quad lies on the
@@ -357,10 +375,10 @@ int strip_quad_at(const char *where, const char *who, RMesh *m, const RCity *c, 
 }
 
 /*  A fan of triangles about a point, from angle t0 at radius r0 to t1 at
- *  r1, one material.  The rim carries across 1, the apex `across_c`. */
-/*  `lift` is added to the ground under each vertex.  So a cap on a slope
+ *  r1, one material.  The rim carries across 1, the apex `across_c`.
+ *  `lift` is added to the ground under each vertex.  So a cap on a slope
  *  lies on the slope.  Set flat at its center's height, the uphill half
- *  of a dead end's cap on a slope piece lay under the ground). */
+ *  of a dead end's cap on a slope piece lies under the ground. */
 int strip_fan_z(RMesh *m, const RCity *c, uint8_t mask_bit, float order, float cx, float cy, float t0, float t1, float r0, float r1, float across_c, float mat, int n, float lift)
 {
     float line_col[3] = {0.0f, 0.0f, mat};
@@ -386,9 +404,6 @@ int strip_fan_z(RMesh *m, const RCity *c, uint8_t mask_bit, float order, float c
     return 0;
 }
 
-/*  A box standing on the surface at world (x, y).  It is `w` by `d` in
- *  tiles, from `z0` to `z1` levels above the ground there.  It has four
- *  sides and a top, in one material.  `phase` in col.r. */
 /*  A round column.  It is a twelve-sided prism of radius r about (cx,
  *  cy).  Its top is flat at z1 over the ground under its center.  Its
  *  foot is draped on the terrain, with each base vertex at the ground
@@ -475,7 +490,8 @@ int tile_highlight(RMesh *m, const RCity *c, uint8_t mask_bit, int32_t col, int3
     /*  A sliver above the ground's own slot and under the lines.  A line
      *  strip is pulled a fifth of a slot nearer than its ground (the
      *  vertex shader).  The zone tint's 0.4 would otherwise outrank that
-     *  and lie over the fill.  The spur marker (paint 8) is a LID.
+     *  and lie over the fill.  A paint at `mark_lid` or above is a LID:
+     *  it is drawn over what it marks rather than under it.
      *
      *      At the top of the tile's own slot.
      *      Over the spur's concrete and its edge lines.
@@ -483,8 +499,9 @@ int tile_highlight(RMesh *m, const RCity *c, uint8_t mask_bit, int32_t col, int3
      *
      *  The spur is drawn in the ground's slot too, and nothing sits
      *  between them. */
-    float lift  = paint > 7.5f ? 0.0f : 0.02f;
-    float order = tile_order(c, col, row, mask_bit) + (paint > 7.5f ? 0.98f : 0.05f);
+    int   lid   = paint >= geo_num(&gix_mark_lid, "mark_lid");
+    float lift  = lid ? 0.0f : 0.02f;
+    float order = tile_order(c, col, row, mask_bit) + (lid ? 0.98f : 0.05f);
     float z[4], zc[3] = {paint, 0.0f, MAT_HILITE}, ref[3] = {paint, paint, paint}, tri[3][3];
     int   was = m->to_water, rc;
     tile_top(c, col, row, mask_bit, z);
@@ -511,6 +528,9 @@ int tile_highlight(RMesh *m, const RCity *c, uint8_t mask_bit, int32_t col, int3
     return rc;
 }
 
+/*  A box standing on the surface at world (x, y).  It is `w` by `d` in
+ *  tiles, from `z0` to `z1` levels above the ground there.  It has four
+ *  sides and a top, in one material.  `phase` in col.r. */
 int put_box(RMesh *m, const RCity *c, uint8_t mask_bit, float order, float cx, float cy, float w, float d, float z0, float z1, float mat, float phase)
 {
     if (s_pass == 1)
@@ -741,3 +761,34 @@ int put_fascia(RMesh *m, const RCity *c, uint8_t mask_bit, float order, const fl
     return put_wall(m, p0, p1, k0, k1, up, order, conc);
 }
 
+/*  SHOW CURVES: the vertices of a fitted path marked with the node models,
+ *  `lift` over the ground.  An end is one mark and a corner another.  The
+ *  paint says whether the corner was swept: 7 an end, 3 an arc, 1 a corner
+ *  left as a corner.  A vertex with no turn between two straights reads as
+ *  an end, not a corner that failed.  Answers 0, or -1 where a mark could
+ *  not be put. */
+int curve_marks(RMesh *m, const RCity *c, uint8_t mask_bit, const V2 *q, const float *rad, int nk, float lift)
+{
+    int k3;
+    for (k3 = 0; k3 < nk; ++k3)
+    {
+        int32_t tc = (int32_t)floorf(q[k3].x), tr = (int32_t)floorf(q[k3].y);
+        float   paint, z;
+        if (tc < 0 || tr < 0 || tc >= R_MAP || tr >= R_MAP)
+            continue;
+        paint = (k3 == 0 || k3 + 1 == nk) ? geo_num(&gix_mark_end, "mark_end")
+                                          : (rad[k3] > 0.001f ? geo_num(&gix_mark_arc, "mark_arc") : geo_num(&gix_mark_corner, "mark_corner"));
+        if (k3 > 0 && k3 + 1 < nk && rad[k3] <= 0.001f)
+        {
+            V2    u1 = {q[k3].x - q[k3 - 1].x, q[k3].y - q[k3 - 1].y};
+            V2    u2 = {q[k3 + 1].x - q[k3].x, q[k3 + 1].y - q[k3].y};
+            float l1 = v2len(u1), l2 = v2len(u2);
+            if (l1 > 1e-5f && l2 > 1e-5f && (u1.x * u2.x + u1.y * u2.y) / (l1 * l2) > geo_num(&gix_straight_dot, "fit_straight_dot"))
+                paint = geo_num(&gix_mark_end, "mark_end");
+        }
+        z = surface_at_world(c, mask_bit, q[k3].x, q[k3].y) + lift;
+        if (net_model_put_on(net_model_find(k3 == 0 || k3 + 1 == nk ? "node_end" : "node_mid"), m, c, mask_bit, tile_order(c, tc, tr, mask_bit), q[k3].x, q[k3].y, 1.0f, 0.0f, 0.0f, paint, 0.0f, z, z, 1) != 0)
+            return -1;
+    }
+    return 0;
+}

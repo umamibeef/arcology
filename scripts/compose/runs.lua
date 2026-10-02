@@ -237,8 +237,8 @@ arc.rules.chain = function (c)
         --  and the last stretch runs at the node's angle.
         --  The pose each end arrives on is kept (arc.arm_pose, by band
         --  and end): the node's arms are settled in height over the
-        --  ways between those poses (scripts/compose/interchange.lua).
-        local reach = arc.geo.interchange_aim or 0.0
+        --  ways between those poses (scripts/compose/interchange).
+        local reach = arc.geo.interchange_aim
         arc.arm_pose = arc.arm_pose or {}
         if be.head then
             local dx, dy = toward(e.sx, e.sy, be.head)

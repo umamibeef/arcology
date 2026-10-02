@@ -206,7 +206,7 @@ void ui_fill(App *a)
      *  inspect.  The query tool says what a tile is.  So the ground, its
      *  banks, walls and water are passed over, and what is built on them
      *  is what the pointer finds. */
-    s->outline      = tune_array()[9] > 0.5f;
+    s->outline      = TUNE(show_curves) > 0.5f;
     s->show_inspect = a->inspect;
     s->comp_ok = s->comp_n = s->comp_box_ok = 0;
     s->comp_label[0] = s->comp_who[0] = s->comp_where[0] = s->comp_gen[0] = s->comp_gen_where[0] = s->comp_note[0] = 0;
@@ -598,9 +598,25 @@ void ui_fill(App *a)
     /* the switches */
     s->speed    = a->speed;
     s->geometry = a->gv.geometry;
-    /*  The road knobs, unless the window is mid-edit and owns them. */
+    /*  The knobs, unless the window is mid-edit and owns them.  The list
+     *  is the store's, which the scripts filled: the window is handed
+     *  the label and the range along with the value. */
     if (!s->tune_changed)
-        memcpy(s->tune, tune_array(), sizeof s->tune);
+    {
+        int i;
+        s->n_knob = tune_count() < RUI_MAX_KNOBS ? tune_count() : RUI_MAX_KNOBS;
+        for (i = 0; i < s->n_knob; ++i)
+        {
+            RKnob got;
+            tune_knob(i, &got);
+            s->knob[i].label = got.label;
+            s->knob[i].group = got.group;
+            s->knob[i].v     = got.v;
+            s->knob[i].lo    = got.lo;
+            s->knob[i].hi    = got.hi;
+            s->knob[i].def   = got.def;
+        }
+    }
     s->plan    = a->plan;
     s->cell_ok = 0;
     if (a->plan && s->show_cells && a->sw.level)
@@ -683,11 +699,14 @@ void ui_apply(App *a, SDL_Window *win, int pw, int ph)
     }
     if (s->tune_changed)
     {
-        /*  The knobs are a tuning session's.  Outline is a view and is
+        /*  The knobs are a tuning session's.  The window writes back only
+         *  what it drew a slider for, so a knob some other control owns
+         *  keeps what that control left.  Outline is one of those and is
          *  applied below with the other views. */
-        float keep = tune_array()[9];
-        memcpy(tune_array(), s->tune, sizeof s->tune);
-        tune_array()[9] = keep;
+        int k;
+        for (k = 0; k < s->n_knob; ++k)
+            if (s->knob[k].label)
+                tune_set_at(k, s->knob[k].v);
         s->tune_changed = 0;
         a->mesh_dirty   = 1; /* the knobs are geometry: rebuild it */
     }
@@ -696,12 +715,12 @@ void ui_apply(App *a, SDL_Window *win, int pw, int ph)
         a->gv.geometry = s->geometry;
         a->mesh_dirty  = 1; /* the roads are part of the mesh */
     }
-    if (!!s->outline != (tune_array()[9] > 0.5f))
+    if (!!s->outline != (TUNE(show_curves) > 0.5f))
     {
         /*  Outline stands the roads aside and draws the fitted curves and
          *  the margin network on bare ground.  It is geometry, so the
          *  mesh is built again, and it is remembered like the grid. */
-        tune_array()[9] = s->outline ? 1.0f : 0.0f;
+        tune_set("show_curves", s->outline ? 1.0f : 0.0f);
         a->mesh_dirty  = 1;
         if (a->prefs_ok)
             prefs_set("curves", s->outline ? "on" : "off");
@@ -982,14 +1001,12 @@ void use_tool(App *a, SDL_Window *win)
             SDL_GetWindowSizeInPixels(win, &pw, &ph);
             {
                 /*  Center through the camera's own anchor rather than a
-                 *  projection of its own.  The one that stood here was a
-                 *  fourth transcription and it was wrong twice.  It put
-                 *  the origin half a tile out (tile_h / 2, not the
-                 *  tile_h + 0.5 every other path uses).  It took no
-                 *  account of pitch at all.  It divided by gv.scale
-                 *  while ignoring gv.zoom.  So the tile you clicked did
-                 *  not land in the middle at any zoom but one, and never
-                 *  in the map view. */
+                 *  projection of its own.  A projection written here has
+                 *  to agree with cam_anchor on the origin (tile_h + 0.5),
+                 *  on the pitch and on gv.zoom as well as gv.scale.  One
+                 *  that does not puts the tile clicked in the middle at
+                 *  one zoom only, and never in the map view.  The anchor
+                 *  already agrees. */
                 int32_t idx   = row * R_MAP + col;
                 a->anch_c     = (float)col + 0.5f;
                 a->anch_r     = (float)row + 0.5f;

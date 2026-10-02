@@ -63,10 +63,12 @@ compile.*
 **6.  All routing and every pose is out of the C code.**  C is for rendering.  The chain of points a way runs
 between two poses -- an interchange movement, a band's continuation, a taper, a spur's foot and descent, a junction's
 connectors, a segment's lane joins, a dead end's cap, a level meet's crossing -- is built by a script and handed to
-`arc.fit`; C never answers "the points between these two poses", not even as a test of what can be built.  MET for
-the routing: no `pose_chain` exists.  A pass that wants a chain queues its two POSES (`net_cut_add_poses`) and the
+`arc.fit`; C never answers "the points between these two poses", not even as a test of what can be built.  MET, and
+`ctest -R no_routing` (`tools/no_routing.py`, no build needed) holds the line: it fails on any `Piece` filled in by
+hand outside `src/render/mesh`, which is the shape every router in C has had.  Its list of what is NOT a route is
+two entries long, each with its reason.  No `pose_chain` exists.  A pass that wants a chain queues its two POSES (`net_cut_add_poses`) and the
 drive asks `arc.rules.posed` (`scripts/compose/chain.lua`, the biarc at float precision) for the points before the
-cut; the interchange and the band ends build theirs directly (`arc.chain_between`, `scripts/compose/links.lua`; the
+cut; the interchange and the band ends build theirs directly (`arc.chain_between`, `scripts/compose/links/chain.lua`; the
 node's are annealed there).  The poses are the script's own: `scripts/compose/poses.lua` settles every one from the
 map before any fit -- a junction's mouths, a band's arms, a spur's gore, a level meet -- and the fits are fitted TO
 them (`c:end_at`).  Heights ride on the same poses: a slab hands its gore its finished stations and the ramp leaves
@@ -75,93 +77,90 @@ relaxation over one graph of heights (`scripts/compose/relax.lua`, `arc.weave.pl
 over the ways the node expects and again in the building pass over the lanes' real ways.  Every chain the scripts
 build leaves a pose on a straight, so the curvature is nought on both sides of it; the cut counts the ends that are
 not (`arc.g2`, the `G2` lines under `pose_dump`).  C evaluates where a laid piece ends and hands that back, and
-decides nothing.  *Met when `pose_chain` has no caller and every chain is a script's.*
+decides nothing.  A SPUR'S FOOT is the orient rule's too (`scripts/compose/orient.lua`): where the descent stops at
+the line and the way it heads there come back with the rest of what the rule read.  *Met when `pose_chain` has no
+caller, `no_routing` passes, and every chain is a script's.*
 
 ## The constraint on all of it
 
 Every stage is proved output-identical before it is believed.  A geometry change that cannot show this has not been
-verified, however sound it reads.
+verified, however sound it reads.  The proof is `tools/battery.py`, and its reference is `tools/battery_ref.json`:
+the file holds every number the renderer is held to, and nothing in this document or any other repeats them.
 
-    sh tools/fp.sh                       # the eight views; the only exact check
+    python3 tools/battery.py --gate      # the eight views and Atlanta's mesh check: about a minute
+    python3 tools/battery.py             # the mesh check over eight cities, every city's corners, the moving world
+    python3 tools/battery.py --update    # record an accepted change; the diff of the reference is the record
 
-    for c in atlanta toronto tokyo flint babar maltron chicago; do
-        ./build/arcology cities/$c.sc2 --mute --mesh-check --run 1 2>&1 |
-            grep -aE "^mesh check|line clip|claimed by none"
-    done
+A value that differs from the reference fails whichever way it moved: an improvement that is not recorded is a
+regression waiting to pass.  A world that was not built -- a crash, a rule that runs away, a build abandoned -- is a
+FAULT, and a fault is never accepted, whatever the reference says.  The reference moves only after somebody has
+looked (`tools/frame.py` frames a difference) and only in the same change as the geometry that moved it.
 
-    ctest --test-dir build               # 39 tests
+`ctest` runs in tiers, and the tier is the whole choice a session makes:
 
-The reference, which every one of these must still print:
+    ctest --test-dir build -L lint       # no build needed, a second: the style and layer checkers
+    ctest --test-dir build -L gate       # one build of Atlanta, about a minute: what runs between edits
+    ctest --test-dir build -L full       # everything the repository alone can run
+    ctest --test-dir build -L oracle     # what needs the game's own files
 
-    c2a1eea4b9 e664211a6f e43c1d3e03 389bb13ee6 c8ff0ea62c b303e7b5b4
-    e976ebeceb 5cfeb5254e                                     at 1280x800
-
-| city | triangles | shapes |
-|---|---|---|
-| atlanta | 1070955 | 33413 |
-| toronto | 778196 | 29483 |
-| tokyo | 840849 | 29601 |
-| flint | 818083 | 30499 |
-| babar | 671535 | 21045 |
-| maltron | 828321 | 30077 |
-| chicago | 1069533 | 35090 |
-
-with `line clip  0 samples` and `0 triangles claimed by none` on every one, and `ctest` at 39 of 39.  The four
-simulation checks (`verify`, `microsim`, `allocmicro`, `arco_roundtrip`) are behind `-DARC_SIM_TESTS=ON` and off by
-default: the simulation is verified against the original and the renderer cannot move a simulation layer.
-
-Views seven and eight frame a 2x2 highway INTERCHANGE, which none of the others reaches: without them the battery is
-blind to the deck a driver crosses one on, and every claim about it rests on a screenshot somebody chose.  Neither
-frames WATER, and that is not an accident: the water shader moves every frame, so a view with a river in it hashes
-differently on every run and the battery cries wolf.
-
-The views say nothing about the traffic: a headless frame does not draw the movers, so `--traffic-t 0` and `--traffic-t
-26` hash the same. What the moving world does is checked by `moving_world` (`tools/traffic_check.py`), which advances
-five cities and hashes every car, gate and train and every vertex of the mesh the frame uploads.
-
-Two traps in the battery itself.  A crashed run leaves the previous PNGs in place, so `fp.sh` would report stale hashes
-as a pass -- it deletes them first for that reason.  And the hashes are per FRAMEBUFFER: a display backing-scale change
-makes `--win 1280x800` produce 2560x1600 and every hash differs with nothing moved, which is why the script prints the
-size it got.
-
+The views frame no water, because the water shader moves every frame and a hashed river cries wolf.  They frame the
+2x2 highway INTERCHANGE twice (views seven and eight), because nothing else does.  They say nothing about the traffic:
+a headless frame draws no movers, so the battery's `traffic` section hashes every car, gate and train instead.  The
+simulation's four checks (`verify`, `microsim`, `allocmicro`, `arco_roundtrip`) are behind `-DARC_SIM_TESTS=ON`: the
+simulation is verified against the original and the renderer cannot move a simulation layer.
 
 ## Where the renderer's code lives
 
-Four levels, and the includes nearly hold the order.  The top runs a build.  `walk/` and `net/` sit under it, and still
-name each other in both directions.  `mesh/` is under both, and is meant to know nothing above itself.
+Four levels, and the includes hold the order: `tools/layering.py` (`ctest -R layering`) fails on any include that
+runs up a level and is not on its list of exceptions, each with its reason.  The top runs a build.  `walk/` and
+`net/` sit under it, and `net/` includes nothing from `walk/`.  `mesh/` is under all three and includes nothing
+from `walk/`; the handful of `net/` names it still reads are the exceptions the checker lists, and whether `mesh/`
+should know a family HAS stages is a design question for the user, not a file move.
+
+**Neither `walk/` nor `net/` can see the ART.**  Not a sprite, not a palette index, not an atlas level.  What a
+picture MEANS is decided in a script and pushed down as a table, so there is nothing there to look at.  The
+checker holds that line too.
+
+The arithmetic is compiled with `-ffp-contract=off`.  With contraction on, a function inlined into its caller rounds
+differently from the same function called across a translation unit, so moving a function between files moved the
+mesh; off, a move is bit-identical and the battery can prove it.
 
 ### `src/render/` — the build, and what all three below it share
 
-* `build` — two passes over one body, handed one at a time to the script that composes them.  The door itself is
-  `net/drive.c`.
+* `build` — two passes over one body, handed one at a time to the script that composes them.  `build_pass_begin`
+  empties the stores and hands the pass over; `build_pass_field` builds the field when the script says the tops are
+  settled; `build_world_nets` runs the network passes by name.  The door itself is `net/drive.c`.
 * `incr` — what a build has to redo after an edit.
 * `geo` — the numbers a script tunes with: `arc.geo`'s store and `arc.tune`'s knobs.
-* `pipeline.h` — the vocabulary the three share.
+* `prof` — where a build's time goes, stage by stage.
+* `pipeline.h` — the vocabulary the three share, and nothing more: a point, a piece, a sample, a family slot,
+  what a loft is asked to draw.  What one directory answers is declared in that directory's own headers.
 
 ### `src/render/walk/` — a segment's stages
 
-A segment's stages, the pieces a tile carries, and the footway network.  The network walk itself is
-`scripts/compose/network.lua`: nothing here decides which cells make a segment.
-
-* `walk` — one segment's stages, from a node to the next node along the pieces a family lays.
-* `cursor` — the order the drive steps them in.
-* `cell` — what a cell carries: which family a tile's piece belongs to, and how it links to its neighbours.
-* `walkway` — the margin network: the paths, their ports, and whether the ends meet.
+* `walk` — one segment's stages, from a node to the next node along the pieces a family lays, and the replay of
+  the table's segments in the building pass.
+* `cursor` — the order the drive steps them in, and the class each segment asks for before anything is fitted.
 
 ### `src/render/net/` — the stores and the plumbing
 
 The plumbing that turns a Lua declaration into a family; the fans that offer a reading to a rule and take its answer
 back; and the stores.  Nothing here decides anything, and nothing here knows what any family draws.
 
-`family`, `drive`, `cut` and `strip` are the plumbing.  `table`, `lane`, `station`, `shelf`, `network` and `traffic` are
-the stores, and `report` says what the city holds on a tile.  `box`, `meet`, `node` and `margin` are one concept each.
-Two concepts are a pair of files: `band` reads what the map says and `band_walk` walks one, `spur` holds the tiles the
-map carries and `spur_build` poses, routes and builds the descent.
+`family`, `drive`, `cut` and `strip` are the plumbing.  `table` (the segments, their classes and the station
+cache), `fits` (the fit arena: every ask, its two ways and the choice, serving the lines and the band alike),
+`lane`, `station`, `shelf`, `network` (the runs, and the tiles a drawn segment serves), `cell` (what a cell carries:
+the piece tables read off the byte sets the script pushed and the art), `walkway` (the margin network) and
+`traffic` are the stores, and `report` says what the city holds on a tile.  `box`, `meet`, `node` (with the arms'
+trims) and `margin` are one concept each.  Two concepts are a pair of files: `band` reads what the map says and
+`band_walk` walks one, `spur` holds the tiles the map carries and `spur_build` poses, routes and builds the descent.
 
 ### `src/render/mesh/` — EVERY SHAPE PRIMITIVE, and nothing else
 
 A file here names no road, ramp, deck, track, junction or footway, and a script inventing something the renderer has
-never heard of can build it out of what these offer.
+never heard of can build it out of what these offer.  One header a file: `mesh/fit.h` declares the fit and the fans
+it offers a rule, `mesh/loft.h` the loft, `mesh/piece.h` the piece arithmetic, `mesh/shapes.h` the shapes,
+`mesh/surface.h` the drawn ground, `mesh/tile.h` and `mesh/emit.h` the rest.
 
 `emit` puts triangles, walls, tops and boxes, `shapes` puts line quads and fans over them, and `shape` is the table of
 what each shape is and which triangles are its own.  `mesh` builds the mesh and answers the query tool, and `check` is
@@ -172,19 +171,6 @@ is and the ground field, and `model` draws a model and caches it.
 ### `scripts/` — the decisions
 
 The numbers, the rules, the families, the models and the drive.
-
-### What the three share
-
-`src/render/pipeline.h` is what the three share, and nothing more: a point, a piece, a sample, a family slot, what a
-loft is asked to draw. It declares no `net/` name at all.  What the network offers is `net/net.h` and one header a file
-under it, so a reader who wants to know what the band offers opens `net/band.h`.
-
-### The five includes that run the wrong way
-
-Five includes still run from `mesh/` up into `net/`, and each one is a real dependency rather than an accident: the
-ground is cut to the corridor shelves (`tile.c`), the loft reads the profile slots and a family's stages (`loft.c`), the
-per-pass body walks the bands (`mesh.c`), and two more read one name apiece (`shapes.c`, `surface.c`). Whether `mesh/`
-should know a family HAS stages is a design question, not a file move.
 
 ## The pipeline names no family
 
@@ -229,13 +215,42 @@ for one only through the pointers the declarations fill in -- `net_line`, `net_t
 the 1995 game draws is describing the material rather than deciding anything -- the same reason `src/sim` is exempt from
 the no-history rule.
 
+## A reading is PUSHED, never asked for
+
+What a byte of the city means, what a picture shows, which rule settles a
+situation: every one of those is a decision, and every one is a script's.  C
+never calls up to ask.  The script says it once when it is read, and the
+pipeline reads the answer out of a table.
+
+| what a script pushes | the table C reads |
+|---|---|
+| `arc.bytes(name, t [, "number"])` | `script_bytes(name)[b]`: a flag or a small number, per byte |
+| `arc.floats(name, t)` | `script_floats(name)[b]`: a number no byte could hold |
+| `arc.names(name, t)` | `script_name(name, b)`: a word, for a report to print |
+| `arc.numbers(name, t)` | `script_numbers(name, keys, out, n)`: a handful of named numbers |
+| `arc.pieces`, `arc.bands` | the piece and band tables, with a shape of their own |
+
+`arc.art` is the other half: the pictures, offered so a script can READ them.
+`arc.art.levels`, `.level`, `.tile`, `.pixel` and `.row` say what the art holds
+and nothing about what it means.  `scripts/art_tiles.lua` reads them, decides
+which edges a piece joins and how high a structure stands, and pushes both
+down.  **A reading of the art belongs there, never in C.**
+
+A table nothing pushed reads as nought at every byte.  That is deliberate: a
+run that cannot find its scripts draws no network at all rather than a city
+half right.
+
 ## Traps when extending the script API
 
-Goals 1 to 3 all add API, and these four cost real time every time.
+Goals 1 to 3 all add API, and these five cost real time every time.
 
-* **`src/script/lint.c` carries a stub `world` handle** as a `luaL_dostring` string, and it must list **every** `w:`
-  method or `lua_lint` fails.  `RULES[]` gives each rule's answer shape and `rule_args` supplies an argument that
-  exercises its body.  Add all three when adding a rule.
+* **The lint's `world` handle is GENERATED** from `WORLD[]` by `tools/gen_lint_stub.py` into
+  `src/script/generated/lint_stub.h`, so a new `w:` method needs no edit: it is on the handle, answering the empty
+  value of what the accessor pushes.  Run the generator and `ctest -R lint_stub_fresh` holds it.  A method that must
+  answer otherwise, to open a pass or to name what the drive reads, is written over in `lint.c` with its reason.
+  **A new RULE is still two edits**: `RULES[]` names it, and `rule_args` supplies an argument that exercises its body.
+* **A new `arc.*` function needs a stub in `lint.c` too**, beside the one the program registers.  The lint runs with no
+  city, no mesh and no art, so the stub answers what a run with none of those would.
 * **`arc.rules.<name>` may be nil.**  Index it through a local -- `local fn = arc.rules[rule]; w:control_is(i, fn and
   fn(at))`.
 * **A static holding a pass's state must own its data**, never point at a caller's stack local.
@@ -281,14 +296,15 @@ file is rewritten by rewriting its generator and running it again.
 ## Comments: what the code does, once
 
 A comment describes the code **as it stands**.  Three rules, checked by
-`ctest -R comment_style` (`tools/comment_style.py`, no build needed):
+`ctest -R comment_lint` (`tools/comment_lint.py`, no build needed, and the same checker is the write hook):
 
 * **No attribution.**  Not "the user asked for", not a quoted request, not a date from this project's own era.  Who
   wanted the code and when is the repository's history; the source is not the place for it.  A date from the game's own
   era is provenance of the material and stays.
-* **No history.**  In `src/render`, `src/app` and `src/ui`, no account of what the code used to do -- no "used to", "had
-  been", "it once", "before this", "no longer".  A reader needs the rule that holds now. `src/sim` is exempt because
-  there "the old value" and "used to" describe the ORIGINAL 68k game, which is the subject matter.
+* **No history.**  No account of what the code used to do -- no "used to", "had been", "it once", "before this",
+  "no longer".  A reader needs the rule that holds now.  This holds in `src/sim` too: what the ORIGINAL 68k game
+  does is its subject matter and is written in the present ("the original divides by zero here"), never as a
+  history of the port.
 * **Never stack.**  Two multi-line block comments must never sit back to back with no code between them.  That shape
   means a change wrote a new comment and left the old one standing: the two then disagree and the reader cannot tell
   which one the code obeys.

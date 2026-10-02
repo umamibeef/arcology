@@ -29,6 +29,8 @@ import os
 import sys
 from pathlib import Path
 
+from game import folder
+
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from runsim import Sim, A5
@@ -64,9 +66,7 @@ G_SCROLL_X, G_SCROLL_Y = 0x2C3C, 0x2C3E
 G_CLIP_T, G_CLIP_B = 0x122C, 0x1230
 G_CLIP_L, G_CLIP_R = 0x122E, 0x1232
 G_CORNER, ROT_TABLE = 0x122A, -0x7DD4
-GAME = Path(os.environ.get(
-    "ARC_CITIES",
-    Path.home() / "Downloads" / "SimCity 2000\u00ae Collection"))
+GAME = folder()
 OX, OY, TW, TH = 2048, 200, 32, 16
 
 
@@ -87,10 +87,10 @@ def render(city, crop, underground=False, view=0, bg=0, zoneflag=None,
     #  Art and descriptor FIRST, frame buffer last, with a wide guard after
     #  it.  The emulator heap is a bump allocator with no bounds check, so
     #  anything the blitter writes past the buffer's end lands in whatever
-    #  was allocated next -- and that used to be the sprite streams it then
-    #  reads back, which surfaces much later as an invalid span and a
-    #  _Debugger trap in the middle of a render.  This way a stray write
-    #  hits dead space instead of the art.
+    #  was allocated next.  With the sprite streams there, a stray write
+    #  surfaces much later as an invalid span and a _Debugger trap in the
+    #  middle of a render.  This way it hits dead space instead of the
+    #  art.
     shapes = tileset_shapes()
     desc = e.alloc(0x2EE0)
     for k in range(0, 0x2EE0, 4):

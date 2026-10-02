@@ -18,6 +18,8 @@
 #include "pipeline.h"
 
 #include "net/net.h"
+#include "mesh/loft.h"
+#include "script.h"
 BandSt s_band_st[BAND_MAX_ST];
 int  s_band_nst, s_band_st_at;
 

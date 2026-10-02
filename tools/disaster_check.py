@@ -50,7 +50,7 @@ def oracle(path, kind, h, v):
     s.e.wr(A5 - 0x7980, 2, v & 0xFFFF)   # view centre, column
     #  the flood's ring search is expensive when no shoreline is near, so
     #  give every disaster room.  A truncated oracle run is not the
-    #  original's answer, and Sim.run now raises rather than return one.
+    #  original's answer, and Sim.run raises rather than return one.
     s.run(ENTRY[kind], stubs=STUBS, limit=400000000)
     t = s.layer("XTXT")
     st = {("x", i // 128, i % 128): b for i, b in enumerate(t) if b}

@@ -81,9 +81,9 @@ New files, none of them shared with the simulation: ``tools/artpack.py``, the or
 
 Everything needed to draw a city is already decoded. What is missing is a real-time renderer.
 
-``tools/render.py`` is 83 lines and it already draws a correct city: it walks the map back to front along anti-diagonals, fills a flat diamond for unbuilt land, blits the ``XTER`` terrain tile, then blits the ``XBLD`` building tile if the tile carries the corner bit for the current rotation. It reads the tile art straight out of the ``TSET`` resource and the colours out of ``pltt 0``.
+The original's own frame is the **reference image**. ``tools/render_pixels.py`` runs the game's per-tile renderer with its real blitter into a framebuffer, and ``tools/pixel_diff.py`` measures a frame against it. The original walks the map back to front along anti-diagonals, fills a flat diamond for unbuilt land, blits the ``XTER`` terrain tile, then blits the ``XBLD`` building tile if the tile carries the corner bit for the current rotation. Its tile art comes from the ``TSET`` resource and its colours from ``pltt 0``.
 
-That script is not a prototype to be thrown away. It is the **reference image**. Every decision below has to keep producing what it produces, because it is the only thing in the project that can say whether a new renderer draws the game or draws something that looks like the game.
+Every decision below has to keep producing that frame, because the original is the only thing in the project that can say whether a renderer draws the game or draws something that looks like the game.
 
 What the art actually is
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -360,7 +360,7 @@ Keep the anti-diagonal painter's sweep; cache its output
    D8 · ordering
 
 
-**Take** The order ``render.py`` already uses, emitted once into a vertex buffer and reused until a tile changes.
+**Take** The original's anti-diagonal sweep order, emitted once into a vertex buffer and reused until a tile changes.
 
 A depth buffer looks tempting and is a trap. Multi-tile buildings are drawn once, at whichever corner the rotation's mask selects, but they occupy up to sixteen tiles' worth of depth; a single depth per quad cannot express that, and per-fragment depth costs more than the sort it replaces. Sorting 16,384 tiles is a sweep over anti-diagonals with no comparisons in it at all — the order is arithmetic, not a sort.
 
@@ -444,7 +444,7 @@ Smooth rotation remains out of reach: there is no art for the intermediate angle
 The software path is the point, not a fallback
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-This project's discipline is that claims are checked. The brief says a number without a denominator is not a result, and that a routine should be run rather than read. A renderer deserves the same treatment, and it can have it: **a software rasteriser that reproduces render.py's PNG exactly**, byte for byte, at 1× and rotation 0.
+This project's discipline is that claims are checked. The brief says a number without a denominator is not a result, and that a routine should be run rather than read. A renderer deserves the same treatment, and it can have it: **a software rasteriser that reproduces the original's frame exactly**, byte for byte, at 1× and rotation 0.
 
 That gives a regression test with no tolerance in it, on a path with no driver and no shader compiler. The GPU path is then checked against the same image within a small tolerance, and a difference is a bug in one of two places rather than a matter of opinion. It also means the project can render a city in continuous integration, on a machine with no display.
 
@@ -453,19 +453,15 @@ Module layout
 
 ::
 
-   sim/
-     render/
-       atlas.c    atlas + sidecar load, mod overrides, palette resolve
-       miff.c     MIFF/TSET/SPRT reader — SCURK import at runtime
-       camera.c   iso projection, continuous zoom, pan, rotation state
-       scene.c    const City * -> instance buffer; dirty-region rebuild
-       gpu.c      SDL_GPU backend, one pipeline, one bind
-       soft.c     reference rasteriser; must match render.py exactly
-       overlay.c  data-layer textures and ramps
+   src/render/
+       atlas/atlas.c  atlas + sidecar load, palette resolve
+       camera.c       iso projection, continuous zoom, pan, rotation state
+       soft/soft.c    reference rasteriser: the sweep's op list, and the paint
+       gpu/gpu.c      SDL_GPU backend: the same op list as instances
    tools/
-       artpack.py  extract / pack / import-scurk — builds on miff.py
+       artpack.py     extract / pack / import-scurk
 
-Extraction stays in Python. ``miff.py`` already decodes the format correctly, including the odd-run padding rule that took real effort to find, and it runs once at build time. The C runtime only needs to read PNG — plus ``miff.c`` for the live SCURK import, which is the one place the format has to exist in both languages.
+Extraction stays in Python. ``tools/artpack.py`` decodes the format, including the odd-run padding rule, and it runs once at build time. The C runtime only needs to read PNG.
 
 8. Cross-platform, enforced
 ---------------------------
@@ -567,7 +563,7 @@ Software rasteriser
 
    Step 2 · done
 
-``soft.c`` draws a city from a read-only view, with no GPU in the picture. It matches ``render.py`` pixel for pixel on cities covering all four rotations. The view type is ``RCity``, defined in the renderer and deliberately *not* the simulation's ``City`` — an adapter will fill one from the other, and until then ``city.c`` reads a ``.SC2`` directly so the renderer builds and tests standalone.
+``soft.c`` draws a city from a read-only view, with no GPU in the picture. ``tools/pixel_diff.py`` measures it against the original's frame, pixel for pixel, on cities covering all four rotations. The view type is ``RCity``, defined in the renderer and deliberately *not* the simulation's ``City`` — an adapter will fill one from the other, and until then ``city.c`` reads a ``.SC2`` directly so the renderer builds and tests standalone.
 
 Window and GPU path
 ~~~~~~~~~~~~~~~~~~~
@@ -585,7 +581,7 @@ Continuous zoom
 
    Step 4 · built, without the crossfade
 
-The level-of-detail ladder of D5 and the texel-boundary sampler of D4, 1 September 2026: the camera carries one continuous scale, the set nearest native draws the canvas, and the resolve pass scales it by the remainder with the D4 filter at fractional scales and plain nearest at integer ones, which keeps the identity check exact. The canvas is drawn at the window's resolution with the camera scaled, so sprites magnify by nearest and the mesh and water are crisp; the D4 sampler for sprites at fractional scales, which needs the palette resolved to colours first, and the ±10% crossfade band are not built: the set switches at the geometric midpoints. See :doc:`enhanced-renderer`.
+The level-of-detail ladder of D5 and the texel-boundary sampler of D4: the camera carries one continuous scale, the set nearest native draws the canvas, and the resolve pass scales it by the remainder with the D4 filter at fractional scales and plain nearest at integer ones, which keeps the identity check exact. The canvas is drawn at the window's resolution with the camera scaled, so sprites magnify by nearest and the mesh and water are crisp; the D4 sampler for sprites at fractional scales, which needs the palette resolved to colours first, and the ±10% crossfade band are not built: the set switches at the geometric midpoints. See :doc:`enhanced-renderer`.
 
 Overlays and interpolation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -603,7 +599,7 @@ Mods and SCURK
 
    Step 6 · not started
 
-``miff.c``, the mod override directory, live reload. Load all 33 readable packs as the test — a renderer that opens 1995 artwork untouched is the thing worth showing people.
+A C reader for the SCURK format, the mod override directory, live reload. Load all 33 readable packs as the test — a renderer that opens 1995 artwork untouched is the thing worth showing people.
 
 11. The third dimension
 -----------------------

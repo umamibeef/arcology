@@ -198,26 +198,7 @@ void traffic_free(RTraffic *t);
  *  geometry of what moves. */
 int  traffic_moving(RTraffic *t, const RMesh *m, const RCity *c, float dt, float time, int draw);
 
-/*  Build the land list for `c`.  Returns 0, or -1 when out of memory. */
-/*  `underground` builds the underground view's ground instead.
- *
- *      Every tile at the ground field.
- *      The seabed under water.
- *      No water.
- *      No walls.
- *      No plinths.
- *      For the white ground with the hairline grid. */
-/*  `rotated` builds for the free rotation.  Every water surface becomes
- *  a mesh face, and the cut runs on all four edges, because any side may
- *  face the camera. */
-/*  `lines` adds the line strips on the surface.
- *
- *      One constant-width band per line tile along the piece's connections.
- *      Bent on a quarter circle at a corner.
- *      In place of the line sprites. */
 void mesh_free(RMesh *m);
-/*  The incremental rebuild's own scratch, kept between builds: given
- *  back when the program is done with meshes altogether. */
 /*  The emitter's own scratch: the triangle index by tile and the
  *  coplanar check's hashes, kept between builds. */
 void mesh_emit_free(void);
@@ -287,27 +268,16 @@ int mesh_check_collide(const RMesh *m, int verbose);
  *  there, its painter's slot, its material and the shape it belongs to.
  *  What to reach for when a surface is hidden or two of them flicker. */
 void mesh_probe(const RMesh *m, float px, float py);
-/*  The mesh the last build wrote into, or NULL before the first one: what
- *  a query with no mesh of its own asks (src/script). */
-/*  A junction's outline must be a simple ring: no vertex where it doubles
- *  back, no two edges meet.  Nonzero when the last build laid one
- *  that is not (net/node.c). */
-/*  A meet must reach a margin at both of its ends.  Nonzero when
- *  the last build marked one that does not (walk/walkway.c). */
-int walk_net_faults(void);
-
-/*  The line geometry's live knobs, in tiles.  They are the way widths,
- *  and the tightest and widest curve each family may be drawn with.  The
- *  straight run reserved at a node, and how far inside its corridor the
- *  band is held.  It also gives how far out a junction may cut its arms
- *  back.  Nine floats in the order the tuning window shows them.
- *  Writing them and rebuilding the mesh is all that is needed to see the
- *  change. */
 
 /*  The street-furniture and margin passes (furniture.c, margin.c): each
  *  switched as one, from the View menu or --no-furniture / --no-margins.
  *  A change rebuilds the mesh. */
 void furniture_enable(int on);
 int  furniture_on(void);      /* the furniture pass's state, to know when a toggle needs a rebuild */
+
+/* ---- mesh.c: the build's clock, read by the stages' timing lines */
+double     tms(void);
+
+void       tnote(const char *what, double t0);
 
 #endif /* R_MESH_H */

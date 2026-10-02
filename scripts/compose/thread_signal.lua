@@ -21,7 +21,7 @@
 
 arc.rules.thread_signal = function (s)
     if s.ahead < arc.geo.rail_block_ahead or s.back < arc.geo.rail_block_back then
-        return "rail_aspect_red"
+        return "thread_aspect_red"
     end
-    return "rail_aspect_green"
+    return "thread_aspect_green"
 end

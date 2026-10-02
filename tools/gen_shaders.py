@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Compile the renderer's GLSL into what SDL_GPU accepts, and embed it.
 
-    python3 tools/gen_shaders.py          # -> src/render/shaders.c
+    python3 tools/gen_shaders.py          # -> src/render/generated/shaders.c
 
 Every shader in src/render/gpu/shaders/ is authored once, in GLSL 450 with
 Vulkan semantics, and compiled to SPIR-V (glslang) for the Vulkan backend
@@ -13,6 +13,10 @@ by `--msl-decoration-binding`:
     vertex   : uniform buffers in set 1, bindings from 0
     fragment : sampled textures in set 2, uniform buffers in set 3
 The counts SDL_CreateGPUShader wants are read off the GLSL text.
+
+A shader may splice another file in with a line `//#include "name"`.
+The materials use it, so the numbers a shader reads by range are the
+ones src/render/mesh/materials.def gives.
 
 Standard library only, so it runs wherever the game builds.
 """
@@ -36,6 +40,23 @@ def run(cmd):
         sys.stderr.write(r.stdout + r.stderr)
         raise SystemExit("failed: " + " ".join(cmd))
     return r
+
+
+#  A shader asks for another file with a line of its own.  glslang needs
+#  an extension for #include, and the text is the same either way, so the
+#  file is spliced in here instead.  The materials are the only one: the
+#  shader reads a material by range, and the ranges must be the ones the
+#  mesh writes.
+INCLUDE = re.compile(r'^//#include "([A-Za-z0-9_.]+)"\s*$', re.M)
+
+
+def splice(glsl):
+    def one(m):
+        p = SRC / m.group(1)
+        if not p.exists():
+            raise SystemExit("no such shader include: %s" % m.group(1))
+        return p.read_text(encoding="utf-8").rstrip("\n")
+    return INCLUDE.sub(one, glsl)
 
 
 def counts(glsl):
@@ -72,11 +93,13 @@ def main():
             src = SRC / name
             if not src.exists():
                 continue
-            glsl = src.read_text(encoding="utf-8")
+            glsl = splice(src.read_text(encoding="utf-8"))
             stage = "vertex" if name.endswith(".vert") else "fragment"
             spv = td / (name + ".spv")
             msl = td / (name + ".metal")
-            run(["glslang", "-V", str(src), "-o", str(spv)])
+            whole = td / name
+            whole.write_text(glsl, encoding="utf-8")
+            run(["glslang", "-V", str(whole), "-o", str(spv)])
             run(["spirv-cross", "--msl", "--msl-version", "20100",
                  "--msl-decoration-binding", str(spv), "--output", str(msl)])
             ident = name.replace(".", "_")
@@ -103,7 +126,21 @@ def main():
     w("            return &shaders_all[i];")
     w("    return NULL;")
     w("}")
-    open(OUT_C, "w", encoding="utf-8", newline="\n").write("\n".join(out) + "\n")
+    text = "\n".join(out) + "\n"
+    #  --check: is the file in the tree already what the GLSL compiles to?
+    #  A shader edited without regenerating draws the last build's frame.
+    if "--check" in sys.argv:
+        try:
+            have = open(OUT_C, encoding="utf-8").read()
+        except OSError:
+            have = None
+        if have != text:
+            print("src/render/generated/shaders.c is not what the GLSL "
+                  "compiles to; run tools/gen_shaders.py", file=sys.stderr)
+            return 1
+        print("gen_shaders: src/render/generated/shaders.c is fresh")
+        return 0
+    open(OUT_C, "w", encoding="utf-8", newline="\n").write(text)
     print("wrote %s: %d shaders" % (OUT_C.relative_to(ROOT), len(table)))
     for name, stage, ident, ls, lm, ns, nu in table:
         print("  %-14s %-8s spv %5d B  msl %5d B  samplers %d  uniforms %d"
@@ -111,4 +148,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main() or 0)

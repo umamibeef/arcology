@@ -36,6 +36,10 @@ void net_car_density_is(int tv, int cars);
 int  net_signals(void);
 int  net_signal_at(int i, float *ahead, float *back);
 void net_signal_is(int i, const char *model);
+/*  The arms at the junction the car in hand is about to reach, for
+ *  arc.rules.car_turn.  They give how many there are, the draw the world
+ *  made, each one's heading away from the node, and the one the rule
+ *  chose. */
 int  net_beat_turn(int *n, unsigned *draw);
 int  net_beat_turn_at(int k, float *dx, float *dy);
 void net_beat_turn_is(int k);

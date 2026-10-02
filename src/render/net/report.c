@@ -16,6 +16,10 @@
 #include "pipeline.h"
 #include "net/net.h"
 #include "net/report.h"
+#include "mesh/loft.h"
+#include "mesh/piece.h"
+#include "net/cell.h"
+#include "script.h"
 
 typedef struct
 {
@@ -51,63 +55,28 @@ static int text_printf(Text *t, const char *fmt, ...)
     return 0;
 }
 
-/*  A tile's two-letter mark: a band piece by its id, the rest by kind. */
+/*  A tile's two-letter mark, in the order the three tables are asked.
+ *  A band piece carries its own, which stands whatever the terrain is,
+ *  so that one band piece can be told from another.  The terrain comes
+ *  next, which is how water shows through what stands on it.  Then what
+ *  stands there.  Every mark is a script's:
+ *  arc.names("band_marks"), ("terrain_marks") and ("tile_marks"). */
 static void tile_mark(const RCity *c, int32_t col, int32_t row, char out[3])
 {
-    uint8_t b = c->xbld[row * R_MAP + col];
-    if (b >= 0x49u && b <= 0x6Bu)
-        snprintf(out, 3, "%02x", b);
-    else if (is_water(c->xter[row * R_MAP + col]))
-        strcpy(out, "~~");
-    else if (b >= 0x6Cu)
-        strcpy(out, "bb");
-    else if (b >= 0x43u && b <= 0x48u)
-        strcpy(out, "xx");
-    else if (b >= 0x3Bu && b <= 0x42u)
-        strcpy(out, "pp");
-    else if (b >= 0x2Cu && b <= 0x3Au)
-        strcpy(out, "tt");
-    else if (b >= 0x1Du && b <= 0x2Bu)
-        strcpy(out, "rr");
-    else if (b >= 0x01u)
-        strcpy(out, ",,");
-    else
-        strcpy(out, "..");
+    int32_t     at = row * R_MAP + col;
+    const char *m  = script_name("band_marks", c->xbld[at]);
+    if (!m)
+        m = script_name("terrain_marks", c->xter[at]);
+    if (!m)
+        m = script_name("tile_marks", c->xbld[at]);
+    snprintf(out, 3, "%s", m ? m : "??");
 }
 
+/*  And the word for a byte, as arc.names("tile_kinds") gives it. */
 static const char *tile_kind(uint8_t b)
 {
-    if (b == 0)
-        return "ground";
-    if (b <= 0x1Cu)
-        return "trees or rubble";
-    if (b <= 0x2Bu)
-        return "line";
-    if (b <= 0x3Au)
-        return "thread";
-    if (b <= 0x42u)
-        return "power line";
-    if (b <= 0x48u)
-        return "level meet";
-    if (b == 0x49u)
-        return "band straight, east-west";
-    if (b == 0x4Au)
-        return "band straight, north-south";
-    if (b <= 0x50u)
-        return "band over a line or thread";
-    if (b <= 0x5Cu)
-        return "band piece";
-    if (b <= 0x60u)
-        return "on-spur";
-    if (b <= 0x64u)
-        return "band section (0x61-0x64)";
-    if (b <= 0x68u)
-        return "band curve block";
-    if (b == 0x69u)
-        return "band interchange";
-    if (b <= 0x6Bu)
-        return "band piece";
-    return "building";
+    const char *k = script_name("tile_kinds", b);
+    return k ? k : "?";
 }
 
 static int in_area(int32_t col, int32_t row, int32_t c0, int32_t r0, int32_t c1, int32_t r1)
@@ -138,7 +107,33 @@ int net_area_report(const RCity *c, int32_t c0, int32_t r0, int32_t c1, int32_t 
     text_printf(&t, "area  %s  cols %d..%d  rows %d..%d  (%d x %d tiles)  rotation %d\n", c->name[0] ? c->name : "(unnamed)", (int)c0, (int)c1, (int)r0, (int)r1, (int)(c1 - c0 + 1), (int)(r1 - r0 + 1), (int)c->rotation);
     text_printf(&t, "  north is decreasing row, east is decreasing col; a label is col,row\n");
     /*  The map: the marks used when the bands were argued over. */
-    text_printf(&t, "tiles  (.. ground  ,, trees or rubble  ~~ water  rr line  tt thread  pp power  xx meet  bb building; a band piece by its id)\n     ");
+    /*  The legend, built from the same tables the marks come from: each
+     *  mark once, with the word of the first byte that carries it.  A
+     *  list written out here would be a second opinion about what a
+     *  mark stands for. */
+    text_printf(&t, "tiles  (");
+    {
+        const char *said[16];
+        int         n_said = 0, byte, seen;
+        for (byte = 0; byte < 512; ++byte)
+        {
+            /*  The terrain's marks first, then what stands on a tile,
+             *  which is the order a mark is settled in. */
+            const char *m = byte < 256 ? script_name("terrain_marks", (unsigned char)byte)
+                                       : script_name("tile_marks", (unsigned char)(byte - 256));
+            if (!m)
+                continue;
+            for (seen = 0; seen < n_said; ++seen)
+                if (strcmp(said[seen], m) == 0)
+                    break;
+            if (seen < n_said || n_said >= (int)(sizeof said / sizeof said[0]))
+                continue;
+            said[n_said++] = m;
+            text_printf(&t, "%s%s %s", n_said > 1 ? "  " : "", m,
+                        byte < 256 ? "water" : tile_kind((uint8_t)(byte - 256)));
+        }
+    }
+    text_printf(&t, "; a band piece by its id)\n     ");
     for (col = c0; col <= c1; ++col)
         text_printf(&t, " %3d", (int)col);
     text_printf(&t, "\n");
@@ -227,7 +222,7 @@ int net_area_report(const RCity *c, int32_t c0, int32_t r0, int32_t c1, int32_t 
             if (in_area(tc[k], tr[k], c0, r0, c1, r1))
                 ++here;
         if (here)
-            text_printf(&t, "%s segment %d from %d,%d to %d,%d: %d of its %d tiles are in the area, %d pieces, %d fitted nodes\n", r->f == net_thread->f ? "thread" : "line", i, (int)col0, (int)row0, (int)cc, (int)cr, here, nt, r->np, r->nk);
+            text_printf(&t, "%s segment %d from %d,%d to %d,%d: %d of its %d tiles are in the area, %d pieces, %d fitted nodes\n", net_tile_family_name((int)r->f), i, (int)col0, (int)row0, (int)cc, (int)cr, here, nt, r->np, r->nk);
     }
     /*  The on-spurs, with the stage that lost any. */
     for (i = 0; i < s_band_nspurs; ++i)
@@ -259,7 +254,7 @@ int net_area_report(const RCity *c, int32_t c0, int32_t r0, int32_t c1, int32_t 
  *  it is the band of the line or line that runs through it.  The polygon
  *  comes back in world coordinates, closed, and `label` names the thing.
  *  Returns 0, or -1 when nothing of ours is there. */
-int net_component_at(const RCity *c, const RAtlasLevel *l, int32_t col, int32_t row, float *poly_xy, int max_pts, int *n, char *label, size_t lab)
+int net_component_at(const RCity *c, int32_t col, int32_t row, float *poly_xy, int max_pts, int *n, char *label, size_t lab)
 {
     V2 *poly = (V2 *)poly_xy; /* pairs of floats, laid out as the points are */
     int max  = max_pts;
@@ -270,20 +265,20 @@ int net_component_at(const RCity *c, const RAtlasLevel *l, int32_t col, int32_t 
     *n = 0;
     /*  A junction first: its outline is the shape its own box is drawn
      *  on, which is what the eye calls the intersection. */
-    for (fi = 0; l && fi < 2; ++fi)
+    for (fi = 0; fi < 2; ++fi)
     {
         Family  f     = fams[fi];
-        int     links = eff_links(c, l, col, row, f);
+        int     links = eff_links(c, col, row, f);
         float   trim[4];
         uint8_t mouth[JUNC_MAX];
         int     np;
-        if (!tile_links(c, l, col, row, f) || node_kind(c, l, f, col, row) != 2)
+        if (!tile_links(c, col, row, f) || node_kind(c, f, col, row) != 2)
             continue;
         np = junction_poly(c, f, col, row, links, poly, mouth, max < JUNC_MAX ? max : JUNC_MAX, trim, NULL);
         if (np < 3)
             continue;
         *n = np;
-        snprintf(label, lab, "%s junction at %d,%d", f == net_thread->f ? "thread" : "line", (int)col, (int)row);
+        snprintf(label, lab, "%s junction at %d,%d", net_tile_family_name((int)f), (int)col, (int)row);
         return 0;
     }
     /*  A spur next: it is a lane and nothing else.  No segment holds it.

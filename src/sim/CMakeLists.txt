@@ -7,24 +7,13 @@
 #   cmake -B build && cmake --build build
 #   ./build/arcology --verify "<game folder>" "<game folder>/Cities"
 #
-cmake_minimum_required(VERSION 3.16)
-project(arcology_sim
-        VERSION 0.1
-        DESCRIPTION "The Arcology simulation, reconstructed from CODE 2"
-        LANGUAGES C)
-
-set(CMAKE_C_STANDARD 99)
-set(CMAKE_C_STANDARD_REQUIRED ON)
-set(CMAKE_C_EXTENSIONS OFF)
-
-if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
-    set(CMAKE_BUILD_TYPE Release CACHE STRING "" FORCE)
-endif()
+# This is a DIRECTORY of the one project the root declares, not a project
+# of its own: the version, the language standard, the build type,
+# ARC_CITIES, Python3 and enable_testing() are all settled there.
 
 # tables.c is generated from the binary's own global image.  It is checked
 # in so a plain build needs no Python, but regenerate it with
 #   cmake --build build --target tables
-find_package(Python3 COMPONENTS Interpreter)
 if(Python3_FOUND)
     add_custom_target(tables
         COMMAND ${Python3_EXECUTABLE}
@@ -58,7 +47,6 @@ add_library(arc_core STATIC
     sane.c          # the _FP68K trap, reduced to the 21 opwords that occur
     economy.c       # economyPass $34D04, the national economy
     generated/tables.c  # GENERATED - do not edit
-    advisor.c
     arco.c          # .arco, the native world format
 )
 target_include_directories(arc_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
@@ -81,19 +69,16 @@ endif()
 target_link_libraries(arc_core PUBLIC arc_vendor)
 
 # dev.c holds the developer modes -- --verify, --clock, --growth and the
-# rest.  It is a library rather than an executable because app/main.c
-# dispatches into it: one binary, `arcology`, answers to all of them.
-add_library(arc_dev STATIC dev.c testcity.c)
-target_link_libraries(arc_dev PUBLIC arc_core)
+# The developer modes that drive it are TOOLING, not reconstruction, and
+# are built in src/dev.
+add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../dev" "${CMAKE_CURRENT_BINARY_DIR}/../dev")
 
 # The reconstruction is held to a strict standard on purpose: a silent
 # integer conversion here is a behavioural difference from the original.
-foreach(tgt arc_core arc_dev)
-    target_compile_options(${tgt} PRIVATE
-        $<$<C_COMPILER_ID:GNU,Clang,AppleClang>:
-            -Wall -Wextra -Wshadow -Wconversion -Wsign-compare -Wpointer-arith>
-        $<$<C_COMPILER_ID:MSVC>:/W4>)
-endforeach()
+target_compile_options(arc_core PRIVATE
+    $<$<C_COMPILER_ID:GNU,Clang,AppleClang>:
+        -Wall -Wextra -Wshadow -Wconversion -Wsign-compare -Wpointer-arith>
+    $<$<C_COMPILER_ID:MSVC>:/W4>)
 
 find_library(M_LIB m)
 if(M_LIB)
@@ -109,8 +94,10 @@ find_program(CLANG_FORMAT NAMES clang-format
 #  The hand-written sources only.  generated/tables.c is machine output --
 #  its layout is gen_tables.py's business, and holding it to a style meant
 #  for people just made the generator and the checker argue.
-set(ARC_SOURCES dev.c city.c sim.c sim_thing.c sim_disaster.c sim_queue.c sim_scan.c sim_map.c sim_place.c sim_growth.c sim_micro.c rng.c ext80.c sane.c arco.c testcity.c
-                 sim.h ext80.h arco.h rotate.c)
+set(ARC_SOURCES city.c sim.c sim_thing.c sim_disaster.c sim_queue.c sim_scan.c sim_map.c sim_place.c
+                sim_growth.c sim_micro.c rng.c ext80.c sane.c arco.c economy.c rotate.c
+                sim.h sim_int.h ext80.h arco.h
+                ../dev/dev.c ../dev/testcity.c ../dev/advisor.c ../dev/advisor.h)
 if(CLANG_FORMAT)
     add_custom_target(format
         COMMAND ${CLANG_FORMAT} -i ${ARC_SOURCES}
@@ -125,16 +112,12 @@ if(CLANG_FORMAT)
 endif()
 
 # ---- verification ---------------------------------------------------
-# The game folder is not redistributable, so point at your own copy:
-#   cmake -B build -DARC_CITIES="/path/to/SimCity 2000® Collection"
-set(ARC_CITIES "" CACHE PATH "Folder holding the shipped city files")
-if(ARC_CITIES OR CLANG_FORMAT)
-    enable_testing()
-endif()
+# Testing is enabled once, at the root, and ARC_CITIES is declared there.
 if(CLANG_FORMAT)
     add_test(NAME format
              COMMAND ${CLANG_FORMAT} --dry-run --Werror ${ARC_SOURCES}
              WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+    set_tests_properties(format PROPERTIES LABELS "lint;gate;full")
 endif()
 #  The `verify` test needs the executable, which lives one level up, so
 #  it is registered in the root CMakeLists.txt instead of here.

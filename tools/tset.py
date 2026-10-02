@@ -9,10 +9,11 @@ oracle -- left NULL, $C2DA reads whatever sits at address 0.
 import os
 import struct
 
+from game import folder
+
 from rezfork import load as rez_load
 
-GAME = os.environ.get("ARC_CITIES") or os.path.expanduser(
-    "~/Downloads/SimCity 2000® Collection")
+GAME = str(folder())
 _CACHE = None
 
 

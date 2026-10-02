@@ -8,15 +8,13 @@ and adapt.h calls itself "the one file that includes both sides": the
 adapter copies what the renderer reads into an RCity, and the renderer
 cannot reach the City it came from.
 
-That is the design boundary of this codebase and it was enforced by
-nothing.  It broke twice in one day -- a save generator under src/render
-that included sim.h to author a City, and then app_int.h, which included
-adapt.h and so handed every field of City to camera.c, paths.c and
-prefs.c while claiming in its own comment that it did not.
+That is the design boundary of this codebase.  Two shapes break it: a
+generator under src/render that includes sim.h to author a City, and a
+header that includes adapt.h and so hands every field of City to files
+that claim, in their own comments, not to read it.
 
-The second one is why this follows includes instead of grepping each file
-in isolation: a direct include is the easy case, and it was not the one
-that happened.  Every simulation header counts, not just sim.h, and the
+The second is why this follows includes instead of grepping each file in
+isolation: a direct include is the easy case.  Every simulation header counts, not just sim.h, and the
 allow-list is keyed on path so a file cannot be exempted by being named
 after one that is.
 
@@ -36,6 +34,11 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SRC = ROOT / "src"
 SIM = SRC / "sim"
+#  The SIMULATION'S OWN SIDE.  src/dev is the tooling that drives it --
+#  the verification modes, the clock dump, the board of advisors -- so
+#  naming the simulation is what those files are for.  They are not the
+#  renderer, and the seam this checks is the renderer's.
+SIM_DIRS = ("sim/", "dev/", "vendor/")
 #  The files that may see both sides, by path from src/.
 #  Whole layers, not a list of files that grows every time one is split.
 ALLOWED_DIRS = ("app/",)
@@ -107,7 +110,7 @@ def main():
         if not path.is_file() or path.suffix not in SUFFIX:
             continue
         rel = path.relative_to(SRC).as_posix()
-        if rel.startswith(("sim/", "vendor/") + ALLOWED_DIRS) or rel in ALLOWED:
+        if rel.startswith(SIM_DIRS + ALLOWED_DIRS) or rel in ALLOWED:
             continue
         for n, inc in includes_of(path):
             route = reaches(inc, set())

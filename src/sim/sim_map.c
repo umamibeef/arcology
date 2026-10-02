@@ -156,36 +156,36 @@ void release_label(City *c, int v)
  *  pier is a run of identical tiles.  So those are taken down by
  *  flooding over the neighbors that carry the same id rather than by
  *  walking a footprint.  Nothing marks a tile as visited: the rubble
- *  written into XBLD no longer matches.  This is what stops the walk.
+ *  written into XBLD stops matching.  This is what stops the walk.
  *  The queue is popped from the back, so the flood is depth first. */
 static void demolish_run(City *c, int y, int x, int a, int b, int rubble, int even_bare)
 {
-    q_reset();         /* $21DD4 clears both ends */
-    q_push(y, x);      /* and pushes the first point */
-    while (!q_empty()) /* $21EBE */
+    q_reset(c);         /* $21DD4 clears both ends */
+    q_push(c, y, x);    /* and pushes the first point */
+    while (!q_empty(c)) /* $21EBE */
     {
         int r, cx;
-        q_pop_back(&r, &cx); /* $68D4 */
+        q_pop_back(c, &r, &cx); /* $68D4 */
 
-        sim_set_tile(c, r, cx, rubble ? (uint8_t)(1 + (Random() & 3)) : 0); /* $6BF4 */
-        c->xzon[r][cx] = (uint8_t)(c->xzon[r][cx] & 0x0F);                  /* $6908 */
-        c->xbit[r][cx] = (uint8_t)(c->xbit[r][cx] & 0x3D);                  /* $6922 */
+        sim_set_tile(c, r, cx, rubble ? (uint8_t)(1 + (Random(c) & 3)) : 0); /* $6BF4 */
+        c->xzon[r][cx] = (uint8_t)(c->xzon[r][cx] & 0x0F);                   /* $6908 */
+        c->xbit[r][cx] = (uint8_t)(c->xbit[r][cx] & 0x3D);                   /* $6922 */
 
         /*  $6926 and $6C36: the collapse animation, two draws a tile. */
         if (even_bare)
         {
-            (void)Random();
-            (void)Random();
+            (void)Random(c);
+            (void)Random(c);
         }
 
         if (r > 0 && (c->xbld[r - 1][cx] == a || c->xbld[r - 1][cx] == b))
-            q_push(r - 1, cx); /* $6D1E */
+            q_push(c, r - 1, cx); /* $6D1E */
         if (r < 0x7F && (c->xbld[r + 1][cx] == a || c->xbld[r + 1][cx] == b))
-            q_push(r + 1, cx); /* $6D68 */
+            q_push(c, r + 1, cx); /* $6D68 */
         if (cx > 0 && (c->xbld[r][cx - 1] == a || c->xbld[r][cx - 1] == b))
-            q_push(r, cx - 1); /* $6DB2 */
+            q_push(c, r, cx - 1); /* $6DB2 */
         if (cx < 0x7F && (c->xbld[r][cx + 1] == a || c->xbld[r][cx + 1] == b))
-            q_push(r, cx + 1); /* $6DFC */
+            q_push(c, r, cx + 1); /* $6DFC */
     }
 }
 
@@ -304,11 +304,11 @@ static void demolish_pair_run(City *c, int y, int x, int bld, int even_bare)
          *  three more debris blocks at $6478, $64BA and $64FC. */
         if (even_bare)
         {
-            (void)Random(); /* $637E */
-            (void)Random(); /* $63EA */
-            (void)Random(); /* $6478 */
-            (void)Random(); /* $64BA */
-            (void)Random(); /* $64FC */
+            (void)Random(c); /* $637E */
+            (void)Random(c); /* $63EA */
+            (void)Random(c); /* $6478 */
+            (void)Random(c); /* $64BA */
+            (void)Random(c); /* $64FC */
         }
         clear_pair(c, y, x);
     }
@@ -372,8 +372,8 @@ static void demolish_bridge(City *c, int y, int x, int even_bare)
          *  debris shape and a mirror flag before it is cleared. */
         if (even_bare)
         {
-            (void)Random(); /* $637E */
-            (void)Random(); /* $63EA */
+            (void)Random(c); /* $637E */
+            (void)Random(c); /* $63EA */
         }
         sim_set_tile(c, y, x, 0);                         /* $6422 */
         c->xzon[y][x] = (uint8_t)(c->xzon[y][x] & 0x0F);  /* $6442 */
@@ -430,8 +430,8 @@ void sim_demolish_and_place(City *c, int y, int x, int even_bare)
     if (even_bare)
         for (dy = 0; dy < n * n * n; dy++)
         {
-            (void)Random(); /* $71CA, the debris shape */
-            (void)Random(); /* $71FA, the mirror */
+            (void)Random(c); /* $71CA, the debris shape */
+            (void)Random(c); /* $71FA, the mirror */
         }
 
     for (dy = 0; dy < n; dy++)     /* $7518 */
@@ -447,7 +447,7 @@ void sim_demolish_and_place(City *c, int y, int x, int even_bare)
             if (c->xter[r][cx] > 0)
                 sim_set_tile(c, r, cx, 0); /* $73DE, no rubble on a slope */
             else
-                sim_set_tile(c, r, cx, (uint8_t)(1 + (Random() & 3))); /* $7406 */
+                sim_set_tile(c, r, cx, (uint8_t)(1 + (Random(c) & 3))); /* $7406 */
 
             c->xbit[r][cx] = (uint8_t)(c->xbit[r][cx] & 0x3D); /* $742A */
             c->xzon[r][cx] = (uint8_t)(c->xzon[r][cx] & 0x0F); /* $7452 */

@@ -105,9 +105,9 @@ int incr_want_tile(int32_t col, int32_t row)
 
 /*  A stable counting sort of a triangle list by chunk.  The opaque list
  *  is sorted by terrain or network as well.  The triangles before
- *  `n_split` are the terrain's.  `start`/`count` come out in vertices. */
-/*  ... and `aux`, one entry a triangle, is permuted the same way.  The
- *  component ids must follow their geometry through the chunk sort or
+ *  `n_split` are the terrain's.  `start`/`count` come out in vertices.
+ *  And `aux`, one entry a triangle, is permuted the same way.  The
+ *  component ids must follow their geometry through the chunk sort, or
  *  the inspector would name whatever ended up in the slot. */
 static int bucket_sort(const RMeshVert *src, uint32_t n, int split, uint32_t n_split, RMeshVert *dst, uint32_t *start, uint32_t *count, int nk, uint32_t *aux)
 {
@@ -374,8 +374,6 @@ static void want_all(void)
     memset(s_want, 1, sizeof s_want);
 }
 
-/*  After the grading pass, with its tables complete: which chunks the
- *  building pass emits into.  `lines` says the tables were filled. */
 /*  How far the closure reaches, in tiles, and every distance in it the
  *  SCRIPT'S (scripts/incr.lua).  Read once a build: the closure runs
  *  once, so a rule here costs one call.
@@ -396,6 +394,8 @@ enum
     R_N
 };
 
+/*  After the grading pass, with its tables complete: which chunks the
+ *  building pass emits into.  `lines` says the tables were filled. */
 void incr_closure(int lines)
 {
     static uint8_t near2[NT], changed[NT], want_t[NT], hot[SEGS_MAX], reemit[SEGS_MAX], hotb[SEGS_MAX];

@@ -335,8 +335,6 @@ void sim_rebuild_census(City *c)
  *  counts as done, not as a failure.
  * ================================================================== */
 
-int trip_mark_log;
-
 /* ================================================================== *
  *  tripGenerate ($245E8): can a journey be made from here?
  *
@@ -489,13 +487,13 @@ void sim_budget(City *c)
      *  which is the only reason to think of it as one.  Both its dice
      *  are drawn whenever the switch is on, so a model that leaves it
      *  out is a draw short every month. */
-    if (!c->disasters_off && (Random() & 7) == 0)
+    if (!c->disasters_off && (Random(c) & 7) == 0)
     {
-        int32_t bar = (int32_t)(uint16_t)Random() + 50000; /* $26726 */
-        if (bar < c->funds)                                /* $2672C */
+        int32_t bar = (int32_t)(uint16_t)Random(c) + 50000; /* $26726 */
+        if (bar < c->funds)                                 /* $2672C */
         {
-            int k = (int)((uint16_t)Random() % 20); /* $2673C */
-            c->ordinances |= (int32_t)1 << k;       /* $26748 */
+            int k = (int)((uint16_t)Random(c) % 20); /* $2673C */
+            c->ordinances |= (int32_t)1 << k;        /* $26748 */
         }
     }
 }
@@ -605,7 +603,7 @@ int sim_opinion_poll(City *c)
     /*  $31608: a hundred citizens, each landing in one bucket */
     for (n = 0; n < 100; n++)
     {
-        int r = (uint16_t)Random() % (uint16_t)(int16_t)total; /* $31612 */
+        int r = (uint16_t)Random(c) % (uint16_t)(int16_t)total; /* $31612 */
 
         for (i = 0; i < N_PROBLEM; i++) /* $3161C */
         {

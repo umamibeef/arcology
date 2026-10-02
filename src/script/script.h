@@ -24,6 +24,11 @@
 extern "C" {
 #endif
 
+/*  The art the scripts may READ, offered before they are read.  What a
+ *  picture MEANS is a script's, so it needs the pictures. */
+struct RAtlas;
+void script_art(const struct RAtlas *a);
+
 /*  Bring the state up and run the scripts.  `dir` is the folder the
  *  program ships.  The props' models live there and are always read.
  *  And `path` a file or folder of the player's own, read after it so it
@@ -80,6 +85,20 @@ void script_family_reset(void);
  *  below: this header names neither the renderer's types nor Lua's. */
 void script_city_is(const void *city);
 
+/*  What a named byte table means.  It answers a number or a flag.  The
+ *  ceiling is the largest value the concept allows.  The word is for a
+ *  report.  The program and the lint hold every push to this list. */
+typedef struct
+{
+    const char *name;
+    int         number;
+    int         high;
+    const char *what;
+} ScriptByteKind;
+extern const ScriptByteKind  script_byte_kinds[];
+extern const int             script_byte_kinds_n;
+const ScriptByteKind        *script_byte_kind(const char *name);
+
 /*  The byte tables a script pushed with arc.bytes: what a byte of the
  *  save means, read straight out of 256 rather than asked for.  An
  *  unknown name answers a table of noughts, and a reading of the scripts
@@ -91,6 +110,20 @@ const unsigned char *script_bytes(const char *name);
  *  which is not an answer.  A caller that cannot go on without them must
  *  say so. */
 int                  script_numbers(const char *name, const char *const *keys, float *out, int n);
+/*  A name and the float it fills, written together, for a caller that
+ *  reads a table into the fields of a struct. */
+typedef struct
+{
+    const char *name;
+    float      *at;
+} ScriptNumber;
+int                  script_numbers_at(const char *name, const ScriptNumber *fill, int n);
+/*  One word per byte of the city, as arc.names pushed it.  NULL for a
+ *  byte the table names nothing for. */
+const char          *script_name(const char *name, unsigned char b);
+/*  And one number per byte that a byte cannot hold, as arc.floats
+ *  pushed it.  Nought for a byte the table names nothing for. */
+const float         *script_floats(const char *name);
 /*  And the two whose entries have a SHAPE.  They give which network a
  *  byte carries, and where in the shared layout it sits.  They also give
  *  what part of a band it is and which way that runs.  Arrays of 256,
@@ -113,26 +146,14 @@ int script_rules(void);
 /*  How many script files the last reading read, and through `total` how
  *  many it found.  The two are equal after a reading that finished. */
 int script_files(int *total);
+/*  Every .lua under a folder, as full paths in the order the program
+ *  reads them.  Answers the count, or -1 out of memory. */
+int script_dir_paths(const char *dir, char ***out);
 
 /*  ---- the rules ------------------------------------------------------
  *
  *  Each answers 1 when the script decided and *out holds the answer, 0
  *  when it did not and the caller keeps its own. */
-
-/*  Whether one arm's mouth carries a meet, and how deep a band it asks
- *  for before the line it has to give up is known.  `margin` says the
- *  outline has a margin on each side of the mouth.  `cos` says how the
- *  two run against one another, and -1 is one margin squarely facing the
- *  other across the line.  And `span` how wide the mouth is in margin
- *  widths.  Answers 1 with *out the depth in tiles, 0 for no meet. */
-int script_rule_meet_at(int col, int row, int arm, int ctrl, int margin, float cos, float span, float *out);
-
-/*  The world that MOVES asks these on its own beat, never on a frame:
- *  where a level meet's gate arm has swung to.  The speed a car keeps
- *  for the car ahead of it and for the line it must stop at. */
-float script_rule_gate(float angle, float near, float dt);
-float script_rule_car_follow(float gap, float v, float stop, float free);
-float script_rule_car_hold(float to_end, int hold, float line, float v, float dt);
 
 /*  ---- the models ----------------------------------------------------
  *
@@ -159,9 +180,6 @@ int script_model_build(int model, float size, struct ModelHead *head, struct Mod
  *  the same script's (scripts/compose/slab.lua). */
 void script_strip_open(void *loft, const char *family, float cls, const float *zorig);
 void script_strip_close(void);
-/*  Answers 1 when the script laid the ribbon.  With no rule a strip has
- *  no surface at all: nothing in C draws one. */
-int  script_rule_strip(void);
 /*  What the family builds beside one pair, which the rule asks for by
  *  index: a slab's gore before the quad and its underside after it. */
 float script_strip_zorig(void *loft, int i);
@@ -196,8 +214,8 @@ int   script_rule_object(const char *rule, const char *kind, void *rec);
  *  it is drawn into.  So `arc.put.box` and its neighbors have somewhere
  *  to put a face.  Outside that window they draw nothing.
  *
- *  script_rule_prop answers 1 when the script drew the prop and the C
- *  should not, 0 when it did not and the C draws its own. */
+ *  A prop's rule answers 1 when the script drew it and the C should not.
+ *  It answers 0 when it did not, and the C draws its own. */
 /*  The mesh and the city are the renderer's.  This header names neither
  *  its types nor Lua's, so they pass as addresses and api_put.c reads
  *  them back. */
@@ -219,48 +237,18 @@ typedef struct
     float angle;     /* a moving part's angle, in degrees     */
     float len;       /* how far that part reaches             */
 } ScriptProp;
-int script_rule_prop(const char *name, const ScriptProp *at);
 
 /*  Where the lamps stand along one strip.  Each is a distance along it.
  *  It also gives which side of the centerline the pole is on, and how
  *  far in from the lip it stands.  `cls` is the strip's line class and
- *  `len` how long it runs.  Answers how many were written.  With no rule
- *  there are no lamps at all, since nothing in C spaces them. */
+ *  `len` how long it runs.  With no rule there are no lamps at all,
+ *  since nothing in C spaces them. */
 typedef struct
 {
     float at;   /* along the strip, in tiles      */
     float side; /* 1 one hand of it, -1 the other */
     float in;   /* in from the lip, as a part of the half width */
 } ScriptLamp;
-
-
-
-
-
-/*  Which way an on-spur's taper lies along the slab.  `free_side` says
- *  both ways are open: a line along the slab's axis blocks its own side,
- *  since the strip would run over the line.  `room` and `room_back` are
- *  how many slab tiles each way has. 1 keeps the id's own way, 0 turns
- *  it about.
- *
- *  And how two spurs whose tapers face each other share the tiles
- *  between them.  `gap` tiles lie between the two slab tiles, and `cap`
- *  is the longest taper either may have.  The answer is what each is cut
- *  to, or -1 to leave them alone. */
-
-/*  Where a spur's descent runs along the slab.  `at` is its station's
- *  distance along the band.  `len` is its taper in tiles.  `leaves` says
- *  whether it goes down from the slab or up onto it.  `sgn` says whether
- *  the band's own direction runs with the spur's.  Answers the top of
- *  the descent, its foot, how long it is, and which way along the band
- *  the taper lies. */
-/*  Where a band's walk begins.  `back` and `on` say whether the
- *  band carries on the two ways along it from this cell.  1 walks forward
- *  from here, -1 backward, 0 leaves the cell to the sweep that walks a
- *  band with no end at all. */
-
-
-
 
 /*  How the world that moves behaves: the trains, the cars that follow
  *  one another, the gates they wait at and the signals that blink.  None
@@ -284,13 +272,12 @@ typedef struct
      *  holds it, and how far ahead of it the block runs. */
     float block_back, block_ahead;
 } ScriptTraffic;
-int script_rule_traffic(ScriptTraffic *out);
 
 /*  What is true of every strip and every junction of one family.
  *
  *      The margin beside its way.
  *      The box its junctions are built in.
- *      The threads a railway lays through one.
+ *      The threads a thread family lays through one.
  *      The band a level meet fades over on its approach.
  *
  *  Asked once for each family and kept for the length of a build, since
@@ -308,7 +295,7 @@ typedef struct ScriptFamily
     /*  The junction box: how far inside the tile its surface is read,
      *  and how far out its outline may reach. */
     float junc_inset, junc_far;
-    /*  A railway's threads through a junction: the gauge between two,
+    /*  A thread family's threads through a junction: the gauge between two,
      *  and where a through line runs: the second one over the first. */
     float gauge, through, second;
     /*  A level meet's approach: the band the line fades over on its
@@ -389,52 +376,13 @@ typedef struct ScriptFamily
      *  taper.  How much band a taper needs, and how nearly a line lane
      *  must face a band's end. */
     float band_abreast, band_outer, band_taper_far, band_taper_near;
-    float band_taper_gap, band_taper_room, band_road_dot;
+    float band_taper_gap, band_taper_room, band_line_dot;
 } ScriptFamily;
 /*  The numbers a family is drawn by, as the script pushed them with
  *  arc.family.rules.  A family nobody pushed answers a table of noughts. */
 const ScriptFamily *script_family_rules(const char *name);
 
-/*  Which of the city's building bytes are a band, and which way each
- *  runs.  `kind` answers 0 for a byte that is no band, and 1 for a slab
- *  tile.  It answers 2 for an incline of the band, and 3 for a spur.  It
- *  answers 4 for a curve block, 5 for the interchange and 6 for a band
- *  meet something.  `ew` answers 1 where the band runs east-west.  Read
- *  once a generation and kept, since every tile of the map is looked up
- *  in it. */
-int script_rule_band_tiles(unsigned char *kind, unsigned char *ew, int n);
-
-/*  Which of the city's building bytes carry a NETWORK piece.  The family
- *  it belongs to, and its place in the shared fifteen-piece layout.  It
- *  gives the same again for the second family a lap carries on the other
- *  axis.  `piece` and `piece2` take -1 for a byte no family claims, and
- *  `fam`/`fam2` the family code beside it.  Read once a generation and
- *  kept, since every tile of the map is looked up in it. */
-int script_rule_piece_tiles(unsigned char *fam, signed char *piece,
-                            unsigned char *fam2, signed char *piece2, int n);
-
-/*  Which of the city's building bytes carry a line, and how.  1 is a
- *  line piece.  2 is a line lapped by something, and 3 a line running
- *  under a slab that stands on the tile. 0 is no line.  Read once a
- *  generation and kept, since every tile of the map is looked up in it. */
-int script_rule_road_tiles(unsigned char *carries, int n);
-
-/*  A rule that answers a plain set of the city's building bytes.  The
- *  table it returns is keyed by the byte and any true value puts it in.
- *  Read once a generation and kept. */
-int script_rule_byte_set(const char *rule, unsigned char *set, int n);
-/*  The same, where each byte answers a NUMBER rather than yes or no: a
- *  byte the rule does not name takes 0. */
-int script_rule_byte_map(const char *rule, unsigned char *map, int n);
-
-/*  A rule that answers a table of NAMED numbers, asked with nothing.
- *  `names` and `out` are n long and line up.  Answers 1 when the rule
- *  answered, 0 when there is no such rule.  And 0 is not an answer.  A
- *  caller that cannot go on without the numbers must say so rather than
- *  carry on with whatever `out` held. */
-int script_rule_numbers(const char *rule, const char *const *names, float *out, int n);
-
-/*  How big a level meet is, from the angle the line and the railway
+/*  How big a level meet is, from the angle the line and the thread
  *  cross at.  `sin` is the sine of that angle, `line` and `thread` their
  *  widths.  Every measurement of the meet follows.
  *
@@ -450,7 +398,6 @@ typedef struct
     float lift;  /* over the ground it replaces              */
     float slot;  /* its place in the painter's stack         */
 } ScriptLap;
-int script_rule_meet_frame(int col, int row, float sn, float line, float thread, ScriptLap *out);
 
 /*  What one line approach to a level meet carries: the gate's mast, the
  *  stop line and the second-train signs.  `reach` and `mast` are the
@@ -476,17 +423,12 @@ typedef struct
     float x, y, fx, fy, gx, gy;
     int   ns; /* the line runs north-south, for a mark that faces the line's own axis */
 } ScriptApproachAsk;
-int script_rule_meet_marks(float reach, float mast, float limit, float line,
-                               float cx, float cy, float fx, float fy, float gx, float gy,
-                               ScriptApproach *out, int max);
 
-
-/*  What stands beside a railway, and where: the signals along it and the
+/*  What stands beside a thread strip, and where: the signals along it and the
  *  whistle posts before its level meets.  `len` is how long the strip
  *  runs, `ahead` and `behind` say whether it ends at a junction each
- *  way.  `cross` holds where along it the line meets are.  Answers how
- *  many places were written.  With no rule a railway carries nothing,
- *  since nothing in C spaces them. */
+ *  way.  `cross` holds where along it the line meets are.  With no rule
+ *  a thread strip carries nothing, since nothing in C spaces them. */
 typedef struct
 {
     float at;      /* along the strip, in tiles                        */
@@ -497,8 +439,6 @@ typedef struct
     int   to_map;  /* faces along the map's own axis rather than back along the thread */
     int   clear;   /* dropped where a level meet owns the tile     */
 } ScriptMark;
-
-
 
 /*  What a junction's outline does where two arms meet: rounds the corner
  *  off with a lip return, leaves it square.  Runs straight past it.
@@ -521,8 +461,6 @@ typedef struct
     float radius;  /* the circle tangent to both edges there         */
     float steps;   /* how many pieces its arc is drawn in            */
 } ScriptCorner;
-int script_rule_corner(int col, int row, float phi, float grow, float width,
-                       const float *room, const float *back, const float *fwd, ScriptCorner *out);
 
 #ifdef __cplusplus
 }

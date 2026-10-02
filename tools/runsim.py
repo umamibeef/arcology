@@ -151,10 +151,9 @@ class Sim:
         The map comes from tools/miscload.py, which ran the game's own
         unpacker at $295D6 with every read tagged by its MISC index, so
         each value lands at the address and the width the game gives it
-        -- including the ones inside pointer blocks, which the earlier
-        builder-side map could not name.  Setting up the oracle by hand
-        instead is how it came to run the coverage stage with a budget
-        block full of zeros.
+        -- including the ones inside pointer blocks, which a map read off
+        the builder's side cannot name.  An oracle set up by hand runs
+        the coverage stage with a budget block full of zeros.
         """
         m = json.load(open(os.path.join(HERE, "..", "out", "miscload.json")))
         placed = 0

@@ -12,12 +12,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/*  How many of the structural-change routines this scan wanted that are
- *  not reconstructed yet.  Counted rather than ignored, so the coverage
- *  figure in the report is measured and not asserted. */
-static int32_t growth_todo;
-static int32_t growth_stub[8];
-
 /*  Which transport mode a trip starts in, from the tile it steps onto.
  *  $24660: the road set, then the three stations. */
 static int start_mode(uint8_t t)
@@ -299,7 +293,7 @@ static WalkStep walk_step(const City *c, int mode, int y, int x)
 
 int sim_trip(City *c, int y, int x, int zone, int tier, int budget)
 {
-    rng_log_mark(y * 1000 + x);
+    rng_log_mark(c, y * 1000 + x);
     /*  Three parallel 512-byte stacks in the original's frame: the mode
      *  the trip was in, the directions still untried there, and the
      *  length so far. */
@@ -328,19 +322,19 @@ int sim_trip(City *c, int y, int x, int zone, int tier, int budget)
     if (mode < 0)
         return 0; /* $246C2 */
 
-    q_reset();
-    q_push(cy, cx);
+    q_reset(c);
+    q_push(c, cy, cx);
     mask_st[0] = 0xF;
     mode_st[0] = (uint8_t)mode;
     sp         = 1;
 
-    turn = ((Random() & 1) * 2) + 1; /* $24706 */
+    turn = ((Random(c) & 1) * 2) + 1; /* $24706 */
     if (tier == 1)
         budget -= budget >> 2; /* $24722 */
 
     while (!arrived && len < budget)
-    {                         /* $251F0 */
-        dir   = Random() & 3; /* $24732 */
+    {                          /* $251F0 */
+        dir   = Random(c) & 3; /* $24732 */
         moved = 0;
         for (i = 0; i < 4 && !moved; i++)
         { /* $250E6 */
@@ -411,8 +405,8 @@ int sim_trip(City *c, int y, int x, int zone, int tier, int budget)
                 sp--;
                 if (sp <= 0)
                     break;
-                q_pop_back(&cy, &cx);
-                q_peek_back(&cy, &cx);
+                q_pop_back(c, &cy, &cx);
+                q_peek_back(c, &cy, &cx);
                 mode = mode_st[sp - 1];
                 mask = mask_st[sp - 1];
                 len  = len_st[sp - 1];
@@ -425,7 +419,7 @@ int sim_trip(City *c, int y, int x, int zone, int tier, int budget)
             break; /* $25168 */
 
         mask_st[sp - 1] = (uint8_t)mask; /* $25178 */
-        q_push(cy, cx);
+        q_push(c, cy, cx);
         if (mode == 3 || mode == 7)
             mask = 1 << dir; /* keep going straight */
         else if (mode == 11)
@@ -442,8 +436,8 @@ int sim_trip(City *c, int y, int x, int zone, int tier, int budget)
         sp++;
     }
 
-    if (trip_mark_log)
-        fprintf(stderr, "TRIP %d %d zone=%d tier=%d arrived=%d len=%d sp=%d\n", y, x, zone, tier, arrived, len, sp);
+    if (c->trace)
+        c->trace(c->trace_at, "TRIP %d %d zone=%d tier=%d arrived=%d len=%d sp=%d\n", y, x, zone, tier, arrived, len, sp);
 
     /*  $25204: a journey that failed leaves no traffic behind: the route
      *  is only drained and stamped when the trip arrived. */
@@ -452,10 +446,10 @@ int sim_trip(City *c, int y, int x, int zone, int tier, int budget)
 
     /*  $25216: walk the route back out.  Only the surface modes leave
      *  traffic.  Riding the subway does not put cars on the road. */
-    while (!q_empty())
+    while (!q_empty(c))
     {
         int py, px, m;
-        q_pop_back(&py, &px);
+        q_pop_back(c, &py, &px);
         sp--;
         m = mode_st[sp < 0 ? 0 : sp];
         if (m == 11)
@@ -467,8 +461,8 @@ int sim_trip(City *c, int y, int x, int zone, int tier, int budget)
         if (m == 0 || m == 1 || m == 3)
         {
             int32_t v = (int32_t)c->xtrf[py / 2][px / 2] + tier;
-            if (trip_mark_log)
-                fprintf(stderr, "MARK %d %d\n", py, px);
+            if (c->trace)
+                c->trace(c->trace_at, "MARK %d %d\n", py, px);
             if (v > 255)
                 v = 255;
             c->xtrf[py / 2][px / 2] = (uint8_t)v;
@@ -480,7 +474,7 @@ int sim_trip(City *c, int y, int x, int zone, int tier, int budget)
         c->transit_rail += tier;
     if (used_bus)
         c->transit_bus += tier;
-    rng_log_mark(-1);
+    rng_log_mark(c, -1);
     return arrived != 0;
 }
 
@@ -634,7 +628,7 @@ void sim_growth_scan(City *c, int y0, int x0)
                  *  budget charges.  The ranges are tested in a fixed
                  *  order, so a tile owned by two departments decays
                  *  against the first of them. */
-                if (game_rand127() == 0)
+                if (game_rand127(c) == 0)
                 {
                     static const int ORDER[5] = {DEPT_ROAD, DEPT_RAIL, DEPT_SUBWAY, DEPT_POWER, DEPT_BAND};
                     uint16_t         m        = BUILDING[bld].dept;
@@ -648,17 +642,17 @@ void sim_growth_scan(City *c, int y0, int x0)
                         done = 1;
                         if (c->dept[d].funding == 100)
                             break; /* $31804 */
-                        if (((uint16_t)Random() % 100) < (uint16_t)c->dept[d].funding)
+                        if (((uint16_t)Random(c) % 100) < (uint16_t)c->dept[d].funding)
                             break; /* $3181C, it survives */
                         if (d == DEPT_POWER || d == DEPT_BAND)
                         {
                             /*  Power lines are removed through $5FAA and
                              *  bands through an eight-tile teardown.
                              *  Neither is reconstructed. */
-                            growth_todo++, growth_stub[2]++;
+                            c->growth_todo++, c->growth_stub[2]++;
                             break;
                         }
-                        sim_set_tile(c, y, x, (uint8_t)((Random() & 3) + 1)); /* $31824 */
+                        sim_set_tile(c, y, x, (uint8_t)((Random(c) & 3) + 1)); /* $31824 */
                         c->xbit[y][x] &= (uint8_t)~XBIT_CONDUCTIVE;
                     }
                     if (done && bld < 0x70)
@@ -675,7 +669,7 @@ void sim_growth_scan(City *c, int y0, int x0)
                         continue; /* $31B34 */
 
                 if (bld == 0xED && (c->xbit[y][x] & XBIT_POWERED) && /* $31B54 */
-                    game_rand3() == 0)                               /* $31B5E */
+                    game_rand3(c) == 0)                              /* $31B5E */
                 {
                     if ((uint16_t)((uint16_t)c->census[0xED] >> 2) >
                         (uint16_t)c->road_count)        /* $31B6A */
@@ -683,7 +677,7 @@ void sim_growth_scan(City *c, int y0, int x0)
                     continue;
                 }
                 if (bld == 0xF8 && (c->xbit[y][x] & XBIT_POWERED) && /* $31B9E */
-                    game_rand3() == 0)                               /* $31BA8 */
+                    game_rand3(c) == 0)                              /* $31BA8 */
                 {
                     if ((uint16_t)((uint16_t)c->census[0xF8] / 9) >
                         (uint16_t)c->boat_count) /* $31BB8 */
@@ -756,7 +750,7 @@ void sim_growth_scan(City *c, int y0, int x0)
                     }
                     if (stage < 2 || stage > 4)
                         continue; /* $31FFE */
-                    if ((Random() & 3) != 0)
+                    if ((Random(c) & 3) != 0)
                         continue;
 
                     if (stage == 4)
@@ -809,14 +803,14 @@ void sim_growth_scan(City *c, int y0, int x0)
                 if (zone == 9)
                 { /* $321BA */
                     int want;
-                    if ((Random() & 3) != 0)
+                    if ((Random(c) & 3) != 0)
                     {
                         /*  $321C6: not this tile's turn.  A pier may
                          *  still launch a boat, which needs the moving
                          *  object system. */
                         if (bld != 0xE0)
                             continue;
-                        if ((Random() & 3) != 0)
+                        if ((Random(c) & 3) != 0)
                             continue;          /* $321CE */
                         seaport_ship(c, y, x); /* $321E0 */
                         continue;
@@ -839,13 +833,13 @@ void sim_growth_scan(City *c, int y0, int x0)
                 if (zone == 8)
                 { /* $32260 */
                     int want, n;
-                    if ((Random() & 3) != 0)
+                    if ((Random(c) & 3) != 0)
                     {
                         /*  $3226E: the runway spawns aircraft, which
                          *  need the moving object system. */
                         if (bld != 0xDD)
                             continue;
-                        if ((uint16_t)Random() % 30 != 0)
+                        if ((uint16_t)Random(c) % 30 != 0)
                             continue;
                         if (!(c->xbit[y][x] & XBIT_POWERED))
                             continue; /* $3229E */
@@ -853,7 +847,7 @@ void sim_growth_scan(City *c, int y0, int x0)
                          *  the airport.  Otherwise a plane does, and the
                          *  map rotation together with XBIT bit 1 picks
                          *  which of the two plane kinds. */
-                        if ((uint16_t)Random() % 10 < 4)
+                        if ((uint16_t)Random(c) % 10 < 4)
                             spawn_helicopter(c, y, x); /* $322BC */
                         else if (c->rotation & 1)      /* $322CC */
                             spawn_plane(c, y, x, (c->xbit[y][x] & 0x02) ? 0 : 2);
@@ -926,10 +920,10 @@ void sim_growth_scan(City *c, int y0, int x0)
                     c->accum8[zone] += GROWTH_TABLE[tier];
                     /*  $31E0A: roll for growth against the headroom this
                      *  tier still has. */
-                    if ((int32_t)(uint16_t)Random() < head / tier)
+                    if ((int32_t)(uint16_t)Random(c) < head / tier)
                     {
                         /* $31E1A: grow into the next tier */
-                        sim_upgrade(c, y, x, tier, Random() & 1);
+                        sim_upgrade(c, y, x, tier, Random(c) & 1);
                         continue;
                     }
                 }
@@ -940,7 +934,7 @@ void sim_growth_scan(City *c, int y0, int x0)
                      *  one.  So the guard is defensive rather than
                      *  faithful: it draws the die either way, which is
                      *  what keeps the stream in step. */
-                    if ((uint16_t)Random() < (uint16_t)(tier ? 0x4000 / tier : 0))
+                    if ((uint16_t)Random(c) < (uint16_t)(tier ? 0x4000 / tier : 0))
                     {
                         if (church_pressure && (tier & 2) && zone < 3)
                             sim_build_church(c, y, x); /* $32874 */
@@ -952,7 +946,7 @@ void sim_growth_scan(City *c, int y0, int x0)
                 else if (BUILDING[bld].tier_flag == 2)
                 { /* $31EA2 */
                     c->accum8[7] += GROWTH_TABLE[tier];
-                    if ((int32_t)(uint16_t)Random() < (tier ? (15 * demand) / tier : 0))
+                    if ((int32_t)(uint16_t)Random(c) < (tier ? (15 * demand) / tier : 0))
                         sim_place(c, y, x, tier, (zone - 1) / 2); /* $31EFE */
                     continue;
                 }
@@ -974,13 +968,13 @@ void sim_growth_scan(City *c, int y0, int x0)
                     if (tier == 3 && hv < 0xC0)
                         continue; /* $31F96 */
                 }
-                if ((int32_t)(uint16_t)Random() < (3 * demand) / (tier + 1))
+                if ((int32_t)(uint16_t)Random(c) < (3 * demand) / (tier + 1))
                     sim_grow_footprint(c, y, x, tier, zone); /* growFootprint $32998 */
             }
         }
     }
 }
 
-int32_t sim_growth_stub(int i) { return growth_stub[i & 7]; }
+int32_t sim_growth_stub(const City *c, int i) { return c->growth_stub[i & 7]; }
 
-int32_t sim_growth_unimplemented(void) { return growth_todo; }
+int32_t sim_growth_unimplemented(const City *c) { return c->growth_todo; }

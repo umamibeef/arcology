@@ -138,16 +138,16 @@ int spawn_disaster_thing(City *c, int kind)
 
     if (kind == 0x0F) /* the tornado */
     {
-        r[1] = (uint8_t)(Random() & 7);             /* $387FA */
-        r[8] = (uint8_t)((uint16_t)Random() % 128); /* $38844 */
-        r[9] = (uint8_t)((uint16_t)Random() % 128);
+        r[1] = (uint8_t)(Random(c) & 7);             /* $387FA */
+        r[8] = (uint8_t)((uint16_t)Random(c) % 128); /* $38844 */
+        r[9] = (uint8_t)((uint16_t)Random(c) % 128);
         r[5] = (uint8_t)(c->altm[y][x] & 0x1F); /* $3889E */
     }
     else /* the monster */
     {
-        r[1] = 2;                                   /* $3860E */
-        r[8] = (uint8_t)((uint16_t)Random() % 128); /* $3864A */
-        r[9] = (uint8_t)((uint16_t)Random() % 128);
+        r[1] = 2;                                    /* $3860E */
+        r[8] = (uint8_t)((uint16_t)Random(c) % 128); /* $3864A */
+        r[9] = (uint8_t)((uint16_t)Random(c) % 128);
         r[5] = 0x0F; /* $38698 */
     }
 
@@ -158,10 +158,10 @@ int spawn_disaster_thing(City *c, int kind)
     {
         if ((uint8_t)c->misc[MISC_SCEN_ACTIVE])
             r[0x0B] = 0;
-        else if (Random() & 1)
+        else if (Random(c) & 1)
             r[0x0B] = 0; /* $386FC */
         else
-            r[0x0B] = (uint8_t)(((uint16_t)Random() % 3) + 1); /* $386F0 */
+            r[0x0B] = (uint8_t)(((uint16_t)Random(c) % 3) + 1); /* $386F0 */
         c->monster_count++;
     }
     else
@@ -213,7 +213,7 @@ static int can_travel(const City *c, int y, int x, int kind)
  * ================================================================== */
 int pick_direction(City *c, int y, int x, int turn, int kind)
 {
-    int flip = (int)lib_rand(2); /* $E19A: THINK C rand(), not the LFSR */
+    int flip = (int)lib_rand(c, 2); /* $E19A: THINK C rand(), not the LFSR */
     int i;
     for (i = 0; i < 4; i++) /* $E250 */
     {
@@ -351,9 +351,9 @@ static void step_train(City *c, int slot)
     int      car2, car3, dir, nd, v, b;
 
     /*  $D81C: half the time a locomotive stops beside a station. */
-    if (type == 0x0A && game_rand1())
+    if (type == 0x0A && game_rand1(c))
     {
-        const int k = (t[1] & 1) ? (int)lib_rand(2) + 2 : (int)lib_rand(2);
+        const int k = (t[1] & 1) ? (int)lib_rand(c, 2) + 2 : (int)lib_rand(c, 2);
         if (k == 0 && y > 0 && c->xbld[y - 1][x] == 0xED)
             return;
         if (k == 1 && y < 0x7F && c->xbld[y + 1][x] == 0xED)
@@ -415,9 +415,9 @@ static void step_train(City *c, int slot)
 
     /*  $DBD8.  One turn in four is considered, left or right by a coin,
      *  and taken only if the track goes that way. */
-    if (game_rand(4) == 0)
+    if (game_rand(c, 4) == 0)
     {
-        const int nw = game_rand(2) ? (dir + 1) & 3 : (dir + 3) & 3;
+        const int nw = game_rand(c, 2) ? (dir + 1) & 3 : (dir + 3) & 3;
         if (can_travel(c, y + TRAIN_DY[nw], x + TRAIN_DX[nw], type))
             dir = nw; /* $DC50 */
 
@@ -426,7 +426,7 @@ static void step_train(City *c, int slot)
          *  from the Toolbox generator that the boats and ships also
          *  read.  So leaving it out is invisible in a city with only
          *  trains and wrong in every other one. */
-        if ((Random() & 0xFF) == 0)
+        if ((Random(c) & 0xFF) == 0)
             ; /* $DC64, sound $20C */
     }
 
@@ -581,12 +581,12 @@ static void step_boat(City *c, int slot)
 
     if (t[2]) /* $E28E: already sinking */
     {
-        if (game_rand(5) == 0)
+        if (game_rand(c, 5) == 0)
             free_thing(c, slot); /* $E2A4 */
         return;
     }
 
-    if (game_rand(4) != 0) /* $E2B4: three steps in four it just sails */
+    if (game_rand(c, 4) != 0) /* $E2B4: three steps in four it just sails */
     {
         if (boat_can_enter(c, slot, t[1]))
             advance_subtile(c, slot); /* $E2DE */
@@ -599,7 +599,7 @@ static void step_boat(City *c, int slot)
         free_thing(c, slot); /* $E316, aground */
         return;
     }
-    if (game_rand(0xFA0) == 0) /* $E324, one step in four thousand */
+    if (game_rand(c, 0xFA0) == 0) /* $E324, one step in four thousand */
     {
         t[2] = 1; /* $E338, it starts to sink */
         /*  $E342 reports it, which only makes a sound. */
@@ -607,7 +607,7 @@ static void step_boat(City *c, int slot)
     /*  $E35A: turn by -1, 0 or +1, from the Toolbox generator rather
      *  than the game's own.  This is the only draw in the routine that
      *  does not come from the shift register. */
-    dir  = t[1] + (int)((uint16_t)Random() % 3) - 1;
+    dir  = t[1] + (int)((uint16_t)Random(c) % 3) - 1;
     t[1] = (uint8_t)(dir & 3);
 }
 
@@ -761,7 +761,7 @@ static void step_ship(City *c, int slot)
     int       i, d5         = 0, d6;
 
     c->ship_count++; /* $E5D4 */
-    if ((Random() & 0xFF) == 0)
+    if ((Random(c) & 0xFF) == 0)
         ; /* $E5E8 sounds the horn, $205 */
 
     if (!(c->xbit[y][x] & XBIT_WATER)) /* $E630 */
@@ -779,8 +779,8 @@ static void step_ship(City *c, int slot)
 
     switch (t[2]) /* $E688 */
     {
-        case 0:                     /* $E696: under way */
-            if (game_rand(10) == 0) /* $E69A */
+        case 0:                        /* $E696: under way */
+            if (game_rand(c, 10) == 0) /* $E69A */
             {
                 d6 = steer_toward(t[1], y, x, ty, tx); /* $E6C2 */
                 if (ship_can_enter(c, slot, d6))       /* $E6CC */
@@ -816,7 +816,7 @@ static void step_ship(City *c, int slot)
 
         case 2: /* $E806: boxed in, sweep for any way out */
             d6 = t[1];
-            if (game_rand(2) != 0) /* $E818 */
+            if (game_rand(c, 2) != 0) /* $E818 */
             {
                 for (i = 0; i < 9; i++) /* $E828 */
                 {
@@ -845,7 +845,7 @@ static void step_ship(City *c, int slot)
             break;
 
         case 3: /* $E8A8: tied up, one chance in thirty of leaving */
-            if (game_rand(0x1E) != 0)
+            if (game_rand(c, 0x1E) != 0)
                 break;
             t[2] = 4; /* $E8C2 */
             /*  $E8CC sounds the horn again. */
@@ -865,7 +865,7 @@ static void step_ship(City *c, int slot)
             d6 = t[1];
             /*  $E930: the sweep starts at 0 or 1, so the ship sometimes
              *  skips its own heading before looking. */
-            for (i = (int)game_rand(2); i < 9; i++)
+            for (i = (int)game_rand(c, 2); i < 9; i++)
             {
                 d5 = (d6 + TURN_CW[i]) & 7;
                 if (ship_can_enter(c, slot, d5))
@@ -1068,16 +1068,16 @@ static void step_heli(City *c, int slot)
                  *  looking, redrawing either coordinate that lands off the
                  *  map.  Every one of these is a Toolbox draw. */
                 {
-                    int ny = c->view_y + (int)((uint16_t)Random() % 0x40) - 0x20;
-                    int nx = c->view_x + (int)((uint16_t)Random() % 0x40) - 0x20;
+                    int ny = c->view_y + (int)((uint16_t)Random(c) % 0x40) - 0x20;
+                    int nx = c->view_x + (int)((uint16_t)Random(c) % 0x40) - 0x20;
                     if (ny < 0 || ny >= MAP_H)
-                        ny = (int)((uint16_t)Random() % 0x40) + 0x20; /* $C9E2 */
+                        ny = (int)((uint16_t)Random(c) % 0x40) + 0x20; /* $C9E2 */
                     if (nx < 0 || nx >= MAP_W)
-                        nx = (int)((uint16_t)Random() % 0x40) + 0x20; /* $CA08 */
-                    t[8] = (uint8_t)ny;                               /* $CA28 */
+                        nx = (int)((uint16_t)Random(c) % 0x40) + 0x20; /* $CA08 */
+                    t[8] = (uint8_t)ny;                                /* $CA28 */
                     t[9] = (uint8_t)nx;
                 }
-                if (!(Random() & 1))
+                if (!(Random(c) & 1))
                     break; /* $CA42 */
                 if (c->xbld[t[3]][t[4]] != 0)
                     break; /* $CA6E */
@@ -1096,7 +1096,7 @@ static void step_heli(City *c, int slot)
             break;
 
         case 4: /* $CADA: on the ground, one chance in twenty of going */
-            if ((uint16_t)Random() % 0x14 != 0)
+            if ((uint16_t)Random(c) % 0x14 != 0)
                 break;
             t[2] = 0; /* $CAF8 */
             break;
@@ -1135,11 +1135,11 @@ static int bearing_coarse(int y0, int x0, int y1, int x1)
 }
 
 /*  $B394: one chance in n of drifting a point either way. */
-static int wander(int dir, int n)
+static int wander(City *c, int dir, int n)
 {
-    if ((uint16_t)Random() % (uint16_t)n != 0)
-        return dir;                                       /* $B3B0 */
-    return (dir + (int)((uint16_t)Random() % 3) - 1) & 7; /* $B3C2 */
+    if ((uint16_t)Random(c) % (uint16_t)n != 0)
+        return dir;                                        /* $B3B0 */
+    return (dir + (int)((uint16_t)Random(c) % 3) - 1) & 7; /* $B3C2 */
 }
 
 /* ================================================================== *
@@ -1164,7 +1164,7 @@ static void step_plane(City *c, int slot)
             t[0] = 6; /* $C270 */
             t[2] = 5; /* $C27E */
             /*  $C288.  One crash in sixteen leaves the flag set. */
-            t[0x0B] = (uint8_t)(game_rand(0x10) == 0 ? 1 : 0);
+            t[0x0B] = (uint8_t)(game_rand(c, 0x10) == 0 ? 1 : 0);
             t[1]    = 0; /* $C2B8 */
             return;
         }
@@ -1208,10 +1208,10 @@ static void step_plane(City *c, int slot)
             free_thing(c, slot);           /* $C45E */
             break;
 
-        case 2:                              /* $C468: cruising */
-            t[1] = (uint8_t)wander(t[1], 5); /* $C47C */
-            heli_avoid(c, slot);             /* $C490, shared with the helicopter */
-            advance_speed(c, 1, slot, t[1]); /* $C4AC */
+        case 2:                                 /* $C468: cruising */
+            t[1] = (uint8_t)wander(c, t[1], 5); /* $C47C */
+            heli_avoid(c, slot);                /* $C490, shared with the helicopter */
+            advance_speed(c, 1, slot, t[1]);    /* $C4AC */
             break;
 
         case 3:                                                     /* $C4B8: turning onto the approach */
@@ -1310,10 +1310,10 @@ void sim_step_things(City *c)
      *  skipping one shifts every later draw in the pass.  Both averages
      *  come from the statistics pass at $224DA, which is not
      *  reconstructed, so in practice neither gate opens yet. */
-    if (c->graph[GRAPH_TRAFFIC][0] > 0x23 && (Random() & 0xFF) == 0)
+    if (c->graph[GRAPH_TRAFFIC][0] > 0x23 && (Random(c) & 0xFF) == 0)
         ;                       /* $9E90 sound $209 */
     if (c->census[0xD2] != 0 && /* a police station exists */
-        c->graph[GRAPH_CRIME][0] > 0x28 && (Random() & 0xFF) == 0)
+        c->graph[GRAPH_CRIME][0] > 0x28 && (Random(c) & 0xFF) == 0)
         ; /* $9EBC sound $1FA */
 
     c->plane_count = c->heli_count = c->ship_count = 0;
@@ -1399,8 +1399,8 @@ void spawn_helicopter(City *c, int y, int x)
     t[4]    = (uint8_t)x;
     t[6]    = 8;
     t[7]    = 8;
-    t[8]    = (uint8_t)((uint16_t)Random() % 128); /* $BB2A */
-    t[9]    = (uint8_t)((uint16_t)Random() % 128);
+    t[8]    = (uint8_t)((uint16_t)Random(c) % 128); /* $BB2A */
+    t[9]    = (uint8_t)((uint16_t)Random(c) % 128);
     t[5]    = 0;
     t[0x0A] = c->xtxt[y][x];
     t[2]    = 0;
@@ -1431,7 +1431,7 @@ void spawn_plane(City *c, int y, int x, int kind)
     t[6] = 8;
     t[7] = 8;
 
-    if ((uint16_t)Random() % 10 >= 5) /* $B7F8, start at the airport */
+    if ((uint16_t)Random(c) % 10 >= 5) /* $B7F8, start at the airport */
     {
         ty   = y;
         tx   = x;
@@ -1443,8 +1443,8 @@ void spawn_plane(City *c, int y, int x, int kind)
     }
     else /* $B80C, fly in from one edge of the map */
     {
-        int edge  = (int)(Random() & 3);
-        int along = (int)((uint16_t)Random() % 100) + 10;
+        int edge  = (int)(Random(c) & 3);
+        int along = (int)((uint16_t)Random(c) % 100) + 10;
         switch (edge)
         {
             case 0:
@@ -1530,7 +1530,7 @@ void seaport_ship(City *c, int y, int x)
     if (c->ship_count >= 1)
         return; /* $BBB6, one ship at a time */
 
-    edge = (int)(Random() & 3); /* $BBC6 */
+    edge = (int)(Random(c) & 3); /* $BBC6 */
     for (i = 0; i < MAP_W; i++)
     {
         int ty = (edge == 0) ? 2 : (edge == 1) ? 0x7E

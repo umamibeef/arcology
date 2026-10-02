@@ -26,6 +26,10 @@ typedef struct
     const char *lua_eval; /* --lua-eval SRC: one chunk, run once the world is up */
     /* the build, one stage at a time */
     int noscale, no_sort, no_shadow, no_cap, no_replay, no_incr, no_smp_cache, grade_loft, grade_all, grade_junc, grade_lanes, gpu_tight, spike_check, check_open;
+    /*  The runaway guard's budget, in whole seconds, or 0 for the
+     *  generous default.  A rule that will never finish costs that long
+     *  EVERY build, so a short one is worth having while chasing one. */
+    const char *rule_seconds;
     int times;
     /* the window and the run */
     const char *tune, *win, *cities, *traffic_t, *edit, *seed, *area, *turn;
@@ -37,6 +41,28 @@ typedef struct
     int lap_debug, box_debug;
 } DevOpts;
 extern DevOpts g_dev;
+
+/*  THE SWITCHES TWO PARSERS TAKE.  The game reads its line with CLI11
+ *  (app/options.cpp).  The software rasteriser reads its own
+ *  (render/soft/main.c), because a mode's line is its own.  These four
+ *  mean the same thing to both, so they are spelled once, here.  Two
+ *  parsers with their own copies of a name is how a rename reaches one
+ *  and misses the other. */
+typedef struct
+{
+    const char *name;
+    int         takes_value; /* 1 for a switch with a value after it */
+} ArcSwitch;
+
+enum
+{
+    ARC_SW_ZOOM,
+    ARC_SW_SCALE,
+    ARC_SW_UNDERGROUND,
+    ARC_SW_NO_THINGS,
+    ARC_SW_COUNT
+};
+extern const ArcSwitch ARC_SWITCHES[ARC_SW_COUNT];
 #ifdef __cplusplus
 }
 #endif

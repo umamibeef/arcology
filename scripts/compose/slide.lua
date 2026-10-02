@@ -88,10 +88,10 @@ arc.rules.slide = function (sl)
             if sn then sn:is(arc.lip_lane(sn, sn:info())) end
             --  The chain this placing is cut from is the script's: the
             --  two poses are read, the chain is built between them
-            --  (arc.chain_between, scripts/compose/links.lua), and the
+            --  (arc.chain_between, scripts/compose/links/chain.lua), and the
             --  cut is arc.rules.pieces's like every other path's.  The
             --  placing is built from the pieces it answers.
-            local qx, qy, tax, tay, px, py, tbx, tby = sl:poses(u, at)
+            local qx, qy, tax, tay, px, py, tbx, tby, ax, ay = sl:poses(u, at)
             local r
             if not qx and qy == "off" then
                 --  Off the lane aimed at: no further along the line.
@@ -158,6 +158,15 @@ arc.rules.slide = function (sl)
                                 end
                             end
                         end
+                    end
+                    --  THE LEAD.  The descent leaves the slab at `ax, ay`
+                    --  and this placing starts it `u` further along, so
+                    --  the chain begins with a straight run of `u`
+                    --  between the two.  It is part of what the rule
+                    --  answers: nothing is put in front of it.
+                    if u > 0.0 then
+                        table.insert(pc, 1, {arc = false, ax = ax, ay = ay,
+                                             bx = qx, by = qy, len = u})
                     end
                     r = sl:routed(pc)
                 end

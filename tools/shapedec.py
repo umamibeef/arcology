@@ -20,6 +20,8 @@ import os
 import sys
 from pathlib import Path
 
+from game import folder
+
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from runsim import Sim, A5
@@ -32,9 +34,7 @@ BLIT = 0x18E96
 #  only if it survives BOTH fills unchanged.
 FILL_A, FILL_B = 0x00, 0xFF
 #  Your own copy of the game.  Nothing here can ship it.
-GAME = Path(os.environ.get(
-    "ARC_CITIES",
-    Path.home() / "Downloads" / "SimCity 2000\u00ae Collection"))
+GAME = folder()
 CITY = GAME / "Cities/Bayview"
 
 
@@ -68,10 +68,10 @@ def decode_all(verbose=True):
     #  Every span stream is placed BEFORE the frame buffer, and the frame
     #  buffer gets a megabyte of slack behind it.  m68kemu's alloc() is an
     #  unchecked bump allocator, so a sprite whose spans reach past the
-    #  buffer writes straight into whatever was allocated next -- and with
-    #  the old order that was the art of the sprites still to come.  Shape
-    #  1252 was the visible casualty: it decodes perfectly on its own and
-    #  hit a _Debugger only after 1,251 earlier blits had scribbled on it.
+    #  buffer writes straight into whatever was allocated next.  With the
+    #  art of the sprites still to come there, a shape that decodes on
+    #  its own hits a _Debugger after the blits before it have scribbled
+    #  on it.
     todo = [sid for sid in sorted(streams)
             if sid * 8 + 8 <= 0x2EE0 and streams[sid][0] and streams[sid][1]]
     for sid in todo:

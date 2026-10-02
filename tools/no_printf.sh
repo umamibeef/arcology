@@ -9,7 +9,12 @@
 #  Run from anywhere; prints each offending line and fails.
 set -e
 root=$(cd "$(dirname "$0")/.." && pwd)
-hits=$(grep -rnE '(^|[^A-Za-z0-9_])printf\(' "$root/src/render" "$root/src/app" 2>/dev/null | grep -v '\.h:' || true)
+#  Every spelling of a write straight to the terminal: printf and puts,
+#  and fprintf, fputs and fputc aimed at stderr or stdout.  A write to a
+#  FILE the code opened itself is not one of these.  src/app/stub.c is
+#  the game when the build found no SDL3, and the log is not linked into
+#  that binary, so it says so with the only stream it has.
+hits=$(grep -rnE '(^|[^A-Za-z0-9_])(printf|puts)\(|fprintf\((stderr|stdout)|fputs\([^;]*,\s*(stderr|stdout)\)|fputc\([^;]*,\s*(stderr|stdout)\)|perror\(' "$root/src/render" "$root/src/app" 2>/dev/null | grep -v '\.h:' | grep -v '/src/app/stub\.c:' || true)
 if [ -n "$hits" ]; then
     echo "printf is not used in the renderer or the app; use R_DBG/R_NOTE for messages, dumpf for dumps:"
     echo "$hits"

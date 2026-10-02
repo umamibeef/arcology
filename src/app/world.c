@@ -132,7 +132,10 @@ void shore_field(const RCity *c, uint8_t *out)
 int traffic_frame(App *a, float time)
 {
     int on = geometry_on(a) && !a->opts.underground;
-    if (!on)
+    /*  A world the build faulted on has a half-made lane model, and the
+     *  movers read that model.  So nothing moves, and that is not a
+     *  failure to report every frame. */
+    if (!on || a->world_faulted)
         return gpu_set_movers(a->gpu, NULL, 0);
     {
         float dt = a->traffic_time > 0.0f && time > a->traffic_time ? time - a->traffic_time : 0.0f;
@@ -147,10 +150,25 @@ int remesh(App *a)
 {
     const RAtlasLevel *l = a->sw.level;
     static uint8_t     shore[R_MAP * R_MAP * 4];
+    /*  A build that FAILED, and this still answers that it did.  The
+     *  rest of this runs on the half of a mesh the build did make.  A
+     *  city whose FIRST build faults then has what was finished on the
+     *  screen instead of an empty window.  Every check still fails and
+     *  the exit code is unchanged: what is SHOWN is not what is
+     *  reported. */
+    int faulted = 0;
     if (!l)
         return -1;
     if (build_world(&a->mesh, a->view, &a->atlas, l, a->opts.underground, 1 /* the full mesh, every side and surface, once */, geometry_on(a) && !a->opts.underground) != 0)
-        return -1;
+    {
+        /*  THE MOVING WORLD IS DOWN FROM HERE, whatever is shown.  It
+         *  reads the lane model the build lays, and a build that
+         *  faulted left that model half made.  The flag is set before
+         *  anything returns.  So the movers are not driven over it, and
+         *  the drive is not asked for a turn it cannot take. */
+        a->world_faulted = 1;
+        faulted          = 1;
+    }
     shore_field(a->view, shore);
     /*  --field-dump path writes the field as a binary PPM (r: water's
      *  distance to land, g: depth, b: land's distance to water; all x16). */
@@ -170,6 +188,18 @@ int remesh(App *a)
         return -1;
     if (gpu_set_mesh(a->gpu, &a->mesh) != 0)
         return -1;
+    /*  THE MOVING WORLD NEEDS A WHOLE ONE.  It is driven off the lane
+     *  model.  A build that faulted part way through left that model half
+     *  made.  Every lane after the fault is missing, and the ones
+     *  before it may name lanes that were never laid.  So a kept mesh is
+     *  shown with nothing moving on it. */
+    if (faulted)
+    {
+        R_WARN("mesh", "the mesh is up and nothing moves on it, because the "
+                       "lane model the movers read is half made");
+        a->mesh_dirty = 0;
+        return -1;
+    }
     if (traffic_init(&a->traffic, &a->mesh, a->view) != 0)
         return -1;
     a->traffic_time = 0.0f;
@@ -188,7 +218,8 @@ int remesh(App *a)
         return -1;
     if (g_dev.traffic_t)
         traffic_digest(&a->traffic, &a->mesh);
-    a->mesh_dirty = 0;
+    a->mesh_dirty    = 0;
+    a->world_faulted = 0;
     R_DBG("mesh", "%u vertices, %u retaining walls; canvas %dx%d origin %d,%d "
                   "tile %dx%d step %d",
           (unsigned)a->mesh.n_land,
@@ -200,7 +231,8 @@ int remesh(App *a)
           (int)l->tile_w,
           (int)l->tile_h,
           (int)l->alt_step);
-    return 0;
+    /*  Shown, and still a failure. */
+    return faulted ? -1 : 0;
 }
 
 /*  The backdrop: the sky, except in the underground view, which the
@@ -223,7 +255,7 @@ int check_frame(App *a, SDL_Window *win, const char *out_path)
         int ww, wh;
         if (!SDL_GetWindowSizeInPixels(win, &ww, &wh))
         {
-            fprintf(stderr, "check: window size: %s\n", SDL_GetError());
+            R_ERR("check", "check: window size: %s", SDL_GetError());
             return -1;
         }
         w = ww / a->gv.scale;
@@ -232,7 +264,7 @@ int check_frame(App *a, SDL_Window *win, const char *out_path)
     RGpuView fv = frame_view(a);
     if (gpu_readback(a->gpu, &fv, backdrop(a), w, h, 1, &gpu, NULL, NULL) != 0)
     {
-        fprintf(stderr, "check: readback failed: %s\n", SDL_GetError());
+        R_ERR("check", "check: readback failed: %s", SDL_GetError());
         return -1;
     }
     {
@@ -240,7 +272,7 @@ int check_frame(App *a, SDL_Window *win, const char *out_path)
         so.mesh      = 1;
         if (soft_render(&soft, &a->atlas, view_quarter(a) ? a->view_rot : a->view, &so) != 0)
         {
-            fprintf(stderr, "check: the software render failed\n");
+            R_ERR("check", "check: the software render failed");
             image_free(&gpu);
             return -1;
         }

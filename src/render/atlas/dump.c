@@ -11,6 +11,7 @@
 #include "lodepng.h"
 #include "atlas/atlas.h"
 #include "dump.h"
+#include "log.h"
 
 static int dump_tile(const RAtlas *a, const RAtlasLevel *l, int32_t id,
                      const char *out)
@@ -22,7 +23,7 @@ static int dump_tile(const RAtlas *a, const RAtlasLevel *l, int32_t id,
 
     if (!t)
     {
-        fprintf(stderr, "shape %d is not in the %d px set\n", (int) id,
+        R_ERR("atlas", "shape %d is not in the %d px set", (int) id,
                 (int) l->zoom);
         return 1;
     }
@@ -44,7 +45,7 @@ static int dump_tile(const RAtlas *a, const RAtlasLevel *l, int32_t id,
     free(px);
     if (err)
     {
-        fprintf(stderr, "cannot write %s\n", out);
+        R_ERR("atlas", "cannot write %s", out);
         return 1;
     }
     dumpf("wrote %s  (shape %d, %ux%u, footprint %ux%u, rises %d px)\n", out,
@@ -60,12 +61,12 @@ int atlas_main(int argc, char **argv)
 
     if (argc < 2)
     {
-        fprintf(stderr, "usage: %s <assets dir> [shap id [out.png]]\n", argv[0]);
+        R_ERR("atlas", "usage: %s <assets dir> [shap id [out.png]]", argv[0]);
         return 2;
     }
     if (atlas_load(&a, argv[1]) != 0)
     {
-        fprintf(stderr, "%s\n", a.err);
+        R_ERR("atlas", "%s", a.err);
         return 1;
     }
 

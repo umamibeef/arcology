@@ -113,16 +113,18 @@ int find_scripts(char *out, size_t n, const char *argv0)
     return 0;
 }
 
-/*  $--cities, then the usual install, then ./Cities */
-/*  Where the cities are, most specific first.  `cities/` beside the
- *  build is the answer that needs no setup: the repository carries the
- *  collection, so a fresh clone can open one straight away.  The
- *  environment variable still wins, for a folder of your own. */
+/*  Where the cities are, most specific first.  `--cities` wins, for a
+ *  folder of your own.  Then `cities/` beside the build, which is the
+ *  answer that needs no setup: the repository carries the collection.  A
+ *  fresh clone can open one straight away.  Then ARC_CITIES, the ONE
+ *  name the game folder is read by.  The build takes it
+ *  (`-DARC_CITIES=`), and so does every tool that needs the game's own
+ *  files (tools/game.py). */
 int find_cities(char *out, size_t n)
 {
     static const char *const REL[] = {"cities", "../cities", "../../cities", "Cities", NULL};
     const char              *env   = g_dev.cities;
-    const char              *home  = getenv("HOME");
+    const char              *game  = getenv("ARC_CITIES");
     char                     probe[1024];
     int                      i;
 
@@ -137,12 +139,20 @@ int find_cities(char *out, size_t n)
             snprintf(out, n, "%s", REL[i]);
             return 1;
         }
-    if (home)
+    if (game && *game)
     {
-        snprintf(probe, sizeof probe, "%s/Downloads/SimCity 2000\xc2\xae Collection/Cities", home);
+        /*  The collection keeps its saves in a Cities folder inside it.
+         *  A setting that names that folder outright is taken as it
+         *  is. */
+        snprintf(probe, sizeof probe, "%s/Cities", game);
         if (is_dir(probe))
         {
             snprintf(out, n, "%s", probe);
+            return 1;
+        }
+        if (is_dir(game))
+        {
+            snprintf(out, n, "%s", game);
             return 1;
         }
     }

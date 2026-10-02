@@ -1,4 +1,4 @@
---  line.lua -- the line family.
+--  road.lua -- the line family.
 --
 --  A family says how one kind of line is drawn: how wide it is, what it
 --  is made of, which of the loft's stages it supplies and what it builds

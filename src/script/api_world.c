@@ -31,6 +31,7 @@
 
 #include "net/net.h"
 #include "build.h"
+#include "net/walkway.h"
 /*  The city the last build was given.  A script reads the map through
  *  this and not through the network walk.  This has its own copy and is
  *  only up while a walk is running. */
@@ -202,7 +203,7 @@ static int l_tile(lua_State *L)
     return 1;
 }
 
-static int l_road_class(lua_State *L)
+static int l_line_class(lua_State *L)
 {
     int32_t col = (int32_t)luaL_checkinteger(L, 1);
     int32_t row = (int32_t)luaL_checkinteger(L, 2);
@@ -265,7 +266,7 @@ void api_world_open(lua_State *L)
     lua_pushcfunction(L, l_near), lua_setfield(L, -2, "near");
     lua_pushcfunction(L, l_plane), lua_setfield(L, -2, "plane");
     lua_pushcfunction(L, l_tile), lua_setfield(L, -2, "tile");
-    lua_pushcfunction(L, l_road_class), lua_setfield(L, -2, "line_class");
+    lua_pushcfunction(L, l_line_class), lua_setfield(L, -2, "line_class");
     /*  The layers themselves, so a script can be told what there is to
      *  read rather than carrying a list of its own that goes stale.  A
      *  sequence the script reads with ipairs, so it is Lua's own and

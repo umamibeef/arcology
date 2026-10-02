@@ -19,9 +19,11 @@
 #include "net/types.h"
 #include "net/band.h"
 #include "net/box.h"
+#include "net/cell.h"
 #include "net/cut.h"
 #include "net/drive.h"
 #include "net/family.h"
+#include "net/fits.h"
 #include "net/lane.h"
 #include "net/strip.h"
 #include "net/margin.h"
@@ -33,6 +35,7 @@
 #include "net/station.h"
 #include "net/table.h"
 #include "net/traffic.h"
+#include "net/walkway.h"
 #include "net/report.h"
 
 #endif /* ARC_NET_H */

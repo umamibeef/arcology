@@ -22,12 +22,23 @@
 #include "opt.h"
 #include "pipeline.h"
 #include "incr.h"
+#include "mesh/shapes.h"
+#include "mesh/fit.h"
+#include "mesh/loft.h"
+#include "mesh/surface.h"
+#include "script.h"
+#include "prof.h"
 
 
-/*  Walk one band from an end and loft its slab.  The spine runs along
- *  the seam: half a tile across from the primary tile's center. */
-
-/*  One band's walk, in stages: the tiles, the ends, the fit, the
+/*  Walk one band from an end and loft its slab.  A band is not one tile
+ *  wide.  Its slab is a TWO-TILE BAND, the spec's 2x2 segment.  So the
+ *  spine runs along the seam between two rows or two columns, never
+ *  through a tile center.  It lies half a tile across from the primary
+ *  tile's center.  The segment pipeline walks tile to tile and cannot
+ *  express it.  This walks the band instead and hands the ordinary loft
+ *  that spine.
+ *
+ *  One band's walk, in stages: the tiles, the ends, the fit, the
  *  overlay, the loft.  Each stage reads what it needs off this and
  *  writes back what it changed. */
 typedef struct
@@ -58,24 +69,7 @@ typedef struct
 } BandWalk;
 
 
-
-/*  Through a curve block, and on through every block that follows it.
- *  Its center lies on both seams.  So the spine turns there, and the
- *  fillet carries the arc back into the tile before and on into the one
- *  after.  The art draws a diagonal band as a chain of these blocks
- *  touching at their corners.  So the walk follows the chain by whatever
- *  step joins one to the next.  The straightener makes one line of the
- *  centers. 1 when a chain was taken (the walk goes on from where it
- *  left the chain, or ends if nothing continued it). */
-
-
-
-
-
-/*  The tiles: from the first cell along the band wherever it goes.
- *  Straight on while it can, through a curve block at a right angle, or
- *  a step sideways.  Until nothing continues it. */
-/*  And the band BUILT from a run of cells: the spine's points, the tiles
+/*  The band BUILT from a run of cells: the spine's points, the tiles
  *  the band owns, and which of its cells carry a spur.  Everything here
  *  follows from the run.  Nothing decides which cells are in it.  A
  *  cell's point sits on the seam, half a tile across from its own
@@ -268,7 +262,7 @@ static void band_chain_ask(const BandWalk *x)
     s_band_stair.pts   = x->pts;
     s_band_stair.block = x->block;
     s_band_stair.n     = x->n;
-    s_band_stair.gap   = (int)s_tune.band_stair;
+    s_band_stair.gap   = (int)TUNE(band_stair);
     s_band_stair.chain = s_band_chain;
 }
 
@@ -280,111 +274,58 @@ StairFan *net_band_chain(void)
 /*  The fit two ways, the better kept.  One way has free lines and the
  *  band's spur tiles in its corridor.  The slab runs as straight as its
  *  corridor allows, and the plain fit.  Which of the two is better is
- *  arc.rules.fit_choice's. */
-/*  The fit two ways, the better kept.  One way has free lines and the
- *  band's spur tiles in its corridor.  The slab runs as straight as its
- *  corridor allows, and the plain fit.  Which of the two is better is
- *  arc.rules.fit_choice's.  So the band reads what each fit needs, the
- *  drive runs both and settles the choice, and the walk takes the one
- *  that was kept. */
-static struct
-{
-    const RCity   *c;
-    const BandWalk  *x;
-    const int32_t *own;
-    const V2      *chain;
-    int            n_own, nc, live;
-    V2             band0, band1;
-} s_bandfit;
-static V2    s_bandfit_q[2][MAX_PTS];
-static float s_bandfit_rad[2][MAX_PTS], s_bandfit_tlim[2][MAX_PTS];
-static int   s_bandfit_nk[2], s_bandfit_sc[2][3];
-static char  s_bandfit_tally[2][512], s_bandfit_before[512];
-static int   s_bandfit_kept = -1;
+ *  arc.rules.fit_choice's.  The band puts both ways to the fit arena
+ *  (net/fits.c).  The drive runs both and settles the choice, and the walk
+ *  takes the one that was kept. */
+static int s_bandfit_live; /* an ask waits on the drive: a band the building pass replays asks for none */
 
 static void band_fit_ask(const RCity *c, const BandWalk *x, const int32_t *own, int n_own, const V2 *chain, int nc, V2 band0, V2 band1)
 {
-    s_bandfit.c     = c;
-    s_bandfit.x     = x;
-    s_bandfit.own   = own;
-    s_bandfit.n_own = n_own;
-    s_bandfit.chain = chain;
-    s_bandfit.nc    = nc;
-    s_bandfit.band0 = band0;
-    s_bandfit.band1 = band1;
-    s_bandfit.live  = 1;
-    s_bandfit_nk[0] = s_bandfit_nk[1] = 0;
-    fit_tally_get(2, s_bandfit_before, sizeof s_bandfit_before);
+    const uint8_t *mask = band_own_mask(x);
+    fits_reset(fits_band());
+    fits_add_points(fits_band(), c, own, n_own, mask, chain, nc, band0, band1, 1, net_band->fit_fam, net_band->name);
+    fits_add_points(fits_band(), c, own, n_own, mask, chain, nc, band0, band1, 2, net_band->fit_fam, net_band->name);
+    s_bandfit_live = 1;
 }
 
 int net_band_fits(void)
 {
-    return s_bandfit.live ? 2 : 0;
+    return s_bandfit_live ? fits_count(fits_band()) : 0;
 }
 
 int net_band_fit_begin(int w)
 {
-    if (!s_bandfit.live || w < 0 || w > 1)
+    if (!s_bandfit_live)
         return 0;
-    fit_tally_set(2, s_bandfit_before, sizeof s_bandfit_before);
-    return path_fit_points_begin(band_corridor(s_bandfit.c, s_bandfit.own, s_bandfit.n_own, w),
-                                 band_own_mask(s_bandfit.x), s_bandfit.chain, s_bandfit.nc,
-                                 s_tune.band_w, s_bandfit.band0, s_bandfit.band1,
-                                 s_tune.band_rmax, s_tune.band_rmin, 1.0f, -1, -1, w,
-                                 s_bandfit_q[w], s_bandfit_rad[w], s_bandfit_tlim[w], MAX_PTS);
+    return fits_begin(fits_band(), NULL, w);
 }
 
 void net_band_fit_done(int w)
 {
-    int k;
-    if (!s_bandfit.live || w < 0 || w > 1)
+    if (!s_bandfit_live)
         return;
-    s_bandfit_nk[w]    = path_fit_points_end();
-    s_bandfit_sc[w][0] = s_bandfit_sc[w][1] = 0;
-    s_bandfit_sc[w][2] = s_bandfit_nk[w];
-    for (k = 1; k + 1 < s_bandfit_nk[w]; ++k)
-        if (s_bandfit_rad[w][k] < 0.01f)
-            ++s_bandfit_sc[w][0];
-        else if (s_bandfit_rad[w][k] < s_tune.band_rmin)
-            ++s_bandfit_sc[w][1];
-    fit_tally_get(2, s_bandfit_tally[w], sizeof s_bandfit_tally[w]);
+    fits_done(fits_band(), w);
 }
 
 const char *net_band_fit_choice(const int **free_, const int **held)
 {
-    if (!s_bandfit.live)
+    if (!s_bandfit_live)
         return NULL;
-    *free_ = s_bandfit_sc[1];
-    *held  = s_bandfit_sc[0];
-    return "band";
+    return fits_choice(fits_band(), free_, held);
 }
 
-/*  The one the script kept, into the band's own arrays, and the tally
- *  that goes with it. */
+/*  The one the script kept, and the tally that goes with it. */
 void net_band_fit_choice_is(int keep_free)
 {
-    const int w = keep_free ? 1 : 0;
-    if (!s_bandfit.live)
+    if (!s_bandfit_live)
         return;
-    s_bandfit.live = 0;
-    s_bandfit_kept = w;
-    if (g_dev.path_dump)
-        dumpf("FIT %s kept: free %d corners %d tight %d nodes, plain %d corners %d tight %d nodes\n",
-              keep_free ? "free" : "plain",
-              s_bandfit_sc[1][0], s_bandfit_sc[1][1], s_bandfit_sc[1][2],
-              s_bandfit_sc[0][0], s_bandfit_sc[0][1], s_bandfit_sc[0][2]);
-    fit_tally_set(2, s_bandfit_tally[w], sizeof s_bandfit_tally[w]); /* the kept fit's tallies alone */
+    s_bandfit_live = 0;
+    fits_choice_is(fits_band(), keep_free);
 }
 
 static int net_band_fit_take(V2 *q, float *rad, float *tlim)
 {
-    const int w = s_bandfit_kept;
-    int       k;
-    if (w < 0)
-        return 0;
-    for (k = 0; k < s_bandfit_nk[w]; ++k)
-        q[k] = s_bandfit_q[w][k], rad[k] = s_bandfit_rad[w][k], tlim[k] = s_bandfit_tlim[w][k];
-    return s_bandfit_nk[w];
+    return fits_take(fits_band(), q, rad, tlim);
 }
 
 /*  The corridor fit, straightened as a line is and filleted with the
@@ -415,8 +356,8 @@ static int band_fit(BandWalk *x)
      *  lengths come first, measured along the raw polyline in TILES: the
      *  taper below compares them against arc length.  A count of points
      *  is no length at all once the straightener has collapsed a run.  A
-     *  slab is raised end to end: the 0x61-0x64 cells at a band's ends
-     *  are the band's own, the slab runs over them.  The taper is the
+     *  slab is raised end to end: the sloped cells at a band's ends
+     *  are the band's own, and the slab runs over them.  The taper is the
      *  on-spurs' alone. */
     spur0 = spur1 = 0.0f;
     (void)spur;
@@ -430,18 +371,18 @@ static int band_fit(BandWalk *x)
      *  be covered: where the arc cuts inside a block, the ground shows
      *  under the viaduct, as it should. */
     fit_tally_into(net_band->fit_fam);
-    /*  Every one of the band's own tiles must end up under the slab, as
-     *  a line's must under its strip.  The corridor says where the slab
-     *  MAY sweep, the own tiles where it MUST pass.  Without that rule a
-     *  long band's jogs collapse into a line across the block beside
-     *  them.  That line lies tiles off the band's cells, and over lines
-     *  and buildings.  The fit is given the chain band_chain_ask makes of the
-     *  points: the straight cells', a lone block's corner, and nothing
-     *  of a staircase.  So the runs at its ends meet across it.  The
-     *  band the fit holds to the corridor is the slab's own width and no
-     *  wider.  At a full tile each side its inner edge at a corner
-     *  samples the on-spur tile beside the slab, which is not free air.
-     *  Every fillet is refused down to a kink. */
+    /*  Every one of the band's own tiles must end up under the slab, as a
+     *  line's must under its strip.  The corridor says where the slab MAY
+     *  sweep, the own tiles where it MUST pass.  Without that rule a long
+     *  band's jogs collapse into a line across the block beside them.  That
+     *  line lies tiles off the band's cells, and over lines and buildings.
+     *  The fit is given the chain band_chain_ask makes of the points: the
+     *  straight cells', a lone block's corner, and nothing of a staircase.
+     *  So the runs at its ends meet across it.  The band the fit holds to
+     *  the corridor is the slab's own width and no wider.  At a full tile
+     *  each side its inner edge at a corner samples the on-spur tile beside
+     *  the slab, which is not free air.  Every fillet is refused down to a
+     *  kink. */
     band_fit_ask(c, x, own, n_own, s_band_chain, s_band_stair.nc, band0, band1);
     (void)pts, (void)pieces, (void)q, (void)rad, (void)tlim, (void)np, (void)col, (void)row, (void)n, (void)nk;
     x->spur0 = spur0;
@@ -488,7 +429,7 @@ static int band_fit_take(BandWalk *x)
          *  slab the way it draws a line: its tiles, the fitted line, its
          *  radii and budgets, and the runs it found. */
         int d;
-        dumpf("PATH hw=%.3f\nTILES", (double)s_tune.band_w);
+        dumpf("PATH hw=%.3f\nTILES", (double)TUNE(band_w));
         for (d = 0; d < n_own; ++d)
             dumpf(" %d,%d", (int)(own[d] % R_MAP), (int)(own[d] / R_MAP));
         dumpf("\nGATES\nPTS");
@@ -535,6 +476,9 @@ static int band_fit_cut(BandWalk *x)
     return 0;
 }
 
+/*  The overlay's paints, which the script names (arc.geo). */
+static int gix_mark_corridor = -1, gix_mark_free = -1, gix_mark_spur = -1;
+
 /*  The fit's nodes and corridors as ground highlights, when the overlay
  *  is on.  1 to stop, as a failed highlight always has. */
 static int band_overlay(BandWalk *x)
@@ -556,7 +500,7 @@ static int band_overlay(BandWalk *x)
      *  tan, the free air beside them in blue.  Ground highlights,
      *  blended tints under everything that stands on the tile.  The
      *  outlines before them, and the slabs before those, hid the town. */
-    if (s_tune.show_curves > 0.5f && s_pass != 1)
+    if (TUNE(show_curves) > 0.5f && s_pass != 1)
     {
         int     k3;
         int32_t ti;
@@ -568,33 +512,11 @@ static int band_overlay(BandWalk *x)
                 isown = own[k3] == ti;
             if (!isown && !corr[ti])
                 continue;
-            if (tile_highlight(m, c, mask_bit, tc, tr, isown ? 3.0f : 6.0f) != 0)
+            if (tile_highlight(m, c, mask_bit, tc, tr, isown ? geo_num(&gix_mark_corridor, "mark_corridor") : geo_num(&gix_mark_free, "mark_free")) != 0)
                 return 1;
         }
-        for (k3 = 0; k3 < nk; ++k3)
-        {
-            int32_t tc = (int32_t)floorf(q[k3].x), tr = (int32_t)floorf(q[k3].y);
-            float   paint, z, half;
-            if (tc < 0 || tr < 0 || tc >= R_MAP || tr >= R_MAP)
-                continue;
-            paint = (k3 == 0 || k3 + 1 == nk) ? 7.0f : (rad[k3] > 0.001f ? 3.0f : 1.0f);
-            if (k3 > 0 && k3 + 1 < nk && rad[k3] <= 0.001f)
-            {
-                V2    u1 = {q[k3].x - q[k3 - 1].x, q[k3].y - q[k3 - 1].y};
-                V2    u2 = {q[k3 + 1].x - q[k3].x, q[k3 + 1].y - q[k3].y};
-                float l1 = v2len(u1), l2 = v2len(u2);
-                if (l1 > 1e-5f && l2 > 1e-5f && (u1.x * u2.x + u1.y * u2.y) / (l1 * l2) > 0.9999f)
-                    paint = 7.0f;
-            }
-            (void)half;
-            z    = surface_at_world(c, mask_bit, q[k3].x, q[k3].y) + BAND_LIFT;
-            /*  The mark is a model (scripts/models): a line's end
-             *  is a smaller one than a turn. */
-            if (net_model_put_on(net_model_find(k3 == 0 || k3 + 1 == nk ? "node_end" : "node_mid"),
-                                 m, c, mask_bit, tile_order(c, tc, tr, mask_bit),
-                                 q[k3].x, q[k3].y, 1.0f, 0.0f, 0.0f, paint, 0.0f, z, z, 1) != 0)
-                return 1;
-        }
+        if (curve_marks(m, c, mask_bit, q, rad, nk, BAND_LIFT) != 0)
+            return 1;
     }
     return 0;
 }
@@ -631,7 +553,7 @@ static int band_loft(BandWalk *x)
         spur1 = 0.0f; /* all spur: one slope, not two */
     d.f             = net_line->f;
     d.fam           = net_band;
-    d.hw            = s_tune.band_w; /* the slab's half width */
+    d.hw            = TUNE(band_w); /* the slab's half width */
     d.ground_margin = geo_num(&gix_slab_ground_margin, "slab_ground_margin"); /* it reads the ground a hair beyond its edges */
     d.mat           = MAT_BAND;
     d.kind          = LOFT_SLAB;
@@ -669,7 +591,7 @@ int build_band_done(void)
     if (rc != 0 || !s_band_hold_live)
         return rc;
     s_band_hold_live = 0;
-    rc = lane_slab(s_band_hold.m, s_band_hold.c, s_band_hold.mask_bit, s_band_hold.pieces, s_band_hold.np, s_tune.band_w, s_band_of_hold);
+    rc = lane_slab(s_band_hold.m, s_band_hold.c, s_band_hold.mask_bit, s_band_hold.pieces, s_band_hold.np, TUNE(band_w), s_band_of_hold);
     band_lane_cut_clear();
     return rc;
 }
@@ -800,7 +722,6 @@ static struct
 {
     RMesh             *m;
     const RCity       *c;
-    const RAtlasLevel *l;
     uint8_t            mask_bit;
     int                comp;
     int                phase; /* 0 the table's bands, 1 the script's, 3 nothing left */
@@ -817,10 +738,10 @@ int net_band_replaying(void)
     return !(s_pass == 2 && seg_table_count() > 0 && !g_dev.no_replay);
 }
 
-static void build_bands_begin(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit, int comp)
+static void build_bands_begin(RMesh *m, const RCity *c, uint8_t mask_bit, int comp)
 {
     memset(&s_bands_walk, 0, sizeof s_bands_walk);
-    s_bands_walk.m = m, s_bands_walk.c = c, s_bands_walk.l = l, s_bands_walk.mask_bit = mask_bit, s_bands_walk.comp = comp;
+    s_bands_walk.m = m, s_bands_walk.c = c, s_bands_walk.mask_bit = mask_bit, s_bands_walk.comp = comp;
     s_bands_walk.phase = net_band_replaying() ? 1 : 0;
 }
 
@@ -871,17 +792,17 @@ int build_band_next(void)
     return 0;
 }
 
-int build_bands(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit, int comp)
+int build_bands(RMesh *m, const RCity *c, uint8_t mask_bit, int comp)
 {
     int32_t col, row;
     double  tp;
     tp = prof_now();
-    band_free_air(c, l);
-    net_prof_add(NET_PROF_BAND_AIR, prof_now() - tp), tp = prof_now();
+    band_free_air(c);
+    prof_add(PROF_BAND_AIR, prof_now() - tp), tp = prof_now();
     /* band_lanes ran before the junctions (mesh.c), so a junction knows the spur beside it */
     net_station_reset();
     net_bands_reset();
-    build_bands_begin(m, c, l, mask_bit, comp);
+    build_bands_begin(m, c, mask_bit, comp);
     (void)col, (void)row;
     s_band_tp = tp;
     return 0;
@@ -889,10 +810,10 @@ int build_bands(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit
 
 /*  And what stands on the bands the drive has just had composed: every
  *  network tile tinted for outline mode, and the spurs. */
-int build_band_spurs(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit, int comp)
+int build_band_spurs(RMesh *m, const RCity *c, uint8_t mask_bit, int comp)
 {
     double tp = s_band_tp;
-    net_prof_add(NET_PROF_BANDS, prof_now() - tp), tp = prof_now();
+    prof_add(PROF_BANDS, prof_now() - tp), tp = prof_now();
     /*  Every spur tile marked orange on the ground, for outline mode:
      *  the corridor markers' ground-highlight pipeline.  The shader
      *  shows it only while the grid is on. */
@@ -905,13 +826,13 @@ int build_band_spurs(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mas
         int32_t              i;
         for (i = 0; i < R_MAP * R_MAP; ++i)
         {
-            float paint = lane_spur_tile(i % R_MAP, i / R_MAP) ? 8.0f : (float)tint[c->xbld[i]];
+            float paint = lane_spur_tile(i % R_MAP, i / R_MAP) ? geo_num(&gix_mark_spur, "mark_spur") : (float)tint[c->xbld[i]];
             if (paint > 0.0f && tile_highlight(m, c, mask_bit, i % R_MAP, i / R_MAP, paint) != 0)
                 return -1;
         }
     }
-    net_prof_add(NET_PROF_BAND_TINT, prof_now() - tp);
-    build_spurs_begin(m, c, l, mask_bit, comp);
+    prof_add(PROF_BAND_TINT, prof_now() - tp);
+    build_spurs_begin(m, c, mask_bit, comp);
     s_band_tp = prof_now();
     return 0;
 }
@@ -928,23 +849,14 @@ void *build_band_links(RMesh *m, const RCity *c, uint8_t mask_bit)
 int build_band_links_done(void)
 {
     double tp = s_band_tp;
-    net_prof_add(NET_PROF_BAND_TRANS, prof_now() - tp), tp = prof_now();
+    prof_add(PROF_BAND_TRANS, prof_now() - tp), tp = prof_now();
     lane_check_ends();
-    net_prof_add(NET_PROF_BAND_CHECK, prof_now() - tp);
+    prof_add(PROF_BAND_CHECK, prof_now() - tp);
     return 0;
 }
 
 /* ---- the loft's stages a slab or a spur supplies ---------------------------- */
 
-
-/*  The slab stands clear (spec 7.2): 5 m under the soffit plus the
- *  girder is about 7.5 m to the line surface.  The vertical unit here is
- *  the altitude level, seven to eight meters.  So a little over one
- *  level, applied after the profile is settled so the slab follows the
- *  ground's shape while riding above it.  A slab is a structure, not a
- *  carpet: its support line may rise or fall no faster than a sixth of a
- *  level a tile.  So it runs straight over what the ground does under it
- *  and the columns take up the difference. */
 
 /*  Station i: how far along it is, the height it stands at, and the
  *  ground under it. */
@@ -972,7 +884,9 @@ void band_prof_set(ProfFan *p, int i, float z)
     ((Sample *)p->smp)[i].z = z;
 }
 
-/*  A band strip's elevation: arc.rules.profile lays it out. */
+/*  A band strip's elevation: arc.rules.profile lays it out.  The lift it
+ *  is given, the grade it may hold and the stiffness it is smoothed
+ *  with come with it. */
 static int band_profile(Loft *x)
 {
     static ProfFan s_prof;
@@ -989,8 +903,8 @@ static int band_profile(Loft *x)
     p.z0         = x->d->z0;
     p.spur0      = x->d->spur0;
     p.spur1      = x->d->spur1;
-    p.grade      = s_tune.band_grade;
-    p.stiff      = s_tune.band_stiff;
+    p.grade      = TUNE(band_grade);
+    p.stiff      = TUNE(band_stiff);
     p.lift       = BAND_LIFT;
     s_prof       = p;
     net_stage_hand(&s_prof, "profile");
@@ -1011,9 +925,6 @@ static int band_profile_done(Loft *x)
 
 /* ---- the band as a family --------------------------------------------- */
 
-/*  A slab records its edge in the traffic's graph under a class of its
- *  own.  It never takes whatever the last line walked left behind, so
- *  its cars use both lanes.  It has no margin and no stripe. */
 /*  What this file lends the declarations: the slab's stages.  The band
  *  is walked by its own bands, not by tile family (its tiles are the
  *  line's).  So only what the loft asks a family for is here. */

@@ -1,4 +1,4 @@
---  margin.lua -- the margin itself, and the crosswalk.
+--  footway.lua -- the margin itself, and the crosswalk.
 --
 --  The network says where a band's stations are, what it joins and how
 --  deep a meet the arm could spare.  What is drawn over those

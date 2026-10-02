@@ -21,6 +21,15 @@
 #include "pipeline.h"
 #include "script.h"
 #include "walk/internal.h"
+#include "mesh/shapes.h"
+#include "mesh/loft.h"
+#include "mesh/piece.h"
+#include "mesh/surface.h"
+#include "net/cell.h"
+#include "walk/cursor.h"
+#include "walk/walk.h"
+#include "net/walkway.h"
+#include "prof.h"
 
 /*  The numbers this file reads, each remembering where the store
  *  put it (net/geo.c).  A name here is a name a script must set. */
@@ -28,54 +37,7 @@
 
 static int s_measure; /* 1: the measuring walk: fit the paths, record the arms, draw nothing */
 
-/*  Where a building pass's time goes, stage by stage (--times). */
-static int gix_walk_cap_w = -1;
-static double s_prof[NET_PROF_N];
-void          net_prof_add(int stage, double amount)
-{
-    s_prof[stage] += amount;
-}
-double prof_now(void)
-{
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (double)ts.tv_sec * 1e3 + (double)ts.tv_nsec / 1e6;
-}
-void net_prof_reset(void)
-{
-    memset(s_prof, 0, sizeof s_prof);
-}
-void net_prof_print(void)
-{
-    if (!g_dev.times)
-        return;
-    dumpf("time    segments: walk+fit %.1f, trims %.1f, lanes %.1f, overlay %.1f, caps %.1f | loft: sample %.1f (%d stations, %d lofts from the cache, %d sampled), ground %.1f, profile %.1f, slab works %.1f, record %.1f, slab %.1f (of which slabs and spurs %.1f) | junctions: lanes %.1f, box %.1f ms\n",
-          s_prof[0],
-          s_prof[1],
-          s_prof[2],
-          s_prof[3],
-          s_prof[4],
-          s_prof[5],
-          (int)s_prof[13],
-          (int)s_prof[14],
-          (int)s_prof[15],
-          s_prof[16],
-          s_prof[6],
-          s_prof[7],
-          s_prof[8],
-          s_prof[9],
-          s_prof[10],
-          s_prof[11],
-          s_prof[12]);
-    dumpf("time    bands: free air %.1f, bands %.1f, tints %.1f, spurs %.1f (of which their lofts %.1f), transitions %.1f, lane check %.1f ms\n",
-          s_prof[NET_PROF_BAND_AIR],
-          s_prof[NET_PROF_BANDS],
-          s_prof[NET_PROF_BAND_TINT],
-          s_prof[NET_PROF_BAND_SPURS],
-          s_prof[NET_PROF_SPUR_LOFT],
-          s_prof[NET_PROF_BAND_TRANS],
-          s_prof[NET_PROF_BAND_CHECK]);
-}
+static int gix_walk_cap_w = -1, gix_mark_corridor = -1;
 
 /*  ==================================================================
  *  Walking the network
@@ -86,10 +48,10 @@ void net_prof_print(void)
 /*  A lone piece no neighbor joins.  It is a band across its own tile,
  *  along the axis its art links.  Both ends are capped, as the
  *  original's lone sprite. */
-int build_island(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit, int comp, Family f, int32_t col, int32_t row)
+int build_island(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, Family f, int32_t col, int32_t row)
 {
     Piece pc;
-    int   links = tile_links(c, l, col, row, f), ns;
+    int   links = tile_links(c, col, row, f), ns;
     float cx = (float)col + 0.5f, cy = (float)row + 0.5f;
     if (!links)
         return 0;
@@ -119,15 +81,13 @@ int build_island(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bi
     }
 }
 
-/*  A node of a family's network: a junction (three or four links), an
- *  end (one), or nothing. */
 /*  Where a segment ends on an end tile, and how.  The tile's art links
  *  that no neighbor returns point at the dead side.  What stands there
  *  decides: which byte is a carrier and which a building is the script's
  *  (`end_against`).  Returns 1 for a square end. */
-static int end_point(const RCity *c, const RAtlasLevel *l, Family f, int32_t col, int32_t row, V2 *pt)
+static int end_point(const RCity *c, Family f, int32_t col, int32_t row, V2 *pt)
 {
-    int dead = tile_links(c, l, col, row, f) & ~eff_links(c, l, col, row, f), e;
+    int dead = tile_links(c, col, row, f) & ~eff_links(c, col, row, f), e;
     *pt      = (V2){(float)col + 0.5f, (float)row + 0.5f};
     for (e = 0; e < 4; ++e)
     {
@@ -222,64 +182,6 @@ float   s_wk_rad[MAX_PTS], s_wk_tlim[MAX_PTS];
 int32_t s_wk_tcol[MAX_PTS], s_wk_trow[MAX_PTS], s_wk_marks[2 * MAX_PTS];
 Piece   s_wk_pieces[MAX_PIECES];
 
-/*  THE DISCOVERY.  From this node out along edge e, cell by cell, to the
- *  next node.  It reads the links and the node kinds and nothing else.
- *  No geometry, no mesh, no family beyond which links count: this is the
- *  whole of what "which cells form a segment" means.  It is what a
- *  script does instead (scripts/compose/network.lua). */
-void net_walk_cells(const RCity *c, const RAtlasLevel *l, Family f, int32_t col, int32_t row, int e, NetRun *out)
-{
-    int32_t cc = col, cr = row;
-    int     ee = e, back, guard = 0;
-    out->n     = 0;
-    out->stop  = NET_STOP_STUCK;
-    out->exit  = -1;
-    out->cell[out->n++] = row * R_MAP + col;
-    for (;;)
-    {
-        int links, other;
-        cc += (int32_t)SIDE_DU[ee];
-        cr += (int32_t)SIDE_DV[ee];
-        back = (ee + 2) & 3;
-        if (cc < 0 || cr < 0 || cc >= R_MAP || cr >= R_MAP)
-        {
-            out->stop = NET_STOP_EDGE; /* the run leaves the map by the way it was going */
-            out->exit = ee;
-            return;
-        }
-        links = eff_links(c, l, cc, cr, f);
-        if (!(links & (1 << back)))
-        {
-            out->stop = NET_STOP_STUCK; /* cannot happen on effective links.  Kept as a guard */
-            out->exit = ee;
-            return;
-        }
-        if (out->n + 2 >= MAX_PTS || ++guard > 4096)
-        {
-            out->stop = NET_STOP_CUT; /* the cell was entered and is not kept */
-            out->exit = ee;
-            return;
-        }
-        if (node_kind(c, l, f, cc, cr) != 0 || link_count(links) != 2)
-        {
-            out->cell[out->n++] = cr * R_MAP + cc;
-            out->stop           = NET_STOP_NODE;
-            return;
-        }
-        out->cell[out->n++] = cr * R_MAP + cc;
-        other               = links & ~(1 << back);
-        ee                  = other == L_N ? 0 : other == L_E ? 1
-                                             : other == L_S   ? 2
-                                                              : 3;
-        out->exit           = ee;
-        if (cc == col && cr == row)
-        {
-            out->stop = NET_STOP_LOOP; /* round to the cell it started from */
-            return;
-        }
-    }
-}
-
 /*  And the segment BUILT from a run of cells.
  *
  *      The points the fit passes through.
@@ -291,7 +193,6 @@ void net_walk_cells(const RCity *c, const RAtlasLevel *l, Family f, int32_t col,
 int seg_from_cells(Seg *x, const NetRun *w)
 {
     const RCity       *c    = x->c;
-    const RAtlasLevel *l    = x->l;
     Family             f    = x->f;
     V2                *pts  = x->pts;
     int32_t           *tcol = x->tcol, *trow = x->trow, *marks = x->marks;
@@ -312,7 +213,7 @@ int seg_from_cells(Seg *x, const NetRun *w)
     if (x->kind0 == 2)
         pts[n++] = (V2){(float)x->col + 0.5f + SIDE_DU[x->e] * hw, (float)x->row + 0.5f + SIDE_DV[x->e] * hw};
     else
-        x->square0 = end_point(c, l, f, x->col, x->row, &pts[n++]);
+        x->square0 = end_point(c, f, x->col, x->row, &pts[n++]);
     tcol[nt]   = x->col;
     trow[nt++] = x->row;
     for (i = 1; i < w->n; ++i)
@@ -330,13 +231,13 @@ int seg_from_cells(Seg *x, const NetRun *w)
             marks[nm++] = (cr * R_MAP + cc) * 4 + back;
         if (last && w->stop == NET_STOP_NODE)
         {
-            x->kind1 = node_kind(c, l, f, cc, cr);
+            x->kind1 = node_kind(c, f, cc, cr);
             if (x->kind1 == 0)
                 x->kind1 = 1;
             if (x->kind1 == 2)
                 pts[n++] = (V2){(float)cc + 0.5f + SIDE_DU[back] * hw, (float)cr + 0.5f + SIDE_DV[back] * hw};
             else
-                x->square1 = end_point(c, l, f, cc, cr, &pts[n++]);
+                x->square1 = end_point(c, f, cc, cr, &pts[n++]);
             if (nt < MAX_PTS)
             {
                 tcol[nt]   = cc;
@@ -398,25 +299,7 @@ int seg_from_cells(Seg *x, const NetRun *w)
     return 0;
 }
 
-/*  The tiles a drawn segment serves.  It is every tile of a segment
- *  whose strip was lofted, whether or not the strip runs over that tile.
- *  A family fitted across the free ground beside its tiles leaves some
- *  bare, by design.  The check (mesh/check.c) must not read those as a
- *  piece the walk could not draw. */
-static uint8_t s_served[R_MAP * R_MAP];
 
-void net_serve_tiles(const int32_t *tcol, const int32_t *trow, int nt)
-{
-    int i;
-    for (i = 0; i < nt; ++i)
-        if (tcol[i] >= 0 && trow[i] >= 0 && tcol[i] < R_MAP && trow[i] < R_MAP)
-            s_served[trow[i] * R_MAP + tcol[i]] = 1;
-}
-
-int net_tile_served(int32_t i)
-{
-    return i >= 0 && i < R_MAP * R_MAP && s_served[i];
-}
 
 /*  Stages one and two: the corridor and the fit through it, the pieces the strip is lofted from. */
 static int seg_fit(Seg *x)
@@ -457,12 +340,12 @@ static int seg_fit(Seg *x)
     nk = net_seg_fit_of(f, col, row, e, q, rad, tlim, MAX_PTS);
     /*  The corridor under the curve overlay: the segment's own tiles, in
      *  tan, which for a line is all the fit may use. */
-    if (s_tune.show_curves > 0.5f && s_pass != 1)
+    if (TUNE(show_curves) > 0.5f && s_pass != 1)
     {
         int ct;
         for (ct = 0; ct < nt; ++ct)
         {
-            if (tile_highlight(m, c, mask_bit, tcol[ct], trow[ct], 3.0f) != 0)
+            if (tile_highlight(m, c, mask_bit, tcol[ct], trow[ct], geo_num(&gix_mark_corridor, "mark_corridor")) != 0)
                 return -1;
         }
     }
@@ -652,40 +535,14 @@ static int seg_overlay(Seg *x)
      *  spacing between them can be read directly and every corner that
      *  came out hard is visible as such.  Amber where the corner was
      *  swept into an arc, red where no legal radius fitted and the line
-     *  simply turns.  Not under the spline fit: it has no fillets.  So
-     *  every node would read as "no arc".  At that sampling the marks
-     *  merge into a ribbon that hides the very curve they are there to
-     *  explain. */
-    if (s_tune.show_curves > 0.5f && s_pass != 1)
+     *  simply turns.  A fit whose pieces are dense samples has no
+     *  fillets, so every node would read as "no arc".  At that sampling
+     *  the marks merge into a ribbon that hides the very curve they are
+     *  there to explain. */
+    if (TUNE(show_curves) > 0.5f && s_pass != 1)
     {
-        int k3;
-        for (k3 = 0; k3 < nk; ++k3)
-        {
-            int32_t tc = (int32_t)floorf(q[k3].x), tr = (int32_t)floorf(q[k3].y);
-            float   paint, z, half;
-            if (tc < 0 || tr < 0 || tc >= R_MAP || tr >= R_MAP)
-                continue;
-            /*  An end node has no corner to sweep, so it is neither. */
-            paint = (k3 == 0 || k3 + 1 == nk) ? 7.0f : (rad[k3] > 0.001f ? 3.0f : 1.0f);
-            /*  Under the tangent fit a vertex with no turn is a line's
-             *  end, not a corner that failed: shown as an end. */
-            if (k3 > 0 && k3 + 1 < nk && rad[k3] <= 0.001f)
-            {
-                V2    u1 = {q[k3].x - q[k3 - 1].x, q[k3].y - q[k3 - 1].y};
-                V2    u2 = {q[k3 + 1].x - q[k3].x, q[k3 + 1].y - q[k3].y};
-                float l1 = v2len(u1), l2 = v2len(u2);
-                if (l1 > 1e-5f && l2 > 1e-5f && (u1.x * u2.x + u1.y * u2.y) / (l1 * l2) > 0.9999f)
-                    paint = 7.0f;
-            }
-            (void)half;
-            z    = surface_at_world(c, mask_bit, q[k3].x, q[k3].y);
-            /*  The mark is a model (scripts/models): a line's end
-             *  is a smaller one than a turn. */
-            if (net_model_put_on(net_model_find(k3 == 0 || k3 + 1 == nk ? "node_end" : "node_mid"),
-                                 m, c, mask_bit, tile_order(c, tc, tr, mask_bit),
-                                 q[k3].x, q[k3].y, 1.0f, 0.0f, 0.0f, paint, 0.0f, z, z, 1) != 0)
-                return 0;
-        }
+        if (curve_marks(m, c, mask_bit, q, rad, nk, 0.0f) != 0)
+            return 0;
     }
     x->nk = nk;
     return 0;
@@ -789,7 +646,10 @@ static int seg_caps(Seg *x)
 static Seg s_seg_hold;
 static int s_seg_live;
 
-int walk_segment(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit, int comp, Family f, const NetRun *run, uint8_t *visited)
+/*  Walk one segment of a family from a node tile out through link `e`,
+ *  collect its centerline, straighten, fillet and loft it.  `visited`
+ *  marks (tile, link) so each segment is walked once, from either end. */
+int walk_segment(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, Family f, const NetRun *run, uint8_t *visited)
 {
     V2              *pts = s_wk_pts, *q = s_wk_q;
     float           *rad = s_wk_rad, *tlim = s_wk_tlim;
@@ -804,10 +664,10 @@ int walk_segment(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bi
         return 0;
     visited[(row * R_MAP + col) * 4 + e] = 1;
     memset(&x, 0, sizeof x);
-    x.m = m, x.c = c, x.l = l, x.mask_bit = mask_bit, x.comp = comp, x.f = f, x.col = col, x.row = row, x.e = e, x.visited = visited;
+    x.m = m, x.c = c, x.mask_bit = mask_bit, x.comp = comp, x.f = f, x.col = col, x.row = row, x.e = e, x.visited = visited;
     x.pts = pts, x.q = q, x.rad = rad, x.tlim = tlim, x.tcol = tcol, x.trow = trow, x.pieces = pieces, x.marks = marks;
     x.hw    = *fam->width * 0.5f;
-    x.kind0 = node_kind(c, l, f, col, row);
+    x.kind0 = node_kind(c, f, col, row);
     x.cc = col, x.cr = row, x.back = (e + 2) & 3, x.ee = e;
     /*  The drawing walk reads the segment the measuring walk kept, and
      *  only walks and fits it again if the table could not hold it. */
@@ -833,7 +693,7 @@ int walk_segment(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bi
         if (r != 0)
             return r < 0 ? -1 : 0;
     }
-    net_prof_add(NET_PROF_WALK_FIT, prof_now() - tp);
+    prof_add(PROF_WALK_FIT, prof_now() - tp);
     for (k = 0; k < x.np; ++k)
         x.total += pieces[k].len;
     seg_measure_arms(&x);
@@ -846,7 +706,7 @@ trims:
     {
         double t1 = prof_now();
         int    r  = seg_trim(&x); /* 1: the trims ate the segment */
-        net_prof_add(NET_PROF_TRIMS, prof_now() - t1);
+        prof_add(PROF_TRIMS, prof_now() - t1);
         if (r != 0)
             return r < 0 ? -1 : 0;
     }
@@ -856,10 +716,10 @@ trims:
     double t2 = prof_now();
     if (lane_segment(m, c, mask_bit, f, pieces, x.np, col, row, e, x.kind0, x.cc, x.cr, x.back, x.kind1, x.hw, fam->classed ? (int)x.cls : -1) != 0)
         return -1;
-    net_prof_add(NET_PROF_LANES, prof_now() - t2), t2 = prof_now();
+    prof_add(PROF_LANES, prof_now() - t2), t2 = prof_now();
     if (seg_overlay(&x) != 0)
         return -1;
-    net_prof_add(NET_PROF_OVERLAY, prof_now() - t2);
+    prof_add(PROF_OVERLAY, prof_now() - t2);
     {
         /* a line or thread strip: the class's markings, a stripe at a controlled leg, pinned at a junction */
         RLoft d      = {0};
@@ -926,7 +786,7 @@ int build_draw_done(void)
     net_serve_tiles(s_seg_hold.tcol, s_seg_hold.trow, s_seg_hold.nt);
     t3 = prof_now();
     rc = seg_caps(&s_seg_hold);
-    net_prof_add(NET_PROF_CAPS, prof_now() - t3);
+    prof_add(PROF_CAPS, prof_now() - t3);
     return rc;
 }
 
@@ -941,7 +801,6 @@ int build_draw_done(void)
  *  The pass over the map: both families measured, the junction shapes,
  *  the meets and power, then the junctions and segments drawn.
  *  ================================================================== */
-static int s_comp; /* the width compensation this build lofts with */
 
 /*  How far an arm's strip runs STRAIGHT from its mouth, up to `want`.  A
  *  stripe is painted between two parallel margins.  The two margins are
@@ -974,23 +833,12 @@ static float arm_straight(Family f, int32_t col, int32_t row, int e, float want)
     return got < want ? got : want;
 }
 
-/*  Stage three: each junction takes its shape from its arms and hands
- *  each of them back the length to start at.  It is a computation and
- *  nothing else.  No geometry comes out of it.  So it is worked out
- *  ONCE, by the grading pass, and the building pass reads the table it
- *  left.  It may: the arms it reads are measured from the fitted path
- *  BEFORE any trim.  Walk_segment runs seg_measure_arms ahead of
- *  seg_trim.  And the building pass replays the very segments the
- *  grading pass fitted, so both passes were working the same numbers.
- *  Doing it twice was also how the passes came to disagree about a
- *  thread arm's cut and left a raw slope under a junction's strip
- * . */
 /*  Stage three's reading: which junctions there are, so the drive can
  *  have each one's control answered before anything that turns on it is
  *  measured.  The outline is worked out here only to know that there IS
  *  a junction.  It reads the arm table the fit left and nothing stage
  *  three writes, so the walk below arrives at the same outlines. */
-static void net_stage_three_ask(const RCity *c, const RAtlasLevel *l)
+static void stage_three_ask(const RCity *c)
 {
     Family fam;
     int    fk, k;
@@ -1008,7 +856,7 @@ static void net_stage_three_ask(const RCity *c, const RAtlasLevel *l)
             float         trm[4];
             const int32_t cell = net_disc_junction(fk, k);
             const int32_t col = cell % R_MAP, row = cell / R_MAP;
-            int           links = eff_links(c, l, col, row, fam);
+            int           links = eff_links(c, col, row, fam);
             if (junction_poly(c, fam, col, row, links, poly, NULL, JUNC_MAX, trm, arms) < 3)
                 continue;
             net_family_control_ask(net_family(fam), c, col, row, links);
@@ -1030,7 +878,6 @@ static void net_stage_three_ask(const RCity *c, const RAtlasLevel *l)
 static struct
 {
     const RCity       *c;
-    const RAtlasLevel *l;
     Family             fam;
     int                fk, at;
     int32_t            col, row;
@@ -1042,11 +889,11 @@ static struct
 } s_trimj;
 static int s_n_trimj;
 
-int net_trim_junctions(const RCity *c, const RAtlasLevel *l)
+int walk_trim_junctions(const RCity *c)
 {
     int fk, n = 0;
     memset(&s_trimj, 0, sizeof s_trimj);
-    s_trimj.c = c, s_trimj.l = l;
+    s_trimj.c = c;
     s_n_trimj = 0;
     if (s_pass == 2)
         return 0;
@@ -1079,7 +926,7 @@ static int trim_at(int i)
             s_trimj.lw   = *net_family(s_trimj.fam)->width * 0.5f *
                          (1.0f - net_family_rules(s_trimj.fam)->inner);
             s_trimj.np = junction_poly(s_trimj.c, s_trimj.fam, s_trimj.col, s_trimj.row,
-                                       eff_links(s_trimj.c, s_trimj.l, s_trimj.col, s_trimj.row, s_trimj.fam),
+                                       eff_links(s_trimj.c, s_trimj.col, s_trimj.row, s_trimj.fam),
                                        s_trimj.poly, NULL, JUNC_MAX, s_trimj.trm, s_trimj.arms);
             return 1;
         }
@@ -1088,7 +935,7 @@ static int trim_at(int i)
     return 0;
 }
 
-void *net_trim_band(int i)
+void *walk_trim_band(int i)
 {
     JBox jb;
     if (i < 0 || i >= s_n_trimj || !trim_at(i) || s_trimj.np < 3)
@@ -1100,14 +947,14 @@ void *net_trim_band(int i)
 }
 
 /*  The mouths of the junction in hand, off the band just answered. */
-int net_trim_mouths(void)
+int walk_trim_mouths(void)
 {
     return margin_mouths_ask(s_trimj.poly, s_trimj.np, s_trimj.lw);
 }
 
 /*  And what follows: the trim each arm is handed, and how deep a band
  *  each mouth that asked for a meet wants. */
-void net_trim_done(int i)
+void walk_trim_done(int i)
 {
     float want[4];
     int   k;
@@ -1121,7 +968,19 @@ void net_trim_done(int i)
         s_xwalk[FAMX(s_trimj.fam)][(s_trimj.row * R_MAP + s_trimj.col) * 4 + k] = want[k];
 }
 
-static void net_stage_three(const RCity *c, const RAtlasLevel *l)
+/*  Stage three: each junction takes its shape from its arms and hands
+ *  each of them back the length to start at.  It is a computation and
+ *  nothing else, and no geometry comes out of it.  So it is worked out
+ *  ONCE, by the grading pass, and the building pass reads the table it
+ *  left.
+ *
+ *  It may.  The arms it reads are measured from the fitted path BEFORE
+ *  any trim, since walk_segment runs seg_measure_arms ahead of
+ *  seg_trim.  The building pass replays the very segments the grading
+ *  pass fitted, so both passes work the same numbers.  Working it out in
+ *  each pass instead lets the two disagree about a thread arm's cut.
+ *  That leaves a raw slope under a junction's strip. */
+static void stage_three(const RCity *c)
 {
     Family fam;
     int    fk;
@@ -1187,7 +1046,7 @@ static void net_stage_three(const RCity *c, const RAtlasLevel *l)
         {
             const int32_t cell = net_disc_junction(fk, j);
             const int32_t col = cell % R_MAP, row = cell / R_MAP;
-            int           links = eff_links(c, l, col, row, fam), k;
+            int           links = eff_links(c, col, row, fam), k;
             for (k = 0; k < 4; ++k)
                 if (links & (1 << k))
                     s_trim[FAMX(fam)][(row * R_MAP + col) * 4 + k] = tf->turnout - *tf->width * 0.5f;
@@ -1195,15 +1054,35 @@ static void net_stage_three(const RCity *c, const RAtlasLevel *l)
     }
 }
 
-/*  ... for a box's own lofts (thread.c thread_loft), which loft as a segment does. */
-int net_compensate(void)
+
+/*  The building pass's measure, from the table: every kept segment's
+ *  arms and meets again, without walking or fitting anything.  The
+ *  grading pass fitted them.  The pieces are the same in both. */
+static int seg_replay(RMesh *m, const RCity *c, uint8_t mask_bit, int comp, uint8_t *visited)
 {
-    return s_comp;
+    int i;
+    for (i = 0; i < seg_table_count(); ++i)
+    {
+        const RSeg *r = seg_table_entry(i);
+        Seg         x;
+        if (r->band)
+            continue; /* a band: no arms, no meets.  Band.c replays it */
+        memset(&x, 0, sizeof x);
+        x.m = m, x.c = c, x.mask_bit = mask_bit, x.comp = comp, x.f = r->f, x.col = r->col, x.row = r->row, x.e = r->e;
+        x.visited = visited;
+        x.pts = s_wk_pts, x.q = s_wk_q, x.rad = s_wk_rad, x.tlim = s_wk_tlim, x.tcol = s_wk_tcol, x.trow = s_wk_trow;
+        x.pieces = s_wk_pieces, x.marks = s_wk_marks;
+        x.ee = r->e;
+        seg_load(&x, r);
+        seg_measure_arms(&x);
+        if (seg_measure_laps(&x) != 0)
+            return -1;
+    }
+    return 0;
 }
 
-int build_networks(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel *l, uint8_t mask_bit, int comp)
+int build_networks(RMesh *m, const RCity *c, const RAtlas *a, uint8_t mask_bit, int comp)
 {
-    s_comp = comp;
     static uint8_t visited[R_MAP * R_MAP * 4];
     Family         fam;
     int            fk;
@@ -1223,11 +1102,11 @@ int build_networks(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel 
     }
     memset(s_cross, 0, sizeof s_cross);
     lane_reset();
-    memset(s_served, 0, sizeof s_served);
+    net_serve_reset();
     margin_reset(c);
     walk_net_reset(c);
     junction_outline_reset();
-    net_prof_reset();
+    prof_reset();
     if (s_pass != 2)
         seg_table_reset(); /* the grading pass fits.  The building pass reads the same table */
     s_measure = 1;
@@ -1235,7 +1114,7 @@ int build_networks(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel 
     {
         /* the building pass: the arms and meets from the kept segments, nothing walked */
         memset(visited, 0, sizeof visited);
-        if (seg_table_replay(m, c, l, mask_bit, comp, visited) != 0)
+        if (seg_replay(m, c, mask_bit, comp, visited) != 0)
             return -1;
     }
     else
@@ -1253,7 +1132,7 @@ int build_networks(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel 
                 NetRun run;
                 if (!net_disc_run_get(fk, i, &run))
                     continue;
-                if (walk_segment(m, c, l, mask_bit, comp, fam, &run, visited) != 0)
+                if (walk_segment(m, c, mask_bit, comp, fam, &run, visited) != 0)
                     return -1;
             }
         }
@@ -1268,23 +1147,23 @@ int build_networks(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel 
     return 0;
 }
 
-/*  Stage three: the trims every junction hands its arms, from the rings
- *  the script walked between this pass and the one before.  The building
- *  pass reads what the grading pass left. */
 /*  The reading stage three is made from, taken before it runs so the
  *  drive can settle every junction's control first. */
-int build_networks_controls(const RCity *c, const RAtlasLevel *l)
+int build_networks_controls(const RCity *c)
 {
     net_control_asks_reset();
     if (s_pass != 2)
-        net_stage_three_ask(c, l);
+        stage_three_ask(c);
     return 0;
 }
 
-int build_networks_trims(const RCity *c, const RAtlasLevel *l)
+/*  Stage three: the trims every junction hands its arms, from the rings
+ *  the script walked between this pass and the one before.  The building
+ *  pass reads what the grading pass left. */
+int build_networks_trims(const RCity *c)
 {
     net_xwalk_asks_reset();
     if (s_pass != 2)
-        net_stage_three(c, l);
+        stage_three(c);
     return 0;
 }

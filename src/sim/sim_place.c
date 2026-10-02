@@ -69,7 +69,7 @@ static int auto_rail_station_try(City *c, int y, int x)
     if (c->xtxt[y][x] != 0)
         return 0; /* $B1BC */
 
-    dir = pick_direction(c, y, x, (int)game_rand(4), 0x0A); /* $B1CC/$B1DA */
+    dir = pick_direction(c, y, x, (int)game_rand(c, 4), 0x0A); /* $B1CC/$B1DA */
     if (dir < 0)
         return 0; /* $B1E8 */
 
@@ -194,15 +194,15 @@ static int auto_marina_try(City *c, int y, int x)
         return 0; /* $C148 */
 
     t       = thing(c, slot);
-    t[0]    = 0x09;                  /* $C154 */
-    t[1]    = (uint8_t)game_rand(3); /* $C15E */
-    t[3]    = (uint8_t)y;            /* $C178 */
-    t[4]    = (uint8_t)x;            /* $C184 */
-    t[6]    = 4;                     /* $C190 */
-    t[7]    = 4;                     /* $C19E */
-    t[5]    = 0;                     /* $C1AC */
-    t[0x0A] = 0;                     /* $C1B8 */
-    t[2]    = 0;                     /* $C1C4 */
+    t[0]    = 0x09;                     /* $C154 */
+    t[1]    = (uint8_t)game_rand(c, 3); /* $C15E */
+    t[3]    = (uint8_t)y;               /* $C178 */
+    t[4]    = (uint8_t)x;               /* $C184 */
+    t[6]    = 4;                        /* $C190 */
+    t[7]    = 4;                        /* $C19E */
+    t[5]    = 0;                        /* $C1AC */
+    t[0x0A] = 0;                        /* $C1B8 */
+    t[2]    = 0;                        /* $C1C4 */
 
     c->xtxt[y][x] = (uint8_t)(slot + 0xC9); /* $C1D4 */
     c->boat_count++;                        /* $C1D8 */
@@ -597,13 +597,13 @@ void sim_place(City *c, int y, int x, int tier, int kind) /* placeBuilding $3258
         int band = c->xval[y / 2][x / 2] / 64;
         if (band > 2)
             band = 2;
-        id = BLD_CHOICE_BASE[0] + band * 4 + (Random() & 3);
+        id = BLD_CHOICE_BASE[0] + band * 4 + (Random(c) & 3);
     }
     else
     { /* $325F8 and $3267C compute this identically */
         int cnt  = BLD_CHOICE_COUNT[kind * 4 + tier - 1];
         int base = BLD_CHOICE_BASE[kind * 4 + tier - 1];
-        id       = base + (cnt ? (uint16_t)Random() % (uint16_t)cnt : 0);
+        id       = base + (cnt ? (uint16_t)Random(c) % (uint16_t)cnt : 0);
     }
 
     n = SIZE[tier - 1];
@@ -695,7 +695,7 @@ void sim_upgrade(City *c, int y, int x, int tier, int coin)
                 int              k, r;
                 for (k = 0; k < 8; k++)
                     sim_place(c, y + DY[k], x + DX[k], 1, 4);
-                r = Random() & 3;                             /* $3319E */
+                r = Random(c) & 3;                            /* $3319E */
                 sim_place(c, y + (r & 1), x - (r / 2), 3, 4); /* $331A8 */
             }
             break;

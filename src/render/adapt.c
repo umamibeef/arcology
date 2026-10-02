@@ -1,6 +1,8 @@
 /*  adapt.c: see adapt.h. */
 #include "adapt.h"
 
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 void adapt_city(RCity *v, const City *c)
@@ -148,4 +150,27 @@ void adapt_city_turned(RCity *v, const City *c, int q)
         v->name[len] = '\0';
     }
     v->err[0] = '\0';
+}
+
+/*  The view read straight from a file.  One reader for the simulation
+ *  and the renderer, so the view cannot decode a file differently from
+ *  the simulation it draws. */
+int rcity_load(RCity *v, const char *path)
+{
+    City *c = (City *)calloc(1, sizeof *c);
+    if (!c)
+    {
+        snprintf(v->err, sizeof v->err, "out of memory");
+        return -1;
+    }
+    if (!city_load(path, c))
+    {
+        snprintf(v->err, sizeof v->err, "%s is not a city this reader knows", path);
+        free(c);
+        return -1;
+    }
+    adapt_city(v, c);
+    city_free(c);
+    free(c);
+    return 0;
 }

@@ -1,4 +1,4 @@
---  band_tiles.lua -- which of the city's building bytes are a band.
+--  hiway_tiles.lua -- which of the city's building bytes are a band.
 --
 --  An elevated band is stored as a run of ids that alternate between
 --  the two axes, and the band a slab tile belongs to runs whichever way

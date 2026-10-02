@@ -24,6 +24,10 @@
 #include "net/net.h"
 #include "script.h"
 #include "opt.h"
+#include "mesh/piece.h"
+#include "mesh/surface.h"
+#include "net/cell.h"
+#include "build.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -98,6 +102,9 @@ static struct
 } s_ls;
 
 static void net_wires_reset(void);
+
+/*  The overlay's paints, which the script names (arc.geo). */
+static int gix_wire_link = -1, gix_wire_connector = -1, gix_wire_spur = -1;
 
 void lane_reset(void)
 {
@@ -297,10 +304,6 @@ static int lane_add(uint8_t cls, Family f, const Piece *pc, int np, float w, flo
     return lane_file(s_nl - 1);
 }
 
-/*  The lane drawn as a colored wire a hair above the ground, under "show
- *  curves".  It reads like the corridor highlights and the fit's nodes.
- *  The lane model on screen before it shapes anything.  Red for a
- *  segment's lanes, blue for a junction's connectors. */
 /*  The slab's height near a point, from the band's recorded stations.
  *  The ground where the band has none. */
 float slab_z_near(const RCity *c, uint8_t mask_bit, int band, V2 p)
@@ -407,10 +410,14 @@ void net_wire_done(int i)
         shape_close(s_wire[i].sh);
 }
 
+/*  The lane drawn as a colored wire a hair above the ground, under "show
+ *  curves".  It reads like the corridor highlights and the fit's nodes.
+ *  The lane model on screen before it shapes anything.  Red for a
+ *  segment's lanes, blue for a junction's connectors. */
 static int lane_wires(RMesh *m, const RCity *c, uint8_t mask_bit, const Piece *pc, int np, float lift, float paint, int band)
 {
     LaneFan f;
-    if (!(s_tune.show_curves > 0.5f) || s_pass == 1)
+    if (!(TUNE(show_curves) > 0.5f) || s_pass == 1)
         return 0;
     f.m = m, f.c = c, f.mask_bit = mask_bit;
     f.pc = pc, f.np = np;
@@ -496,8 +503,8 @@ void lane_dump_pieces(const Piece *pc, int np)
     for (k = 0; k < np; ++k)
     {
         V2 a, b, d;
-        l_piece_at(&pc[k], 0.0f, &a, &d);
-        l_piece_at(&pc[k], pc[k].len, &b, &d);
+        piece_at(&pc[k], 0.0f, &a, &d);
+        piece_at(&pc[k], pc[k].len, &b, &d);
         if (pc[k].arc)
             dumpf("    arc  r %.3f  %.3f,%.3f -> %.3f,%.3f  len %.3f\n", (double)pc[k].r, (double)a.x, (double)a.y, (double)b.x, (double)b.y, (double)pc[k].len);
         else
@@ -523,9 +530,9 @@ const BandSpur *lane_spur_tile(int32_t col, int32_t row)
 
 
 /*  The connectors of a junction: from each arm's inbound lane to each
- *  other arm's outbound lane, routed. */
-/*  A junction's lanes as they are built: the arms' ports, in and out,
- *  each lane's pose at them.  Which arm is a spur with its one port. */
+ *  other arm's outbound lane, routed.  A junction's lanes as they are
+ *  built: the arms' ports, in and out, each lane's pose at them.  Which
+ *  arm is a spur with its one port. */
 typedef struct
 {
     RMesh       *m;
@@ -626,7 +633,7 @@ static void lj_spur_ports(LaneJunc *x)
             if (rp->rc != nc || rp->rr != nr)
                 continue;
             /*  How it meets this meet is the SPUR'S own: what
-             *  arc.rules.orient made of the lines round its line tile.
+             *  arc.rules.spurs made of the lines round its line tile.
              *  Nought is a spur whose join meets the near lane beside
              *  the box rather than going through it. */
             mode = rp->arm;
@@ -702,7 +709,7 @@ static int lj_connectors_take(LaneJunc *x)
             dumpf("LANE conn %d,%d %c%d in -> %c%d out: %d pieces, rmin %.3f%s\n", (int)col, (int)row, EN[e], k, EN[e2], k2, np, rmin < 1e8f ? (double)rmin : 0.0, tight ? " TIGHT" : "");
             lane_dump_pieces(tmp, np);
         }
-        if (lane_wires(m, c, mask_bit, tmp, np, net_line_rules()->lane_wire, 6.0f, 0) != 0) /* a connector in blue */
+        if (lane_wires(m, c, mask_bit, tmp, np, net_line_rules()->lane_wire, geo_num(&gix_wire_connector, "wire_connector"), 0) != 0)
             return -1;
     }
     return 0;
@@ -794,14 +801,6 @@ int lane_turns_want(int e, int k, int e2, int k2)
     return 1;
 }
 
-/*  A segment's two lanes from its fitted, trimmed pieces.
- *
- *      One with the path on the viewer's right of it.
- *      One against the path on the other side.
- *      Reversed so every lane runs the way its traffic does.
- *
- *  Each end is the port the segment's node gives it, and its pose is
- *  checked against the port's own. */
 /*  A segment's lanes as they are built: the segment as the walk gave it,
  *  the lane offsets its class allows.  Each lane's end poses and table
  *  index for the dead ends' caps. */
@@ -843,9 +842,9 @@ static void ls_port_check(const LaneSeg *x, int side, int li, int k0, int k1, in
             continue;
         port_pose(f, which ? n1c : n0c, which ? n1r : n0r, which ? n1e : n0e, which ? 0 : 1, li, &pp, &pd);
         if (which)
-            l_piece_at(&tmp[np - 1], tmp[np - 1].len, &lp, &ld);
+            piece_at(&tmp[np - 1], tmp[np - 1].len, &lp, &ld);
         else
-            l_piece_at(&tmp[0], 0.0f, &lp, &ld);
+            piece_at(&tmp[0], 0.0f, &lp, &ld);
         dx   = lp.x - pp.x;
         dy   = lp.y - pp.y;
         dist = sqrtf(dx * dx + dy * dy);
@@ -933,8 +932,8 @@ static int ls_lane(LaneSeg *x, int side, int li)
     if (lane_add(LC_LINE, f, tmp, np, offs[nlane - 1], rmin, rmin < LANE_RMIN, k0, p0, k1, p1, 0, side ? -h : h) != 0)
         return -1;
     lid[side][li] = s_nl - 1;
-    l_piece_at(&tmp[0], 0.0f, &ep[side][li][0], &ed[side][li][0]);
-    l_piece_at(&tmp[np - 1], tmp[np - 1].len, &ep[side][li][1], &ed[side][li][1]);
+    piece_at(&tmp[0], 0.0f, &ep[side][li][0], &ed[side][li][0]);
+    piece_at(&tmp[np - 1], tmp[np - 1].len, &ep[side][li][1], &ed[side][li][1]);
     ls_port_check(x, side, li, k0, k1, n0c, n0r, n0e, n1c, n1r, n1e, tmp);
     if (dump)
     {
@@ -1091,7 +1090,7 @@ static int ls_caps_line_take(void)
         ++s_ls.caps;
         if (lane_add(LC_TURN, f, tmp, np2, offs[nlane - 1], rmin, 0, LE_LANE, lid[sa][li], LE_LANE, lid[sb][li], 0, 0.0f) != 0)
             return -1;
-        if (lane_wires(m, c, mask_bit, tmp, np2, net_line_rules()->lane_wire, 6.0f, 0) != 0)
+        if (lane_wires(m, c, mask_bit, tmp, np2, net_line_rules()->lane_wire, geo_num(&gix_wire_connector, "wire_connector"), 0) != 0)
             return -1;
     }
     return 0;
@@ -1106,6 +1105,14 @@ int lane_segment_caps(void)
     return rc;
 }
 
+/*  A segment's two lanes from its fitted, trimmed pieces.
+ *
+ *      One with the path on the viewer's right of it.
+ *      One against the path on the other side.
+ *      Reversed so every lane runs the way its traffic does.
+ *
+ *  Each end is the port the segment's node gives it, and its pose is
+ *  checked against the port's own. */
 int lane_segment(RMesh *m, const RCity *c, uint8_t mask_bit, Family f, const Piece *pc, int np, int32_t col, int32_t row, int e, int kind0, int32_t cc, int32_t cr, int back, int kind1, float hw, int cls)
 {
     if (grade_only(g_dev.grade_lanes))
@@ -1280,16 +1287,13 @@ int lane_snap_take(V2 *pos, V2 *odir, float *dist)
     return s_snap.c[s_snap.pick].lane;
 }
 
-/*  A spur, once built, as a lane of its own: its ends name the slab lane
- *  it leaves and the line lane it joins.  An end that found none is
- *  counted. */
 /*  A spur's wire: its height eases from the slab at the gore to the
  *  ground at the line, as the loft's does (ease_smooth).  So the overlay
  *  shows the lane meeting the slab's lane where it does. */
 static int spur_wires(RMesh *m, const RCity *c, uint8_t mask_bit, const Piece *pc, int np, int off, float paint)
 {
     LaneFan f;
-    if (!(s_tune.show_curves > 0.5f) || s_pass == 1)
+    if (!(TUNE(show_curves) > 0.5f) || s_pass == 1)
         return 0;
     f.m = m, f.c = c, f.mask_bit = mask_bit;
     f.pc = pc, f.np = np;
@@ -1298,6 +1302,9 @@ static int spur_wires(RMesh *m, const RCity *c, uint8_t mask_bit, const Piece *p
     return wire_add(&f);
 }
 
+/*  A spur, once built, as a lane of its own: its ends name the slab lane
+ *  it leaves and the line lane it joins.  An end that found none is
+ *  counted. */
 int lane_spur(RMesh *m, const RCity *c, uint8_t mask_bit, const Piece *pc, int np, float hw, int slab_lane, int line_lane, int line_port, int off)
 {
     if (grade_only(g_dev.grade_lanes))
@@ -1322,7 +1329,7 @@ int lane_spur(RMesh *m, const RCity *c, uint8_t mask_bit, const Piece *pc, int n
         if (lane_add(LC_SPUR, net_band->f, pc, np, hw, rmin, rmin < LANE_RMIN, off ? dk : rk, off ? slab_lane : rv, off ? rk : dk, off ? rv : slab_lane, 0, 0.0f) != 0)
             return -1;
     }
-    return spur_wires(m, c, mask_bit, pc, np, off, 5.0f); /* a spur is a lane: red like a line's */
+    return spur_wires(m, c, mask_bit, pc, np, off, geo_num(&gix_wire_spur, "wire_spur"));
 }
 
 /*  The pose of a lane's end: 0 its start, 1 its finish, in its own
@@ -1330,7 +1337,7 @@ int lane_spur(RMesh *m, const RCity *c, uint8_t mask_bit, const Piece *pc, int n
 static void lane_end_pose(const Lane *l, int which, V2 *pos, V2 *dir)
 {
     const Piece *pc = &s_lp[l->first + (which ? l->np - 1 : 0)];
-    l_piece_at(pc, which ? pc->len : 0.0f, pos, dir);
+    piece_at(pc, which ? pc->len : 0.0f, pos, dir);
 }
 
 /*  The station on lane `li` at arc length `back` before its finish
@@ -1353,7 +1360,7 @@ static void lane_station_back(int li, int which, float back, V2 *pos, V2 *dir)
         const Piece *pc = &s_lp[l->first + k];
         if (want <= s + pc->len || k == l->np - 1)
         {
-            l_piece_at(pc, want - s, pos, dir);
+            piece_at(pc, want - s, pos, dir);
             return;
         }
         s += pc->len;
@@ -1362,14 +1369,6 @@ static void lane_station_back(int li, int which, float back, V2 *pos, V2 *dir)
 
 
 
-/*  Where a band comes down to grade and becomes a line, its six
- *  lanes have to become the line's two.  At each band end, per side: the
- *  INNER slab lane routes into the line's lane on that side.  The line
- *  lane whose open end lies nearest the slab lane's, running the same
- *  way.  And the middle and outer lanes taper into the inner lane.  They
- *  do it at stations a tile and a half and three tiles before the end.
- *  On the side traveling onto the slab).  A band end that meets no line
- *  stays open and is counted. */
 /*  Is lane i an open end that could carry on across a meet?  A line lane
  *  whose far end is open, and not at the map's edge: an end there faces
  *  nothing. */
@@ -1511,7 +1510,7 @@ int lane_cross_take(void)
         ++s_ls.links;
         if (lane_add(LC_LINK, net_line->f, tmp, np, s_xlink[i].w, rmin, rmin < LANE_RMIN, LE_LANE, s_xlink[i].from, LE_LANE, s_xlink[i].to, 0, 0.0f) != 0)
             rc = -1;
-        else if (lane_wires(m, c, mask_bit, tmp, np, net_line_rules()->lane_wire, 5.0f, 0) != 0)
+        else if (lane_wires(m, c, mask_bit, tmp, np, net_line_rules()->lane_wire, geo_num(&gix_wire_link, "wire_link"), 0) != 0)
             rc = -1;
     }
     s_n_xlink = 0;
@@ -1521,7 +1520,7 @@ int lane_cross_take(void)
 /*  The band's lanes joined.  Which slab lane goes on to which.  It is
  *  the lane of another band round an interchange, the line's lane where
  *  the slab comes down.  The inner lane of its own band where it tapers
- *  out: is arc.rules.links's (scripts/compose/links.lua).  There is no
+ *  out: is arc.rules.links's (scripts/compose/links).  There is no
  *  matcher in C behind it: take the rule away and a slab's lanes end in
  *  mid-air.
  *
@@ -1632,7 +1631,7 @@ int net_links_add(const Piece *pc, int np, float w, int from, int to, int band)
     ++s_ls.links;
     if (lane_add(LC_LINK, net_line->f, pc, np, w, rmin, rmin < LANE_RMIN, LE_LANE, from, LE_LANE, to, 0, 0.0f) != 0)
         return -1;
-    return lane_wires(s_links.m, s_links.c, s_links.mask_bit, pc, np, net_line_rules()->lane_wire, 5.0f, band);
+    return lane_wires(s_links.m, s_links.c, s_links.mask_bit, pc, np, net_line_rules()->lane_wire, geo_num(&gix_wire_link, "wire_link"), band);
 }
 
 /*  What the script counted while it joined them, for the report. */

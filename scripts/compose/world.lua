@@ -89,6 +89,12 @@ local function step_said(pass, tally)
     end
 end
 
+--  OVER 150 LINES, and one page on purpose: this rule IS the order a
+--  build runs in.  Every line is a pass, named and in sequence, and the
+--  sequence is the thing a reader comes here for.  Cut into modules the
+--  order would be spread over several files and could no longer be read
+--  at all.  The passes themselves are modules already: each is one
+--  arc.rules.<name> of its own.
 arc.rules.world = function (w)
     local d = w:info()
     local n = d.size
@@ -248,8 +254,6 @@ arc.rules.world = function (w)
         local hw = w:band_cells()
         if hw then bands(hw) end
 
-        --  And how a spur's foot meets the line it lands on: the eight
-        --  readings there are, settled before any spur is read.
         --  How a junction's lights are staggered and grouped: the eight
         --  staggers and the four edges, settled before a signal is drawn
         --  or a car held at one.
@@ -261,7 +265,7 @@ arc.rules.world = function (w)
         --  is, settled before anything reads a class.
         local line_class = arc.rules.line_class
         for tv = 0, 255 do
-            w:road_class_is(tv, line_class and line_class(tv))
+            w:line_class_is(tv, line_class and line_class(tv))
         end
 
         --  How many cars a tile's traffic is worth, for every byte
@@ -476,7 +480,7 @@ arc.rules.world = function (w)
                 --  connectors are taken: a thread junction's threads lofted
                 --  from the pieces the cut answered, or a line's outline
                 --  gathered for the fill to be laid on.
-                w:rail_threads_done()
+                w:node_threads_done()
                 w:box_paving()
                 --  The ring read as a margin, before the fill is
                 --  laid inside it: the box cannot know where its own
@@ -528,7 +532,7 @@ arc.rules.world = function (w)
         --  joined to the lines they become.  What the bands' ends
         --  record of the interchange arms they meet is this pass's
         --  (scripts/compose/profile.lua, scripts/compose/runs.lua): a
-        --  band of an earlier build that no longer meets a node must
+        --  band the last build laid, meeting no node in this one, must
         --  not stand as an arm.
         arc.arm_floor, arc.arm_node = {}, {}
         if d.pass == 1 then arc.arm_pose = {} end
@@ -541,7 +545,11 @@ arc.rules.world = function (w)
             --  The points the fit is given, picked from the band the
             --  walk read: the straight cells', a lone block's corner,
             --  and nothing of a staircase.
-            stage(w:band_chain())
+            --  The rule that picks the points a slab is fitted through
+            --  is named HERE: the pipeline hands back the reading of
+            --  the band and nothing more.
+            local chain = w:band_chain()
+            if chain then stage("stair", chain) end
             w:band_chained()
 
             --  A band the grading pass walked is fitted here, the same
@@ -629,7 +637,7 @@ arc.rules.world = function (w)
         w:band_links_done()
 
         --  And the ways each interchange is crossed on, swept from the
-        --  map (scripts/compose/interchange.lua): the grading pass
+        --  map (scripts/compose/interchange/arms.lua): the grading pass
         --  settles the heights its arms arrive at, the building pass
         --  lays the ways.
         arc.interchange_slabs(w, d.pass)

@@ -46,7 +46,9 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-TREE = os.path.join(ROOT, "src", "render")
+#  The renderer and the script API alike: a family named in an accessor
+#  or a field is a family the pipeline knows.
+TREES = [os.path.join(ROOT, "src", "render"), os.path.join(ROOT, "src", "script")]
 
 EXEMPT = ("soft", "generated")
 
@@ -99,11 +101,13 @@ def abbreviated(name):
 
 
 def files():
-    for dirpath, dirnames, names in os.walk(TREE):
-        dirnames[:] = [d for d in dirnames if d not in EXEMPT]
-        for n in sorted(names):
-            if n.endswith((".c", ".h", ".cpp", ".glsl")):
-                yield os.path.relpath(os.path.join(dirpath, n), TREE)
+    """Every source file under the trees, as a path from the repository."""
+    for tree in TREES:
+        for dirpath, dirnames, names in os.walk(tree):
+            dirnames[:] = [d for d in dirnames if d not in EXEMPT]
+            for n in sorted(names):
+                if n.endswith((".c", ".h", ".cpp", ".glsl")):
+                    yield os.path.relpath(os.path.join(dirpath, n), ROOT)
 
 
 def main():
@@ -117,7 +121,7 @@ def main():
         if PAT.search(base) or abbreviated(os.path.splitext(base)[0]):
             bad_name.append(rel)
         n = 0
-        with open(os.path.join(TREE, rel), errors="replace") as f:
+        with open(os.path.join(ROOT, rel), errors="replace") as f:
             for i, line in enumerate(f, 1):
                 hits = [m.group(0) for m in PAT.finditer(line)]
                 hits += [t for t in IDENT.findall(line) if abbreviated(t)]

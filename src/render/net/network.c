@@ -22,6 +22,7 @@
 #include "pipeline.h"
 
 #include "net/net.h"
+#include "net/cell.h"
 /*  Room for every walked family's list at once.  A run is at most
  *  MAX_PTS cells and a city's segments are counted in thousands. */
 #define DISC_MAX   16384
@@ -158,15 +159,15 @@ int net_disc_run_get(int fk, int i, NetRun *out)
  *
  *  Handed over whole because the script walks the map with them, and a
  *  call a cell would cost more than the walk. */
-void net_disc_planes(const RCity *c, const RAtlasLevel *l, Family f,
+void net_disc_planes(const RCity *c, Family f,
                      uint8_t *links, uint8_t *art)
 {
     int32_t i;
     for (i = 0; i < R_MAP * R_MAP; ++i)
     {
         int32_t col = i % R_MAP, row = i / R_MAP;
-        links[i] = (uint8_t)eff_links(c, l, col, row, f);
-        art[i]   = (uint8_t)tile_links(c, l, col, row, f);
+        links[i] = (uint8_t)eff_links(c, col, row, f);
+        art[i]   = (uint8_t)tile_links(c, col, row, f);
     }
 }
 
@@ -185,10 +186,11 @@ void net_disc_nodes_set(Family f, const uint8_t *plane)
         memcpy(s_node[(int)f], plane, sizeof s_node[0]);
 }
 
-int node_kind(const RCity *c, const RAtlasLevel *l, Family f, int32_t col, int32_t row)
+/*  A node of a family's network: a junction (three or four links), an
+ *  end (one), or nothing. */
+int node_kind(const RCity *c, Family f, int32_t col, int32_t row)
 {
     (void)c;
-    (void)l;
     if ((int)f < 0 || (int)f >= 3 || col < 0 || row < 0 || col >= R_MAP || row >= R_MAP)
         return 0;
     return s_node[(int)f][row * R_MAP + col];
@@ -265,4 +267,29 @@ int net_band_disc_get(int i, const BandRun **r, int32_t *col, int32_t *row, int 
     *ew   = s_band_run[i].ew;
     *sign = s_band_run[i].sign;
     return 1;
+}
+
+/*  The tiles a drawn segment serves.  It is every tile of a segment
+ *  whose strip was lofted, whether or not the strip runs over that tile.
+ *  A family fitted across the free ground beside its tiles leaves some
+ *  bare, by design.  The check (mesh/check.c) must not read those as a
+ *  piece the walk could not draw. */
+static uint8_t s_served[R_MAP * R_MAP];
+
+void net_serve_reset(void)
+{
+    memset(s_served, 0, sizeof s_served);
+}
+
+void net_serve_tiles(const int32_t *tcol, const int32_t *trow, int nt)
+{
+    int i;
+    for (i = 0; i < nt; ++i)
+        if (tcol[i] >= 0 && trow[i] >= 0 && tcol[i] < R_MAP && trow[i] < R_MAP)
+            s_served[trow[i] * R_MAP + tcol[i]] = 1;
+}
+
+int net_tile_served(int32_t i)
+{
+    return i >= 0 && i < R_MAP * R_MAP && s_served[i];
 }

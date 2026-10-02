@@ -19,15 +19,12 @@ _PARSE_CACHE = {}
 
 class Emu:
     A5 = 0x00400000                     # where we place the A5 world
-    #  Memory map.  The heap used to start at 0x200000 and the stack at
-    #  0x300000, which left the two exactly 1 MB apart -- and shapedec.py
-    #  allocates 1.09 MB of span streams, so the heap grew straight through
-    #  the stack and the game's own pushes scribbled on the sprite art.
-    #  That surfaced as "shape 1252 cannot be decoded", a defect that did
-    #  not exist: 1252 decodes perfectly on its own.  The A5 world occupies
-    #  0x3F7000..0x404000 and everything above 0x480000 was unused, so the
-    #  heap now lives there with the stack at the top of memory, and
-    #  alloc() refuses to cross instead of corrupting silently.
+    #  Memory map.  The A5 world occupies 0x3F7000..0x404000; the heap
+    #  lives above 0x480000 with the stack at the top of memory, and
+    #  alloc() refuses to let the two cross.  A heap that grows into the
+    #  stack lets the game's own pushes scribble on whatever the heap
+    #  holds -- shapedec.py keeps 1.09 MB of span streams there -- and a
+    #  sprite then fails to decode for no fault of its own.
     HEAP_BASE  = 0x00480000
     HEAP_LIMIT = 0x007A0000             # 3.25 MB of heap
     SP_INIT    = 0x007F0000             # stack grows down from here
@@ -85,11 +82,10 @@ class Emu:
         self.miscbuf = None
 
     # ---- snapshots ----------------------------------------------
-    #  Every investigation of a late tick used to replay the whole clock
-    #  from the save -- two to four minutes of interpreter before the
-    #  interesting instruction was even reached, once per probe.  The
-    #  machine state is a few megabytes of plain data, so it can simply
-    #  be kept.
+    #  Replaying the whole clock from the save costs two to four minutes
+    #  of interpreter before a late tick's interesting instruction is
+    #  reached, once per probe.  The machine state is a few megabytes of
+    #  plain data, so it can simply be kept.
     #
     #  The code and the parsed listing are NOT in here: they come from
     #  the binary and never change during a run, and re-reading them
@@ -594,10 +590,11 @@ class Emu:
             elif base == 'rts':
                 #  Below the initial SP means we are inside a nested call,
                 #  so pop and carry on; at or above it we have returned to
-                #  the top level and the run is over.  This used to test a
-                #  hard-coded 0x300000: moving the stack made it always
-                #  false, so every rts ended the run and any routine that
-                #  called another returned early with plausible garbage.
+                #  the top level and the run is over.  The test is against
+                #  SP_INIT itself, not a number: a test against a stack
+                #  address outside the map is always false, every rts ends
+                #  the run, and any routine that calls another returns
+                #  early with plausible garbage.
                 if real_calls and self.a[7] < self.SP_INIT:
                     nxt = self.rd(self.a[7], 4)
                     self.a[7] = (self.a[7] + 4) & MASK

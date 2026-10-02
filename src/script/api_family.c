@@ -5,7 +5,7 @@
  *          width = "line_w", rmin = "line_rmin", rmax = "line_rmax",
  *          material = arc.mat.line, loft = "line",
  *          lips = true, caps = true, classed = true,
- *          stages = { box = "road_box", record = "road_record" },
+ *          stages = { box = "line_box", record = "line_record" },
  *      }
  *
  *  Everything a family is comes through here.  It gives its width and
@@ -25,6 +25,7 @@
 #include "pipeline.h"
 #include "net/net.h"
 #include "script.h"
+#include "mesh/loft.h"
 
 
 /*  A field of the table at `t`, as a string copied into the caller's own
@@ -167,7 +168,7 @@ static struct
 } s_frules[FAM_RULES_MAX];
 static int s_n_frules;
 
-void script_family_rules_reset(void)
+static void script_family_rules_reset(void)
 {
     s_n_frules = 0;
 }

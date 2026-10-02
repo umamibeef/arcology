@@ -103,7 +103,8 @@ struct RMusic
     int n_started, n_stolen, n_dropped;
     /* the scheduler, $471E: the last four songs, and when the next may start */
     int enabled;
-    uint16_t (*rand_fn)(uint16_t);
+    uint16_t (*rand_fn)(void *at, uint16_t);
+    void *rand_at;
     uint32_t          lcg; /* the private copy: THINK C's rand, from 1 */
     int               history[4];
     Uint64            next_tick;
@@ -868,11 +869,12 @@ void music_stop(RMusic *m)
  *  The original reads its own ROTATION copy instead, 4, 7 and 8 ticks,
  *  and for the Theme (18) whatever lies beyond its frame.  All four come
  *  to the same thing under the idle rule: the next song follows the
- *  moment that one ends.  That is what this does for them. */
-/*  The generator is never seeded, in the original or here: its state is
- *  1 in the A5 image.  The first draw of nine from 1 is 18: so the first
- *  song after launch is the Theme, every time.  Only then does the order
- *  depend on the simulation's own draws in between.  That is the
+ *  moment that one ends.  That is what this does for them.
+ *
+ *  The generator is never seeded, in the original or here.  Its state is
+ *  1 in the A5 image, and the first draw of nine from 1 is 18.  So the
+ *  first song after launch is the Theme, every time.  Only then does the
+ *  order depend on the simulation's own draws in between.  That is the
  *  original's behavior and it is kept. */
 static const int ROTATION[9] = {0, 3, 4, 7, 8, 11, 12, 13, 18};
 static const int WAIT[9]     = {9000, 6000, 7200, 11000, 13000, 6000, 6000, 9000, 9000};
@@ -888,10 +890,10 @@ static uint16_t private_rand(RMusic *m, uint16_t n)
     return n ? (uint16_t)(v % n) : 0;
 }
 
-void music_set_rand(RMusic *m, uint16_t (*rand_fn)(uint16_t n))
+void music_set_rand(RMusic *m, uint16_t (*rand_fn)(void *at, uint16_t n), void *at)
 {
     if (m)
-        m->rand_fn = rand_fn;
+        m->rand_fn = rand_fn, m->rand_at = at;
 }
 
 static Uint64 ticks_now(void)
@@ -924,7 +926,7 @@ void music_update(RMusic *m)
     now = ticks_now();
     if (now < m->next_tick)
         return;
-    draw = m->rand_fn ? m->rand_fn(9) : private_rand(m, 9);
+    draw = m->rand_fn ? m->rand_fn(m->rand_at, 9) : private_rand(m, 9);
     idx  = ROTATION[draw];
     for (k = 0; k < 4; k++)
         if (m->history[k] == idx)

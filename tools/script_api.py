@@ -2,9 +2,8 @@
 """The script API's own house style, checked.
 
 The pipeline hands a script an OBJECT: a handle of some KIND, with a table
-of methods.  Five rules hold that API together, and every one of them was
-broken at least once while the API was being written, each time silently
--- geometry moved and nothing said so.  They are mechanical, so they are
+of methods.  Five rules hold that API together, and each breaks silently:
+geometry moves and nothing says so.  They are mechanical, so they are
 checked here rather than remembered.
 
   kind        every rule asks for the kind of its own name, so a reader
@@ -27,13 +26,19 @@ checked here rather than remembered.
 
 Run from anywhere; prints each breach and fails.
 """
+import glob
 import os
 import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.join(HERE, "..")
-API = os.path.join(ROOT, "src", "script", "api_object.c")
+#  The object layer: the handle and the list of kinds, plus the files
+#  that hold each kind's own methods.  A checker that read only one of
+#  them would pass every accessor in the others.
+API_FILES = sorted(glob.glob(os.path.join(ROOT, "src", "script", "api_object.c"))
+                   + glob.glob(os.path.join(ROOT, "src", "script", "obj_*.c"))
+                   + glob.glob(os.path.join(ROOT, "src", "script", "api_tile.c")))
 LINT = os.path.join(ROOT, "src", "script", "lint.c")
 SCRIPTS = os.path.join(ROOT, "scripts")
 
@@ -50,21 +55,39 @@ NOT_ACCESSORS = ("obj_index", "obj_tostring")
 
 def tables(src):
     """Each luaL_Reg table: its C name and its (method, function) pairs."""
-    for m in re.finditer(r"static const luaL_Reg ([A-Z]+)\[\] = \{(.*?)\n\};", src, re.S):
+    for m in re.finditer(r"(?:static )?const luaL_Reg ([A-Z]+)\[\] = \{(.*?)\n\};", src, re.S):
         yield m.group(1), re.findall(r'\{"([a-z_]+)",\s*([a-z_0-9]+)\s*\}', m.group(2))
 
 
 def kinds_of(src):
-    """The kind each table is registered under, from api_object_open."""
+    """The kind each table is registered under, from the KINDS[] rows
+    (`{"strip", STRIP}`) and the one kind registered beside them.  A
+    checker that finds no kinds checks nothing, so finding none is a
+    fault of its own."""
     out = {}
-    for m in re.finditer(r'luaL_setfuncs\(L, ([A-Z]+), 0\), lua_setfield\(L, -2, "([a-z_]+)"\)', src):
-        out[m.group(1)] = m.group(2)
+    body = re.search(r"\} KINDS\[\] = \{(.*?)\n\};", src, re.S)
+    if body:
+        for name, tbl in re.findall(r'\{"([a-z_]+)",\s*([A-Z]+)\s*\}', body.group(1)):
+            out[tbl] = name
+    for tbl, name in re.findall(r'luaL_setfuncs\(L, ([A-Z]+), 0\)[^\n]*lua_setfield\(L, -2, "([a-z_]+)"\)', src):
+        out[tbl] = name
+    #  A kind whose table is handed over by a function of its own, so the
+    #  file that knows the thing keeps its table static.  Without this the
+    #  checker reads none of that kind's accessors.
+    for lister, name in re.findall(r'luaL_setfuncs\(L, (\w+)\(&n\), 0\)[^\n]*lua_setfield\(L, -2, "([a-z_]+)"\)', src):
+        m = re.search(r"const luaL_Reg \*" + re.escape(lister) + r"\(int \*n\)\s*\{[^}]*return ([A-Z]+);", src)
+        if m:
+            out[m.group(1)] = name
+    if not out:
+        raise SystemExit("script api: found no kinds in api_object.c; the checker is blind")
     return out
 
 
 def main():
     bad = []
-    api = open(API).read()
+    #  One text of the whole object layer: a kind's table and the
+    #  accessors it names may now be in different files.
+    api = "\n".join(open(f).read() for f in API_FILES)
     kind_of = kinds_of(api)
 
     #  prefix: an accessor is api_<kind>_<method>, in its own kind's table
@@ -80,8 +103,8 @@ def main():
     #  index: nothing counts from one
     for m in re.finditer(r"luaL_(?:check|opt)integer\([^)]*\)\s*-\s*1", api):
         line = api[:m.start()].count("\n") + 1
-        bad.append(("index", "api_object.c:%d turns a script's index into a C one; "
-                             "both count from nought" % line))
+        bad.append(("index", "the object layer, line %d of it, turns a script's "
+                             "index into a C one; both count from nought" % line))
 
     #  info: answers a table
     for tbl, entries in tables(api):
@@ -94,7 +117,8 @@ def main():
                 bad.append(("info", "%s answers plain values; info answers a table" % fn))
 
     #  kind: a rule asks for the kind of its own name
-    for root, dirs, files in os.walk(os.path.join(ROOT, "src", "render")):
+    for root, dirs, files in [t for d in ("render", "script")
+                              for t in os.walk(os.path.join(ROOT, "src", d))]:
         for f in files:
             if not f.endswith(".c"):
                 continue

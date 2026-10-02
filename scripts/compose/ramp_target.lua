@@ -1,9 +1,9 @@
---  spur_target.lua -- where a spur aims on the line it comes down to.
+--  ramp_target.lua -- where a spur aims on the line it comes down to.
 --
 --  A spur's foot has to end ON a lane of the line, not on its surface.
 --  Which lane, and where along it, follows from the FORK -- what the
---  meet beside the spur is, which arc.rules.spur_arm answers, and
---  what the lines beyond it are, which arc.rules.spur_fork answers:
+--  meet beside the spur is, and what the lines beyond it are.  The
+--  pipeline reads the fork off the map and hands it in the record:
 --
 --    fork 3, STRAIGHT ON.  A line carries through the tile's far side,
 --      so the spur's lane runs on along it with no turn at all: the lane

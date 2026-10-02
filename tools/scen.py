@@ -38,8 +38,7 @@ FIELDS = [
 ]
 FMT = ">hBBh6ihh3iBBhh"   # exactly $34 = 52 bytes, what the loader copies
 
-#  Names taken from the scenarios' own TEXT 128 briefings, not guessed.
-#  My first pass at this table was wrong on nine of eleven entries --
+#  Names taken from the scenarios' own TEXT 128 briefings, not guessed:
 #  the numbers are ground truth from SCEN, the meanings are not, and the
 #  briefing is the only thing in the file that states them.
 DISASTER = {
@@ -48,7 +47,7 @@ DISASTER = {
     8:  "UFO / monster",   # Atlanta "UFO Invasion", Hollywood "strange monster"
     9:  "nuclear",         # Barcelona "nuclear device", Manhattan "meltdown"
     10: "meltdown",        # Silicon Valley "new energy source... malfunctioned"
-    11: "volcano",         # Portland "a previously unknown volcano erupts"
+    11: "volcano",         # Portland "a previously unknown volcano erupts"  comment-lint: allow
     12: "firestorm",       # Malibu, Oakland Hills, Paris -- all fires
     13: "riot",            # Washington "lawyers running amuck"
     14: "flood",           # Davenport "the mighty Mississippi"

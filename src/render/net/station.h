@@ -10,6 +10,7 @@
 #define ARC_NET_STATION_H
 
 #include "net/types.h"
+#include "mesh/loft.h"
 
 extern BandSt s_band_st[BAND_MAX_ST];
 void net_station_reset(void);

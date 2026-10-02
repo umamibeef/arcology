@@ -59,8 +59,10 @@ int   ext_cmp(ext80 a, ext80 b); /* -1, 0, +1 */
 
 /*  The trap itself, in sane.c: the opword the 68k code pushed, the
  *  destination and the source.  Returns the comparison result for FOCMP
- *  and 0 otherwise.  The header above describes it.  Nothing declared
- *  it, so it was global by default and nothing said so. */
+ *  and 0 otherwise.  An opword outside the 21 that occur answers
+ *  FP68K_UNHANDLED and leaves the destination as it was.  The
+ *  reconstruction does not print, so a caller that cares must look. */
+#define FP68K_UNHANDLED (-2)
 int fp68k(uint16_t opword, void *dst, const void *src);
 
 /* read/write the 10-byte in-memory form the 68k code passes around */

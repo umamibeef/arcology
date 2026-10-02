@@ -95,7 +95,10 @@ static void store_fmt(int fmt, void *p, ext80 a)
     }
 }
 
-/*  Returns the comparison result for FOCMP, 0 otherwise. */
+/*  Returns the comparison result for FOCMP, 0 otherwise, and
+ *  FP68K_UNHANDLED for an opword outside the 21 that occur.  It does
+ *  not print: the reconstruction says what happened through its answer,
+ *  and what to do about it is the caller's. */
 int fp68k(uint16_t opword, void *dst, const void *src)
 {
     int   op  = opword & 0x1F;
@@ -137,8 +140,8 @@ int fp68k(uint16_t opword, void *dst, const void *src)
         case FOCMP:
             return ext_cmp(d, s);
         default:
-            fprintf(stderr, "fp68k: unhandled opword $%04X (op 0x%02X fmt %d)\n", opword, op, fmt);
-            return 0;
+            /*  Outside the 21.  The destination is left as it was. */
+            return FP68K_UNHANDLED;
     }
     store_fmt(FFEXT, dst, d);
     return 0;

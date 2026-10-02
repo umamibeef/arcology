@@ -7,6 +7,7 @@
 #define ARC_NET_MARGIN_H
 
 #include "net/types.h"
+#include "script.h"
 
 void                margin_enable(int on);
 int                 margin_on(void);

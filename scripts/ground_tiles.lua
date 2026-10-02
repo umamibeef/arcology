@@ -1,12 +1,14 @@
 --  ground_tiles.lua -- what a tile's own two bytes mean to the GROUND.
 --
---  Nine answers, all of them by the byte alone and every one looked up
---  at every tile of the map: whether the terrain byte is water, what
+--  Eleven answers, all of them by the byte alone and every one looked
+--  up at every tile of the map: whether the terrain byte is water, what
 --  slope it carries, whether anything stands on the tile, whether the
 --  piece on it follows the slope, whether it is a building with a
 --  footprint and an anchor, whether it is a raised piece ordered by its
 --  neighbour, whether a corridor may level it, whether the saddle lift
---  applies, and what the map view tints a placed structure.
+--  applies, what the map view tints a placed structure, which zone a
+--  tile is zoned for, which record a text byte names, and whether the
+--  tile was placed rather than grown.
 --
 --  They are PUSHED, not asked for: the pipeline reads a table of 256 and
 --  never calls back up to find out what a byte means.
@@ -44,6 +46,21 @@ do
     local m = {[0] = 0, 9, 3, 6, 12, 11, 7, 14, 13, 1, 2, 4, 8, 5}
     arc.bytes("corner_lifts", m, "number")
 
+    --  AND WHICH WAY A SLOPE RUNS, which follows from the same masks.  A
+    --  line piece on a slope is straight along it, and no picture can
+    --  say so.  A tile whose two raised corners lie on one side of it
+    --  falls east and west; every other falls north and south.  The
+    --  corners are numbered NW, SW, SE, NE from nought, so a mask of the
+    --  first two or of the last two is one side.
+    do
+        local e = {}
+        for code = 0, 255 do
+            local k = m[code]
+            e[code] = k == 3 or k == 12
+        end
+        arc.bytes("slope_runs_ew", e)
+    end
+
     --  AND THE DIAGONAL a tile's top is folded on, which follows from
     --  the same masks.  A tile with one odd corner keeps a flat triangle
     --  on the other three, so the fold avoids the odd corner; a saddle
@@ -79,7 +96,6 @@ arc.bytes("saddle_terrain", {[0x0D] = true})
 do
     local t = {}
     for b = 0x0E, 0xFF do t[b] = true end
-    arc.bytes("built_tiles", t)
     arc.built_tiles = t
 end
 
@@ -93,7 +109,6 @@ do
                         {0x3F, 0x42}, {0x61, 0x64}} do
         for b = r[1], r[2] do t[b] = true end
     end
-    arc.bytes("sloped_tiles", t)
     arc.sloped_tiles = t
 end
 
@@ -106,6 +121,15 @@ do
     for b = 0xC6, 0xCF do t[b] = 11 end -- the ten power plants
     t[0xD5] = 12                        -- a park
     arc.bytes("structure_tints", t, "number")
+end
+
+--  A TILE SOMETHING WAS PLACED ON, as against one a zone grew.  The
+--  frame keeps its art in the map view, where every other sprite is
+--  dropped for the tint.
+do
+    local t = {}
+    for b = 0xC6, 0xFF do t[b] = true end
+    arc.bytes("placed_tiles", t)
 end
 
 --  A BUILDING PROPER: one that occupies a footprint and hangs its whole
@@ -155,7 +179,6 @@ do
     local t = {}
     for b = 0x00, 0x48 do t[b] = true end
     for b = 0x4B, 0x4E do t[b] = true end
-    arc.bytes("levelling_tiles", t)
     arc.levelling_tiles = t
 end
 
@@ -203,3 +226,22 @@ end
 --  instead.  Only bare flat land qualifies -- a terrain byte carrying a
 --  stream, a shore or a slope does not, whatever its slope code says.
 arc.bytes("cap_ground", {[0x00] = true})
+
+--  THE ZONE a zoning byte carries.  The low half is the zone the tile
+--  is zoned for, which is what the map view tints.  The high half marks
+--  the corners of a footprint and is no business of the tint.
+do
+    local t = {}
+    for b = 0x00, 0xFF do t[b] = b % 16 end
+    arc.bytes("zone_of", t, "number")
+end
+
+--  WHICH RECORD A TEXT BYTE NAMES.  The save marks the tile a moving
+--  thing stands on with that thing's place in the record list, offset
+--  so that a low byte can carry a sign instead.  The answer is ONE PAST
+--  the place, since nought has to mean no record at all.
+do
+    local t = {}
+    for b = 0xC9, 0xF0 do t[b] = b - 0xC9 + 1 end
+    arc.bytes("thing_marks", t, "number")
+end

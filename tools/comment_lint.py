@@ -39,11 +39,16 @@ HASH_NAMES = {"CMakeLists.txt"}
 #  for it.  docs/conventions.rst is the one file that states those rules,
 #  so it quotes the words they forbid and is left alone.
 RST_LIKE = {".rst"}
-RST_EXEMPT = {"conventions.rst"}
+#  Markdown pages get the cited-path rule alone: their prose is the
+#  house rules themselves, which quote the words the other rules ban.
+MD_LIKE = {".md"}
+#  The refactor plan names files that are gone and files that are to come.
+MD_EXEMPT = {"REFACTOR.md"}
+RST_EXEMPT = {"conventions.rst", "notebook.rst"}
 #  A script carries the same prose as the code it drives, and the same two
 #  rules hold for it.  Lua comments start with -- and a long one with --[[.
 LUA_LIKE = {".lua"}
-EXTENSIONS = C_LIKE | PY_LIKE | HASH_LIKE | RST_LIKE | LUA_LIKE
+EXTENSIONS = C_LIKE | PY_LIKE | HASH_LIKE | RST_LIKE | LUA_LIKE | MD_LIKE
 
 #  Third-party sources and build products keep their own comments.
 SKIP_PARTS = {
@@ -559,9 +564,149 @@ def paragraphs(items):
         yield joined, owner, {line for line, text in run if ALLOW.search(text)}
 
 
+#  ---- S1: never stack --------------------------------------------------
+#  Two multi-line block comments back to back with no code between them
+#  is the shape a change leaves when it writes a new comment and keeps
+#  the old one standing: the two then disagree and a reader cannot tell
+#  which the code obeys.  A one-line note beside a field, a comment that
+#  trails a declaration, and a file or section header are not the shape.
+
+
+def blocks_c(lines):
+    """(first, last) of every block comment, whole-line or trailing."""
+    out, i = [], 0
+    while i < len(lines):
+        if "/*" in lines[i]:
+            s = lines[i].index("/*")
+            if "*/" in lines[i][s + 2:]:
+                out.append((i, i))
+            else:
+                j = i + 1
+                while j < len(lines) and "*/" not in lines[j]:
+                    j += 1
+                if j < len(lines):
+                    out.append((i, j))
+                    i = j
+        i += 1
+    return out
+
+
+#  A comment drawn as a BOX, or opened by a SECTION RULE: a run of
+#  repeated characters on a line of its own, or a heading with a rule
+#  drawn out beside it.  Either marks a division of the file rather than
+#  describing the code under it, so one ending where the next begins is
+#  the shape a divided file has.  The comment rules ban `--` in prose,
+#  so a run of eight can only be a rule.
+RULE_LINE = re.compile(r"^[\s/*]*[-=*_#]{8,}[\s*/]*$")
+RULE_RUN  = re.compile(r"[-=]{8,}")
+
+
+def boxed(block):
+    return any(RULE_LINE.match(x) or RULE_RUN.search(x) for x in block)
+
+
+def stacked_c(path):
+    """Every stacked pair in a C-like file, as check_file reports them."""
+    lines = open(path, errors="replace").read().split("\n")
+    bl = blocks_c(lines)
+    found = []
+    for k in range(len(bl) - 1):
+        a0, a1 = bl[k]
+        b0, b1 = bl[k + 1]
+        if [x for x in lines[a1 + 1 : b0] if x.strip()]:
+            continue
+        if a1 == a0 or b1 == b0:
+            continue
+        if lines[b0][: lines[b0].index("/*")].strip():
+            continue
+        #  A BOXED comment is a section marker, not a description of the
+        #  code under it, so one ending where the next begins is the
+        #  shape a divided file has rather than the shape a stale
+        #  comment leaves.  A box opens or closes on a rule of its own.
+        if boxed(lines[a0:a1 + 1]) or boxed(lines[b0:b1 + 1]):
+            continue
+        found.append((a0 + 1, "S1", "two block comments stacked, no code between", lines[a0].strip()[:80], ""))
+    return found
+
+
+#  ---- P1: a cited path exists -----------------------------------------
+#  A page that names a file the tree does not have sends the reader to
+#  nothing, and it is the commonest way a document goes stale.  Every
+#  token shaped like a path under one of the tree's own folders is
+#  tested against the tree.  Folders the repository does not carry
+#  (build/, out/, assets/, rsrc/, the rendered previews) are not
+#  tested: what they hold depends on the machine.
+
+#  Three shapes of citation: a path from the root (src/render/net/cut.c),
+#  a path inside a tree (net/cut.c, mesh/fit.c), and a bare file in
+#  backticks (`cut.c`).  The second is tested as the tail of any path in
+#  the tree, the third as any file's name.
+CITED = re.compile(r"(?<![\w/.-])((?:src|tools|scripts|docs|cities|tests|cmake|media)/[A-Za-z0-9_./+-]*[A-Za-z0-9_+])")
+CITED_IN = re.compile(r"(?<![\w/.-])([a-z_][a-z0-9_]*(?:/[a-z_][a-z0-9_]*)+\.(?:c|h|cpp|lua|py|sh|rst|glsl|json))\b")
+CITED_BARE = re.compile(r"``?([a-z_][a-z0-9_]*\.(?:c|h|cpp|lua|py|sh|glsl))``?")
+#  A numbered city is an entry inside a .arco archive, not a file of the tree.
+NOT_A_PATH = re.compile(r"[<>*{}$\\|]|\.\.\.|/\.\.|docs/_build|docs/img/preview|docs/\.venv|^cities/\d")
+SOURCE_EXT = (".c", ".h", ".cpp", ".lua", ".py", ".sh", ".rst", ".glsl", ".json", ".md", ".txt", ".cmake")
+_TREE = {}
+
+
+def tree_files(root):
+    """Every file the tree carries, as paths from the root, once."""
+    if root not in _TREE:
+        rels = []
+        for dirpath, dirnames, names in os.walk(root):
+            dirnames[:] = [d for d in dirnames if d not in ("build", ".git", ".venv", "_build", "_deps", "__pycache__", "out", "assets", "rsrc")]
+            for n in names:
+                rels.append(os.path.relpath(os.path.join(dirpath, n), root))
+        _TREE[root] = (set(rels), {os.path.basename(r) for r in rels})
+    return _TREE[root]
+
+
+def cited_paths(path, root):
+    """Every path a page cites that the tree does not have, as check_file
+    reports them."""
+    found = []
+    rels, names = tree_files(root)
+    with open(path, "r", errors="replace") as f:
+        lines = f.read().split("\n")
+    for i, line in enumerate(lines, 1):
+        if ALLOW.search(line):
+            continue
+        seen = set()
+        for m in CITED.finditer(line):
+            tok = re.sub(r":\d[\d,-]*$", "", m.group(1).rstrip(".,:;)"))
+            if NOT_A_PATH.search(tok) or tok in seen:
+                continue
+            seen.add(tok)
+            if not os.path.exists(os.path.join(root, tok)):
+                found.append((i, "P1", "cites a path the tree does not have", tok, tok))
+        for m in CITED_IN.finditer(line):
+            tok = m.group(1)
+            if NOT_A_PATH.search(tok) or tok in seen or CITED.search(tok) or tok.startswith(("src/", "tools/", "scripts/", "docs/")):
+                continue
+            seen.add(tok)
+            if not any(r == tok or r.endswith("/" + tok) for r in rels):
+                found.append((i, "P1", "cites a path the tree does not have", tok, tok))
+        for m in CITED_BARE.finditer(line):
+            tok = m.group(1)
+            if tok in seen:
+                continue
+            seen.add(tok)
+            if tok not in names:
+                found.append((i, "P1", "cites a file the tree does not have", tok, tok))
+    return found
+
+
 def check_file(path, rules):
     """Report every rule a file's comments break, as (line, id, message, text)."""
     found = []
+    ext = os.path.splitext(path)[1]
+    if ext in C_LIKE:
+        found += stacked_c(path)
+    if ext in RST_LIKE | MD_LIKE and os.path.basename(path) not in MD_EXEMPT:
+        found += cited_paths(path, project_root(path))
+    if ext in MD_LIKE:
+        return found
     for text, owner, allowed in paragraphs(comments(path)):
         if not text.strip():
             continue

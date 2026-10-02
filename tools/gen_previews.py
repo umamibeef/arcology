@@ -25,6 +25,8 @@ import os
 import sys
 from pathlib import Path
 
+from game import folder
+
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 EXE = ROOT / "build/arcology"
@@ -32,9 +34,7 @@ ASSETS = ROOT / "assets"
 OUT = ROOT / "docs/img/preview"
 MANIFEST = OUT / "manifest.json"
 DOCS = ROOT / "docs"
-GAME = Path(os.environ.get(
-    "ARC_CITIES",
-    Path.home() / "Downloads" / "SimCity 2000\u00ae Collection"))
+GAME = folder()
 
 
 def city(name):

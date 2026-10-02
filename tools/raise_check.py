@@ -3,7 +3,7 @@
 
 Three hundred tiles are tested and raised in the same order on both
 sides, then ALTM, XTER, XBIT, XZON, XBLD and the funds are compared.
-The raise now runs $12C04 for real, so this also exercises $128DE nine
+The raise runs $12C04 for real, so this also exercises $128DE nine
 times per raise.  Only $5FAA is stubbed.
 """
 import subprocess, sys, os

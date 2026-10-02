@@ -1,4 +1,4 @@
---  line_class.lua -- what class a tile's line is.
+--  road_class.lua -- what class a tile's line is.
 --
 --  A line is drawn as a line, an avenue or a boulevard, and which of
 --  those it is follows from the TRAFFIC on it: the busier the tile, the

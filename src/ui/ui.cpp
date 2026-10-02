@@ -1327,41 +1327,42 @@ static void script_window(RUiState *s)
 
 /*  Road tuning: the geometry's knobs, live.  Every slider rebuilds the
  *  mesh, which takes about a fifth of a second, so a change is seen as it
- *  is made rather than described. */
+ *  is made rather than described.
+ *
+ *  The window holds no list of them.  The app hands over what the
+ *  scripts declared: the label, the range and the value each starts at.
+ *  So a knob a script invents gets a slider with no change here.  The
+ *  window is the game's own, through mac_begin, so it wears whatever
+ *  theme is on. */
 static void tuning_window(RUiState *s)
 {
-    /*  The road geometry's knobs, live.  Every slider rebuilds the mesh,
-     *  which takes about a fifth of a second, so a change is seen as it is
-     *  made rather than described.  The window is the game's own, through
-     *  mac_begin, so it wears whatever theme is on. */
-    static const char *NAME[19] = {
-        "road width", "rail width", "road min radius", "rail min radius", "road max sweep", "rail max sweep", "node approach", "corridor margin", "junction trim", "show curves", "band width", "band min radius", "band max sweep", "spur reach", "staircase step", "corner share", "spur merge", "deck grade", "deck stiffness"};
-    static const float LO[19]  = {0.15f, 0.15f, 0.05f, 0.05f, 0.5f, 0.5f, 0.0f, 0.0f, 0.10f, 0.0f, 0.30f, 0.5f, 1.0f, 0.5f, 0.0f, 0.25f, 0.0f, 0.02f, 0.0f};
-    static const float HI[19]  = {1.00f, 1.00f, 4.00f, 8.00f, 12.0f, 16.0f, 2.0f, 0.3f, 0.60f, 1.0f, 1.00f, 6.0f, 16.0f, 3.0f, 6.0f, 1.00f, 4.0f, 0.50f, 8.0f};
-    static const float DEF[19] = {0.50f, 0.62f, 0.90f, 3.00f, 6.00f, 8.00f, 0.8f, 0.04f, 0.45f, 0.0f, 0.60f, 2.5f, 8.0f, 1.6f, 2.0f, 0.50f, 2.5f, 0.10f, 2.0f};
-    int                k;
+    const char *group = NULL;
+    int         k, shown = 0;
     if (!mac_begin("Road tuning", &s->show_tuning, 340.0f, ImVec2(110.0f, 300.0f)))
     {
         ImGui::End();
         return;
     }
     ImGui::PushItemWidth(150.0f);
-    for (k = 0; k < 19; ++k)
+    for (k = 0; k < s->n_knob; ++k)
     {
-        if (k == 9)
-            continue; /* outline is a view, on the View menu */
-        if (k == 10)
-            ImGui::Separator(); /* the band's knobs */
-        if (ImGui::SliderFloat(NAME[k], &s->tune[k], LO[k], HI[k], "%.3f"))
+        RUiKnob *n = &s->knob[k];
+        if (!n->label)
+            continue; /* a view or a switch some other control owns */
+        if (shown && n->group && (!group || strcmp(group, n->group) != 0))
+            ImGui::Separator();
+        group = n->group;
+        ++shown;
+        if (ImGui::SliderFloat(n->label, &n->v, n->lo, n->hi, "%.3f"))
             s->tune_changed = 1;
     }
     ImGui::PopItemWidth();
     ImGui::Separator();
     if (ImGui::Button("Defaults"))
     {
-        for (k = 0; k < 19; ++k)
-            if (k != 9)
-                s->tune[k] = DEF[k];
+        for (k = 0; k < s->n_knob; ++k)
+            if (s->knob[k].label)
+                s->knob[k].v = s->knob[k].def;
         s->tune_changed = 1;
     }
     ImGui::TextUnformatted("in tiles; each change rebuilds the mesh");
@@ -1624,19 +1625,18 @@ extern "C" int ui_wants_keyboard(const RUi *u)
     return u && ImGui::GetIO().WantTextInput ? 1 : 0;
 }
 
-/*  LOADING.  A reading of the scripts is followed by a whole build, and
- *  the build blocks.  The window stops repainting for about a second and
- *  a half.  This is the frame drawn just before it.  So what the panel
- *  says is what the window shows for as long as the build takes.  That
- *  is the whole point of it.
- *
- *  It sits in the middle of the screen and takes no input: there is
- *  nothing to press, and the frame after it is the build. */
 /*  LOADING.  The scripts are read in a few milliseconds and the world
  *  they describe takes about a second and a half to build.  So what this
- *  announces is the BUILD.  The bar carries the words: a caption beside
- *  it would leave the bar itself saying nothing.  The bar is the part
- *  the eye goes to.
+ *  announces is the BUILD.
+ *
+ *  The build BLOCKS, and the window stops repainting for as long as it
+ *  runs.  This is the frame drawn just before it, so what the panel says
+ *  is what the window shows the whole time.  That is the point of it.
+ *  The panel sits in the middle of the screen and takes no input.
+ *  There is nothing to press, and the frame after it is the build.
+ *
+ *  The bar carries the words.  A caption beside it would leave the bar
+ *  itself saying nothing, and the bar is the part the eye goes to.
  *
  *  The words are drawn TWICE, clipped either side of the fill: white
  *  over the black that is done, black over the white that is not.  That

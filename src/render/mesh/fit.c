@@ -8,6 +8,8 @@
 #include "mesh/internal.h"
 #include "pipeline.h"
 #include "opt.h"
+#include "mesh/fit.h"
+#include "script.h"
 
 /*  The strip being lofted, as loft() was asked for it (RLoft).  Read by
  *  the loft's helpers through s_ld.  Outside a loft it holds zeros, a
@@ -77,64 +79,8 @@ static void swept_cover(V2 a, V2 b, float hw, uint8_t *cov, uint8_t stamp)
     }
 }
 
-/*  Does a->b stray only onto tiles already stamped?  */
-
-/*  ------------------------------------------------------------------
- *  The corridor fit as it is actually solved elsewhere.
- *
- *  The polyline-and-fillet pipeline decides curvature locally and after
- *  the fact: each corner asks for the widest arc that happens to fit
- *  between its two edges.  When none does the corner is emitted hard.
- *  Every symptom that follows is that choice coming back.  Nodes lie too
- *  close to sweep.  A radius floor rises with the band, and corners are
- *  left with no legal arc.
- *
- *  It is solved.  The standard method is safe-corridor optimization.
- *  Put the path in a basis whose CONTROL POINTS bound the curve, by the
- *  convex hull property of a uniform cubic B-spline.  Then box each
- *  control point into the corridor, and minimize curvature.  Containment
- *  stops being a test applied afterwards and becomes a constraint on
- *  points.  Curvature is continuous by construction.  So there is no
- *  such thing as a hard corner in the result.  Quadrotor and
- *  self-driving planners fit paths this way.  The civil engineering
- *  equivalent is the tangent-spiral-arc alignment line design has used
- *  for a century.
- *
- *  Minimising the discrete bending energy sum|p[i-1] - 2p[i] + p[i+1]|^2
- *  makes the stationary condition a fourth difference of zero, so one sweep
- *  of projected Gauss-Seidel is
- *
- *  p[i] <- box( (4(p[i-1] + p[i+1]) - (p[i-2] + p[i+2])) / 6 )
- *
- *  which is a few dozen iterations of arithmetic per segment and needs no
- *  solver, no global system and no per-corner search.
- *  ------------------------------------------------------------------ */
-
 static float turn_radius(V2 a, V2 b, V2 c);
 
-/*  Whether the last path fitted took the spline.  Under the spline fit
- *  the node marks are drawn ONLY for the segments that did not.  So the
- *  overlay shows at a glance which runs the spline fit did not take, and
- *  so where a harsh turn that remains must be. */
-
-/*  The corridor's own convex regions, one per span of the curve.  The
- *  convex hull property bounds a span by its four control points.  So a
- *  span is safe exactly when all four lie in one CONVEX piece of the
- *  corridor.  Boxing each point into its own tile proves nothing about
- *  the curve between them.  This was why nine spans in ten escaped and
- *  had to be thrown away.  The corridor here is a run of unit tiles.  So
- *  the convex pieces are the solid rectangles it contains.  They are the
- *  four tiles' bounding rectangle when the corridor fills it.  Otherwise
- *  they are the middle tile alone, which forces the span's points
- *  together and turns the corner tightly but legally. */
-/*  ==================================================================
- *  The corridor fit, by spline
- *
- *  Control points boxed into convex pieces of the corridor, curvature
- *  minimised under tension toward the taut line, the minimum radius
- *  imposed, and the curve checked as a swept band before it is accepted.
- *  Off by default.  The 'spline fit' knob turns it on.
- *  ================================================================== */
 /*  The point where the line through a in direction da meets the line
  *  through b in direction db.  0 when they are parallel. */
 int line_meet(V2 a, V2 da, V2 b, V2 db, V2 *out)
@@ -158,8 +104,8 @@ int line_meet(V2 a, V2 da, V2 b, V2 db, V2 *out)
  *
  *  The fit classifies first and fits only the joins.  A fit that treats
  *  every tile as a free node and smooths makes a straight corridor
- *  wobble.  Relaxation and spline both do it, and turns a corner into a
- *  chain of small kinks.  Nothing in it knows what a straight IS.
+ *  wobble.  It also turns a corner into a chain of small kinks, because
+ *  nothing in it knows what a straight IS.
  *
  *  runs    the step sequence is cut into straights (two or more equal
  *          steps), regular slopes (N,E,N,E or N,N,E,N,N,E: two full
@@ -208,6 +154,7 @@ static int tf_perp(V2 a, V2 b)
 
 static unsigned long s_tf_probes; /* how many corridor samples one build takes */
 static int gix_fit_straight_dot = -1, gix_fit_edge = -1, gix_fit_edge_slab = -1;
+static int gix_fit_jog_dot = -1;
 static float s_tf_edge; /* how far inside the band's edge the corridor is sampled (arc.geo.fit_edge) */
 
 /*  Does a straight line's band hold on the corridor from a to b?  Every
@@ -245,7 +192,7 @@ static V2   tf_onto(const Run *r, V2 q);
 static const uint8_t *s_tf_own;        /* the tiles that must end up under the band.  NULL: none need to */
 static int            s_tf_cover_runs; /* ... held by the runs and the corner joins too, not the arcs alone: the band asks for it */
 static int            s_tf_free_lines; /* a run may be any span whose chord, shifted midway across its covered points, holds and covers: the band asks for it */
-static int32_t        s_tf_ex0, s_tf_ex1; /* the junction tiles at the chain's ends, -1 for none: defined with the arc coverage below */
+static int32_t        s_tf_ex0 = -1, s_tf_ex1 = -1; /* the junction tiles at the chain's ends, -1 for none: theirs is the junction's surface */
 
 /*  A point's distance to the segment ab. */
 static float seg_dist(V2 p, V2 a, V2 b)
@@ -568,7 +515,6 @@ static V2 tf_onto(const Run *r, V2 q)
  *  that fitted. */
 static V2      s_tf_fail; /* the sample that refused the last arc, for --sweep-probe */
 static int     s_tf_fail_side;
-static int32_t s_tf_ex0 = -1, s_tf_ex1 = -1; /* the junction tiles: theirs is the junction's surface */
 
 /*  Coverage.  An arc cuts inside the corner it replaces.  If it cuts far
  *  enough it leaves the corner tile with no line over it at all.  The
@@ -668,11 +614,6 @@ static int tf_arc_holds(const uint8_t *mark, V2 cen, float R, float a0, float sw
     return 1;
 }
 
-/*  The widest arc a corner may sweep inside its corridor, given the
- *  tangent length it may take from its edges.  Searched finely from the
- *  ceiling down to the floor an arc still reads as one.  The first that
- *  holds is the answer.  Sets `tight` when the answer is under the
- *  minimum radius, and returns 0, a corner, when nothing holds. */
 /*  Does an arc of this radius sit in the corner and stay on the
  *  corridor.  Does it still cover the tiles the corner was drawn for?
  *  An arc cuts inside the corner it replaces.  If it cuts far enough it
@@ -696,7 +637,7 @@ int path_sweep_holds(SweepFan *s, float r)
     }
     {
         V2 t2 = {s->b.x + s->uo.x * d, s->b.y + s->uo.y * d};
-        if (!tf_arc_covers(s->mark, t1, s->b, t2, cen, r, a0, sw, s->hw - s_tune.margin))
+        if (!tf_arc_covers(s->mark, t1, s->b, t2, cen, r, a0, sw, s->hw - TUNE(margin)))
         {
             if (s->probe)
                 dumpf("PROBE %.3f,%.3f r %.3f holds but leaves a tile bare\n", (double)s->b.x, (double)s->b.y, (double)r);
@@ -736,7 +677,7 @@ SweepFan *path_sweep_ask(const void *markv, V2 a, V2 b, V2 c, float tlim, float 
     s.rmax   = rmax;
     s.rmin   = rmin;
     s.hw     = hw;
-    s.margin = s_tune.margin;
+    s.margin = TUNE(margin);
     s.padded = s_tf_own != NULL;
     s.probe  = g_dev.sweep_probe && sscanf(g_dev.sweep_probe, "%f,%f", &px, &py) == 2 && fabsf(px - b.x) < 0.01f && fabsf(py - b.y) < 0.01f;
     if (li < 1e-5f || lo < 1e-5f || tlim <= 1e-4f)
@@ -827,7 +768,7 @@ static float tf_biarc_holds(const uint8_t *mark, V2 prev, V2 c0, V2 c1, V2 next,
             return -1.0f;
         {
             V2 t2 = {b.x + uo.x * d, b.y + uo.y * d};
-            if (!tf_arc_covers(mark, t1, b, t2, cen, r, atan2f(t1.y - cen.y, t1.x - cen.x), cross > 0.0f ? theta : -theta, hw - s_tune.margin))
+            if (!tf_arc_covers(mark, t1, b, t2, cen, r, atan2f(t1.y - cen.y, t1.x - cen.x), cross > 0.0f ? theta : -theta, hw - TUNE(margin)))
                 return -1.0f;
         }
         if (r < rmin_)
@@ -881,11 +822,9 @@ void fit_tally_set(int bucket, const void *src, size_t cap)
 }
 
 /*  Counted once per build: the network is walked twice, once to
- *  measure and once to draw, and the fit runs in both. */
-/*  The fit's statistics count the pass that fits: the grading pass (or
- *  the one pass of a build without grading).  They had counted the
- *  building pass, which fits nothing now that the table replays every
- *  segment and band.  It had only ever seen the bands' second walk. */
+ *  measure and once to draw, and the fit runs in both.  The fit's
+ *  statistics count the pass that fits.  That is the grading pass, or
+ *  the one pass of a build without grading. */
 static void tf_count(int *c)
 {
     if (s_pass != 2)
@@ -1014,8 +953,6 @@ void path_chain_run(ChainFan *c, int i)
     c->lines[c->nl++] = c->runs[i];
 }
 
-/*  The steps, and the runs through them.  The lines the runs lie on, and
- *  the chain of lines from the start's exit step to the goal's last. */
 /*  The fit in hand, from the moment its corridor is set up to the
  *  moment its shape is closed: every stage below reads it. */
 static Tf     s_path;
@@ -1111,10 +1048,9 @@ int path_lined(void)
     return x->nl > 1 ? x->nl - 1 : 0;
 }
 
-/*  The lines cross: one arc at the meet, if the meet is ahead
- *  of P and behind Q and an arc can be held there.  1 when the vertex is
- *  placed. */
-/*  A leg's extension to the meet.  A line reaching a meet behind its own
+/*  The lines cross: one arc at the meet, if the meet is ahead of P and
+ *  behind Q and an arc can be held there.  1 when the vertex is placed.
+ *  A leg's extension to the meet.  A line reaching a meet behind its own
  *  end is slab the run never held, so it must hold too. */
 int path_join_holds(const JoinFan *j, int leg)
 {
@@ -1210,18 +1146,11 @@ static void tf_join(Tf *x, const TfPair *p, V2 pi, JoinFan *out)
     j.res0       = x->res0;
     j.res1       = x->res1;
     j.need       = tf_need(p->prev, pi, p->after, x->rmin);
-    j.share      = s_tune.corner_share;
-    j.trim_cap   = s_tune.trim_cap;
+    j.share      = TUNE(corner_share);
+    j.trim_cap   = TUNE(trim_cap);
     *out = j;
 }
 
-/*  One placing of the S.  Its tangent points are drawn back `a` along P
- *  and `b` along Q.  It holds the biarc between them.  It also holds the
- *  room its tangents leave the neighboring vertices.  Half an edge each
- *  way, the other half being theirs, unless the neighbor is the band's
- *  own end.  This turns nothing and needs only its reserve: and whether
- *  the band holds it.  The radius held. -1 for a placing the band
- *  refuses. -2 for no placing at all. */
 /*  One placing of the S: its tangent points drawn back `a` along P and
  *  `c` along Q, and the biarc between them.  0 where there is no biarc
  *  at all, which is B behind A. */
@@ -1322,9 +1251,9 @@ static void tf_bridge(Tf *x, const TfPair *p, BridgeFan *out)
     b.gap        = (p->SQ.x - p->EP.x) * p->P->d.x + (p->SQ.y - p->EP.y) * p->P->d.y;
     b.res0       = x->res0;
     b.res1       = x->res1;
-    b.share      = s_tune.corner_share;
+    b.share      = TUNE(corner_share);
     b.band       = x->band;
-    b.margin     = s_tune.margin;
+    b.margin     = TUNE(margin);
     b.padded     = x->own != NULL;
     b.head       = p->P->i0 < 0;
     b.tail       = p->Q->i0 >= x->ns;
@@ -1335,10 +1264,10 @@ static void tf_bridge(Tf *x, const TfPair *p, BridgeFan *out)
 }
 
 /*  Neither: the join is walked point by point.  P's end, the gap's
- *  points, Q's start.  Or, for a jog, drawn as one diagonal. */
-/*  Does the gap point beside this end already lie in line with it?
- *  Then the end turns nothing as a vertex, and only shortens the edge
- *  the real corner beside it may take its tangent from. */
+ *  points, Q's start.  Or, for a jog, drawn as one diagonal.  Does the
+ *  gap point beside this end already lie in line with it?  Then the end
+ *  turns nothing as a vertex, and only shortens the edge the real corner
+ *  beside it may take its tangent from. */
 int path_step_inline(const StepFan *w, int side)
 {
     const Tf     *x = (const Tf *)w->fit;
@@ -1364,7 +1293,7 @@ int path_step_jog(const StepFan *w)
     const TfPair *p = (const TfPair *)w->pair;
     V2            jg1, jst;
     float         jsl;
-    if (fabsf(v2cross(p->P->d, p->Q->d)) >= 1e-3f || p->P->d.x * p->Q->d.x + p->P->d.y * p->Q->d.y <= 0.999f)
+    if (fabsf(v2cross(p->P->d, p->Q->d)) >= 1e-3f || p->P->d.x * p->Q->d.x + p->P->d.y * p->Q->d.y <= geo_num(&gix_fit_jog_dot, "fit_jog_dot"))
         return 0;
     jg1 = x->pts[p->P->tb + 1];
     jst = (V2){p->SQ.x - jg1.x, p->SQ.y - jg1.y};
@@ -1477,9 +1406,9 @@ void path_fit_count(const char *what)
 /*  The idle vertices dropped and the radius at each corner: the SCRIPT'S
  *  (arc.rules.fit).  The join stage above produced the vertices.  Which
  *  of them say nothing, and how much of each edge the two corners
- *  sharing it may take, are decisions. */
-/*  The path as it stands, for the rule that drops the idle vertices and
- *  settles the radius at each of the rest. */
+ *  sharing it may take, are decisions.  The path as it stands, for the
+ *  rule that drops the idle vertices and settles the radius at each of
+ *  the rest. */
 static FitFan s_tf_fitfan;
 
 static void tf_finish(Tf *x, FitFan *out)
@@ -1489,8 +1418,8 @@ static void tf_finish(Tf *x, FitFan *out)
     f.n = x->n;
     f.res0 = x->res0, f.res1 = x->res1;
     f.rmax = x->rmax, f.rmin = x->rmin, f.band = x->band;
-    f.share    = s_tune.corner_share;
-    f.trim_cap = s_tune.trim_cap;
+    f.share    = TUNE(corner_share);
+    f.trim_cap = TUNE(trim_cap);
     f.mark = x->mark;
     *out = f;
 }
@@ -1509,6 +1438,9 @@ static void tf_finish(Tf *x, FitFan *out)
 
 static int tangent_begin(const uint8_t *mark, const uint8_t *own, const V2 *pts, int nt, float hw, V2 start, V2 goal, float rmax, float rmin, float gro, float reserve, int32_t ex0, int32_t ex1, V2 *out, float *rad, float *tlim, int cap)
 {
+    /*  The steps, and the runs through them.  The lines the runs lie
+     *  on, and the chain of lines from the start's exit step to the
+     *  goal's last. */
     static V2    st[MAX_PTS];
     static Run   runs[TF_MAX_RUNS];
     static Run   lines[TF_MAX_RUNS + 2];
@@ -1517,9 +1449,9 @@ static int tangent_begin(const uint8_t *mark, const uint8_t *own, const V2 *pts,
      *  band, two tiles exactly.  Its corridor is the air beside it.
      *  Padding it would push every straight a hair into the tile next
      *  door, and refuse the whole slab wherever that is built on. */
-    const float band = own ? hw + s_tune.margin : hw;
+    const float band = own ? hw + TUNE(margin) : hw;
     /*  The approach a junction's mouth reserves straight.  It is the knob's, scaled by the width, or the length the family asks for.  A thread turnout's reach, so the cut lands on straight thread and the port where the lane ends. */
-    const float appr = reserve > 0.0f ? reserve : s_tune.approach * (g_dev.noscale ? 1.0f : gro);
+    const float appr = reserve > 0.0f ? reserve : TUNE(approach) * (g_dev.noscale ? 1.0f : gro);
     static int  gix_fit_free_end = -1;
     const float freen   = geo_num(&gix_fit_free_end, "fit_free_end");
     const float res0 = ex0 >= 0 ? appr : freen, res1 = ex1 >= 0 ? appr : freen;
@@ -1592,53 +1524,55 @@ void path_after_is(int meet)
 }
 
 /*  One way of joining the two tried: an arc at the meet, a biarc between
- *  them, or the join walked tile by tile.  Each is a reading handed to a
- *  rule of its own.  Path_held answers whether what the rule did with it
- *  held, and the first way that does wins the boundary. */
+ *  them, or the join walked tile by tile.  Each lays a reading of its
+ *  own kind.  Answers WHICH of the three it laid, and puts the reading
+ *  in `obj`.  Which rule reads which is the script's.  Path_held answers
+ *  whether what that rule did held, and the first way that holds wins
+ *  the boundary. */
 static JoinFan   s_try_join;
 static BridgeFan s_try_bridge;
 static StepFan   s_try_step;
-static int       s_try_way; /* 0 none, 1 an arc, 2 a biarc, 3 the walk */
+static int       s_try_way;
 
-const char *path_try(const char *how, void **obj)
+int path_try(const char *how, void **obj)
 {
     Tf     *x = &s_path;
     TfPair *p = &s_path_pair;
     V2      pi;
-    s_try_way = 0;
+    s_try_way = TRY_NONE;
     *obj      = NULL;
     if (!s_path_ready || !how)
-        return NULL;
+        return TRY_NONE;
     if (strcmp(how, "arc") == 0)
     {
         if (!line_meet(p->P->p, p->P->d, p->Q->p, p->Q->d, &pi))
-            return NULL; /* they never cross: there is no arc to try */
+            return TRY_NONE; /* they never cross: there is no arc to try */
         tf_join(x, p, pi, &s_try_join);
-        s_try_way = 1, *obj = &s_try_join;
-        return "meet";
+        s_try_way = TRY_ARC, *obj = &s_try_join;
+        return TRY_ARC;
     }
     if (strcmp(how, "biarc") == 0)
     {
         tf_bridge(x, p, &s_try_bridge);
-        s_try_way = 2, *obj = &s_try_bridge;
-        return "bridge";
+        s_try_way = TRY_BIARC, *obj = &s_try_bridge;
+        return TRY_BIARC;
     }
     if (strcmp(how, "walk") == 0)
     {
         tf_walk(x, p, &s_try_step);
-        s_try_way = 3, *obj = &s_try_step;
-        return "step";
+        s_try_way = TRY_WALK, *obj = &s_try_step;
+        return TRY_WALK;
     }
-    return NULL;
+    return TRY_NONE;
 }
 
 int path_held(void)
 {
     switch (s_try_way)
     {
-    case 1: return s_try_join.placed;
-    case 2: return s_try_bridge.placed;
-    case 3: return 1; /* the walk always works, and always looks like it */
+    case TRY_ARC: return s_try_join.placed;
+    case TRY_BIARC: return s_try_bridge.placed;
+    case TRY_WALK: return 1; /* the walk always works, and always looks like it */
     default: break;
     }
     return 0;
@@ -1735,19 +1669,6 @@ void fit_stats_reset(void)
     s_tf_p = &s_tf_by[0];
 }
 
-/*  The whole path of one segment: its corridor's gates from the tile
- *  list, a smooth line through them, and the radius each corner may
- *  sweep.  The taut string was tried first and is wrong for a line: the
- *  shortest path hugs the inside of every bend.  So the band runs along
- *  one wall of its corridor.  It leaves the far side of the tile bare,
- *  and the tiles it left bare carried no geometry at all.  What a line
- *  wants is the smoothest line the corridor allows, near its middle
- *  where the corridor is straight.  So the line starts at the gates'
- *  midpoints and is relaxed.  Each point moves toward the mean of its
- *  neighbors, then back onto its own gate, over and over.  That
- *  converges on a curve which is straight where the corridor is
- *  straight, cuts a staircase into one diagonal because the gates let
- *  it.  Never leaves the room it was given. */
 /*  The radius of the circle through three points: how tight the line
  *  turns at the middle one.  Straight gives infinity. */
 static float turn_radius(V2 a, V2 b, V2 c)
@@ -1764,34 +1685,6 @@ static float turn_radius(V2 a, V2 b, V2 c)
     return ab * bc * ca / (2.0f * ar2);
 }
 
-/*  ------------------------------------------------------------------
- *  The corridor fit, stage by stage.
- *
- *  It was one six-hundred-line function that carried every stage in the
- *  same scope, so a change to any of them could reach all the others.
- *  The stages now stand on their own and pass this working state between
- *  them.  Each one still reads the same names it always did, so the
- *  bodies are the bodies that were measured, unchanged.
- *
- *  corridor the run's own tiles, and nothing else gates the crossable part
- *  of each shared edge seed the first line: a point on every gate relax
- *  smooth it, hold the minimum radius, keep it inside collapse straight
- *  runs back into single edges spacing nodes far enough apart to be
- *  filleted spline the alternative fit, when it is asked for radii the
- *  widest legal arc at every corner
- *  ------------------------------------------------------------------ */
-typedef struct
-{
-    uint8_t *mark;   /* corridor tiles, by index                    */
-    int32_t *marked; /* which indices, so they can be cleared       */
-    int      nm;
-    V2      *gl, *gr; /* each gate's two ends                       */
-    int      ng;
-    V2      *p;    /* the line being fitted                       */
-    int     *gate; /* the gate a point sits on, or -1 for free    */
-    int      n;
-    float    hw, rmin, rmax, gro;
-} Fit;
 
 /*  Ground a line may sweep across, as the script pushed it
  *  (scripts/line_tiles.lua). */
@@ -1835,6 +1728,8 @@ int path_corridor(const int32_t **tcol, const int32_t **trow, int *nt, V2 *start
     return 1;
 }
 
+/*  The whole path of one segment: its corridor from the tile list, a
+ *  smooth line through it, and the radius each corner may sweep. */
 int path_fit_begin(const RCity *c, const int32_t *tcol, const int32_t *trow, int nt, float hw, V2 start, V2 goal, float rmax, float rmin, float gro, float reserve, int32_t ex0, int32_t ex1, int free_reach, V2 *out, float *rad, float *tlim, int cap)
 {
     s_tf_edge = geo_num(&gix_fit_edge, "fit_edge"); /* a chain of tiles samples its own band's edge */
@@ -1892,8 +1787,6 @@ int path_fit_begin(const RCity *c, const int32_t *tcol, const int32_t *trow, int
     return tangent_begin(mark, free_reach > 0 ? NULL : mark, centres, nt < MAX_PTS ? nt : MAX_PTS, hw, start, goal, rmax, rmin, gro, reserve, ex0, ex1, out, rad, tlim, cap);
 }
 
-/*  And what the fit leaves: the path, the corridor's marks cleared, and
- *  the dumps that read it. */
 /*  A path the SCRIPT settled outright, in place of the fit's own stages.
  *  It is written where the fit's answer would have gone.  So everything
  *  after it reads a script's path exactly as it reads the pipeline's
@@ -1917,6 +1810,8 @@ int path_answer(const V2 *q, const float *rad, const float *tlim, int n)
     return n;
 }
 
+/*  And what the fit leaves: the path, the corridor's marks cleared, and
+ *  the dumps that read it. */
 int path_fit_end(void)
 {
     uint8_t *const mark   = s_corr_fit.mark;
@@ -2037,19 +1932,18 @@ void tlim_half(const V2 *q, int n, float *tlim)
     {
         float lin  = v2len((V2){q[i].x - q[i - 1].x, q[i].y - q[i - 1].y});
         float lout = v2len((V2){q[i + 1].x - q[i].x, q[i + 1].y - q[i].y});
-        tlim[i]    = s_tune.corner_share * (lin < lout ? lin : lout);
+        tlim[i]    = TUNE(corner_share) * (lin < lout ? lin : lout);
     }
 }
 
 
 /*  Fillet the polyline into straights and arcs.  At each bend the arc's
  *  radius is the one it was given.  It is clamped so its tangent points
- *  stay within the tangent budget the fit allowed it, which is half an
- *  edge under the older fits.  Under the tangent fit whatever room the
- *  vertex beside it left.  This is how an arc takes the whole of an end
- *  edge and a biarc's two vertices split theirs exactly. */
-/*  A straight piece, unless it would have no length: a piece shorter
- *  than this is nothing to loft and leaves `cur` where it was. */
+ *  stay within the tangent budget the fit allowed it, which is whatever
+ *  room the vertex beside it left.  This is how an arc takes the whole
+ *  of an end edge and a biarc's two vertices split theirs exactly.  A
+ *  straight piece, unless it would have no length: a piece shorter than
+ *  this is nothing to loft and leaves `cur` where it was. */
 static void piece_run(PieceFan *p, V2 to)
 {
     float l = v2len((V2){to.x - p->cur.x, to.y - p->cur.y});
@@ -2134,10 +2028,12 @@ void path_piece_arc(PieceFan *p, int i, float r)
     p->cur = t2;
 }
 
-/*  The run out to the path's far end. */
+/*  The run out to the path's far end.  A path with no points has no far
+ *  end, and a script that asks for one gets nothing.  A primitive
+ *  answers a script's input.  It does not read before its array. */
 void path_piece_tail(PieceFan *p)
 {
-    if (p->over)
+    if (p->over || p->n < 1)
         return;
     if (p->np + 1 > MAX_PIECES)
     {

@@ -33,11 +33,10 @@ arc.rules.moving = function (b)
     local turn = arc.rules.car_turn
 
     for _ = 1, d.beats do
-        --  The trains run on their own rails; the gates and the cars are
-        --  what a beat decides.
-        --  The trains run on their own rails, and the beat STOPS at each
-        --  junction one of them reaches so the arm can be chosen on the
-        --  heading it actually arrived with.
+        --  The trains run on their own rails, and the gates and the cars
+        --  are what a beat decides.  The beat STOPS at each junction a
+        --  train reaches, so the arm is chosen on the heading it
+        --  actually arrived with.
         local train_turn = arc.rules.train_turn
         while b:run() do
             local a = b:arms()

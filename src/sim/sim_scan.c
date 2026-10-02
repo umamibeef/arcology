@@ -14,15 +14,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/*  A5+0x13BA: the one scratch plane the whole of $2317E shares, 128 rows
- *  of 128 words.  Nothing ever clears it between stages, so each stage
- *  reads whatever the last one left in the cells it touches.  That is
- *  not tidy.  Reproducing it is the difference between land value at 89%
- *  and at 100%.  Stage 4 seeds its accumulators from stage 1's raw
- *  pollution.  It also seeds them from stage 3's building marks.
- *  Modeling the two stages with separate arrays loses exactly that. */
-static int16_t pad[MAP_H][MAP_W];
-
 /*  Push the four neighbors that have not been visited yet.  The order is
  *  load bearing and is taken literally from $21250, $2128A, $212C6 and
  *  $21304: west, north, east, south.  Power is handed out in queue order
@@ -31,13 +22,13 @@ static int16_t pad[MAP_H][MAP_W];
 static void push_neighbours(City *c, int y, int x)
 {
     if (x > 0 && !(c->xbit[y][x - 1] & XBIT_VISITED))
-        q_push(y, x - 1);
+        q_push(c, y, x - 1);
     if (y > 0 && !(c->xbit[y - 1][x] & XBIT_VISITED))
-        q_push(y - 1, x);
+        q_push(c, y - 1, x);
     if (x < MAP_W - 1 && !(c->xbit[y][x + 1] & XBIT_VISITED))
-        q_push(y, x + 1);
+        q_push(c, y, x + 1);
     if (y < MAP_H - 1 && !(c->xbit[y + 1][x] & XBIT_VISITED))
-        q_push(y + 1, x);
+        q_push(c, y + 1, x);
 }
 
 /*  Pass 2 walks the marks pass 1 left, so its test is inverted: push a
@@ -49,20 +40,23 @@ static void push_neighbours(City *c, int y, int x)
 static void push_marked(City *c, int y, int x)
 {
     if (x > 0 && (c->xbit[y][x - 1] & XBIT_VISITED))
-        q_push(y, x - 1);
+        q_push(c, y, x - 1);
     if (y > 0 && (c->xbit[y - 1][x] & XBIT_VISITED))
-        q_push(y - 1, x);
+        q_push(c, y - 1, x);
     if (x < MAP_W - 1 && (c->xbit[y][x + 1] & XBIT_VISITED))
-        q_push(y, x + 1);
+        q_push(c, y, x + 1);
     if (y < MAP_H - 1 && (c->xbit[y + 1][x] & XBIT_VISITED))
-        q_push(y + 1, x);
+        q_push(c, y + 1, x);
 }
 
 /*  Output of one tile of a power plant.  Eight of the ten are constants
  *  from the switch at $21174.  Two are computed.  $211DA reads the
  *  terrain.  This is why a wind farm on a mountain really does produce
- *  more, and $2119C reads the weather global at A5+0x1F02. */
-static int32_t plant_output(const City *c, int y, int x, uint8_t bld)
+ *  more, and $2119C reads the weather global at A5+0x1F02.
+ *
+ *  The two that are computed DRAW, so this moves the city's dice on and
+ *  the city is not const here. */
+static int32_t plant_output(City *c, int y, int x, uint8_t bld)
 {
     int32_t v = BUILDING[bld].power;
     if (v >= 0)
@@ -81,13 +75,13 @@ static int32_t plant_output(const City *c, int y, int x, uint8_t bld)
     if (v == -1)
     { /* Wind,  $211DA */
         int span = ASR(c->weather1, 3) + 1;
-        int r    = (uint16_t)Random();
+        int r    = (uint16_t)Random(c);
         int alt  = c->altm[y][x] & 0x1F;
         return (alt + (span ? r % span : 0)) >> 1;
     }
     { /* Solar, $2119C */
         int span = (100 - c->weather2) / 10;
-        int r    = (uint16_t)Random();
+        int r    = (uint16_t)Random(c);
         return (span ? r % span : 0) + 5;
     }
 }
@@ -108,12 +102,12 @@ static void power_flood(City *c, int y0, int x0, int32_t *supply, int32_t *drawn
     int     y, x;
 
     /* ---- pass 1: measure ---------------------------------------- */
-    q_reset();
-    q_push(y0, x0);
-    while (!q_empty())
+    q_reset(c);
+    q_push(c, y0, x0);
+    while (!q_empty(c))
     {
         uint8_t bits, bld;
-        q_pop(&y, &x);
+        q_pop(c, &y, &x);
         if (y < 0 || y >= MAP_H || x < 0 || x >= MAP_W)
             continue;
 
@@ -150,11 +144,11 @@ static void power_flood(City *c, int y0, int x0, int32_t *supply, int32_t *drawn
     *drawn += consumers;      /* $21384 */
 
     /* ---- pass 2: distribute ------------------------------------- */
-    q_reset();
-    q_push(y0, x0); /* $21388 */
-    while (!q_empty())
+    q_reset(c);
+    q_push(c, y0, x0); /* $21388 */
+    while (!q_empty(c))
     {
-        q_pop(&y, &x);
+        q_pop(c, &y, &x);
         if (y < 0 || y >= MAP_H || x < 0 || x >= MAP_W)
             continue;
         if (!(c->xbit[y][x] & XBIT_VISITED))
@@ -254,12 +248,12 @@ static void water_flood(City *c, int y0, int x0, int32_t *cap_out, int32_t *met_
     int     y, x;
 
     /* ---- pass 1: measure ---------------------------------------- */
-    q_reset();
-    q_push(y0, x0);
-    while (!q_empty())
+    q_reset(c);
+    q_push(c, y0, x0);
+    while (!q_empty(c))
     {
         uint8_t bits, bld;
-        q_pop(&y, &x);
+        q_pop(c, &y, &x);
         if (y < 0 || y >= MAP_H || x < 0 || x >= MAP_W)
             continue;
 
@@ -315,12 +309,12 @@ static void water_flood(City *c, int y0, int x0, int32_t *cap_out, int32_t *met_
 
     /* ---- pass 2: distribute, $21BC2 ----------------------------- */
     budget = consumers;
-    q_reset();
-    q_push(y0, x0);
-    while (!q_empty())
+    q_reset(c);
+    q_push(c, y0, x0);
+    while (!q_empty(c))
     {
         uint8_t bld;
-        q_pop(&y, &x);
+        q_pop(c, &y, &x);
         if (y < 0 || y >= MAP_H || x < 0 || x >= MAP_W)
             continue;
         if (!(c->xbit[y][x] & XBIT_VISITED))
@@ -467,8 +461,8 @@ void sim_traffic_total(City *c)
 /*  $23302 computes the blur divisor as 4 - A5+0x2C8A + A5+0x2CA0, plus
  *  one when ordinance bit 0x80000 is set.  All three inputs are in the
  *  save, MISC[1037], MISC[1043] and MISC[1000].  So the whole thing is
- *  derived here rather than passed in, which is how an earlier version
- *  managed to drop the ordinance term silently. */
+ *  derived here rather than passed in, so no caller can drop the
+ *  ordinance term. */
 void sim_pollution(City *c)
 {
     int y2, x2;
@@ -493,7 +487,7 @@ void sim_pollution(City *c)
                 if (b == 5)
                     acc += 200; /* $2320E, id 5 unidentified */
             }
-            pad[y2][x2] = (int16_t)acc;
+            c->pad[y2][x2] = (int16_t)acc;
         }
     }
 
@@ -503,28 +497,28 @@ void sim_pollution(City *c)
     {
         for (x2 = 0; x2 < HALF_W; x2++)
         {
-            int32_t sum = (int32_t)pad[y2][x2] * 2;
+            int32_t sum = (int32_t)c->pad[y2][x2] * 2;
             int     div = divisor_base < 1 ? 1 : divisor_base;
             int32_t v;
 
             if (y2 > 0)
             {
-                sum += pad[y2 - 1][x2];
+                sum += c->pad[y2 - 1][x2];
                 div++;
             }
             if (y2 < HALF_H - 1)
             {
-                sum += pad[y2 + 1][x2];
+                sum += c->pad[y2 + 1][x2];
                 div++;
             }
             if (x2 > 0)
             {
-                sum += pad[y2][x2 - 1];
+                sum += c->pad[y2][x2 - 1];
                 div++;
             }
             if (x2 < HALF_W - 1)
             {
-                sum += pad[y2][x2 + 1];
+                sum += c->pad[y2][x2 + 1];
                 div++;
             }
 
@@ -777,12 +771,12 @@ void sim_demand(City *c)
 
 void sim_forest(City *c)
 {
-    int32_t y = (int32_t)(Random() & 0xFFFF) % 128; /* $34794 */
-    int32_t x = (int32_t)(Random() & 0xFFFF) % 128; /* $347AE */
+    int32_t y = (int32_t)(Random(c) & 0xFFFF) % 128; /* $34794 */
+    int32_t x = (int32_t)(Random(c) & 0xFFFF) % 128; /* $347AE */
     int32_t b = c->xbld[y][x];
 
     /*  $347D8: rubble clears itself one time in sixteen */
-    if (b == RUBBLE && (Random() & 0xF) == 0)
+    if (b == RUBBLE && (Random(c) & 0xF) == 0)
         sim_set_tile(c, (int)y, (int)x, 0);
 
     if (c->xbit[y][x] & XBIT_WATER) /* $34804 */
@@ -790,7 +784,7 @@ void sim_forest(City *c)
 
     /*  $3480E: a tile that is not already forest only gets a turn one
      *  time in sixteen */
-    if ((b < TREE_FIRST || b > 13) && (Random() & 0xF) != 0)
+    if ((b < TREE_FIRST || b > 13) && (Random(c) & 0xF) != 0)
         return;
 
     if (b >= TREE_FIRST && b < 12) /* $34828 */
@@ -798,7 +792,7 @@ void sim_forest(City *c)
 
     /*  $34846: and now the neighbor, one step in one direction, the map
      *  edge simply refusing to move */
-    switch (Random() & 3)
+    switch (Random(c) & 3)
     {
         case 0:
             if (y < 127)
@@ -848,36 +842,36 @@ void sim_news_rolls(City *c)
     int     i;
 
     /*  $348F0: one of six openings, and only the first rolls again */
-    if ((int32_t)(Random() & 0xFFFF) % 6 == 0)
+    if ((int32_t)(Random(c) & 0xFFFF) % 6 == 0)
     {
-        Random(); /* $34920 */
-        Random(); /* $3493A */
+        Random(c); /* $34920 */
+        Random(c); /* $3493A */
     }
 
     /*  $349A4: the stadium's own headline, drawn only when there is a
      *  stadium to write about */
     if (c->census[0xD7] != 0)
-        Random(); /* $349B0 */
+        Random(c); /* $349B0 */
 
     /*  $349DC .. $34AFC: eight rolls against four of the map-view
      *  averages, a coarse one and a fine one each */
-    Random(); /* $349E6 traffic   & 0x7F */
-    Random(); /* $34A10 traffic   & 0x0F */
-    Random(); /* $34A3A pollution & 0x7F */
-    Random(); /* $34A64 pollution & 0x0F */
-    Random(); /* $34A8E crime     & 0x7F */
-    Random(); /* $34AB8 crime     & 0x0F */
-    Random(); /* $34ADA jobless   & 0x3F */
-    Random(); /* $34AFC jobless   & 0x03 */
+    Random(c); /* $349E6 traffic   & 0x7F */
+    Random(c); /* $34A10 traffic   & 0x0F */
+    Random(c); /* $34A3A pollution & 0x7F */
+    Random(c); /* $34A64 pollution & 0x0F */
+    Random(c); /* $34A8E crime     & 0x7F */
+    Random(c); /* $34AB8 crime     & 0x0F */
+    Random(c); /* $34ADA jobless   & 0x3F */
+    Random(c); /* $34AFC jobless   & 0x03 */
 
     /*  $34B1C and $34B80: education and health each take one roll, and
      *  which of the two branches runs decides what it is compared
      *  against rather than whether it happens. */
-    Random(); /* $34B26 or $34B5A */
-    Random(); /* $34B8A or $34BBE */
+    Random(c); /* $34B26 or $34B5A */
+    Random(c); /* $34B8A or $34BBE */
 
     /*  $34BE6: one time in eight the deadlines are looked at */
-    r = Random() & 7;
+    r = Random(c) & 7;
     if (r == 0)
         for (i = 0; i < 17; i++)
         {
@@ -915,7 +909,7 @@ void sim_weather(City *c)
 
     if (st < 0 || st >= 12)
         st = 0;
-    roll             = (int)(Random() & 7); /* $34C74 */
+    roll             = (int)(Random(c) & 7); /* $34C74 */
     st               = WEATHER_NEXT[season * 96 + st * 8 + roll];
     c->weather_state = (int16_t)st;
     c->misc[27]      = st;
@@ -1135,7 +1129,7 @@ void sim_city_centre(City *c, int *cy, int *cx)
             sy += y;
             sx += x;
             n++;
-            pad[y][x] = 0x28;                        /* $234A8 */
+            c->pad[y][x] = 0x28;                     /* $234A8 */
             c->xbit[y][x] &= (uint8_t)~XBIT_VISITED; /* $234C6 */
         }
     /*  $234EA divides by twice the count, and the value kept in a2/a3.
@@ -1166,7 +1160,7 @@ static void build_planes(City *c)
         {
             int     hx = x / 2, qx = hx / 2;
             uint8_t b = c->xbld[y][x], t;
-            int16_t a = pad[qy][qx], w = pad[qy + 32][qx];
+            int16_t a = c->pad[qy][qx], w = c->pad[qy + 32][qx];
 
             if (b == 0)
             { /* $23582 */
@@ -1200,35 +1194,35 @@ static void build_planes(City *c)
             if (t != 0 && t < 0x10)
                 a += 12; /* $2365A */
 
-            pad[qy][qx]      = a;
-            pad[qy + 32][qx] = w;
+            c->pad[qy][qx]      = a;
+            c->pad[qy + 32][qx] = w;
         }
     }
 }
 
 /*  a 5-point mean over one of the 32x32 planes */
-static int32_t stencil(int plane_row0, int qy, int qx)
+static int32_t stencil(const City *c, int plane_row0, int qy, int qx)
 {
-    int32_t s = pad[plane_row0 + qy][qx];
+    int32_t s = c->pad[plane_row0 + qy][qx];
     int     n = 1;
     if (qy > 0)
     {
-        s += pad[plane_row0 + qy - 1][qx];
+        s += c->pad[plane_row0 + qy - 1][qx];
         n++;
     }
     if (qy < 31)
     {
-        s += pad[plane_row0 + qy + 1][qx];
+        s += c->pad[plane_row0 + qy + 1][qx];
         n++;
     }
     if (qx > 0)
     {
-        s += pad[plane_row0 + qy][qx - 1];
+        s += c->pad[plane_row0 + qy][qx - 1];
         n++;
     }
     if (qx < 31)
     {
-        s += pad[plane_row0 + qy][qx + 1];
+        s += c->pad[plane_row0 + qy][qx + 1];
         n++;
     }
     return s / n;
@@ -1284,7 +1278,7 @@ void sim_land_value(City *c)
 
             if (zone == 5 || zone == 6)
             { /* industrial */
-                v = stencil(32, qy, qx);
+                v = stencil(c, 32, qy, qx);
                 if (zone == 6)
                     v += 0x15;
                 if (64 - dist > 0)
@@ -1294,7 +1288,7 @@ void sim_land_value(City *c)
             }
             else if (zone == 3 || zone == 4)
             { /* commercial */
-                v = stencil(0, qy, qx);
+                v = stencil(c, 0, qy, qx);
                 if (64 - dist > 0)
                     v += 64 - dist;
                 v -= c->xplt[hy][hx] / 4;
@@ -1303,7 +1297,7 @@ void sim_land_value(City *c)
             }
             else
             { /* residential */
-                v = stencil(0, qy, qx);
+                v = stencil(c, 0, qy, qx);
                 if (c->xpop[qy][qx] < 0x40)
                     v += 0x15; /* $23B08 */
                 if (64 - dist > 0)
@@ -1363,7 +1357,7 @@ void sim_crime(City *c)
             int32_t v;
             if (!mask[hy][hx])
             { /* $23FCA */
-                pad[hy][hx] = 0;
+                c->pad[hy][hx] = 0;
                 continue;
             }
             v = c->xpop[qy][qx];      /* $23FF0 */
@@ -1371,7 +1365,7 @@ void sim_crime(City *c)
             v -= c->xval[hy][hx] / 4; /* $24044 */
             if (c->ordinances & 0x04)
                 v += 0x10; /* $2404E */
-            pad[hy][hx] = (int16_t)v;
+            c->pad[hy][hx] = (int16_t)v;
         }
     }
 
@@ -1380,26 +1374,26 @@ void sim_crime(City *c)
     {
         for (hx = 0; hx < HALF_W; hx++)
         {
-            int32_t s = pad[hy][hx];
+            int32_t s = c->pad[hy][hx];
             int     n = 1;
             if (hy > 0)
             {
-                s += pad[hy - 1][hx];
+                s += c->pad[hy - 1][hx];
                 n++;
             }
             if (hy < HALF_H - 1)
             {
-                s += pad[hy + 1][hx];
+                s += c->pad[hy + 1][hx];
                 n++;
             }
             if (hx > 0)
             {
-                s += pad[hy][hx - 1];
+                s += c->pad[hy][hx - 1];
                 n++;
             }
             if (hx < HALF_W - 1)
             {
-                s += pad[hy][hx + 1];
+                s += c->pad[hy][hx + 1];
                 n++;
             }
             s /= n;

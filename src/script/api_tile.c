@@ -20,6 +20,7 @@
 #include "internal.h"
 #include "mesh/internal.h"
 #include "pipeline.h"
+#include "mesh/emit.h"
 
 TileFan *api_tile_of(lua_State *L);
 
@@ -30,7 +31,7 @@ TileFan *api_tile_of(lua_State *L);
  *      Which slope its art cuts.
  *      Where it sits in the painter's stack.
  *      Whether a body of water lies on it. */
-static int t_info(lua_State *L)
+static int api_tile_info(lua_State *L)
 {
     TileFan *t = api_tile_of(L);
     if (!t)
@@ -57,7 +58,7 @@ static int t_info(lua_State *L)
  *      How high the drawn ground is there.
  *      How high the seabed under it.
  *      How high the leveled pad. */
-static int t_at(lua_State *L)
+static int api_tile_at(lua_State *L)
 {
     TileFan *t = api_tile_of(L);
     int      k = (int)luaL_checkinteger(L, 2);
@@ -73,7 +74,7 @@ static int t_at(lua_State *L)
 
 /*  A color the ground is drawn in: the tile's own from the atlas, or one
  *  of the four the ground is walled and bedded in. */
-static int t_colour(lua_State *L)
+static int api_tile_colour(lua_State *L)
 {
     TileFan    *t    = api_tile_of(L);
     const char *want = luaL_optstring(L, 2, "land");
@@ -106,7 +107,7 @@ static int t_colour(lua_State *L)
  *
  *  Whether its terrain is water at all: which is not the same question:
  *  a tile can be dry on top and still be a river's. */
-static int t_edge(lua_State *L)
+static int api_tile_edge(lua_State *L)
 {
     TileFan *t = api_tile_of(L);
     int      e = (int)luaL_checkinteger(L, 2);
@@ -127,7 +128,7 @@ static int t_edge(lua_State *L)
 
 /*  The outward normal of one edge, which a face turns to whichever side
  *  it is seen from. */
-static int t_normal(lua_State *L)
+static int api_tile_normal(lua_State *L)
 {
     TileFan *t = api_tile_of(L);
     int      e = (int)luaL_checkinteger(L, 2);
@@ -142,7 +143,7 @@ static int t_normal(lua_State *L)
 
 /*  The tile's top face, cut by the slope code its art carries: the drawn
  *  ground, or the seabed under a body of water. */
-static int t_top(lua_State *L)
+static int api_tile_top(lua_State *L)
 {
     TileFan *t    = api_tile_of(L);
     int      bed  = lua_toboolean(L, 2);
@@ -165,7 +166,7 @@ static int t_top(lua_State *L)
 
 /*  A wall between two corners: the face from one pair of heights down to
  *  another, turned to (nx, ny). */
-static int t_wall(lua_State *L)
+static int api_tile_wall(lua_State *L)
 {
     TileFan *t = api_tile_of(L);
     int      ia, ib, bed;
@@ -203,7 +204,7 @@ static int t_wall(lua_State *L)
 /*  The same wall, carrying the two heights the material reads along it.
  *  The layers of sediment at the map's cut edge run from what the tile
  *  draws down to the base. */
-static int t_wall_r(lua_State *L)
+static int api_tile_wall_r(lua_State *L)
 {
     TileFan *t = api_tile_of(L);
     int      ia, ib;
@@ -236,7 +237,7 @@ static int t_wall_r(lua_State *L)
 
 /*  The glass at the map's cut edge: a water face carrying four heights,
  *  the surface and the bed at each end. */
-static int t_glass(lua_State *L)
+static int api_tile_glass(lua_State *L)
 {
     TileFan *t = api_tile_of(L);
     int      ia, ib;
@@ -271,7 +272,7 @@ static int t_glass(lua_State *L)
 
 /*  One flat triangle over the tile, which the vertex shader drops
  *  unless the camera is looking down: the map view's zone tint. */
-static int t_tri(lua_State *L)
+static int api_tile_tri(lua_State *L)
 {
     TileFan *t = api_tile_of(L);
     float    tri[3][3], col3[3], ref[3];
@@ -298,7 +299,7 @@ static int t_tri(lua_State *L)
 
 /*  How many walls the ground came to, which the mesh counts for its own
  *  report. */
-static int t_walled(lua_State *L)
+static int api_tile_walled(lua_State *L)
 {
     TileFan *t = api_tile_of(L);
     if (t)
@@ -307,17 +308,17 @@ static int t_walled(lua_State *L)
 }
 
 static const luaL_Reg TILE[] = {
-    {"info",   t_info  },
-    {"at",     t_at    },
-    {"colour", t_colour},
-    {"edge",   t_edge  },
-    {"normal", t_normal},
-    {"top",    t_top   },
-    {"wall",   t_wall  },
-    {"wall_r", t_wall_r},
-    {"glass",  t_glass },
-    {"tri",    t_tri   },
-    {"walled", t_walled},
+    {"info",   api_tile_info  },
+    {"at",     api_tile_at    },
+    {"colour", api_tile_colour},
+    {"edge",   api_tile_edge  },
+    {"normal", api_tile_normal},
+    {"top",    api_tile_top   },
+    {"wall",   api_tile_wall  },
+    {"wall_r", api_tile_wall_r},
+    {"glass",  api_tile_glass },
+    {"tri",    api_tile_tri   },
+    {"walled", api_tile_walled},
     {NULL,     NULL    }
 };
 

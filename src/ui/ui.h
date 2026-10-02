@@ -50,6 +50,18 @@ enum
     RUI_N_DISASTERS
 };
 
+/*  ONE SLIDER of the tuning window.  The app fills these from the
+ *  renderer's own store, which the scripts declared.  So the window
+ *  keeps no list of knobs, no ranges and no defaults of its own.  A knob
+ *  with no label gets no slider: some other control owns it. */
+#define RUI_MAX_KNOBS 32
+typedef struct
+{
+    const char *label;
+    const char *group; /* a rule is drawn where this changes */
+    float       v, lo, hi, def;
+} RUiKnob;
+
 typedef struct
 {
     /* --- shown: filled by the app before the frame --------------- */
@@ -101,19 +113,15 @@ typedef struct
     int markings, furniture, margins; /* the road-marking, street-furniture and margin passes */
     /*  Outline: the roads and their works stand aside and the fitted
      *  curves and the margin network are drawn on bare ground.  A view of
-     *  its own, from the View menu, --outline, or the last of --tune. */
+     *  its own, from the View menu, --outline, or --tune show_curves=1. */
     int outline;
-    /*  The road geometry's knobs, live.
-     *
-     *      The two widths.
-     *      The tightest and widest curve each family may take.
-     *      The straight approach at a node.
-     *      The corridor margin and the junction trim.
-     *
-     *  The app fills them from the mesh and takes them back when
-     *  tune_changed. */
-    float tune[19];
-    int   tune_changed, show_tuning;
+    /*  The geometry's knobs, live.  The widths, the curves each family
+     *  may take, the approach at a node, the margin, the trim, and the
+     *  band's own.  The app fills them from the store.  It takes them
+     *  back when tune_changed. */
+    RUiKnob knob[RUI_MAX_KNOBS];
+    int     n_knob;
+    int     tune_changed, show_tuning;
     /*  The script console: one line in, the last answers out.  The app
      *  owns the state, so the UI only shows what it is given and says
      *  when a line was typed. */
@@ -143,9 +151,9 @@ typedef struct
     char    comp_gen_where[160];
     char    comp_note[1024]; /* and what that call said of the thing: lines of key, TAB, value, shown as rows */
     /*  Everything else the pointer is over, topmost first: one line each,
-     *  with its material and the height it was met at.  Two surfaces at
-     *  one point and one height are drawn over each other, which is what
-     *  a silhouette cannot show. */
+     *  with its material and the height it was met at.  Two surfaces
+     *  that share a point and a height are drawn over each other, and a
+     *  silhouette cannot show that. */
     char    comp_also[8][120];
     int     comp_n_also;
     float   comp_mat;       /* its material */

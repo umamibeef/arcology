@@ -27,7 +27,7 @@ arc.rules.node_control = function (at)
             local c, r = at.col + DU[e], at.row + DV[e]
             local tv = arc.city.at("xtrf", c, r)
             if tv then
-                arms[e + 1] = {class = arc.city.line_class(c, r), traffic = tv}
+                arms[e] = {class = arc.city.line_class(c, r), traffic = tv}
             end
         end
     end

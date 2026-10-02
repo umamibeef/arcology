@@ -21,6 +21,9 @@ extern int s_dirty;
 /*  Each surface puts its own table on `arc`, which is on the stack top
  *  when these are called. */
 void api_tune_open(lua_State *L);  /* arc.tune, arc.geo */
+/*  arc.tune.declare: one knob off a table.  The lint reads a declaration
+ *  with the same expression, so the two cannot drift. */
+int  api_tune_declare(lua_State *L);
 void api_rules_open(lua_State *L); /* arc.rules */
 void api_world_open(lua_State *L); /* arc.city, arc.mesh */
 void api_put_open(lua_State *L);   /* arc.put, arc.mat    */
@@ -29,7 +32,8 @@ void api_object_push(lua_State *L, const char *kind, void *rec); /* a handle on 
 lua_State *script_state(void);
 void api_model_open(lua_State *L); /* arc.model           */
 void api_family_open(lua_State *L); /* arc.family         */
-void api_data_open(lua_State *L);   /* arc.bytes, arc.numbers */
+void api_data_open(lua_State *L);   /* arc.bytes, arc.numbers, arc.names, arc.floats */
+void api_art_open(lua_State *L);    /* arc.art             */
 void api_fit_open(lua_State *L);    /* arc.fit             */
 /*  A family's numbers off the table on the stack top: one reading, so
  *  whoever starts it.  A rule that answers, or a script that pushes.
@@ -71,10 +75,10 @@ int api_rule_call(lua_State *L, const char *name, int nargs);
  *  good builds on a busy machine, and a guard that cries wolf is worse
  *  than none.
  *
- *  RULE_STEPS is only how often the guard looks.  RULE_SECONDS is the
- *  budget, and it is the whole of an outermost rule, nested calls
- *  included. */
-#define RULE_STEPS   1000000
+ *  RULE_CALLS is only how often the guard looks, in Lua calls.  It is a
+ *  power of two, so the test is a mask.  RULE_SECONDS is the budget,
+ *  and it is the whole of an outermost rule, nested calls included. */
+#define RULE_CALLS   4096u
 #define RULE_SECONDS 30 /* whole seconds: Lua's own formatter has no %g */
 /*  And a rule that ran away.  Raised, is NOT ASKED AGAIN until the
  *  scripts are read.  The budget is one rule call's.  A rule asked once
@@ -87,7 +91,5 @@ void api_rule_watch(lua_State *L, int on);
 
 /*  A field of the table on the stack top, as a number, or `def`. */
 float api_field_num(lua_State *L, const char *key, float def);
-int   api_take_lamps(lua_State *L, int idx, ScriptLamp *out, int max);
-int   api_take_marks(lua_State *L, int idx, ScriptMark *out, int max);
 
 #endif

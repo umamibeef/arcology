@@ -30,11 +30,27 @@
 #define MAT_ZONE      20.0f  /* a zone tint over the ground */
 #define MAT_HILITE    20.5f  /* the pointer's highlight */
 
+/*  A material is a NUMBER, and a variant is shaded from the whole
+ *  number beside it.  So a test on a material is a test on the half
+ *  step around it.  MAT_IS names one material with its variants.
+ *  MAT_IN names a run of them, from the first to the last.
+ *  MAT_ABOVE, MAT_FROM and MAT_UPTO each name everything on one
+ *  side of one. */
+#define MAT_IS(m, M)    ((m) > (M) -0.5f && (m) < (M) + 0.5f)
+#define MAT_IN(m, A, B) ((m) > (A) -0.5f && (m) < (B) + 0.5f)
+#define MAT_ABOVE(m, M) ((m) > (M) + 0.5f)
+#define MAT_FROM(m, M)  ((m) > (M) -0.5f)
+#define MAT_UPTO(m, M)  ((m) < (M) + 0.5f)
+
 /*  A script's own materials are numbered from here, one per
  *  arc.mat.define, and shaded from their parameters rather than
  *  from a branch of their own. */
 #define MAT_SCRIPT_BASE 32.0f
 #define MAT_SCRIPT_MAX  32
+
+/*  How many built-in materials there are, for a table with a
+ *  slot for each. */
+#define MAT_COUNT 23
 
 /*  The built-in materials by name, for the script bridge. */
 typedef struct

@@ -7,7 +7,7 @@ render_pixels.py drives the original per-tile renderer with its real
 blitter into a framebuffer; this renders the same rectangle with the C
 reconstruction and compares pixel for pixel.  Unlike render_diff.py this
 sees the per-shape anchor, the draw order and the palette -- everything
-that stubbing $18E96 used to hide.
+that a stubbed $18E96 hides.
 """
 import argparse
 import subprocess

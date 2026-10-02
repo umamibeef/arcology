@@ -3,6 +3,9 @@
 #include "mesh/internal.h"
 #include "pipeline.h"
 #include "incr.h"
+#include "mesh/shapes.h"
+#include "mesh/emit.h"
+#include "script.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -63,20 +66,6 @@ static int same_point(const float a[3], const float b[3])
     return a[0] == b[0] && a[1] == b[1] && a[2] == b[2];
 }
 
-/*  One flat-shaded triangle.  A ground vertex also carries what the
- *  ground material reads of the topology at its corner.  That is the
- *  curvature in the normal's fourth component.  It is also the height
- *  field's gradient, in world units, in the color's first two.  The
- *  gradient is zero when `flat` is set, for a leveled pad.  A wall
- *  vertex carries the material's reference heights instead, `ref` and
- *  `ref2` per vertex.  They are the ground the sediment's layers follow,
- *  the table and the bed the water column deepens between.  A degenerate
- *  triangle is dropped. */
-/*  Who drew what, per tile: up to eight (function, material) pairs a
- *  tile, in the order they first drew there.  The names are string
- *  literals from __func__, so the table holds pointers and costs nothing
- *  to fill.  It is written as the mesh is built and read by the
- *  inspector.  A rebuild starts it again. */
 static void box_grow(float b[6], const float p[3][3])
 {
     int k, a;
@@ -109,6 +98,11 @@ int mesh_comp_edges_key(uint32_t a, uint32_t b)
     return a == b || shape_is_ancestor(b, a);
 }
 
+/*  Who drew what, per tile: up to ORIGINS_PER_TILE (function, material)
+ *  pairs a tile, in the order they first drew there.  The names are
+ *  string literals from __func__, so the table holds pointers and costs
+ *  nothing to fill.  It is written as the mesh is built and read by the
+ *  inspector.  A rebuild starts it again. */
 #define ORIGINS_PER_TILE 24
 static struct
 {
@@ -180,7 +174,7 @@ int mesh_origin_pick(int32_t col, int32_t row, float wx, float wy, const char **
         float        mk = s_origin[i].mat[k];
         if (wx < b[0] - 0.02f || wx > b[3] + 0.02f || wy < b[1] - 0.02f || wy > b[4] + 0.02f)
             continue;
-        if (mk > 19.4f || (mk > 14.5f && mk < 15.5f))
+        if (MAT_FROM(mk, MAT_ZONE) || MAT_IS(mk, MAT_VEHICLE))
             continue; /* the map's zone tint, the show-curves highlight and the vehicles are not things to point at */
         if (best < 0)
         {
@@ -232,9 +226,18 @@ int mesh_origins(int32_t col, int32_t row, char *out, size_t n)
     return s_origin[i].n;
 }
 
-/*  Every face has a color: `col` is r, g and the material, and the
- *  material is what the whole pipeline reads a face by.  `nrm`, `ref`
- *  and `ref2` are optional.  `col` is not. */
+/*  One flat-shaded triangle.  Every face has a color: `col` is r, g and
+ *  the material, and the material is what the whole pipeline reads a
+ *  face by.  `nrm`, `ref` and `ref2` are optional.  `col` is not.
+ *
+ *  A ground vertex also carries what the ground material reads of the
+ *  topology at its corner.  That is the curvature in the normal's fourth
+ *  component.  It is also the height field's gradient, in world units,
+ *  in the color's first two.  The gradient is zero when `flat` is set,
+ *  for a leveled pad.  A wall vertex carries the material's reference
+ *  heights instead, `ref` and `ref2` per vertex.  They are the ground
+ *  the sediment's layers follow, the table and the bed the water column
+ *  deepens between.  A degenerate triangle is dropped. */
 int put_tri_r2_at(const char *where, const char *who, RMesh *m, const float p[3][3], const float *nrm, float order, const float col[3], const float *ref, const float *ref2, int flat)
 {
     /*  Only while the mesh is being built, and never in the grading
@@ -307,8 +310,8 @@ int put_tri_r2_at(const char *where, const char *who, RMesh *m, const float p[3]
         o->nrm[0] = nn[0];
         o->nrm[1] = nn[1];
         o->nrm[2] = nn[2];
-        o->nrm[3] = col[2] > 6.5f ? m->strip_class : curv; /* a strip: its class */
-        if (col[2] >= 0.5f)
+        o->nrm[3] = MAT_ABOVE(col[2], MAT_SURFACE) ? m->strip_class : curv; /* a strip: its class */
+        if (!MAT_UPTO(col[2], MAT_GROUND))
         {
             o->col[0] = ref ? ref[k] : col[0];
             o->col[1] = ref2 ? ref2[k] : col[1];
@@ -446,40 +449,11 @@ void grid_point(int32_t col, int32_t row, int k, float z, float out[3])
     out[2] = z;
 }
 
-/*  Set while a band slab is being lofted.  The slab is a two-tile band,
- *  not a one-tile strip, and nothing else about the loft changes for it
- *  yet. */
-
-/*  How far the slab rides above the ground, in altitude levels.  Spec
- *  7.2 puts the line surface 7.5 to 8 m up. 7.4.4 makes the step between
- *  one slab level and the next 7.4 m.  L1 is 7.5 m over ground, L2 is L1
- *  + 7.4, and L3 is L2 + 7.4.  A level IS that step, so the lower slab
- *  stands at exactly one and an upper slab will stand at two. */
-/*  The box girder's depth under the slab, the parapet's height above it
- *  and the bent's span along: two tiles, the spec's 30 m. */
-/*  The cap is 1.5 m deep along the slab (7.2) and the columns 1.8 m
- *  across, against the spec's 15 m tile.  Two departures from 7.2, both
- *  taken from the original's own art, which is the reference for how a
- *  raised band reads.  It stands a column under each edge of the slab
- *  every TILE, not a hammerhead on the centerline every two.  Measured
- *  off the sprites, the columns are 16 px apart in x.  This is one tile
- *  step along a slab, about 4 px wide, and they drop about 5 px below
- *  the slab's near edge.  A hammerhead on the centerline is hidden by
- *  the slab it carries at this camera.  The near edge projects eight
- *  pixels further down the screen than the centerline does.  Which is
- *  why the first build read as a slab lying on the ground. */
-
-/*  A box with a clipped skirt, and the vehicle default.  These came out
- *  of line.c, where they had accreted at the bottom under the line
- *  algorithm.  They are emit primitives, a prism, its four sides and its
- *  top.  This is the file that owns those.  The line code and the
- *  traffic both draw with them. */
-/*  A prism clipped to the tile grid, each piece in the depth slot of the
- *  tile under it.  A car had carried the order of the tile under its
- *  center.  The part of it over the next tile toward the viewer then lay
- *  under that tile's ground.  It stayed there until the center crossed,
- *  when the whole car stood up at once.  `order` is the center tile's
- *  slot with the fraction the pieces keep above each tile's ground. */
+/*  A PRISM clipped to the tile grid: a box with a skirt, which is what
+ *  a vehicle is drawn as.  Each piece takes the depth slot of the tile
+ *  under it.  So a car that straddles two tiles is not pushed under the
+ *  ground of the nearer one.  `order` is the center tile's slot, with
+ *  the fraction each piece keeps above the ground it stands on. */
 int put_prism_clip_m(RMesh *m, const RCity *c, uint8_t mask_bit, float order, float cx, float cy, float dx, float dy, float len, float wid, float zb, float zf, float z0, float z1, float paint, float mat)
 {
     static const float up[3] = {0.0f, 0.0f, 1.0f};

@@ -12,6 +12,7 @@
 #include "internal.h"
 #include "mesh/mesh.h"
 #include "net/report.h"
+#include "log.h"
 
 static int area_text(App *a, int32_t c0, int32_t r0, int32_t c1, int32_t r1, char **text)
 {
@@ -53,7 +54,7 @@ int area_report_cli(App *a, const char *spec)
     char *text = NULL;
     if (!spec || sscanf(spec, "%d,%d-%d,%d", &c0, &r0, &c1, &r1) != 4)
     {
-        fprintf(stderr, "--area wants C0,R0-C1,R1\n");
+        R_ERR("app", "--area wants C0,R0-C1,R1");
         return -1;
     }
     if (area_text(a, c0, r0, c1, r1, &text) != 0 || !text)
@@ -69,7 +70,7 @@ int area_report_cli(App *a, const char *spec)
                 char  who[1024], label[120];
                 static float pts[512];
                 int   np = 0;
-                if (a->view && a->sw.level && net_component_at(a->view, a->sw.level, cc, rr, pts, 256, &np, label, sizeof label) == 0)
+                if (a->view && net_component_at(a->view, cc, rr, pts, 256, &np, label, sizeof label) == 0)
                     dumpf("the component at %d,%d: %s, outlined by %d points\n", (int)cc, (int)rr, label, np);
                 if (mesh_origins(cc, rr, who, sizeof who) > 0)
                     dumpf("what drew the mesh on %d,%d\n%s", (int)cc, (int)rr, who);

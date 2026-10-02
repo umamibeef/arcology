@@ -6,10 +6,9 @@
 Runs the renderer with its plan and path dumps and draws the world flat:
 the ground shaded by height, the water, what each tile carries, and over
 that the corridors, their gates and the centreline fitted through them.
-A plan view is how this is worked on and argued about (the user, 3
-September 2026: "you can probably do all this in 2D for previews eh? ...
-much easier for you to see too", then "can you provide a debug view that
-allows me to inspect a city?").
+A plan view is how this is worked on and argued about: the whole of a
+corridor's routing is a flat problem, and a flat picture of it is the one
+a person can inspect.
 
     tools/plan.py Bayview out.png                 the whole map
     tools/plan.py Bayview out.png 60 100 24 24    a window on it
@@ -37,8 +36,9 @@ import struct
 import sys
 import zlib
 
-GAME = os.environ.get("ARC_CITIES") or os.path.expanduser(
-    "~/Downloads/SimCity 2000® Collection")
+from game import folder
+
+GAME = str(folder())
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 

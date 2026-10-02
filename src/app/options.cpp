@@ -115,7 +115,8 @@ const DevFlag FLAGS[] = {
     {"box-debug",   &g_dev.box_debug,   "the traffic's boxes, verbosely"                                               },
 };
 const DevValue VALUES[] = {
-    {"tune",        &g_dev.tune,         nullptr,          "the road and band knobs, as the tuning window sets them: nineteen, in its order",                                       "W_ROAD,W_RAIL,RMIN_ROAD,RMIN_RAIL,RMAX_ROAD,RMAX_RAIL,APPROACH,MARGIN,TRIM,CURVES"},
+    {"rule-seconds",&g_dev.rule_seconds, nullptr,          "the runaway guard's budget in seconds, for chasing a rule that never finishes", "N"},
+    {"tune",        &g_dev.tune,         nullptr,          "the knobs the tuning window shows, by name",                                                                            "NAME=VALUE,NAME=VALUE"},
     {"lua",         &g_dev.lua,          nullptr,          "the script the rules and the knobs are read from, watched and read again when it changes",      "FILE"                                                                     },
     {"lua-eval",    &g_dev.lua_eval,     nullptr,          "run one chunk of script once the world is built, and print what it answers",                    "SRC"                                                                      },
     {"win",         &g_dev.win,          nullptr,          "render at a larger framebuffer",                                                       "WxH"                                                                              },
@@ -172,8 +173,8 @@ extern "C" int parse_options(Startup *o, App *a, int argc, char **argv)
     app.add_option("city", pos1, "a city, by name from the cities directory or by path (or the assets directory, with the city after it)");
     app.add_option("second", pos2, "the city, when the first argument was the assets directory")->group("");
     app.add_option("--assets", assets, "where the art is")->option_text("DIR");
-    app.add_option("--zoom", a->opts.zoom, "8, 16 or 32")->option_text("N");
-    app.add_option("--scale", o->pixel_scale, "the pixel scale, 1 or 2; auto when not given")->option_text("N");
+    app.add_option(ARC_SWITCHES[ARC_SW_ZOOM].name, a->opts.zoom, "8, 16 or 32")->option_text("N");
+    app.add_option(ARC_SWITCHES[ARC_SW_SCALE].name, o->pixel_scale, "the pixel scale, 1 or 2; auto when not given")->option_text("N");
     app.add_flag("--sprites", o->sprites, "the original's terrain and water art");
     app.add_flag("--geometry", o->want_geometry, "the terrain mesh and water shader, even in a headless --run");
     app.add_flag("--terrain3d,--water3d,--roads3d", a->gv.geometry, "the same switch, by its older names");
@@ -185,8 +186,8 @@ extern "C" int parse_options(Startup *o, App *a, int argc, char **argv)
     app.add_flag("--no-furniture", no_furniture, "no street furniture: lamps, signs, signals, gates, the furniture pass off");
     app.add_flag("--no-margins", no_margins, "no margins: the carriageway alone, the margin pass off");
     app.add_flag("--outline", o->outline, "outline: the roads stand aside and the fitted curves and the margin network are drawn on bare ground");
-    app.add_flag("!--no-things", a->opts.draw_things, "no things: the sprites of what stands on the tiles");
-    app.add_flag("--underground", a->opts.underground, "the underground view");
+    app.add_flag(std::string("!") + ARC_SWITCHES[ARC_SW_NO_THINGS].name, a->opts.draw_things, "no things: the sprites of what stands on the tiles");
+    app.add_flag(ARC_SWITCHES[ARC_SW_UNDERGROUND].name, a->opts.underground, "the underground view");
     app.add_option("--centre,--center", centre, "put map tile (col,row) in the middle")->option_text("C,R");
     app.add_option("--scroll", scroll, "the canvas pixel at the top-left")->option_text("X,Y");
     app.add_option("--pick", pick, "what the query tool reads at a window point")->option_text("X,Y");
@@ -310,16 +311,6 @@ extern "C" int parse_options(Startup *o, App *a, int argc, char **argv)
     {
         a->gv.pitch = 90.0f;
         a->angle = a->gv.angle = PLAN_YAW; /* the map view: north up, east right */
-    }
-    /*  --tune w_road,w_rail,rmin_road,rmin_rail,rmax_road,rmax_rail,
-     *  approach,margin,trim,curves: the knobs the tuning window shows,
-     *  in the struct's order, for a headless render of a particular
-     *  setting.  Give as many as you mean to change.  The rest keep
-     *  their defaults. */
-    if (g_dev.tune)
-    {
-        float *t = tune_array();
-        sscanf(g_dev.tune, "%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f", &t[0], &t[1], &t[2], &t[3], &t[4], &t[5], &t[6], &t[7], &t[8], &t[9], &t[10], &t[11], &t[12], &t[13], &t[14], &t[15], &t[16], &t[17], &t[18]);
     }
     a->q_col = a->q_row = -1;
     a->us.show_palette  = 1;

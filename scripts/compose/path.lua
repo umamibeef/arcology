@@ -6,13 +6,19 @@
 --  the join walked tile by tile, which always works and always looks
 --  like it.  Which to try, and in what order, is arc.rules.join's; what
 --  lies after the far line, for the budget the join is given, is
---  arc.rules.after's.
+--  arc.rules.after's.  Which rule settles each way is named below.
 --
 --  Everything the fit MEASURES is the pipeline's -- the corridor, the
 --  lines through it, the arcs and the biarcs -- and everything it
 --  DECIDES is here.
+--  WHICH RULE READS WHICH WAY.  The pipeline lays the join the rule
+--  asked for and hands back the reading; naming the rule that settles
+--  each is this file's, so a way can be answered by a rule of another
+--  name without the pipeline hearing about it.
+local JOIN = {arc = "meet", biarc = "bridge", walk = "step"}
+
 local function stage(name, o)
-    local fn = name and arc.rules[name]
+    local fn = o and arc.rules[name]
     if fn then fn(o) end
 end
 
@@ -20,8 +26,8 @@ arc.rules.path = function (p)
     local after, join = arc.rules.after, arc.rules.join
     --  The runs the corridor lets be straight, and the chain of lines
     --  they become with the ends the fit starts and finishes at.
-    stage(p:runs())
-    stage(p:chain())
+    stage("runs", p:runs())
+    stage("chain", p:chain())
     local n = p:lined()
     for k = 0, n - 1 do
         local a, j = p:pair(k)
@@ -31,14 +37,12 @@ arc.rules.path = function (p)
             for i = 1, how and #how or 0 do
                 --  Each way is a reading of the boundary handed to a
                 --  rule of its own; the first that holds wins it.
-                local name, o = p:try(how[i])
-                local fn      = name and arc.rules[name]
-                if fn then fn(o) end
+                stage(JOIN[how[i]], p:try(how[i]))
                 if p:held() then break end
             end
         end
     end
     --  And the path it came to: the idle vertices dropped, and the
     --  radius at each of the rest.
-    stage(p:ending())
+    stage("fit", p:ending())
 end

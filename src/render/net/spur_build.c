@@ -22,6 +22,11 @@
 #include "net/net.h"
 #include "opt.h"
 #include "pipeline.h"
+#include "mesh/loft.h"
+#include "mesh/piece.h"
+#include "net/cell.h"
+#include "script.h"
+#include "prof.h"
 
 static int gix_spur_head_back = -1, gix_spur_probe_step = -1;
 
@@ -47,7 +52,7 @@ static int s_n_span;
  *  builder makes. */
 static int spur_station(const BandSpur *rp)
 {
-    float best = s_tune.band_reach;
+    float best = TUNE(band_reach);
     int   k, iref = -1;
     for (k = 0; k < s_band_nst; ++k)
     {
@@ -189,42 +194,6 @@ static int band_station_at(int band, float s_at, V2 *pos, V2 *dir)
     return 1;
 }
 
-/*  The foot F is the middle of the spur tile's line-side edge, heading
- *  at the line.  With the line opposite the slab it is the far edge
- *  across the tile.  A through line (fork 2) is met at its side at an
- *  angle, thirty degrees off its line toward the lane the spur merges
- *  into. */
-static void spur_foot_pose(const Spur *x, V2 *F, V2 *tF)
-{
-    const BandSpur *rp   = x->rp;
-    int32_t       col  = x->col;
-    int32_t       row  = x->row;
-    int           fork = x->fork;
-    if (rp->opp)
-    {
-        /* across the spur tile to the line on its far side */
-        *F  = (V2){(float)col + 0.5f - rp->toward.x * 0.5f, (float)row + 0.5f - rp->toward.y * 0.5f};
-        *tF = (V2){-rp->toward.x, -rp->toward.y};
-    }
-    else
-    {
-        *F  = rp->off ? (V2){(float)col + 0.5f + rp->along.x * 0.5f, (float)row + 0.5f + rp->along.y * 0.5f}
-                      : (V2){(float)col + 0.5f - rp->along.x * 0.5f, (float)row + 0.5f - rp->along.y * 0.5f};
-        *tF = rp->off ? rp->along : (V2){-rp->along.x, -rp->along.y}; /* at the line, square on */
-        if (fork == 2)
-        {
-            /*  A through line is met at its side at an angle off its line,
-             *  toward the lane the spur merges into. */
-            V2 dm = {tF->y, -tF->x}; /* the line direction whose right-hand lane is on the spur's side */
-            /*  Both are built slab-to-line.  An OFF spur's traffic runs
-             *  with the lane here, and an ON spur's against it, because
-             *  the spur is reversed afterwards. */
-            float ca = net_line_rules()->spur_meet_cos, sa = net_line_rules()->spur_meet_sin, tr = rp->off ? 1.0f : -1.0f;
-            *tF = (V2){dm.x * ca * tr + tF->x * sa, dm.y * ca * tr + tF->y * sa};
-        }
-    }
-}
-
 static int spur_poses(Spur *x)
 {
     const BandSpur *rp        = x->rp;
@@ -263,7 +232,7 @@ static int spur_poses(Spur *x)
      *  descent runs to the spur tile's far edge instead.  Built
      *  slab-to-line.  An ON spur is reversed afterwards. */
     {
-        const float o = net_line_rules()->spur_outer * s_tune.band_w; /* the outer lane's center, across the slab */
+        const float o = net_line_rules()->spur_outer * TUNE(band_w); /* the outer lane's center, across the slab */
         V2          pos, dir;
         if (!band_station_at(band, s_top, &pos, &dir))
         {
@@ -281,7 +250,6 @@ static int spur_poses(Spur *x)
          *  hooked at the slab.  An OFF spur
          *  travels this way.  An ON spur is reversed below. */
         tA = rp->off ? (V2){dir.x * (float)sgn, dir.y * (float)sgn} : (V2){-dir.x * (float)sgn, -dir.y * (float)sgn};
-        spur_foot_pose(x, &F, &tF);
     }
     /*  The ends stand ON A RECORDED LANE.  A takes a station of the
      *  slab's own band.  The join's end, or the foot, takes a station of
@@ -433,7 +401,7 @@ int net_spur_target_at(int *fork, int *off, float *rdx, float *rdy, float *mdx, 
     *rdx         = x->rd.x, *rdy = x->rd.y;
     *mdx         = x->mdir.x, *mdy = x->mdir.y;
     *fx          = x->F.x, *fy = x->F.y;
-    *lane_off    = s_tune.line_w * net_line_rules()->spur_lane_off;
+    *lane_off    = TUNE(line_w) * net_line_rules()->spur_lane_off;
     *merge_along = net_line_rules()->spur_merge_along;
     return 1;
 }
@@ -460,7 +428,7 @@ static void spur_join_target(const Spur *x, V2 *B, V2 *tB, V2 *trav)
  *  rule: a lane that misses that edge is not this spur's.  The route
  *  may begin far along the slab, on either side of the edge's line.
  *  So the LAST time it passes out through that line is the exit, and
- *  the earlier passes say nothing. */
+ *  the passes before it say nothing. */
 static int spur_exits(const Piece *pc, int np, V2 centre, V2 rd, float *beyond)
 {
     float total = 0.0f, run = 0.0f, ps = 0.0f, pl = 0.0f;
@@ -494,25 +462,6 @@ static int spur_exits(const Piece *pc, int np, V2 centre, V2 rd, float *beyond)
     return found;
 }
 
-/*  The join as a slide.  The route runs from the slab pose to the line's
- *  lane.  Where it meets the lane it slides along it, out to
- *  `spur_merge` tiles from the aimed point.  At the same time, the lane
- *  there is still the one aimed at.  The slab pose may first run
- *  straight, as a parallel lane beside the slab.  It runs up to half a
- *  tile short of the line's lane line, as a real spur runs before it
- *  turns.  A candidate must leave the spur tile across its line edge.
- *  The widest tightest arc wins, and the shortest run and slide among
- *  equals.  It is one arc where the slab crosses the line, and an easy S
- *  where it runs beside it.  Returns 1 with the pieces and the tightest
- *  radius.  It also answers the end pose, the slide.  The taper (the
- *  line part and a little of the spur tile, as the two-leg join's was). */
-/*  One placing: the descent starting `u` along the slab and the join
- *  sitting `at` along the line.  The radius the route holds, or why it
- *  cannot be had: "off" the lane it aimed at.  This ends the slide along
- *  the line, or "unroutable". */
-/*  One placing of the join, as far as the CHAIN it would be cut from.
- *  Cutting it is arc.rules.pieces's and the script does it.  So this
- *  stops here and band_slide_routed takes the pieces back. */
 /*  The lanes within reach of the join at `at` along the line, measured
  *  for the rule that picks one.  A join slides along the SAME lane the
  *  spur's foot fastened to.  So it asks the same question of the same
@@ -531,12 +480,16 @@ int band_slide_snap(SlideFan *s, float at)
  *  the chain arrives there.  The chain itself is the script's to build.
  *  Answers "off" where the lane picked is not the one aimed at, which
  *  ends the slide. */
-const char *band_slide_poses(SlideFan *s, float u, float at, V2 *Q, V2 *tA, V2 *pos, V2 *tb)
+const char *band_slide_poses(SlideFan *s, float u, float at, V2 *A, V2 *Q, V2 *tA, V2 *pos, V2 *tb)
 {
     const Spur *x = (const Spur *)s->spur;
     V2          d2;
     float       dist;
     s->r  = 1e9f;
+    /*  A is where the descent leaves the slab and Q where this placing
+     *  starts it, `u` further along.  Both are answered, because the
+     *  LEAD between them is part of the chain the rule builds. */
+    *A    = x->A;
     *Q    = (V2){x->A.x + x->tA.x * u, x->A.y + x->tA.y * u};
     *tA   = x->tA;
     /*  The lane the rule picked at this placing, from the candidates
@@ -553,25 +506,18 @@ const char *band_slide_poses(SlideFan *s, float u, float at, V2 *Q, V2 *tA, V2 *
     return NULL;
 }
 
-/*  And the placing built from the pieces the script cut: the descent's
- *  own straight ahead of them where it starts further along the slab.
- *  Answers the tightest arc's radius, or 0 for a placing with none. */
+/*  And the placing built from the pieces the script cut.  The whole
+ *  chain is the rule's, the lead along the slab with it: nothing is put
+ *  in front of what it answered.  Answers the tightest arc's radius, or
+ *  0 for a placing with none. */
 float band_slide_routed(SlideFan *s, const Piece *pc, int np)
 {
-    const Spur *x    = (const Spur *)s->spur;
-    int         lead = s->lead > 0.0f, k;
-    if (np < 1 || np + lead > MAX_PIECES)
+    int k;
+    if (np < 1 || np > MAX_PIECES)
         return 0.0f;
-    if (lead)
-    {
-        s->tmp[0].arc = 0;
-        s->tmp[0].a   = x->A;
-        s->tmp[0].b   = s->Q;
-        s->tmp[0].len = s->lead;
-    }
     for (k = 0; k < np; ++k)
-        s->tmp[lead + k] = pc[k];
-    s->n = np + lead;
+        s->tmp[k] = pc[k];
+    s->n = np;
     s->r = 1e9f;
     for (k = 0; k < s->n; ++k)
         if (s->tmp[k].arc && s->tmp[k].r < s->r)
@@ -611,7 +557,18 @@ void band_slide_note(const SlideFan *s, int tried, int off, int unroutable, int 
 }
 
 /*  The join slid along the slab and along the line: arc.rules.slide
- *  walks the placings. */
+ *  walks the placings.  The route runs from the slab pose to the line's
+ *  lane.  Where it meets the lane it slides along it, out to
+ *  `spur_merge` tiles from the aimed point.  At the same time, the lane
+ *  there is still the one aimed at.  The slab pose may first run
+ *  straight, as a parallel lane beside the slab.  It runs up to half a
+ *  tile short of the line's lane line, as a real spur runs before it
+ *  turns.  A candidate must leave the spur tile across its line edge.
+ *  The widest tightest arc wins, and the shortest run and slide among
+ *  equals.  It is one arc where the slab crosses the line, and an easy S
+ *  where it runs beside it.  The placing kept answers the pieces and the
+ *  tightest radius, the end pose and the slide.  It also answers the
+ *  taper: the line part and a little of the spur tile. */
 static SlideFan s_slide;
 
 static SlideFan *spur_slide_ask(const Spur *x, int lane, V2 B0, V2 tB0, V2 trav, Piece *pc, int *np, float *rmin, V2 *B, V2 *tB, float *merge, float *taper)
@@ -628,7 +585,7 @@ static SlideFan *spur_slide_ask(const Spur *x, int lane, V2 B0, V2 tB0, V2 trav,
     s.trav      = trav;
     s.parallel  = fabsf(den) <= 1e-3f;
     s.reach     = s.parallel ? 0.0f : ((B0.x - x->A.x) * nB.x + (B0.y - x->A.y) * nB.y) / den;
-    s.merge     = s_tune.spur_merge;
+    s.merge     = TUNE(spur_merge);
     s.snap      = net_line_rules()->spur_snap;
     s.taper     = net_line_rules()->spur_taper;
     s.tmp       = tmp;
@@ -666,7 +623,6 @@ static SlideFan *spur_join_ask(Spur *x, int take)
 {
     float              taper     = 0.0f, merge = -1.0f;
     const RCity       *c         = x->c;
-    const RAtlasLevel *l         = x->l;
     int                line_port = x->line_port;
     Piece             *pc        = x->pc;
     const BandSpur      *rp        = x->rp;
@@ -700,7 +656,7 @@ static SlideFan *spur_join_ask(Spur *x, int take)
     for (ej0 = 0; ej0 < 4; ++ej0)
         if ((int)lroundf(SIDE_DU[ej0]) == -(int)lroundf(rd.x) && (int)lroundf(SIDE_DV[ej0]) == -(int)lroundf(rd.y))
             break;
-    if (node_kind(c, l, net_line->f, jc0, jr0) == 2 && ej0 < 4 && rp->arm)
+    if (node_kind(c, net_line->f, jc0, jr0) == 2 && ej0 < 4 && rp->arm)
     {
         int32_t jc = jc0, jr = jr0, ej = ej0;
         line_port = lane_port_id(jc, jr, ej, rp->off ? 0 : 1, 0);
@@ -1034,7 +990,7 @@ int build_spur_loft(int i)
         return 0;
     rc = loft(s_spur_m, s_spur_c, s_spur_mask, s_spur_comp, &s_spur_loft[i].d,
               s_spur_loft[i].pc, s_spur_loft[i].np, s_spur_loft[i].total);
-    net_prof_add(NET_PROF_SPUR_LOFT, prof_now() - tp);
+    prof_add(PROF_SPUR_LOFT, prof_now() - tp);
     return rc;
 }
 
@@ -1051,7 +1007,6 @@ static struct
 {
     RMesh             *m;
     const RCity       *c;
-    const RAtlasLevel *l;
     uint8_t            mask_bit;
     int                comp;
     int32_t            row, col;
@@ -1060,12 +1015,20 @@ static struct
     int                joined, np, off, form, flat, lane_off;
     float              taper, z0, climb;
     int          live; /* a spur in hand, between the drive's two picks */
+    /*  A BAND'S END TILE, head-on.  The slab runs into the tile and the
+     *  way climbs straight across it.  There is no line to come down to.
+     *  So such a tile takes none of the stages a spur takes.  No lane at
+     *  either end, no target on a line, no join and no slide.  Its two
+     *  POSES are queued like every other chain and cut by
+     *  arc.rules.pieces. */
+    int          headon, head_cut;
+    V2           head_a, head_b, head_d;
 } s_rt;
 
-void build_spurs_begin(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit, int comp)
+void build_spurs_begin(RMesh *m, const RCity *c, uint8_t mask_bit, int comp)
 {
     memset(&s_rt, 0, sizeof s_rt);
-    s_rt.m = m, s_rt.c = c, s_rt.l = l, s_rt.mask_bit = mask_bit, s_rt.comp = comp;
+    s_rt.m = m, s_rt.c = c, s_rt.mask_bit = mask_bit, s_rt.comp = comp;
     s_n_spur_loft = 0;
     s_spur_m = m, s_spur_c = c, s_spur_mask = mask_bit, s_spur_comp = comp;
     if (s_pass != 1)
@@ -1081,12 +1044,11 @@ void build_spurs_begin(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t m
 static int spur_tile(int32_t col, int32_t row)
 {
     const RCity         *c     = s_rt.c;
-    const RAtlasLevel   *l     = s_rt.l;
     static const int32_t DC[4] = {0, 1, 0, -1}, DR[4] = {-1, 0, 1, 0}; /* N E S W */
     uint8_t              b     = c->xbld[row * R_MAP + col];
     int                  dside, rside, eside, off, lines, how;
     V2                   along, toward;
-    s_rt.fan = NULL, s_rt.joined = 0;
+    s_rt.fan = NULL, s_rt.joined = 0, s_rt.headon = 0;
     s_rt.np = 0, s_rt.form = 0, s_rt.flat = 0, s_rt.lane_off = 0;
     s_rt.taper = 0.0f, s_rt.z0 = 0.0f, s_rt.climb = 0.0f;
     if (!net_band_spur(b))
@@ -1094,21 +1056,22 @@ static int spur_tile(int32_t col, int32_t row)
     how = spur_orient(c, col, row, &dside, &rside, &eside, &along, &toward, &off, &lines);
     if (how == 2)
     {
-        /*  At a band's end, head-on: straight across from the far edge to
-         *  the slab's, climbing. */
-        float back     = geo_num(&gix_spur_head_back, "spur_head_back");
-        V2 from        = {(float)col + 0.5f - (float)DC[eside] * back, (float)row + 0.5f - (float)DR[eside] * back};
-        V2 to          = {(float)col + 0.5f + (float)DC[eside] * 0.5f, (float)row + 0.5f + (float)DR[eside] * 0.5f};
-        s_rt_pc[0].arc = 0;
-        s_rt_pc[0].a   = from;
-        s_rt_pc[0].b   = to;
-        s_rt_pc[0].len = v2len((V2){to.x - from.x, to.y - from.y});
-        s_rt.np        = 1;
-        s_rt.climb     = s_rt_pc[0].len;
-        s_rt.off       = 0;
-        s_rt.form      = 0;
-        if (g_dev.path_dump)
-            dumpf("PATH hw=%.3f\nTILES %d,%d\nGATES\nPTS %.3f,%.3f %.3f,%.3f\nRAD 0.000 0.000\nTLIM 0.000 0.000\n", (double)SPUR_HW, (int)col, (int)row, (double)from.x, (double)from.y, (double)to.x, (double)to.y);
+        /*  At a band's END, head-on: the way climbs across the tile from
+         *  behind it to the slab's own edge.  Both poses run along the
+         *  slab's axis.  The chain between them is queued here and cut
+         *  with every other, so its points are the script's.
+         *
+         *  The tile fastens to no lane at either end, so the snap is
+         *  emptied: the drive's pick then answers nothing for it. */
+        float back  = geo_num(&gix_spur_head_back, "spur_head_back");
+        s_rt.head_d = (V2){(float)DC[eside], (float)DR[eside]};
+        s_rt.head_a = (V2){(float)col + 0.5f - s_rt.head_d.x * back, (float)row + 0.5f - s_rt.head_d.y * back};
+        s_rt.head_b = (V2){(float)col + 0.5f + s_rt.head_d.x * 0.5f, (float)row + 0.5f + s_rt.head_d.y * 0.5f};
+        s_rt.headon = 1;
+        s_rt.head_cut = -1;
+        s_rt.off      = 0;
+        s_rt.form     = 0;
+        lane_snap_ask(s_rt.head_a, s_rt.head_d, 0.0f);
         return 1;
     }
     if (how == 0)
@@ -1127,8 +1090,8 @@ static int spur_tile(int32_t col, int32_t row)
     memset(&s_rt.x, 0, sizeof s_rt.x);
     s_rt.x.m = s_rt.m, s_rt.x.c = c, s_rt.x.mask_bit = s_rt.mask_bit, s_rt.x.comp = s_rt.comp;
     s_rt.x.col = col, s_rt.x.row = row, s_rt.x.pc = s_rt_pc;
-    s_rt.x.iref = -1, s_rt.x.best = s_tune.band_reach, s_rt.x.slab_lane = -1;
-    s_rt.x.line_lane = -1, s_rt.x.line_port = -1, s_rt.x.l = l;
+    s_rt.x.iref = -1, s_rt.x.best = TUNE(band_reach), s_rt.x.slab_lane = -1;
+    s_rt.x.line_lane = -1, s_rt.x.line_port = -1;
     s_rt.x.along = along, s_rt.x.toward = toward, s_rt.x.off = off;
     s_rt.x.dside = dside, s_rt.x.rside = rside, s_rt.x.eside = eside;
     s_rt.x.how = how, s_rt.x.lines = lines;
@@ -1149,18 +1112,22 @@ int build_spur_routed(void)
 {
     if (!s_rt.live)
         return 0;
+    if (s_rt.headon)
+    {
+        net_cut_reset();
+        s_rt.head_cut = net_cut_add_poses(s_rt.head_a, s_rt.head_d, s_rt.head_b, s_rt.head_d);
+        return 1;
+    }
     if (spur_route(&s_rt.x) != 0)
         s_rt.live = 0;
     return s_rt.live;
 }
 
-/*  The descent taken from the pieces the drive cut, and then the LINE
- *  end's lanes measured and left for the drive in the same way. */
 /*  The spur in hand offered to arc.rules.spur_target, once its descent
  *  is cut and before its join is drawn. */
 int build_spur_target(void)
 {
-    if (!s_rt.live)
+    if (!s_rt.live || s_rt.headon)
         return 0;
     s_spur_target.x    = &s_rt.x;
     s_spur_target.have = 0;
@@ -1168,10 +1135,30 @@ int build_spur_target(void)
     return 1;
 }
 
+/*  The descent taken from the pieces the drive cut, and then the LINE
+ *  end's lanes measured and left for the drive in the same way. */
 int build_spur_joined(void)
 {
     if (!s_rt.live)
         return 0;
+    if (s_rt.headon)
+    {
+        /*  The climb, from the pieces the drive cut for its two poses.
+         *  The whole of it is the lift, as the straight across the tile
+         *  was. */
+        int   np = 0, k;
+        float total = 0.0f;
+        if (s_rt.head_cut < 0 || net_cut_pieces(s_rt.head_cut, s_rt_pc, MAX_PIECES, &np) != 0 || np < 1)
+        {
+            s_rt.live = 0;
+            return 0;
+        }
+        for (k = 0; k < np; ++k)
+            total += s_rt_pc[k].len;
+        s_rt.np    = np;
+        s_rt.climb = total;
+        return 1;
+    }
     if (spur_routed(&s_rt.x) != 0)
     {
         s_rt.live = 0;
@@ -1199,7 +1186,7 @@ int build_spur_next(void)
  *  left for the rule that decides how far along it the spur meets. */
 SlideFan *net_spur_slide(void)
 {
-    if (!s_rt.live)
+    if (!s_rt.live || s_rt.headon)
         return NULL;
     s_rt.fan    = spur_join_ask(&s_rt.x, 1);
     s_rt.joined = 1;

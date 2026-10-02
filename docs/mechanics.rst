@@ -99,6 +99,15 @@ The three delays are a word table at ``A5+0x0C9A`` indexed by the speed: 0, 0, 3
 
 Two more schedules hang off the same counter. The thing stepper, which moves the trains, boats and aircraft, runs at most every 15 ticks at any speed above 1, and every 30 in city mode 2. The palette animation runs in ``idlePump``: the 49-entry run at indices 155 to 203 turns every 12 ticks and the 15-entry run at 224 to 238 every 90 ticks, each through a permutation table (``A5-0x64B0`` and ``A5-0x644E``, 49 and 15 words) rather than a plain shift. Speed 5 skips both runs, and speed 1 skips them too.
 
+.. admonition:: The season is derived, not saved
+   :class: caution
+
+   ``A5+0x1E34`` is the season, ``((month + 1) % 12) / 3``. Neither it nor
+   the month is in MISC: phase 0 computes both from the date. A harness
+   that loads a city and leaves the season at zero puts the weather walk
+   on the wrong row of its table, and the weather state then differs with
+   no error in the model.
+
 Phase 0 begins by refreshing the month and the year count from the date (``$01523E``, ``$015268``) before the budget reads them. Phase 22 promotes the city a stage when its population exceeds the next rung of a ten-entry ladder at ``A5-0x3ED8`` -- 2,000, 10,000, 30,000, 60,000, 90,000, 120,000, 500,000, 1,000,000 and 5,000,000, indexed by ``MISC[8]`` plus one -- then runs the scenario check and declares bankruptcy below -100,000 in funds. The newspaper, the reward prompt and the graph windows that the last three phases draw are interface, not simulation.
 
 Two thirds of the clock is growth. That is the single most important structural fact about this simulation: the map is not swept every tick. It is divided into a 4×4 lattice, and each of the sixteen growth phases visits one residue class — phase 3 takes every tile where ``y≡0, x≡0 (mod 4)``, phase 4 takes ``y≡0, x≡1``, and so on. Over sixteen days every tile is visited exactly once.
@@ -417,7 +426,28 @@ Pass one measures, pass two spends
 
 The first pass walks the network from a source and adds up how much capacity it can reach, marking every tile it touches with a scratch bit. The second pass re-walks the *same marks*, switching tiles on while the budget lasts, spending one unit per tile that carries a building, and clearing the mark behind it as it goes.
 
+.. admonition:: The plant rolls are unconditional
+   :class: caution
+
+   The solar plant at ``$211B2`` and the wind plant at ``$211EA`` draw
+   first and divide afterwards, and the value the divide sees is the whole
+   sixteen-bit word. The solar span is ``(100 - weather2) / 10`` and
+   reaches zero when cloud cover passes ninety. A guard that skips the draw
+   when the span is zero also skips a die, and every later decision
+   shifts. The guard belongs on the division alone.
+
 Neighbours are pushed west, north, east, south. Because the second pass hands out capacity in queue order, **traversal order decides which tiles brown out** when a network is short — this is not a global "supply vs demand" comparison but a first-come-first-served walk.
+
+.. admonition:: The power ordinance boosts the draw, not the capacity
+   :class: caution
+
+   ``$21354`` adds the raw generated total to the capacity global at
+   ``A5+0x11D6``, and only then does ``$2135C`` test the ordinance bit and
+   add a twelfth to the working total. The extra twelfth raises the ceiling
+   that consumers are clamped against at ``$21374``. It does not raise the
+   capacity the percentage divides by at ``$2107A``. Boosting first
+   inflates the capacity by exactly 13/12 while every powered bit stays
+   right.
 
 The queue drops work on the floor
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -452,6 +482,16 @@ The city scan
 .. rubric:: cityScanPass (``$2317E``) · phase 2 · nine stages in one walk
 
 One routine produces pollution, the city centre, land value, police and fire coverage, population density and crime — in that order, in a single pass. They are not independent: each stage reads what the last one left.
+
+.. admonition:: Drive the passes in the clock's order
+   :class: caution
+
+   The scan also reads what the two grid phases leave. ``$217D2`` in the
+   water grid sets the water-treatment flag at ``A5+0x2CA0`` when the
+   treatment plants cover the whole delivered total, and ``$23308`` adds
+   that flag to the pollution blur divisor. A checker that runs the scan
+   alone keeps the flag's saved value and certifies a state the game never
+   has. Run phases 1 and 20 before phase 2, as the clock does.
 
 Stage 1–2 · Pollution
 ~~~~~~~~~~~~~~~~~~~~~
@@ -722,6 +762,18 @@ A developed building is only processed at the one corner tile that carries the r
    This is the population model.  Phase 21 sums accum8[1..6] and
    multiplies by ten; that number is the city population.
 
+.. admonition:: Read a table as far as the original reads it
+   :class: caution
+
+   ``$31D2E`` reads the tier as ``words(A5-0x1570)[id - 0x70]``, and the
+   table holds 86 entries. A runway standing on a zoned tile indexes it at
+   116, past the end into the neighbouring A5 data, and ``$31DF4`` then
+   credits ``GROWTH_TABLE`` at that value, past its own 32 entries. The
+   data there is stable and the original acts on it, so ``gen_tables.py``
+   reads 144 entries of the tier and flag tables and 515 of
+   ``GROWTH_TABLE``. Clamping the index, or reading zero, changes one
+   accumulator by thousands.
+
 Then the tile rolls for change. Whether it can grow at all depends on two gates: is there power at or next to it, and **can a journey be made from it**. If either fails, demand is treated as zero and the tile has the full 4000 of headroom.
 
 ::
@@ -843,6 +895,17 @@ Placing a building
    the block hangs DOWN and to the LEFT of the tile given
    a 1×1 keeps all four corner bits; bigger buildings carry one bit
    per corner and nothing in between
+
+.. admonition:: The corner bits go round the block, not across it
+   :class: caution
+
+   XZON's high nibble marks the four corners of a footprint, and the codes
+   run counter-clockwise from the top-left: ``0x10`` top-left, ``0x20``
+   bottom-left, ``0x40`` bottom-right, ``0x80`` top-right. Every placer
+   writes them in that order, and the church's four writes are unrolled
+   (``$328EC``, ``$32916``, ``$32938``, ``$3296E``). A raster loop over
+   the rows and columns puts ``0x20`` and ``0x40`` on the wrong diagonal,
+   and the renderer reads that as a building facing the other way.
 
 Which building appears is drawn from a group of five kinds by four tiers — except for the smallest residential group, where **land value picks the sub-group**: three bands of four, so poor land gets the shacks and rich land gets the houses.
 
@@ -1218,6 +1281,15 @@ What's verified, and how
 Two measurements, answering different questions. Both count only cells non-zero in one or both — scoring across every cell is inflated by empty countryside.
 
 The strictest of them is the random stream. The simulation draws from seven different generators, and reproducing the *sequence* of draws — same generator, same value, same order — means the reconstruction is taking the same branches as the original, not merely arriving at a similar answer. A layer can match by luck; a stream of tens of thousands of draws cannot.
+
+.. admonition:: Seed both sides, or the first draw lies
+   :class: caution
+
+   The save file does not hold the generator seed, and the interpreter
+   keeps whatever the file left at ``A5+0x11DC``. A checker that seeds the
+   C with ``rng_seed(1, 1)`` sets ``A5+0x11DC = 1`` and ``e.tb_seed = 1``
+   on the oracle before the run. A divergence at draw 0 is the harness,
+   not the model.
 
 It is not a complete test on its own, though, and it is worth saying why. A block of code that consumes no randomness is invisible to it: ``$35CAE``, which sets the dirty-industry index the pollution blur divides by, was missing from the economy pass while every dice comparison passed and one city's pollution ran ten per cent high. The layer diff caught it. Neither measurement replaces the other.
 

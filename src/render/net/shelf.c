@@ -3,7 +3,7 @@
  *  What a strip asks of the ground under it, and the graded surface
  *  every later stage reads back.  A shelf is notched per corner and per
  *  node.  How deep and how steep is the family's own declared grade and
- *  arc.rules.flies's, not this file's. */
+ *  the rule its family declared for a flight, not this file's. */
 #include <math.h>
 #include <string.h>
 
@@ -12,6 +12,9 @@
 #include "net/net.h"
 #include "dump.h"
 #include "opt.h"
+#include "mesh/loft.h"
+#include "mesh/surface.h"
+#include "script.h"
 
 float   s_zlow[GRID * GRID];
 uint8_t s_corr[GRID * GRID]; /* the corner belongs to a corridor: its height is the corridor's */
@@ -217,11 +220,6 @@ float s_zdist[GRID * GRID]; /* how far the nearest station that set it was */
  *  looking at: are their own jobs and stand on their own here.
  *  ------------------------------------------------------------------ */
 
-/*  The corridor's own surface: the shelf the band lies on, notched out
- *  of the terrain rather than laid over it. */
-/*  Heights only: this stage writes the shelf the corridor's tiles wear
- *  and emits no geometry of its own.  This is why it needs neither the
- *  mesh nor the city. */
 /*  The station's own tile's four corner heights, flat across the band
  *  and graded along it.  Each corner projects onto the centerline and
  *  takes the profile's height there, the nearest station owning it.
@@ -246,6 +244,10 @@ static void surface_tile_shelf(const Sample *smp, int ns, int i, int32_t tc, int
     }
 }
 
+/*  The corridor's own surface: the shelf the band lies on, notched out
+ *  of the terrain rather than laid over it.  Heights only: this stage
+ *  writes the shelf the corridor's tiles wear and emits no geometry of
+ *  its own.  This is why it needs no mesh. */
 int loft_surface(const RCity *c, uint8_t mask_bit, Sample *smp, int ns, float hw, const RLoft *d)
 {
     const uint32_t edge = ++s_lofts; /* this strip, for as long as it is graded: an edge of the network */

@@ -1,7 +1,7 @@
 /*  band.c: THE BAND'S STORES, AND WHAT IT READS THE MAP WITH.
  *
  *  Which building bytes are a band, and which way each band runs, as
- *  arc.rules.band_tiles says.  The free-air corridor a slab may sweep
+ *  arc.bands says.  The free-air corridor a slab may sweep
  *  over, bounded by the script's `slab_air` table and reaching as far as
  *  its pushed `corridor` numbers allow.  The lane drop offered to
  *  arc.rules.drop.  And:
@@ -19,7 +19,7 @@
  *
  *  Nothing here decides anything.  Which cells form a band is
  *  scripts/compose/bands.lua's, and where a spur joins is
- *  arc.rules.spur_arm's and arc.rules.spur_target's. */
+ *  arc.rules.spur_target's. */
 #include <string.h>
 
 #include "dump.h"
@@ -29,6 +29,7 @@
 #include "net/net.h"
 #include "opt.h"
 #include "pipeline.h"
+#include "script.h"
 
 int gix_slab_ground_margin = -1;
 BandSpur s_band_spurs[MAX_SPURS];
@@ -95,23 +96,6 @@ void net_spur_snap_is(const char *what, int band)
 }
 
 
-/*  The lane drop (spec 7.3): what a spur took from the slab at each
- *  station.  The table is by tile and map side.  A station's right and
- *  left are read off its heading.  Within a tile the taper's progress is
- *  the station's distance from the tile's edge nearest the spur.  It
- *  runs along the taper's direction.  So a gore narrows linearly across
- *  its tile.  The strip comes down in a straight line over the descent,
- *  from the slab's height at the gore to the spur tile's ground. */
-/*  The lane drop (spec 7.3) at each station of a slab.  For every spur
- *  whose point on the centerline lies on this band the slab narrows on
- *  the spur's side.  It narrows by ARC LENGTH from that point.  It goes
- *  through curve blocks as easily as along a straight, over the taper.
- *  The slab tile itself and the descent come first.  Then comes the
- *  gore, the taper's last tile, where the slab widens back and the
- *  lane's own sliver sits level beside it.  Toward the line the slab
- *  stays two lanes as far as a partner spur's point within seven tiles,
- *  else widens back over one.  A spur beside a curve drops its lane from
- *  the curve like any other. */
 /*  Station i of the slab: how far along it is, where it stands and which
  *  way it heads.  Spur r: the point on the centerline it drops from, its
  *  own tile's center, the way it runs, how long its taper is.  Whether
@@ -223,7 +207,7 @@ void band_lane_stations(Sample *smp, int ns)
     d.smp    = smp;
     d.n      = ns;
     d.nspurs = s_band_nspurs;
-    d.reach  = s_tune.band_reach;
+    d.reach  = TUNE(band_reach);
     d.narrow = BAND_LANE_IN;
     s_drop   = d;
     band_lane_cut_clear();
@@ -240,29 +224,23 @@ void band_lane_stations(Sample *smp, int ns)
 /*  A slab's works beside the slab: its piers and what stands with them.
  *  The family's works hook is EMPTY.  The bents' caps and columns every
  *  BAND_BENT all take their offsets in whole tiles.  This stands them
- *  clear of a slab whose width is s_tune.band_w.  Drawing them again
+ *  clear of a slab whose width is the band_w knob.  Drawing them again
  *  means measuring those offsets from the slab's own width instead. */
 
 /* ---- raised bands (the line spec, part 7) --------------------------- */
 
-/*  A band is not one tile wide.  Its slab is a TWO-TILE BAND, the spec's
- *  2x2 segment.  So its centerline runs along the seam between two rows
- *  or two columns, never through a tile center.  The whole segment
- *  pipeline above (which walks tile to tile) cannot express it.  This
- *  walks the band instead and hands the ordinary loft a spine that is
- *  offset half a tile across.  Which ids are which was read off the
- *  shipped cities, not the sprite sheet: see the Part 7 section of
- *  docs/future.rst.  Every one of these is ALWAYS part of a 2x2 square
- *  of band (6905 of 6905 for 0x49).  The id alone says which way the
- *  band runs, because an interior tile of a two-wide band has two
- *  neighbors along it and one across.  The six meets are SLAB tiles too:
- *  0x4D is a slab in an east-west band with a second family underneath.
- *  The line below it is drawn by the thread family, not this one. */
 /*  Is this building byte a band.  Which way does its band run? 1 for a
  *  slab tile, 2 for a spur of the band, 3 for an on-spur, 0 for anything
- *  else.  Which bytes are which is arc.rules.band_tiles, read once a
+ *  else.  Which bytes are which is arc.bands, read once a
  *  generation into a table, since every tile of the map is looked up in
- *  it. */
+ *  it.  Which ids are which was read off the shipped cities, not the
+ *  sprite sheet: see the Part 7 section of docs/future.rst.  Every one
+ *  of these is ALWAYS part of a 2x2 square of band across the whole
+ *  collection.  The id alone says which way the band runs, because an
+ *  interior tile of a two-wide band has two neighbors along it and one
+ *  across.  A meet is a SLAB tile too: a slab in a band of one axis with
+ *  a second family underneath.  The line below it is drawn by the thread
+ *  family, not this one. */
 static int band_kind(uint8_t b, int *east_west)
 {
     const unsigned char *kind, *ew;
@@ -324,11 +302,10 @@ int band_is_incline(uint8_t b)
  *  per walk. */
 static uint8_t s_free[R_MAP * R_MAP];
 static uint8_t s_corr_h[R_MAP * R_MAP];
-static float   s_band_top[R_MAP * R_MAP]; /* a structure's top, in levels of altitude.  0 where none */
-static uint8_t s_rise_said[256];           /* --band-dump: each building's rise, once */
+static uint8_t s_rise_said[256]; /* --band-dump: each structure's rise, once */
 static int     s_corr_reach, s_corr_climb, s_corr_spurs; /* the corridor the script pushed */
 
-void band_free_air(const RCity *c, const RAtlasLevel *l)
+void band_free_air(const RCity *c)
 {
     static const char *const CORR[3] = {"reach", "climb", "spurs"};
     const unsigned char     *air     = script_bytes("slab_air");
@@ -338,63 +315,34 @@ void band_free_air(const RCity *c, const RAtlasLevel *l)
      *  others, which is a band that cannot be fitted at all. */
     script_numbers("corridor", CORR, ans, 3);
     s_corr_reach = (int)ans[0], s_corr_climb = (int)ans[1], s_corr_spurs = ans[2] > 0.5f;
+    /*  How high a structure stands, and whether it can be measured at
+     *  all, are read off the pictures by a script
+     *  (scripts/art_tiles.lua).  A byte the art set cannot show leaves
+     *  nothing to measure, and a tile no measurement can be taken of is
+     *  out of the corridor. */
+    const unsigned char *seen = script_bytes("structure_seen");
+    const float         *rise = script_floats("structure_rise");
     for (i = 0; i < R_MAP * R_MAP; ++i)
     {
         /*  A surface network is not in the way of a viaduct: the slab
          *  crosses over it on a straddle bent (spec 7.2).  Another slab
          *  is, being at the same height.  A structure, a building, a
-         *  park, anything from 0x69, is not in the way at all: the slab
-         *  is raised.  Would rather the slab take the air and the
-         *  building renderer keep buildings off it later.  How high each
-         *  stands is still measured, for --band-dump, in case that
-         *  changes.  The height is the sprite's own.  The art rises `ay`
-         *  above the left corner of its diamond.  The top corner of that
-         *  diamond is half the footprint's diamond above that.  The rest
-         *  is building, alt_step pixels to the level.  Not the bounding
-         *  box, though.  A chimney, an antenna or a flag would make a
-         *  shed a tower.  But the bulk: the first row down from the top
-         *  with paint across two fifths of the diamond's width.  A tree
-         *  stands about a level and a house one.  A warehouse stands
-         *  about two levels and a third to its box, and less to its
-         *  roof.  One the art set cannot show is a wall. */
-        uint8_t      b = c->xbld[i];
-        const RTile *t;
-        int32_t      ybulk;
-        s_band_top[i] = 0.0f;
+         *  park, anything a script calls raised ground, is not in the
+         *  way at all: the slab is over it.  Would rather the slab take
+         *  the air and the building renderer keep buildings off it
+         *  later.  How high each stands is measured all the same, in
+         *  case that changes. */
+        uint8_t b = c->xbld[i];
         if (air[b] < 2)
         {
             s_free[i] = air[b] ? 1 : 0;
             continue;
         }
-        /*  Free air whose height is worth measuring.  A sprite the art
-         *  set cannot show leaves nothing to measure, and a tile no
-         *  measurement can be taken of is out of the corridor. */
-        t = l ? atlas_tile(l, l->id_base + b) : NULL;
-        if (!t || l->alt_step <= 0)
+        s_free[i] = seen[b] ? 1 : 0;
+        if (seen[b] && g_dev.band_dump && !s_rise_said[b])
         {
-            s_free[i] = 0;
-            continue;
-        }
-        for (ybulk = 0; ybulk < (int32_t)t->h; ++ybulk)
-        {
-            int32_t x, n = 0;
-            for (x = 0; x < (int32_t)t->w; ++x)
-                if ((int32_t)l->indices[((size_t)t->y + (size_t)ybulk) * (size_t)l->w + (size_t)t->x + (size_t)x] != l->transparent)
-                    ++n;
-            if (5 * n >= 2 * (int32_t)t->foot * l->tile_w)
-                break;
-        }
-        {
-            float rise = ((float)t->ay - 0.5f * (float)t->foot * (float)l->tile_h - (float)ybulk) / (float)l->alt_step;
-            if (rise < 0.0f)
-                rise = 0.0f;
-            s_band_top[i] = (float)rcity_alt_ground(c->altm[i]) + rise;
-            s_free[i]      = 1;
-            if (g_dev.band_dump && !s_rise_said[b])
-            {
-                s_rise_said[b] = 1;
-                dumpf("band rise: xbld %02x foot %d box %.2f bulk %.2f levels\n", (unsigned)b, (int)t->foot, (double)(((float)t->ay - 0.5f * (float)t->foot * (float)l->tile_h) / (float)l->alt_step), (double)rise);
-            }
+            s_rise_said[b] = 1;
+            dumpf("band rise: xbld %02x  %.2f levels\n", (unsigned)b, (double)rise[b]);
         }
     }
 }
@@ -403,7 +351,7 @@ const uint8_t *band_corridor(const RCity *c, const int32_t *own, int n_own, int 
 {
     int k;
     /*  The reach beside the band and the climb it allows are
-     *  arc.rules.corridor's, read once a build.  The bulk measured above
+     *  arc.numbers("corridor")'s, read once a build.  The bulk measured above
      *  is kept for --band-dump. */
     memset(s_corr_h, 0, sizeof s_corr_h);
     for (k = 0; k < n_own; ++k)

@@ -9,6 +9,9 @@
 #include "pipeline.h"
 #include "mesh/model.h"
 #include "script.h"
+#include "mesh/shapes.h"
+#include "mesh/emit.h"
+#include "mesh/surface.h"
 
 /*  Every model is a SCRIPT'S.  Nothing here ships a prop's shape.  A
  *  name appears the moment a file under scripts/models defines it, and a
@@ -61,10 +64,6 @@ int net_model_shape(int model, float size, const ModelHead **head, const ModelPa
     return s_n[model];
 }
 
-/*  One model, at (x, y) facing (fx, fy).  A part's `w` is across the
- *  facing and `d` along it, so a prop turned to face another way keeps
- *  its shape.  With the facings on the tile's own axes that is the two
- *  swapping over. */
 /*  A model stood on the ground, at its own size and with no phase and no
  *  group.  A caller that wants any of those three asks net_model_put_on,
  *  which is the same call with them. */
@@ -74,6 +73,10 @@ int net_model_put(int model, RMesh *m, const RCity *c, uint8_t mask_bit, float o
     return net_model_put_on(model, m, c, mask_bit, order, x, y, fx, fy, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0);
 }
 
+/*  One model, at (x, y) facing (fx, fy).  A part's `w` is across the
+ *  facing and `d` along it, so a prop turned to face another way keeps
+ *  its shape.  With the facings on the tile's own axes that is the two
+ *  swapping over. */
 int net_model_put_on(int model, RMesh *m, const RCity *c, uint8_t mask_bit, float order,
                      float x, float y, float fx, float fy, float size, float phase, float group,
                      float base, float base2, int on_base)

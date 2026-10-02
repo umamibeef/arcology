@@ -57,17 +57,6 @@ static int32_t tile_alt(uint16_t altm, uint8_t xter)
     return (int32_t)rcity_alt_surface(altm, xter);
 }
 
-/*  Is this the tile the building is drawn at?  The game's own test is a
- *  single AND ($1732C): andi.w #$f0, d0   .  The corner nibble and.w
- *  $122a(a5), d0  .  G_rotTable[rotation], set at $1545E beq  skip but
- *  it is only reached for some XBLD ranges.  Roads, rail, power lines
- *  and trees (XBLD < 0x61) are drawn through paths that never test it
- *  ($17528, $1775E).  This is why they carry no corner bits at all.
- *  Getting this wrong in either direction is visible.  Testing the mask
- *  on everything discards 68% of what is built.  Skipping the test on
- *  everything unzoned draws each large building once per interior tile.
- *  A 3x3 carries corner bits on only its four corners, so five of its
- *  nine tiles have a zero nibble, and a 4x4 has twelve. */
 /*  Traffic, from $17612.  Cars come from the XTRF density layer.  They
  *  do not come from XTHG.  A line tile draws one when the density at
  *  (row/2, col/2) passes a threshold.  A heavier variant above a second
@@ -119,6 +108,17 @@ static int32_t traffic_car(const RCity *c, int32_t idx, int32_t row, int32_t col
     return 399 + k;
 }
 
+/*  Is this the tile the building is drawn at?  The game's own test is a
+ *  single AND ($1732C): andi.w #$f0, d0   .  The corner nibble and.w
+ *  $122a(a5), d0  .  G_rotTable[rotation], set at $1545E beq  skip but
+ *  it is only reached for some XBLD ranges.  Roads, rail, power lines
+ *  and trees (XBLD < 0x61) are drawn through paths that never test it
+ *  ($17528, $1775E).  This is why they carry no corner bits at all.
+ *  Getting this wrong in either direction is visible.  Testing the mask
+ *  on everything discards 68% of what is built.  Skipping the test on
+ *  everything unzoned draws each large building once per interior tile.
+ *  A 3x3 carries corner bits on only its four corners, so five of its
+ *  nine tiles have a zero nibble, and a 4x4 has twelve. */
 static int draws_here(uint8_t xzon, uint8_t xbld, uint8_t mask)
 {
     uint8_t corners = (uint8_t)(xzon & 0xF0u);
@@ -434,15 +434,6 @@ static int underground_tiles(const RCity *c, int32_t idx, uint8_t mask, int32_t 
     return n;
 }
 
-/*  One moving thing, from $A032.
- *
- *    00A052  the type is at +0
- *    00A05E  skip entirely if g_zoom < R_THING_MINZOOM[type]
- *    00A0BA  dispatch on type through the jump table at $A0BE.  Types 12
- *            and 13 land on $A128, a bare branch to the exit
- *    00A13A  most arms take base = R_THING_SHAPE[type] and add a frame
- *            chosen by the heading at +1, mirrored for the headings that
- *            reuse a sprite */
 /*  Road vehicles, thing types 10 and 11 ($A7E0).  The sprite follows the
  *  ROAD under the vehicle, not its heading.  Returns the slot, or -1 for
  *  "do not draw".  *raise is 1 when the sprite sits one altitude level
@@ -514,6 +505,15 @@ static int bridge_is_raised(const RCity *c, int32_t col, int32_t row)
     return 0;
 }
 
+/*  One moving thing, from $A032.
+ *
+ *    00A052  the type is at +0
+ *    00A05E  skip entirely if g_zoom < R_THING_MINZOOM[type]
+ *    00A0BA  dispatch on type through the jump table at $A0BE.  Types 12
+ *            and 13 land on $A128, a bare branch to the exit
+ *    00A13A  most arms take base = R_THING_SHAPE[type] and add a frame
+ *            chosen by the heading at +1, mirrored for the headings that
+ *            reuse a sprite */
 static void draw_thing(Emitter *e, const RCity *c, int32_t idx, const uint8_t *rec, int32_t zoom_level, int32_t sx, int32_t sy)
 {
     const RAtlasLevel *l    = e->l;

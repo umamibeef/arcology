@@ -539,23 +539,56 @@ void gpu_set_light(RGpu *g, float x, float y, float z, float ambient, float diff
     g->params[1] = g->params[2] = g->params[3] = 0.0f;
 }
 
-/*  Terrain art: the land shapes 256..269 (269 is also the map-edge dirt
- *  column), which the mesh replaces.  And the water art 270..290.  Open
- *  water, the shore shapes, the water column 284 and the channel pieces
- *  285..290 that XTER 0x40..0x45 draw.  Which the water shader paints
- *  inside.  Everything else the terrain pass paints: lot tints,
- *  data-view tints, the power markers: stays a sprite whatever is
- *  switched on. */
+/*  WHICH RUN OF SPRITES a picture belongs to.  The land the mesh
+ *  replaces, the water the water shader paints inside, the wireframe
+ *  lattice of an empty underground tile, and a train.  Which ids are
+ *  which is the ART SET'S own numbering, so a script names the runs
+ *  (arc.numbers("art_runs"), scripts/art_tiles.lua) and this reads them.
+ *  Everything else the terrain pass paints: lot tints, data-view tints,
+ *  the power markers: stays a sprite whatever is switched on. */
+static const char *const ART_RUNS[9] = {
+    "land_first", "land_last", "water_first", "water_last", "water_column",
+    "lattice_first", "lattice_last", "train_first", "train_last"};
+enum
+{
+    AR_LAND0,
+    AR_LAND1,
+    AR_WATER0,
+    AR_WATER1,
+    AR_WATER_COL,
+    AR_LATTICE0,
+    AR_LATTICE1,
+    AR_TRAIN0,
+    AR_TRAIN1
+};
+
+/*  Read once a generation: every sprite of every frame asks. */
+static const int32_t *art_runs(void)
+{
+    static int32_t run[9];
+    static int     gen = -1;
+    if (gen != script_generation())
+    {
+        float ans[9] = {0};
+        int   i;
+        gen = script_generation();
+        script_numbers("art_runs", ART_RUNS, ans, 9);
+        for (i = 0; i < 9; ++i)
+            run[i] = (int32_t)ans[i];
+    }
+    return run;
+}
+
 static uint8_t terrain_kind(int32_t tile)
 {
-    if (tile >= 305 && tile <= 318)
-        return K_UG_LATTICE; /* $164A2: the wireframe lattice of an empty tile,
-                              *  0x131 + the terrain code (0x13E is the last) */
-    if (tile == 284)
+    const int32_t *r = art_runs();
+    if (tile >= r[AR_LATTICE0] && tile <= r[AR_LATTICE1])
+        return K_UG_LATTICE;
+    if (tile == r[AR_WATER_COL])
         return K_WATER_COL;
-    if (tile >= 270 && tile <= 290)
+    if (tile >= r[AR_WATER0] && tile <= r[AR_WATER1])
         return K_WATER_ART;
-    if (tile >= 256 && tile <= 269)
+    if (tile >= r[AR_LAND0] && tile <= r[AR_LAND1])
         return K_LAND_ART;
     return K_TERRAIN;
 }
@@ -598,6 +631,9 @@ int gpu_set_ops(RGpu *g, const ROpList *ops, const RSweep *sw)
      *  since a table lookup by name for every sprite of every frame is
      *  the same answer over and over. */
     const uint8_t *meshed = script_bytes("meshed_tiles");
+    /*  And which were PLACED rather than grown, whose art the map view
+     *  keeps.  Read once for the same reason. */
+    const uint8_t *placed = script_bytes("placed_tiles");
     for (k = 0; k < ops->n; ++k)
     {
         const ROp   *op = &ops->v[k];
@@ -655,12 +691,13 @@ int gpu_set_ops(RGpu *g, const ROpList *ops, const RSweep *sw)
         {
             /*  The underground lattice is emitted as a plain sprite, not
              *  as terrain.  It is the empty tile's art all the same. */
-            int32_t sh         = op->shape - l->id_base;
-            g->kind[g->n_inst] = (sh >= 305 && sh <= 318)                       ? K_UG_LATTICE
+            int32_t        sh  = op->shape - l->id_base;
+            const int32_t *r   = art_runs();
+            g->kind[g->n_inst] = (sh >= r[AR_LATTICE0] && sh <= r[AR_LATTICE1]) ? K_UG_LATTICE
                                  : (sh >= 0 && sh < 256 && meshed[sh])          ? K_LINE_ART
                                  : (op->stencil >= 0)                           ? K_CAR
-                                 : (sh >= 374 && sh <= 378)                     ? K_TRAIN
-                                 : (sh >= 0xC6 && sh <= 0xFF)                   ? K_LANDMARK
+                                 : (sh >= r[AR_TRAIN0] && sh <= r[AR_TRAIN1])   ? K_TRAIN
+                                 : (sh >= 0 && sh < 256 && placed[sh])          ? K_LANDMARK
                                                                                 : K_SPRITE;
         }
         /*  misc[0] is the op's painter's slot times 256.  It adds the

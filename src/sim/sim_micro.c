@@ -178,8 +178,8 @@ static void micro_init(City *c, int slot, int bld)
             break;
         case 0xF3: /* the mayor's house, $10006 */
             micro_set_w(r, 0, year);
-            micro_set_w(r, 1, (int)((uint16_t)Random() % 30) + 10); /* $1001E */
-            micro_set_w(r, 2, (int)((uint16_t)Random() % 60));      /* $10040 */
+            micro_set_w(r, 1, (int)((uint16_t)Random(c) % 30) + 10); /* $1001E */
+            micro_set_w(r, 2, (int)((uint16_t)Random(c) % 60));      /* $10040 */
             break;
         /*  The four arcologies, $100AA/$100E4/$1011E/$1015A: a starting
          *  population, a life of five, and the YEAR they went up.  This
@@ -358,10 +358,10 @@ void sim_microsim(City *c)
                     int     n = c->census[0xD7] < 1 ? 1 : (int)c->census[0xD7];
                     att       = (int32_t)((uint32_t)c->population / (uint32_t)n);
                     if (att > 0x61A8)
-                        att = 0x61A8 - (int32_t)(Random() & 0xFF); /* $10456 */
+                        att = 0x61A8 - (int32_t)(Random(c) & 0xFF); /* $10456 */
                     att = micro_cap(c, (int)att, 5);
-                    micro_set_w(r, 0, (int)(att + (int32_t)(Random() & 0xFF)));
-                    r[1] = (uint8_t)((Random() & 0x1F) + 9); /* $10498 */
+                    micro_set_w(r, 0, (int)(att + (int32_t)(Random(c) & 0xFF)));
+                    r[1] = (uint8_t)((Random(c) & 0x1F) + 9); /* $10498 */
                     break;
                 }
 
@@ -391,7 +391,7 @@ void sim_microsim(City *c)
                      *  year and the arithmetic never gives it away. */
                     held += c->misc[MISC_POLICE_LOAD] / n;
                     if (held > 0x2710)
-                        held = (int32_t)(Random() & 0x3FF) + 0x2710; /* $1065E */
+                        held = (int32_t)(Random(c) & 0x3FF) + 0x2710; /* $1065E */
                     micro_set_w(r, 0, micro_cap(c, (int)held, 0x14));
                     micro_set_w(r, 1, micro_cap(c, (int)(c->dept[DEPT_POLICE].funding * 3), 0x78));
                     rate = held / 100; /* $106B6 */
@@ -406,7 +406,7 @@ void sim_microsim(City *c)
                     }
                     /*  $106E8: `moveq #$a6` is -90, so this is rate - 90. */
                     rate = rate - 90 + (100 - c->dept[DEPT_POLICE].funding) / 10;
-                    r[1] = (uint8_t)(rate ? (int32_t)Random() % rate : 0);
+                    r[1] = (uint8_t)(rate ? (int32_t)Random(c) % rate : 0);
                     break;
                 }
 
@@ -440,8 +440,8 @@ void sim_microsim(City *c)
                         room += was / 50; /* $10D12 */
                         room += was;
                         if (room > held)
-                            room = held;                /* $10D44 */
-                        room += (int32_t)game_rand63(); /* $10D4C */
+                            room = held;                 /* $10D44 */
+                        room += (int32_t)game_rand63(c); /* $10D4C */
                         micro_set_w(r, 1, (int)room);
                         arco_pop += (int32_t)(uint16_t)micro_w(r, 1); /* $10D76 */
                     }
@@ -455,12 +455,12 @@ void sim_microsim(City *c)
             case 0xFF:
                 {
                     int32_t d3;
-                    r[1] = (uint8_t)(Random() & 0xFF);
+                    r[1] = (uint8_t)(Random(c) & 0xFF);
                     d3   = (int32_t)((uint32_t)c->population >> 3) +
-                           (int32_t)(Random() & 0x3FF);
+                           (int32_t)(Random(c) & 0x3FF);
                     micro_set_w(r, 0, (int)d3);
-                    micro_set_w(r, 1, (int)(ASR(d3 + (int32_t)((uint32_t)ASR(d3, 2) >> 29), 3) + (int32_t)(Random() & 0x7F)));
-                    micro_set_w(r, 2, (int)(ASR(d3 + (int32_t)((uint32_t)ASR(d3, 3) >> 28), 4) + (int32_t)(Random() & 0x3F)));
+                    micro_set_w(r, 1, (int)(ASR(d3 + (int32_t)((uint32_t)ASR(d3, 2) >> 29), 3) + (int32_t)(Random(c) & 0x7F)));
+                    micro_set_w(r, 2, (int)(ASR(d3 + (int32_t)((uint32_t)ASR(d3, 3) >> 28), 4) + (int32_t)(Random(c) & 0x3F)));
                     break;
                 }
 
@@ -484,7 +484,7 @@ void sim_microsim(City *c)
                 {
                     int at;
                     r[1]++; /* $102FA */
-                    micro_set_w(r, 1, (int)(c->power_pct + (int32_t)(Random() & 7)));
+                    micro_set_w(r, 1, (int)(c->power_pct + (int32_t)(Random(c) & 7)));
                     /*  $1032E: the story at forty-eight is interface. */
                     if (r[1] <= 0x32) /* $10358 */
                         break;
@@ -512,9 +512,6 @@ void sim_microsim(City *c)
                          *      Not simulation.
                          *      Nothing to port.
                          *
-                         *  (symbols.json carried it as `powerLineRemove`
-                         *  for a while.  This is why an earlier note
-                         *  here said a routine was missing.  None is.)
                          *  No shipped city has a fifty-year-old plant,
                          *  so this arm is transcription only: read off
                          *  the listing and never checked against the
@@ -538,16 +535,16 @@ void sim_microsim(City *c)
                     /*  $1073E: signed divide by four, THINK C's way. */
                     micro_set_w(r, 2, (int)ASR(fund + (int32_t)((uint32_t)ASR(fund, 1) >> 30), 2));
                     per    = school_n < 1 ? 1 : school_n;
-                    pupils = (int32_t)(Random() & 0xF); /* $10790, drawn FIRST */
+                    pupils = (int32_t)(Random(c) & 0xF); /* $10790, drawn FIRST */
                     pupils += (int32_t)((uint32_t)(HEADS_AT(c, 1) + HEADS_AT(c, 2)) /
                                         (uint32_t)per);
                     if (pupils > 0x5DC)
-                        pupils = (int32_t)(Random() & 0xFF) + 0x5DC; /* $107C6 */
+                        pupils = (int32_t)(Random(c) & 0xFF) + 0x5DC; /* $107C6 */
                     w0 = micro_cap(c, (int)pupils, 0x14);
                     micro_set_w(r, 0, w0);
-                    staff = (int32_t)(Random() & 7); /* $107F6 */
-                    staff += (fund * 6) / 10;        /* $10810 */
-                    staff -= 12 - (int32_t)r[1];     /* $10834, NOT doubled */
+                    staff = (int32_t)(Random(c) & 7); /* $107F6 */
+                    staff += (fund * 6) / 10;         /* $10810 */
+                    staff -= 12 - (int32_t)r[1];      /* $10834, NOT doubled */
                     if (staff < 0)
                         staff = 0;
                     w1 = micro_cap(c, (int)staff, 0x64);
@@ -576,13 +573,13 @@ void sim_microsim(City *c)
                     micro_set_w(r, 2, (int)(fund & 0xFFFF)); /* $108CA, low word */
                     per      = college_n < 1 ? 1 : college_n;
                     students = (int32_t)((uint32_t)HEADS_AT(c, 3) / (uint32_t)per);
-                    students += (int32_t)(Random() & 0x1F); /* $108F4 */
+                    students += (int32_t)(Random(c) & 0x1F); /* $108F4 */
                     if (students > 0x1388)
-                        students = (int32_t)(Random() & 0x1FF) + 0x1388; /* $10910 */
+                        students = (int32_t)(Random(c) & 0x1FF) + 0x1388; /* $10910 */
                     w0 = micro_cap(c, (int)students, 0x1E);
                     micro_set_w(r, 0, w0);
-                    staff = (int32_t)(Random() & 0xF) + fund * 2; /* $10940 */
-                    staff -= (int32_t)((12 - (int)r[1]) << 2);    /* $1096A */
+                    staff = (int32_t)(Random(c) & 0xF) + fund * 2; /* $10940 */
+                    staff -= (int32_t)((12 - (int)r[1]) << 2);     /* $1096A */
                     if (staff < 0)
                         staff = 0;
                     w1 = micro_cap(c, (int)staff, 0x64);
@@ -614,13 +611,13 @@ void sim_microsim(City *c)
                     if (per < 1)
                         per = 1; /* $10A14 */
                     pat = (int32_t)((uint32_t)c->population / (uint32_t)per);
-                    pat += (int32_t)(Random() & 0xF); /* $10A2E */
+                    pat += (int32_t)(Random(c) & 0xF); /* $10A2E */
                     if (pat > 1000)
-                        pat = (int32_t)(Random() & 0x7F) + 1000; /* $10A4A */
+                        pat = (int32_t)(Random(c) & 0x7F) + 1000; /* $10A4A */
                     w0 = micro_cap(c, (int)pat, 0x1E);
                     micro_set_w(r, 0, w0);
-                    staff = (int32_t)(Random() & 7) + fund; /* $10A7A */
-                    staff -= (12 - (int32_t)r[1]) * 2;      /* $10AA0 */
+                    staff = (int32_t)(Random(c) & 7) + fund; /* $10A7A */
+                    staff -= (12 - (int32_t)r[1]) * 2;       /* $10AA0 */
                     if (staff < 0)
                         staff = 0;
                     w1 = micro_cap(c, (int)staff, 0x78);
@@ -640,10 +637,10 @@ void sim_microsim(City *c)
              *  that reports on itself.  Note the generator: $20EE6 is
              *  THINK C's rand, not the Toolbox's. */
             case 0xDA:
-                r[1] = (uint8_t)lib_rand(100);
-                micro_set_w(r, 0, (int)lib_rand(100));
-                micro_set_w(r, 1, (int)lib_rand(100));
-                micro_set_w(r, 2, (int)lib_rand(100));
+                r[1] = (uint8_t)lib_rand(c, 100);
+                micro_set_w(r, 0, (int)lib_rand(c, 100));
+                micro_set_w(r, 1, (int)lib_rand(c, 100));
+                micro_set_w(r, 2, (int)lib_rand(c, 100));
                 break;
 
             /*  $10B8A: the mayor's house.  It keeps the approval figure
@@ -704,7 +701,7 @@ void sim_microsim(City *c)
                     if (per < 1)
                         per = 1;
                     {
-                        int v = load / per + (int)(Random() & 0xF); /* $1055E */
+                        int v = load / per + (int)(Random(c) & 0xF); /* $1055E */
                         micro_set_w(r, 2, v);
                         /*  $10580: and into the city-wide total, which
                          *  saturates rather than wrapping. */
@@ -726,7 +723,7 @@ void sim_microsim(City *c)
                     w0   = micro_cap(c, (int)ASR(fund, 1), 0x46);
                     micro_set_w(r, 0, w0);
                     micro_set_w(r, 1, (int)((uint16_t)w0 >> 4) + 1); /* $105E8 */
-                    micro_set_w(r, 2, (int)((uint16_t)Random() % 20) + 2);
+                    micro_set_w(r, 2, (int)((uint16_t)Random(c) % 20) + 2);
                     break;
                 }
 
@@ -802,7 +799,7 @@ void sim_microsim(City *c)
             /*  $10BCA: a statue has nothing to simulate.  It picks a
              *  number so the plaque can say something. */
             case 0xDB:
-                micro_set_w(r, 1, (int)((uint16_t)Random() % 42));
+                micro_set_w(r, 1, (int)((uint16_t)Random(c) % 42));
                 break;
 
             /*  $10BEC: water treatment and desalinization.  Both keep
@@ -810,10 +807,10 @@ void sim_microsim(City *c)
              *  a staff figure the city's size caps. */
             case 0xF4:
             case 0xFA:
-                r[1] = (uint8_t)(c->water_pct + (Random() & 7));    /* $10BFA */
-                micro_set_w(r, 0, (int)((uint16_t)Random() % 100)); /* $10C16 */
+                r[1] = (uint8_t)(c->water_pct + (Random(c) & 7));    /* $10BFA */
+                micro_set_w(r, 0, (int)((uint16_t)Random(c) % 100)); /* $10C16 */
                 {
-                    int v = (int)(Random() & 0x1F) + 0x87; /* $10C34 */
+                    int v = (int)(Random(c) & 0x1F) + 0x87; /* $10C34 */
                     if (v > pop_50)
                         v = pop_50; /* $10C42 */
                     micro_set_w(r, 1, v);
@@ -825,7 +822,7 @@ void sim_microsim(City *c)
             case 0xF8:
                 {
                     int v = (int)(uint16_t)(c->census[0xF8] << 3) +
-                            (int)game_rand(0x14);             /* $1110C */
+                            (int)game_rand(c, 0x14);          /* $1110C */
                     micro_set_w(r, 0, micro_cap(c, v, 0x96)); /* $11122 */
                     break;
                 }

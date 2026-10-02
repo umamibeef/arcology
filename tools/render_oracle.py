@@ -62,12 +62,10 @@ class RenderOracle:
         #  the sprite's size: $16298 subtracts +4 to get the top edge and
         #  $A364 subtracts +6/2 to centre a sprite on its tile.
         #
-        #  This used to be zeroed, on the grounds that the real contents
-        #  were unknown.  That was the harness's worst bug: with the table
-        #  zeroed the game skips both subtractions, so the oracle reported
-        #  a multi-tile building 16 px high and an aircraft 32 px left of
-        #  where the game really puts them -- differences that came from
-        #  this file, not from the renderer.  The whole "y differs by the
+        #  With the table zeroed the game skips both subtractions, and the
+        #  oracle reports a multi-tile building 16 px high and an aircraft
+        #  32 px left of where the game really puts them -- differences
+        #  that come from this file, not from the renderer.  The whole "y differs by the
         #  footprint drop, expected" category was that artefact.
         #
         #  The blitter is stubbed here, so +0 can stay null; only the size

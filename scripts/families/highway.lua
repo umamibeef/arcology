@@ -1,4 +1,4 @@
---  band.lua -- the freeway slab.
+--  highway.lua -- the freeway slab.
 --
 --  The slab is walked by its own bands, not by tile family -- its tiles
 --  are the line's -- so it answers for no tile family and the walk never

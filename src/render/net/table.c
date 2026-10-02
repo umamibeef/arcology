@@ -11,16 +11,10 @@
 #include "mesh/internal.h"
 #include "pipeline.h"
 #include "net/net.h"
-#include "walk/walk.h"
 #include "opt.h"
 #include "incr.h"
-
-/*  One segment walk's working state, handed to the stages below so each
- *  can be read on its own.
- *
- *      The tiles walked.
- *      The fit's points and pieces.
- *      The nodes at either end and what kind they are. */
+#include "mesh/loft.h"
+#include "log.h"
 
 /*  THE SEGMENT TABLE.  Every segment the measuring walk fits is kept.
  *  It keeps its pieces, the fit's nodes, its corridor tiles, the tiles
@@ -385,31 +379,6 @@ int seg_table_nodes(int i, const V2 **q, const float **rad, int *nk)
     return 0;
 }
 
-/*  The building pass's measure, from the table: every kept segment's
- *  arms and meets again, without walking or fitting anything.  The
- *  grading pass fitted them.  The pieces are the same in both. */
-int seg_table_replay(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit, int comp, uint8_t *visited)
-{
-    int i;
-    for (i = 0; i < s_nseg; ++i)
-    {
-        const RSeg *r = &s_segs[i];
-        Seg         x;
-        if (r->band)
-            continue; /* a band: no arms, no meets.  Band.c replays it */
-        memset(&x, 0, sizeof x);
-        x.m = m, x.c = c, x.l = l, x.mask_bit = mask_bit, x.comp = comp, x.f = r->f, x.col = r->col, x.row = r->row, x.e = r->e;
-        x.visited = visited;
-        x.pts = s_wk_pts, x.q = s_wk_q, x.rad = s_wk_rad, x.tlim = s_wk_tlim, x.tcol = s_wk_tcol, x.trow = s_wk_trow;
-        x.pieces = s_wk_pieces, x.marks = s_wk_marks;
-        x.ee = r->e;
-        seg_load(&x, r);
-        seg_measure_arms(&x);
-        if (seg_measure_laps(&x) != 0)
-            return -1;
-    }
-    return 0;
-}
 
 /* ---- bands in the table ------------------------------------------ */
 
@@ -517,6 +486,89 @@ void seg_class_counts(const Seg *x, int cnt[3])
             continue;
         ++cnt[(int)line_class(c, tc, tr)];
     }
+}
+
+/*  ---- the classes -------------------------------------------------
+ *
+ *  One class for a whole segment settles how wide it is, where its lanes
+ *  run and what is painted on it.  The walk files each segment's tile
+ *  counts here before anything is fitted.  The drive settles each one and
+ *  hands it back.  The walks that follow look the answer up at the
+ *  segment's start. */
+#define CLASSES_MAX 16384
+
+static struct
+{
+    int32_t col, row;
+    int     e, cnt[3];
+    int     at, nt; /* the segment's own cells, in s_cls_cells */
+} s_cls_ask[CLASSES_MAX];
+/*  And the cells themselves.  A rule that decides what a line carries
+ *  from the density and the neighborhood around it needs the tiles it
+ *  runs over.  A single tile is not enough for itally of them. */
+#define CLASS_CELLS 262144
+static int32_t s_cls_cells[CLASS_CELLS];
+static int     s_n_cls_cells;
+static int   s_n_cls_ask;
+static float s_seg_cls[R_MAP * R_MAP * 4];
+
+int net_seg_class_of(int32_t col, int32_t row, int e)
+{
+    if (col < 0 || row < 0 || col >= R_MAP || row >= R_MAP || e < 0 || e > 3)
+        return 0;
+    return (int)s_seg_cls[(row * R_MAP + col) * 4 + e];
+}
+
+void seg_class_reset(void)
+{
+    s_n_cls_ask = s_n_cls_cells = 0;
+    memset(s_seg_cls, 0, sizeof s_seg_cls);
+}
+
+int seg_class_asks(void)
+{
+    return s_n_cls_ask;
+}
+
+/*  One segment's counts and cells filed for the drive.  Answers 0, or
+ *  -1 with the reason reported where the table is full. */
+int seg_class_file(int32_t col, int32_t row, int e, const int cnt[3], const int32_t *tcol, const int32_t *trow, int nt)
+{
+    int t;
+    if (s_n_cls_ask >= CLASSES_MAX)
+    {
+        R_ERR("net", "no room for the class at %d,%d: %d segments is the most read", (int)col, (int)row, CLASSES_MAX);
+        return -1;
+    }
+    s_cls_ask[s_n_cls_ask].col = col;
+    s_cls_ask[s_n_cls_ask].row = row;
+    s_cls_ask[s_n_cls_ask].e   = e;
+    memcpy(s_cls_ask[s_n_cls_ask].cnt, cnt, sizeof s_cls_ask[s_n_cls_ask].cnt);
+    s_cls_ask[s_n_cls_ask].at = s_n_cls_cells;
+    s_cls_ask[s_n_cls_ask].nt = 0;
+    for (t = 0; t < nt && s_n_cls_cells < CLASS_CELLS; ++t)
+        s_cls_cells[s_n_cls_cells++] = trow[t] * R_MAP + tcol[t], ++s_cls_ask[s_n_cls_ask].nt;
+    ++s_n_cls_ask;
+    return 0;
+}
+
+int net_seg_class_at(int i, int cnt[3], const int32_t **cells, int *nt)
+{
+    if (i < 0 || i >= s_n_cls_ask)
+        return 0;
+    cnt[0] = s_cls_ask[i].cnt[0], cnt[1] = s_cls_ask[i].cnt[1], cnt[2] = s_cls_ask[i].cnt[2];
+    *cells = &s_cls_cells[s_cls_ask[i].at];
+    *nt    = s_cls_ask[i].nt;
+    return 1;
+}
+
+/*  The class the rule settled, on to every link of the segment's start:
+ *  the walks that follow read it there. */
+void net_seg_class_is(int i, int cls)
+{
+    if (i < 0 || i >= s_n_cls_ask)
+        return;
+    s_seg_cls[(s_cls_ask[i].row * R_MAP + s_cls_ask[i].col) * 4 + s_cls_ask[i].e] = (float)cls;
 }
 
 /*  And the class the drive settled for this segment, read back.  A

@@ -12,17 +12,17 @@
  *          and nil for one that is not.
  *
  *      arc.rules.lap_at(mouth) -> depth in tiles, or 0
- *          Whether one arm's mouth carries a crosswalk and how deep a
+ *          Whether one arm's mouth carries a stripe and how deep a
  *          band it asks for.  `mouth` carries col, row, arm, control,
  *          margin (a margin each side of the mouth), cos (how the two
  *          run against one another, -1 squarely facing) and span (how
  *          wide the mouth is, in margin widths).
  *
- *      arc.rules.meet(mouth) -> depth in tiles, or false
- *          Whether one arm's mouth carries a crosswalk and how deep its
- *          band runs.  `mouth` carries col, row, arm, control, want (the
- *          band the C would give it), room (the line it may give up) and
- *          straight (how far that line runs straight from the mouth).
+ *      arc.rules.meet(j) -> true where the join is a meet
+ *          Whether the join in hand reads as two lines meeting rather
+ *          than one line going on.  `j:info()` carries free, ahead,
+ *          behind, reach and reach_on, and `j:holds(side)` says whether
+ *          the line holds on that side (scripts/compose/join.lua).
  *
  *      arc.rules.corner(at) -> {tangent=, radius=, steps=} | false | nil
  *          What a junction's outline does where two arms meet, turning

@@ -4,15 +4,15 @@
    value in ONE layer and zero in the others, so it can only represent a
    mode that reads ONE layer.  Mode 13 reads two -- it surfaces at a
    subway station on XBLD == $E9 ($24E42) as well as consulting XUND --
-   and the XUND-only probe recorded "keep tunnelling, cost 1" for it,
-   which is wrong and was invisible for months.  That case is now
-   handled by an explicit test in sim_trip, transcribed from $24E42.
+   and an XUND-only probe records "keep tunnelling, cost 1" for it,
+   which is wrong.  sim_trip tests that case explicitly, transcribed
+   from $24E42.
 
    Run tools/walk_deps.py after any change here.  It sweeps each layer
    per mode and reports any mode whose outcome responds to more than
    one; as of this writing mode 13 is the only one.
 
-$245E8 walks the transport network as a state machine: it holds a
+$245E8 walks the transport network as a state machine.  It holds a
 transport mode in d6, steps onto a tile, and a fourteen-case switch at
 $247EC decides the new mode, what the step cost, and whether the walk
 moved or arrived.  Fourteen cases of overlapping range tests is a lot of
@@ -102,12 +102,13 @@ def _emit_one(w, name, t, comment):
 
 
 def emit(w):
-    w('/*  The line walk in $245E8 is a state machine: it carries a transport')
-    w(' *  mode, steps onto a tile, and a fourteen-case switch at $247EC picks')
-    w(' *  the new mode, the step cost, and whether the walk moved or arrived.')
-    w(' *  Fourteen cases of overlapping range tests is a great deal of')
-    w(' *  bookkeeping to read correctly, so the switch was executed once for')
-    w(' *  every (mode, tile) pair instead (tools/gen_walk.py).  Two tables,')
+    w('/*  The line walk in $245E8 is a state machine.  It carries a transport')
+    w(' *  mode and steps onto a tile.  A fourteen-case switch at $247EC then')
+    w(' *  picks the new mode, the step cost, and whether the walk moved or')
+    w(' *  arrived.  Fourteen cases of overlapping range tests is a great')
+    w(' *  deal of bookkeeping to read correctly.  So the switch is executed')
+    w(' *  once for every (mode, tile) pair instead (tools/gen_walk.py).')
+    w(' *  Two tables,')
     w(' *  because some modes read the surface and the subway modes read the')
     w(' *  underground layer.')
     w(' *')
@@ -116,7 +117,7 @@ def emit(w):
     _emit_one(w, 'WALK_STEP_BLD', table(0x21C2),
               '/* stepping onto XBLD */')
     _emit_one(w, 'WALK_STEP_UND', table(0x27C2),
-              '/* stepping onto XUND -- how the subway modes 11 and 13 move */')
+              '/* stepping onto XUND: how the subway modes 11 and 13 move */')
 
 
 if __name__ == "__main__":

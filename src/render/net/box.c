@@ -3,7 +3,20 @@
  *  that puts its lamps on the map.  Nothing here decides what is drawn.
  *  The control is arc.rules.node_control's, the fill
  *  arc.rules.junction's, the lamps arc.rules.lamps's.  It draws what it
- *  is asked for. */
+ *  is asked for.
+ *
+ *  The families as geometry.  A line or thread is a strip along the
+ *  piece's connections: a straight piece from edge midpoint to edge
+ *  midpoint.  A lone corner a quarter circle centered on the tile corner
+ *  between its two edges, tangent to both.  A corner on a staircase the
+ *  chord between its two midpoints, so the staircase draws as one
+ *  straight diagonal.  A junction a box at the center with an arm to
+ *  each joined edge.  Where two pieces meet at an angle the inner
+ *  corners are mitred to one point and a fan fills the outside.  So the
+ *  edge line runs unbroken round the turn.  The strips lie on the
+ *  surface the tiles draw, sampled at every vertex's world position.  A
+ *  power line is a pole at the tile's center with a wire to each joined
+ *  edge, meeting the neighbor's wire at the midpoint. */
 #include <math.h>
 #include <stddef.h>
 #include <string.h>
@@ -13,6 +26,7 @@
 #include "net/net.h"
 #include "mesh/model.h"
 #include "script.h"
+#include "mesh/loft.h"
 
 
 /*  The junction whose signs are still to be stood, or none, and the
@@ -189,42 +203,18 @@ static int jb_sides(JBox *jb)
     return 0;
 }
 
-/* ---- the families as geometry ------------------------------------------ */
+/* ---- a line's class ----------------------------------------------------- */
 
-/*  The networks as geometry.  Three families share one layout of fifteen
- *  pieces.  They are two straights, four slopes, four corners, four tees
- *  and a lap.  One family sits at XBLD 0x0E, another at 0x1D and a third
- *  at 0x2C.  Which edges a piece joins comes from the art.  The fill at
- *  each edge's midpoint.  The other two families take the line piece at
- *  the same offset.  The four meets 0x44..0x47 carry two families on one
- *  tile.  A line or thread is a strip along the piece's connections: a
- *  straight piece from edge midpoint to edge midpoint.  A lone corner a
- *  quarter circle centered on the tile corner between its two edges,
- *  tangent to both.  A corner on a staircase the chord between its two
- *  midpoints, so the staircase draws as one straight diagonal.  A
- *  junction a box at the center with an arm to each joined edge.  Where
- *  two pieces meet at an angle the inner corners are mitred to one point
- *  and a fan fills the outside.  So the edge line runs unbroken round
- *  the turn.  The strips lie on the surface the tiles draw, sampled at
- *  every vertex's world position.  A power line is a pole at the tile's
- *  center with a wire to each joined edge, meeting the neighbor's wire
- *  at the midpoint.  Width.  The oblique camera stretches the diagonal
- *  that runs toward it and squashes the other.  So a line at one world
- *  width draws almost twice as wide on screen one way as the other.  In
- *  the snap view every strip's world width is scaled by the direction it
- *  runs so that it reads the same width on screen everywhere.  The
- *  turned inspection view uses the true width. */
-
-/*  A line's class, from the traffic on it.  0 is a two-lane line.  1 is
- *  an avenue with a double center line and four lanes, and 2 a boulevard
- *  with a planted median.  Carried to the material in the normal's
- *  fourth component, where a ground vertex carries its curvature. */
-/*  WHAT CLASS a tile's line is, from the traffic on it.  Where the steps
- *  fall is arc.rules.line_class's, and all two hundred and fifty-six
- *  answers are settled before anything is built.  So a tile costs a
- *  load.  Every reader comes through here, the junction's control, the
- *  class pass, the gate's arm and the script's own arc.city.line_class.
- *  So none of them can hold a different idea of what an avenue is. */
+/*  WHAT CLASS a tile's line is, from the traffic on it.  0 is a two-lane
+ *  line.  1 is an avenue with a double center line and four lanes, and 2
+ *  a boulevard with a planted median.  It is carried to the material in
+ *  the normal's fourth component, where a ground vertex carries its
+ *  curvature.  Where the steps fall is arc.rules.line_class's, and all
+ *  two hundred and fifty-six answers are settled before anything is
+ *  built.  So a tile costs a load.  Every reader comes through here, the
+ *  junction's control, the class pass, the gate's arm and the script's
+ *  own arc.city.line_class.  So none of them can hold a different idea
+ *  of what an avenue is. */
 static uint8_t s_line_class[256];
 
 void net_line_class_is(int tv, int cls)
@@ -269,18 +259,6 @@ int net_box_paving_done(void)
         return 1;
     return jb_sides(jb) == 0;
 }
-
-/*  A line strip records its edge in the traffic's graph, under the class
- *  its tiles gave it.  An island has none, and records as a local line.
- *  Its two margins are the outer fifth each side, from its first station
- *  to its last.  So the margin check can see them meet the junctions'
- *  and the caps'. */
-/*  Each station's distance along to the nearest level lap on the
- *  segment, for the line's approach to it (spec 3.15).  From the RXR
- *  stencil to the stop line the lines are solid.  The quads within a
- *  tile and a half of a lap tile's center carry the approach material
- *  with that distance along.  It is computed here and not by the
- *  furniture pass, which the driver can switch off. */
 
 /*  The margin's two bands as the composing script lays them: the outer
  *  edge, the inner one, and the height, station by station.  The strip's

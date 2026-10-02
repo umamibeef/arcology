@@ -1,0 +1,46 @@
+#  What a push has to pass.
+#
+#  Both jobs run on a bare runner: no game folder, no SDL3, no art.  That
+#  is the whole point of them -- everything they check is in this
+#  repository, so nothing here can be "green on my machine".
+#
+#  The GATE tier (a build of Atlanta and the eight framed views) is not
+#  here yet.  It needs the game's own art, which cannot be published, so
+#  it joins once those assets can be cached for a runner.
+name: checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  #  The style and layer checkers.  None of them builds anything: they
+  #  read the tree, and they take about four seconds.
+  lint:
+    name: the lint tier
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: clang-format, which the format check needs
+        run: sudo apt-get update && sudo apt-get install -y clang-format
+      - name: Configure
+        #  SDL3 is refused outright rather than left to chance: a runner
+        #  image that starts shipping it must not change what is built.
+        run: cmake -B build -DCMAKE_DISABLE_FIND_PACKAGE_SDL3=ON
+      - name: The checkers
+        run: ctest --test-dir build -L lint --output-on-failure
+
+  #  And the code compiles, with every warning an error.  A silent
+  #  integer conversion is an off-by-one on somebody's screen.
+  build:
+    name: a build with warnings as errors
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -B build -DARC_WERROR=ON -DCMAKE_DISABLE_FIND_PACKAGE_SDL3=ON
+      - name: Build
+        run: cmake --build build --parallel
+      - name: The script layer reads, whole, through its own init.lua
+        run: ./build/arcology --lua-lint scripts

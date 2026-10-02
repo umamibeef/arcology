@@ -1,4 +1,4 @@
---  meet.lua -- a level meet's panel.
+--  crossing_panel.lua -- a level meet's panel.
 --
 --  The panel covers the whole of the line it interrupts: the line's full
 --  width across, and along the line as far as the thread bed reaches,

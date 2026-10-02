@@ -75,4 +75,6 @@ lanes a road carries — is changed by editing a script. See
 
    conventions
    appendix-routines
+   appendix-script-api
    appendix-road-spec
+   notebook

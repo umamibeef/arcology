@@ -8,9 +8,12 @@
 
 #include "net/types.h"
 
-/*  One placing of a spur's join, as far as the CHAIN it is cut from,
- *  and the placing built from the pieces the script cut. */
-const char *band_slide_poses(SlideFan *s, float u, float at, V2 *Q, V2 *tA, V2 *pos, V2 *tb);
+/*  Sliding a spur's join along the slab and along the line.  One placing
+ *  of the join, as far as the CHAIN it is cut from, and the placing
+ *  built from the pieces the script cut.  It also says whether the
+ *  placing leaves by the spur tile's line edge, and it keeps the
+ *  placing. */
+const char *band_slide_poses(SlideFan *s, float u, float at, V2 *A, V2 *Q, V2 *tA, V2 *pos, V2 *tb);
 float       band_slide_routed(SlideFan *s, const Piece *pc, int np);
 int         band_slide_exits(SlideFan *s);
 void        band_slide_keep(SlideFan *s, float taper);
@@ -21,7 +24,7 @@ int   band_orient_links(const OrientFan *o, int32_t col, int32_t row);
 void  band_orient_answer(OrientFan *o, int kind, int dside, int rside, int eside, int off, int lines);
 void  band_orient_spur(OrientFan *o, const OrientFan *r);
 void spur_stats(void);
-int   net_spurs_begin(const RCity *c, const RAtlasLevel *l);
+int   net_spurs_begin(const RCity *c);
 int   net_spur_at(int32_t col, int32_t row);
 OrientFan *net_spur_current(void);
 int  net_spur_spans(void);
@@ -30,7 +33,7 @@ void net_spur_span_is(int i, int have, float top, float foot, float total, float
 int  net_spur_shares(void);
 int  net_spur_share_at(int k, float *gap, int *cap);
 void net_spur_share_is(int k, int half);
-void build_spurs_begin(RMesh *m, const RCity *c, const RAtlasLevel *l, uint8_t mask_bit, int comp);
+void build_spurs_begin(RMesh *m, const RCity *c, uint8_t mask_bit, int comp);
 int  build_spur_next(void);
 int  build_spur_routed(void);
 int  build_spur_joined(void);

@@ -33,9 +33,11 @@ int  music_play(RMusic *m, int song_id);
 void music_stop(RMusic *m);
 /*  The generator the scheduler draws from: n in, 0..n-1 out.  The app
  *  hands it the game's own rand, so the music shares the stream the
- *  simulation uses, as the original's does.  Without one a private copy
- *  of that generator, from the same state, is used. */
-void music_set_rand(RMusic *m, uint16_t (*rand_fn)(uint16_t n));
+ *  simulation uses, as the original's does.  `at` is passed back to it:
+ *  the dice belong to a city, and this file knows nothing of one.
+ *  Without a function a private copy of that generator, from the same
+ *  state, is used. */
+void music_set_rand(RMusic *m, uint16_t (*rand_fn)(void *at, uint16_t n), void *at);
 /*  The Options menu's switch: off stops, on starts the rotation. */
 void music_set_enabled(RMusic *m, int on);
 int  music_enabled(const RMusic *m);

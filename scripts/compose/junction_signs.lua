@@ -24,7 +24,7 @@ arc.rules.junction_signs = function (j)
     local prop = arc.rules.control_prop
     if not prop then return true end
     for e = 0, 3 do
-        local a = d.arms[e + 1]
+        local a = d.arms[e]
         if a then
             local p = prop(a.control)
             if p and p.model then

@@ -18,7 +18,6 @@ arc.geo.signal_green       = 0.45
 --  it straight through instead of bending round the corner: about
 --  forty-five degrees.
 arc.geo.box_straight_dot   = 0.7
-arc.geo.buck_long          = 0.081
 arc.geo.car_creep          = 0.02
 arc.geo.car_density        = 1.5
 arc.geo.car_gap_free       = 0.8
@@ -26,12 +25,6 @@ arc.geo.car_gap_stop       = 0.42
 arc.geo.car_len            = 0.556
 arc.geo.car_probe          = 0.075
 arc.geo.car_stop_hold      = 0.45
---  The braking curve: a car a twentieth of a tile from the line it must
---  stop at may still be doing three tiles a second, and nought at the
---  line itself.  Distance and speed, with no time in them: how often the
---  picture is drawn has nothing to do with how a car stops.
-arc.geo.hold_over          = 0.05
-arc.geo.hold_speed         = 3.0
 arc.geo.car_stop_junc      = 0.47
 arc.geo.cross_deep         = 0.2
 arc.geo.cross_par          = 0.985
@@ -107,7 +100,7 @@ arc.geo.band_lead          = 0.0
 --  before it is worth tapering at all.
 arc.geo.band_abreast       = 2.5
 arc.geo.band_outer         = 0.7
-arc.geo.band_road_dot      = 0.7
+arc.geo.band_line_dot      = 0.7
 arc.geo.band_taper_far     = 3.0
 arc.geo.band_taper_gap     = 1.5
 arc.geo.band_taper_near    = 1.5
@@ -174,8 +167,9 @@ arc.geo.rail_block_back    = 0.6
 --  straight: a fillet's straights and swept arcs are a good fraction of a
 --  tile, and the tangent at the start of one IS where the line goes.
 --
---  A spline fit's piece is one dense sample, and a tangent taken from a
---  few hundredths of a tile points wherever that fragment happens to.  A
+--  A piece that is one dense sample gives a tangent taken from a few
+--  hundredths of a tile, which points wherever that fragment happens
+--  to.  A
 --  run leaving diagonally can report due west, the junction trims its arm
 --  back on the strength of it, and the line ends up under terrain the pad
 --  does not cover.  Those are measured half a tile along the run instead
@@ -333,6 +327,15 @@ arc.geo.interchange_girder = 0.08
 --  is not lifted at all, since two ways that close are one surface, and
 --  it is said too.
 arc.geo.keep_out              = 0.30
+--  HOW FAR FROM A NODE A LANE END MAY STAND and still be an end AT
+--  that node.  A slab runs half a tile past its last cell and its
+--  lanes sit up to a half width across that, so a true end lands
+--  within about three tiles of the nearest cell of the glob.  An end
+--  further out is not at the node, whatever any store says of it: the
+--  band simply ends there, and a movement invented to it would reach
+--  across the map to a way it never meets.
+arc.geo.interchange_catchment = 4.0
+
 arc.geo.interchange_over      = arc.geo.keep_out + arc.geo.interchange_girder
 arc.geo.interchange_over_min  = 0.20
 --  The steepest a movement may climb or fall, in levels of altitude per
@@ -346,7 +349,7 @@ arc.geo.interchange_grade     = 0.40
 --  of their floors (the slabs' envelopes where they arrive), in levels
 --  of altitude, so a way between them clears the ground it crosses.
 --  The arms are settled together in the grading pass, and rise only as
---  far as a way asks (scripts/compose/interchange.lua).
+--  far as a way asks (scripts/compose/interchange).
 arc.geo.interchange_rise      = 1.0
 --  How far off an arm's line the way the grading pass lays between two
 --  arms runs, in tiles, on the traffic's side: a slab lane's offset
@@ -372,7 +375,7 @@ arc.geo.interchange_fan       = 0.5
 --  step of the fan, and the lane's way runs on that taper, level, before
 --  its own ribbon begins at the nose.  Nought is a step: the way's
 --  ribbon begins at the lane's end, as wide as the lane, and narrows to
---  a ramp's width over its lead (scripts/compose/interchange.lua).
+--  a ramp's width over its lead (scripts/compose/interchange).
 arc.geo.interchange_gore      = 0
 
 --  THE NOSE past a lane's end: a way leaves the slab as wide as its
@@ -447,11 +450,6 @@ arc.geo.interchange_tangent   = 0.25
 
 --  How closely a movement is sampled when the crossings are looked for.
 arc.geo.interchange_sample = 0.1
-
---  How near two lane ends at an interchange must be to belong to the
---  same arm.  A way is two tiles across and its ends stand
---  within that; the next arm along is further off.
-arc.geo.interchange_arm_apart = 1.6
 
 --  How far from a 2x2 interchange's middle a lane end still belongs to
 --  it: the block is two tiles across and a band runs its slab out to the
@@ -549,7 +547,6 @@ arc.geo.slot_walk_junction = 0.15
 arc.geo.slot_walk_strip    = 0.152
 arc.geo.slot_wire          = 0.46
 arc.geo.slot_xpanel        = 0.06
-arc.geo.slot_xrail         = 0.061
 arc.geo.slot_xstop         = 0.25
 arc.geo.step_max           = 0.1
 arc.geo.trail_step         = 0.03
@@ -580,3 +577,65 @@ arc.geo.meet_stop_min      = 0.1
 arc.geo.meet_stop_pen      = 0.02
 arc.geo.meet_stop_set      = 0.3
 
+
+--  ---- THE OVERLAY'S COLOURS ---------------------------------------------
+--
+--  "Show curves" draws the fit over a bare world: the tiles a fit was
+--  allowed to use, the lanes as wires a hair over the ground, and a mark
+--  at every vertex of the path.  Each number is a PAINT, which the
+--  shader turns into a colour.  They are here so that the overlay can be
+--  recoloured without a compile.
+
+--  The ground under the overlay: the tiles a fit may use, the free air
+--  beside a band, and a tile an on-spur takes.
+arc.geo.mark_corridor      = 3
+arc.geo.mark_free          = 6
+arc.geo.mark_spur          = 8
+--  And the first paint drawn as a LID: over what it marks rather than
+--  under it, at the top of the tile's own slot.  It is a threshold, not
+--  a colour, so recolouring a mark does not move any geometry.
+arc.geo.mark_lid           = 8
+
+--  The lanes, as wires: one joined to another lane, one carried through
+--  a junction, and one dropping off a slab.
+arc.geo.wire_link          = 5
+arc.geo.wire_connector     = 6
+arc.geo.wire_spur          = 5
+
+--  And the mark at each vertex of the fitted path: where it starts and
+--  finishes, a corner swept into an arc, and a corner left as one.
+arc.geo.mark_end           = 7
+arc.geo.mark_arc           = 3
+arc.geo.mark_corner        = 1
+
+--  A CAR'S COLOUR, and a train's.  The first paint of the run, and how
+--  many there are: a car takes one of the run at random, a train's
+--  engine takes its own and every carriage one of the rest.
+arc.geo.car_paint_first    = 4
+arc.geo.car_paint_n        = 5
+arc.geo.train_paint_engine = 0
+arc.geo.train_paint_first  = 1
+arc.geo.train_paint_n      = 3
+
+--  ---- THREE TOLERANCES THAT WERE WRITTEN TWICE ---------------------------
+
+--  How nearly two lines must head the same way for the step between them
+--  to read as a sideways jog rather than a turn.
+arc.geo.fit_jog_dot        = 0.999
+--  How close in height two faces must lie before the check calls them
+--  one surface and asks which of the two is meant to show.
+arc.geo.coplanar_z         = 0.004
+--  How far ahead of the surface it lies on a marking's painter's slot
+--  sits.  A slot's fraction outranks any height term.
+arc.geo.decal_slot         = 0.004
+
+--  ---- THE GROUND'S OWN COLOUR ------------------------------------------
+--
+--  Which sprite the mesh takes the ground's mean colour from, and what
+--  to use where the art set has no such sprite.  The mean itself is the
+--  pipeline's arithmetic; WHICH picture stands for the ground, and what
+--  a run without it falls back on, are decided here.
+arc.geo.ground_art         = 256
+arc.geo.ground_red         = 0.45
+arc.geo.ground_green       = 0.62
+arc.geo.ground_blue        = 0.30

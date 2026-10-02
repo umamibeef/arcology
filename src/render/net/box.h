@@ -23,7 +23,7 @@ void net_line_class_is(int tv, int cls);
 void *net_junction_band(void);
 int   net_junction_mouths(void);
 int   net_junction_band_done(void);
-JuncFan *net_junction_fan(void); /* the outline the drive lays a junction's fill on (line.c) */
+JuncFan *net_junction_fan(void); /* the outline the drive lays a junction's fill on (net/box.c) */
 int  net_box_paving_ask(void);
 int  net_box_paving_done(void);
 

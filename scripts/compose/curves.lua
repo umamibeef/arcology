@@ -51,9 +51,7 @@ arc.rules.curves = function (s)
         end
     end
 
-    --  The construction behind it: a mark at every piece boundary.  Under
-    --  the spline fit the boundaries mean nothing -- every sample is its
-    --  own straight -- so the marks are left off there.
+    --  The construction behind it: a mark at every piece boundary.
     local np = s:pieces()
     for k = 0, np do
         local x, y

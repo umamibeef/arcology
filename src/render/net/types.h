@@ -10,6 +10,8 @@
 #define ARC_NET_TYPES_H
 
 #include "pipeline.h"
+#include "mesh/shapes.h"
+#include "mesh/loft.h"
 
 /*  The structure's proportions, measured off the original's own
  *  rendering of Four Cities' viaduct rather than the specification.  The
@@ -18,15 +20,15 @@
  *  column about a meter across carries it every two tiles.  Built to the
  *  specification's concrete sections it read as a viaduct of walls. */
 #define BAND_LIFT      1.0f
-#define SPUR_HW          (0.15f * s_tune.band_w) /* a spur lane: the slab's outer lane, 0.70 to 1.0 across, on its own */
+#define SPUR_HW          (0.15f * TUNE(band_w)) /* a spur lane: the slab's outer lane, 0.70 to 1.0 across, on its own */
 #define BAND_LANE_IN    0.70f  /* the outer lane's inner edge, across the band */
 #define BAND_LANE_TAPER 4      /* tiles: one gore, then the descent */
 #define BAND_GIRDER  0.11f     /* the slab's edge: 0.9 m of slab and girder */
 #define BAND_BENT    1.0f
-#define LINE_W    (s_tune.line_w)
-#define THREAD_W    (s_tune.thread_w)
-#define LINE_RMIN (s_tune.line_rmin)
-#define THREAD_RMIN (s_tune.thread_rmin)
+#define LINE_W    (TUNE(line_w))
+#define THREAD_W    (TUNE(thread_w))
+#define LINE_RMIN (TUNE(line_rmin))
+#define THREAD_RMIN (TUNE(thread_rmin))
 #define TRAIN_PITCH 0.48f
 #define TRAIN_BOGIE 0.14f
 /*  A spur (spec 7.3, the lane drop), as the scan before the band walks
@@ -274,7 +276,7 @@ typedef struct
  *  band, and which are a line's mouth.  It also gives which way each
  *  faces into the junction, and the ring moved in by the margin's width.
  *  The ring itself is arc.rules.outline's.  How the margin sits on it is
- *  arc.rules.junction_band's. */
+ *  arc.rules.band's. */
 typedef struct
 {
     const JBox    *jb;
@@ -335,6 +337,11 @@ typedef struct
     float        ground[4];
     float        order, lift, slot;
 } LapFan;
+/*  A junction's fill as the composing script is handed it: the polygon
+ *  the fan is laid over.  The outline the arms cut out, inset by the
+ *  margin's band where there is one.  And where its middle sits.  The
+ *  outline itself is the pipeline's: arms, corners, trims and lip
+ *  returns are a solver's work.  What is drawn over it is not. */
 typedef struct
 {
     const JBox *jb;
@@ -364,11 +371,17 @@ typedef struct
     uint64_t phash;      /* the trimmed pieces they were sampled from */
     int      band;       /* a band: walked by band.c, no arms, no meets.  Replayed by band.c */
 } RSeg;
+
+/*  ONE SEGMENT WALK'S working state, handed to the stages below so each
+ *  can be read on its own.
+ *
+ *      The tiles walked.
+ *      The fit's points and pieces.
+ *      The nodes at either end and what kind they are. */
 typedef struct
 {
     RMesh             *m;
     const RCity       *c;
-    const RAtlasLevel *l;
     uint8_t            mask_bit;
     int                comp;
     Family             f;
@@ -381,7 +394,7 @@ typedef struct
     Piece             *pieces;
     int                nt, n, k, nk, np, kind0, kind1, square0, square1, ee;
     float              hw, total;
-    float              cls; /* a line's class from seg_class (line.c).  The arms, the table and the loft read it */
+    float              cls; /* a line's class, from net/table.c.  The arms, the table and the loft read it */
     int32_t            cc, cr, back, guard;
     int32_t           *marks; /* every (tile, edge) the walk marked visited */
     int                nm;
@@ -400,10 +413,22 @@ struct XLaneFan
     int         n;    /* the lanes as they stand.  Links are appended after */
     int         fail; /* a link the router could not draw */
 };
+/*  The shelf's copies of each corner, as the composing script reconciles
+ *  them.  Every tile keeps its own copy of a corner.  Which is what lets
+ *  two corridors lie side by side as two shelves with a wall between
+ *  them.  And the copies were written by whichever station was nearest,
+ *  so one corridor's tiles can take the corner they share from different
+ *  stations and disagree.  Which copies must agree, and on what, is the
+ *  script's. */
 struct ShelfFan
 {
     int nodes; /* how many node tiles there are */
 };
+/*  An on-spur's four sides, as the composing script reads them.  One is
+ *  the slab it climbs to, one the line it comes down onto, and which is
+ *  which decides everything the spur is afterwards.  What each neighbor
+ *  IS is the pipeline's.  Which side is the slab's and which the line's
+ *  is the script's. */
 struct OrientFan
 {
     const void *c;
@@ -431,7 +456,16 @@ struct OrientFan
      *  through. */
     int   fork, arm;
     float rdx, rdy, mdx, mdy;
+    /*  And the FOOT the rule put at the line end: where the descent
+     *  stops, and the way it heads there.  The tile, the way the spur
+     *  lies and what the meet is are all the rule's own.  So where the
+     *  descent meets the line is the rule's too. */
+    float fx, fy, fdx, fdy;
 };
+/*  A slab's stations as the composing script narrows them for each spur
+ *  that leaves it.  The slab gives up its outer lane over the spur's
+ *  taper and takes it back afterwards.  Where it does so, and how far it
+ *  stays narrow toward a partner spur, is the script's. */
 struct DropFan
 {
     void  *smp;
@@ -439,6 +473,11 @@ struct DropFan
     float  reach;  /* how far a spur reaches for the station it drops from */
     float  narrow; /* the outer lane's inner edge, across the band */
 };
+/*  A spur's join, as the composing script slides it.  The descent may
+ *  start further along the slab and the join may sit further along the
+ *  line.  Every pairing of the two is routed and the widest that holds
+ *  wins.  Whether a pairing routes at all, and whether it leaves by the
+ *  spur tile's own line edge, are the pipeline's. */
 struct SlideFan
 {
     void  *spur;             /* the Spur being built */
@@ -464,6 +503,12 @@ struct SlideFan
     float *rmin, *out_merge, *out_taper;
     V2    *B, *tB;
 };
+/*  A band strip's elevation as the composing script lays it out.  A SPUR
+ *  is one straight line from the ground at its line end to the ground at
+ *  its slab end.  A SLAB is stiff, held to a grade and rounded over a
+ *  window so it neither follows every bump nor dips into a hollow.  Both
+ *  then take the lift, tapered over the spur cells at each end.  The
+ *  stations and the ground under them are the pipeline's. */
 struct ProfFan
 {
     void *smp;
@@ -478,6 +523,13 @@ struct ProfFan
     float grade, stiff; /* the slab's steepest rise, and the window it is rounded over */
     float lift;         /* how far a slab rides above the ground */
 };
+/*  A band's cells as the composing script picks the points the fit
+ *  is given.  A STAIRCASE is curve blocks turning alternately, with at
+ *  most a few straight cells between.  It is the game's way of laying a
+ *  diagonal, is one point, the center of the blocks and short straights
+ *  it is made of.  So the run before it, the diagonal through its middle
+ *  and the run after it are three legs the fit fillets at their two
+ *  bends.  Every other cell is a point of its own. */
 struct StairFan
 {
     const void    *c;     /* the city, for the pin test */
@@ -487,7 +539,14 @@ struct StairFan
     V2            *chain;
     int            nc;
 };
-struct JBox /* JBox, declared above with the margin's API */
+/*  ONE JUNCTION BOX'S working state, handed to the stages below so each
+ *  can be read on its own.
+ *
+ *      The tile.
+ *      Its half width and the box's corners.
+ *      The margin's widths.
+ *      The height the box stands at. */
+struct JBox /* declared above with the margin's API */
 {
     RMesh       *m;
     const RCity *c;
@@ -500,7 +559,7 @@ struct JBox /* JBox, declared above with the margin's API */
     float        a0[2], a1[2], b0[2], b1[2];
     int          e;
     int          records_only; /* the box reaches no chunk this build draws: its lanes' and its margin's records, no drawing (the loft's rule) */
-    int          comp;         /* the width compensation the build lofts with (walk.c net_compensate), for the box's own lofts */
+    int          comp;         /* the width compensation the build lofts with (build.c build_compensate), for the box's own lofts */
 };
 /*  A FAMILY: how one kind of line is drawn.  How wide it is, which
  *  material it wears, which of the loft's stages it supplies and what it
@@ -590,7 +649,7 @@ typedef struct NetFamily
     int free_reach;
     /*  A junction's reach along each arm from its center, in tiles, for
      *  a family whose junction is a turnout.  The arms' strips start
-     *  there and the box draws across it (thread.c node_threads).  0 for
+     *  there and the box draws across it (net/node.c).  0 for
      *  a family whose junctions hand back lip trims. */
     float turnout;
     /*  The painter's slot its strip's way draws at, NAMED.  The numbers
@@ -637,35 +696,24 @@ typedef struct NetFamilyDecl
     int         slab;
 } NetFamilyDecl;
 extern const NetFamily *net_line, *net_thread, *net_band, *net_power;
-/*  Where a building pass's time goes, stage by stage (--times): the
- *  stages add to these, walk/walk.c prints them. */
+
+#define LANE_CLS_LINE 0
+
+#define LANE_CLS_TURN 1 /* a junction's connector: the near lane inside a meet piece's box */
+
+#define LANE_CLS_SLAB 2
+
+#define LANE_CLS_LINK 4 /* a band's lane on to the next band's, or into its own inner lane */
+
 enum
 {
-    NET_PROF_WALK_FIT,
-    NET_PROF_TRIMS,
-    NET_PROF_LANES,
-    NET_PROF_OVERLAY,
-    NET_PROF_CAPS,
-    NET_PROF_SAMPLE,
-    NET_PROF_PROFILE,
-    NET_PROF_SLAB_WORKS,
-    NET_PROF_RECORD,
-    NET_PROF_SLAB,
-    NET_PROF_SLAB_SLAB,
-    NET_PROF_JUNC_LANES,
-    NET_PROF_JUNC_BOX,
-    NET_PROF_STATIONS,
-    NET_PROF_CACHED,
-    NET_PROF_SAMPLED,
-    NET_PROF_GROUND,
-    NET_PROF_BAND_AIR, /* build_bands (band.c): the free-air scan, the bands, the tints, the spurs, the transitions, the lane check */
-    NET_PROF_BANDS,
-    NET_PROF_BAND_TINT,
-    NET_PROF_BAND_SPURS,
-    NET_PROF_BAND_TRANS,
-    NET_PROF_BAND_CHECK,
-    NET_PROF_SPUR_LOFT, /* of the spurs: their lofts (the rest is finding, posing and routing them) */
-    NET_PROF_N
+    NET_LANE_ENDS_OPEN,    /* the lanes stop */
+    NET_LANE_ENDS_CAP,     /* a line: round the cap, lane for lane */
+    NET_LANE_ENDS_REVERSE, /* a thread: the train reverses.  The arriving thread names the leaving one */
 };
+
+/*  A stage's C primitive, registered by the module that holds it, under
+ *  the name a declaration reaches it by. */
+typedef void (*NetHookFn)(void);
 
 #endif /* ARC_NET_TYPES_H */

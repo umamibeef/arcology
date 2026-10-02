@@ -6,11 +6,28 @@
  *  its foot aims, and how its join slides along the line's lane.
  *
  *  NOTHING HERE DECIDES ANY OF THAT.  Each is offered to a rule through
- *  a handle, and taken back.  The rules are arc.rules.orient, spur_side,
- *  spur_share, spur_span, spur_fork, spur_arm, spur_lane, spur_target
+ *  a handle, and taken back.  The rules are arc.rules.spurs, spur_side,
+ *  spur_share, spur_span, spur_fork, spur_lane, spur_target
  *  and slide.  What is left is the arithmetic that turns an answer into
  *  a pose.  It also holds the chains queued for the drive to cut, and
- *  the lofts filed for the drive to lay. */
+ *  the lofts filed for the drive to lay.
+ *
+ *  THE SPUR TILES: one id per direction, as the script's band table
+ *  names them.  Each is one tile beside a slab and beside a surface
+ *  line, on two adjacent sides.  The save's neighbors say so.  It is
+ *  spec 7.3's "one 1x1 tile adjacent to a slab edge, connected to a
+ *  surface line".  In the shipped cities a pair of them flanks each line
+ *  that crosses under a slab, one on either side.  That pair is a
+ *  diamond.
+ *
+ *  The data does not grow, which is 7.3's hard constraint.  So the
+ *  spur's form is derived on every build from what is free beside the
+ *  slab, the way 7.3 sets out.  An OFF spur is an ON spur on the
+ *  reversed lane, traversed backwards.  It is built as one and then
+ *  reversed, with the lift falling at its end instead of rising at its
+ *  start.  A spur at a band's END feeds it head-on and goes straight
+ *  across.  A spur is concrete from the line to the slab, and grades
+ *  nothing. */
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -23,71 +40,17 @@
 #include "net/net.h"
 #include "mesh/model.h"
 #include "opt.h"
+#include "net/cell.h"
 
 int gix_lane_line = -1;
 
-/*  THE SPUR TILES: 0x5D to 0x60, one id per direction.
- *
- *  Each is one tile beside a slab and beside a surface line, on two
- *  adjacent sides.  The save's neighbors say so.  It is spec 7.3's "one
- *  1x1 tile adjacent to a slab edge, connected to a surface line".  In
- *  the shipped cities a pair of them flanks each line that crosses under
- *  a slab, one on either side.  That pair is a diamond.
- *
- *  The data does not grow, which is 7.3's hard constraint.  So the
- *  spur's form is derived on every build from what is free beside the
- *  slab, the way 7.3 sets out.
- *
- *      WHICH LANE   Traffic keeps right.  The lane nearest the spur
- *                   runs so that the spur is on its right.  North of an
- *                   east-west slab that is the westbound lane.  East of
- *                   a north-south one it is the northbound.
- *
- *      ON or OFF    An ON spur has the line upstream of it on that
- *                   lane.  Traffic comes off the line and merges
- *                   downstream.  An OFF spur has the line downstream.
- *                   Traffic leaves the slab upstream, descends, and
- *                   turns onto the line.  A diamond puts the OFF before
- *                   the cross street and the ON after it, which is what
- *                   the pairs are.
- *
- *      D            The free-air tiles along the slab's edge, in the
- *                   spur's own row.  They run downstream for an ON spur
- *                   and upstream for an OFF, capped at eight.  Free
- *                   means nothing is built on the tile, and nothing on
- *                   it stands higher than the spur's own ground.
- *
- *      THE FORM     D of 4 or more is PARALLEL.  The spur runs along
- *                   its row beside the slab.  It climbs over
- *                   min(D - 2, 6) tiles, then turns in over two more.
- *                   The turn-in is an S from the row's center onto the
- *                   slab's edge, tangent to it.  Half the spec's climb
- *                   at 4 or 5 is its "short parallel".  D under 4 is a
- *                   HELIX.  It is a spiral of one and a quarter turns
- *                   in the spur tile, turning toward the slab, so its
- *                   last quarter turn is the turn-in.  A short straight
- *                   then reaches the slab's edge.  The spec's hairpin
- *                   is not built yet, and the helix takes its place.
- *
- *  An OFF spur is an ON spur on the reversed lane, traversed backwards.
- *  It is built as one and then reversed, with the lift falling at its
- *  end instead of rising at its start.
- *
- *  A spur at a band's END feeds it head-on and goes straight across.  A
- *  spur is concrete from the line to the slab, and grades nothing. */
-
-/*  How a spur tile sits.  It says which side its slab is on, and which
- *  its line.  It also gives the lane it serves by the right-hand rule,
- *  and the direction of travel on it.  Whether it is an OFF spur (the
- *  line downstream) or ON.  Answers 0 for a spur with no slab beside it,
- *  left to its sprite.  Sets `eside` for one at a band's end, head-on. */
 /*  THE LINKS a tile's own piece claims, as the art shows them: which of
  *  its four edges carry the line's fill to the edge.  A rule reading the
  *  map for itself needs this, because it is not in the save.  It is what
  *  the pipeline made of the byte. */
 int band_orient_links(const OrientFan *o, int32_t col, int32_t row)
 {
-    return tile_links((const RCity *)o->c, (const RAtlasLevel *)o->l, col, row, net_line->f);
+    return tile_links((const RCity *)o->c, col, row, net_line->f);
 }
 
 
@@ -107,6 +70,8 @@ void band_orient_spur(OrientFan *o, const OrientFan *r)
     o->arm  = r->arm;
     o->rdx = r->rdx, o->rdy = r->rdy;
     o->mdx = r->mdx, o->mdy = r->mdy;
+    o->fx = r->fx, o->fy = r->fy;
+    o->fdx = r->fdx, o->fdy = r->fdy;
 }
 
 void band_orient_answer(OrientFan *o, int kind, int dside, int rside, int eside, int off, int lines)
@@ -121,7 +86,7 @@ void band_orient_answer(OrientFan *o, int kind, int dside, int rside, int eside,
 
 /*  Every on-spur tile read once, before any of them is built: which side
  *  of it the slab lies, which the line.  Which way round it runs are
- *  arc.rules.orient's, and they follow from the map alone. */
+ *  arc.rules.spurs's, and they follow from the map alone. */
 
 typedef struct
 {
@@ -131,17 +96,15 @@ typedef struct
 static OrientEntry s_orient[ORIENTS_MAX];
 static int s_n_orient;
 static const RCity       *s_orient_c;
-static const RAtlasLevel *s_orient_l;
 
 /*  EVERY ON-SPUR TILE, as the script finds them.  Which cells carry a
  *  spur is arc.rules.spurs's, it walks the map itself, the way bands.lua
  *  walks it for the slabs.  This only holds what it hands back.  Nothing
  *  here reads the city. */
-int net_spurs_begin(const RCity *c, const RAtlasLevel *l)
+int net_spurs_begin(const RCity *c)
 {
     s_n_orient = 0;
     s_orient_c = c;
-    s_orient_l = l;
     return 1;
 }
 
@@ -157,7 +120,6 @@ int net_spur_at(int32_t col, int32_t row)
     e->col     = col;
     e->row     = row;
     e->o.c     = s_orient_c;
-    e->o.l     = s_orient_l;
     e->o.col   = col;
     e->o.row   = row;
     e->o.dside = e->o.rside = e->o.eside = -1;
@@ -200,10 +162,14 @@ static int s_n_share;
 
 
 
-/*  How a spur tile sits, as arc.rules.orient answered.  Which side its
+/*  How a spur tile sits, as arc.rules.spurs answered.  Which side its
  *  slab is on, which its line, the way it lies along the slab and the
- *  way the slab is.  Nothing is derived here: the rule worked all of it
- *  out from the tile's four neighbors and the map. */
+ *  way the slab is.  It also gives the lane it serves by the right-hand
+ *  rule, and the direction of travel on it.  Whether it is an OFF spur
+ *  (the line downstream) or ON.  Answers 0 for a spur with no slab
+ *  beside it, left to its sprite.  Sets `eside` for one at a band's end,
+ *  head-on.  Nothing is derived here: the rule worked all of it out from
+ *  the tile's four neighbors and the map. */
 int spur_orient(const RCity *c, int32_t col, int32_t row, int *dside, int *rside, int *eside, V2 *along, V2 *toward, int *off, int *lines)
 {
     const OrientFan *op = orient_of(col, row);
@@ -224,7 +190,7 @@ int spur_orient(const RCity *c, int32_t col, int32_t row, int *dside, int *rside
 }
 
 /*  THE SPURS, as the rule made them.  Every on-spur tile was offered to
- *  arc.rules.orient with its four neighbors.  What a spur lies along,
+ *  arc.rules.spurs with its four neighbors.  What a spur lies along,
  *  which side its taper falls on and how far it reaches is that rule's
  *  answer, and this only files it. */
 void band_lanes(const RCity *c)
@@ -360,7 +326,7 @@ int spur_find(Spur *x)
             ++s_spur_forms[4];
         band_spur_lost_is(x->col, x->row, 2);
         if (g_dev.lane_dump && s_pass != 1)
-            dumpf("SPUR %d,%d lost: no slab station within %.1f of c0 %.2f,%.2f (nearest %.2f of %d stations)\n", (int)x->col, (int)x->row, (double)s_tune.band_reach, (double)rp->c0.x, (double)rp->c0.y, (double)nearest, s_band_nst);
+            dumpf("SPUR %d,%d lost: no slab station within %.1f of c0 %.2f,%.2f (nearest %.2f of %d stations)\n", (int)x->col, (int)x->row, (double)TUNE(band_reach), (double)rp->c0.x, (double)rp->c0.y, (double)nearest, s_band_nst);
         return 1; /* no slab lofted beside it after all */
     }
     x->rp   = rp;
@@ -384,15 +350,18 @@ int spur_classify(Spur *x)
     V2            mdir   = x->mdir;
     V2            along  = x->along;
     V2            toward = x->toward;
-    /*  The line the spur comes down to, as arc.rules.orient read it.  It
+    /*  The line the spur comes down to, as arc.rules.spurs read it.  It
      *  gives the way to the line tile, and the way the lane leaves along
-     *  it.  It also gives what the line tile is.  Nothing is read from
-     *  the map here: the rule walked it. */
+     *  it.  It also gives what the line tile is.  And it gives the FOOT:
+     *  where the descent stops at the line, and the way it heads there.
+     *  Nothing is read from the map here: the rule walked it. */
     {
         const OrientFan *op = orient_of(col, row);
         rd   = op ? (V2){op->rdx, op->rdy} : (V2){0.0f, 0.0f};
         mdir = op ? (V2){op->mdx, op->mdy} : mdir;
         fork = op ? op->fork : 0;
+        x->F  = op ? (V2){op->fx, op->fy} : (V2){0.0f, 0.0f};
+        x->tF = op ? (V2){op->fdx, op->fdy} : (V2){0.0f, 0.0f};
     }
     x->rp     = rp;
     x->side   = side;

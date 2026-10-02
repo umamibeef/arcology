@@ -1,9 +1,9 @@
 /*  geo.h: the numbers a script tunes the world with.
  *
- *  Two stores, and neither is any one directory's.  The KNOBS are a
- *  fixed struct the tuning window writes and the macros read.  The
- *  NUMBERS are free: a name exists from the moment a script sets it, so
- *  there is nothing to declare before one can be invented.
+ *  Two stores, and neither is any one directory's.  A KNOB is declared.
+ *  It has a range, a default and a name the tuning window shows.  It
+ *  keeps a float at an address that never moves.  A NUMBER is free: it
+ *  exists from the moment a script sets it.  The scripts fill both.
  *
  *  Both are read by all three halves of the renderer, which is why they
  *  sit here rather than with any of them.  A primitive wants the step it
@@ -12,41 +12,25 @@
 #ifndef ARC_GEO_H
 #define ARC_GEO_H
 
-/*  The knobs the look is tuned with, live.  They were constants.  The
- *  judgment they encode is aesthetic and belongs to the person looking
- *  at the city, not to a number I picked.  The macros still stand so
- *  every use site reads the current value, and the UI's tuning window
- *  writes them and rebuilds the mesh. */
+/*  ONE KNOB.  The name a script and the C set it by.  What the tuning
+ *  window calls it, and the group it is drawn with.  The range it is
+ *  held to, and the value it starts at.
+ *
+ *  A script declares every one of them (scripts/tune.lua).  So the range
+ *  and the slider of a new number are a script's.  C holds the store and
+ *  the names it reads itself.  A knob with no label gets no slider: it
+ *  is a view or a switch some other control owns. */
 typedef struct
 {
-    float line_w;    /* the way, across, in tiles                 */
-    float thread_w;    /* a double thread's right of way                     */
-    float line_rmin; /* the tightest curve each may be drawn with         */
-    float thread_rmin;
-    float line_rmax; /* and the widest sweep to look for                  */
-    float thread_rmax;
-    float approach;    /* straight run reserved at every node               */
-    float margin;      /* how far inside its corridor the band is held      */
-    float trim_cap;    /* how far out a junction may cut its arms back      */
-    float show_curves; /* draw the fitted centerline over the world       */
-    /*  The band's, live too.  The slab's half width across, in tiles,
-     *  and what sits on it follows.  The radii its corners may take.
-     *  How far an on-spur reaches for the slab.  How many straight cells
-     *  may lie between two curve blocks for them to be one staircase.
-     *  And the share of an edge a corner may take for its fillet.  The
-     *  half rule holds it at 0.5.  It is the same for every family,
-     *  because the fit is one. */
-    float band_w;
-    float band_rmin, band_rmax;
-    float band_reach;
-    float band_stair;
-    float corner_share;
-    float spur_merge; /* how far along the line an on-spur's join may slide from the point it aimed at, tiles */
-    float band_grade; /* the slab's steepest rise or fall, levels per tile */
-    float band_stiff; /* the slab's stiffness: the window, tiles, over which it holds level across dips and rounds its crests */
-} RTune;
+    const char *name;
+    const char *label;
+    const char *group;
+    float       v, lo, hi, def;
+} RKnob;
 
-extern RTune s_tune;
+/*  The most knobs the store keeps.  A build's key and the tuning window
+ *  both hold one slot each, so the ceiling is declared here. */
+#define ARC_TUNE_MAX 32
 
 /*  A number by name, remembering where it was found.  The cache is the
  *  reader's own and starts at -1.  A name nothing has set reads as
@@ -54,13 +38,49 @@ extern RTune s_tune;
 float        geo_num(int *cache, const char *name);
 int          geo_set(const char *name, float v);
 const char  *geo_name(int i, float *v);
+/*  One number by name, for a caller that keeps no place: answers
+ *  whether the store holds it. */
+int          geo_find(const char *name, float *v);
 
-/*  The knobs, the same way.  A family holds pointers at its width and
- *  its radii, so every use reads the live value. */
+/*  The knobs.  A declaration that names a knob the store already holds
+ *  keeps its value and moves its range.  So a reading of the scripts
+ *  while the city runs does not throw a tuning session away. */
+int          tune_declare(const RKnob *k);
+int          tune_count(void);
+int          tune_knob(int i, RKnob *out);
 int          tune_set(const char *name, float v);
+int          tune_set_at(int i, float v);
+int          tune_find(const char *name, float *v);
+/*  A family holds pointers at its width and its radii, so every use
+ *  reads the live value. */
 const float *tune_at(const char *name);
 const char  *tune_name(int i, float *v);
-/*  And the knobs as the tuning window holds them: one array of floats. */
-float       *tune_array(void);
+/*  Every value, in the store's own order: what the build puts in its
+ *  key.  Answers how many it wrote. */
+int          tune_values(float *out, int max);
+
+/*  THE KNOBS THE RENDERER READS ITSELF.  A read site says TUNE(margin).
+ *  Each pointer is settled once, by tune_bind, after the scripts are
+ *  read, and a knob's float never moves again.  So a read in a per-tile
+ *  loop is a load.
+ *
+ *  This is the whole list of knobs C looks at.  Everything else a knob
+ *  does, it does through a family's declaration or through a script. */
+typedef struct
+{
+    const float *line_w, *thread_w, *line_rmin, *thread_rmin;
+    const float *approach, *margin, *trim_cap, *show_curves;
+    const float *band_w, *band_rmin, *band_rmax, *band_reach, *band_stair;
+    const float *band_grade, *band_stiff, *corner_share, *spur_merge;
+} RTuned;
+
+extern RTuned s_tuned;
+
+#define TUNE(k) (*s_tuned.k)
+
+/*  Bind the list above to the store.  Answers whether the scripts
+ *  declared every one.  A name they did not is a fault: the renderer
+ *  would draw with a nought where a width belongs. */
+int          tune_bind(void);
 
 #endif /* ARC_GEO_H */

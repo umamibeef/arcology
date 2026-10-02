@@ -708,6 +708,9 @@ int arco_load(const char *path, City *c)
     chunks = MAP_W / ARCO_CHUNK;
 
     memset(c, 0, sizeof *c);
+    /*  The dice come up at one: the seeds are not in the file, and a
+     *  shift register at nought never leaves it. */
+    rng_seed(c, 1, 1);
     layers_of(c, L, &n);
     for (cy = 0; cy < chunks; cy++)
         for (cx = 0; cx < chunks; cx++)

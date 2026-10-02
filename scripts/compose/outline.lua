@@ -32,6 +32,10 @@ local function line_meet(ax, ay, ux, uy, bx, by, vx, vy)
     return f32(ax + ux * t), f32(ay + uy * t)
 end
 
+--  OVER 150 LINES, and one page on purpose: it is ONE ring, built in
+--  stages over the same arrays.  The mouths, the trims and the fill are
+--  each read from what the stage before wrote, so a cut would export
+--  every one of those arrays and hide nothing.
 arc.rules.outline = function (o)
     local d = o:info()
     local n = d.n

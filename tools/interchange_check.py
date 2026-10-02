@@ -2,7 +2,7 @@
 """The band's interchanges are joined by a script, and by nothing else.
 
 A slab lane's end is one of four situations, and telling them apart is
-the whole of `scripts/compose/links.lua`:
+the whole of `scripts/compose/links`:
 
   * the inner lane with a line ahead -- the slab has come down to grade
   * the inner lane with no line -- the slab goes on as another band, so

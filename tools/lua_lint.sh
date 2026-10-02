@@ -8,9 +8,10 @@
 set -e
 bin=${1:-build/arcology}
 root=$(cd "$(dirname "$0")/.." && pwd)
-set -- "$root"/scripts/*.lua "$root"/scripts/*/*.lua
-if [ ! -e "$1" ]; then
+#  The folder, not a glob: the program lists it in its own order, and the
+#  lint has to read what the program reads, in that order.
+if [ ! -d "$root/scripts" ]; then
     echo "lua lint  no scripts"
     exit 0
 fi
-exec "$bin" --lua-lint "$@"
+exec "$bin" --lua-lint "$root/scripts"

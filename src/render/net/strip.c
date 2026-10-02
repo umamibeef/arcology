@@ -19,6 +19,13 @@
 #include "pipeline.h"
 #include "net/net.h"
 #include "script.h"
+#include "mesh/shapes.h"
+#include "mesh/loft.h"
+#include "mesh/piece.h"
+#include "mesh/surface.h"
+#include "net/cell.h"
+#include "prof.h"
+#include "build.h"
 
 static const char *s_lx_furn_rule; /* the props rule the family named, for the take */
 
@@ -126,9 +133,9 @@ static int loft_profile_post(Loft *x)
      *  over one level, applied after the profile is settled so the slab
      *  follows the ground's shape while riding above it.  And it is a
      *  structure, not a carpet.  Its support line may rise or fall no
-     *  faster than a sixth of a level a tile.  So it runs straight over
-     *  what the ground does under it and the columns take up the
-     *  difference.
+     *  faster than the grade the tuning sets (arc.tune.band_grade), in
+     *  levels a tile.  So it runs straight over what the ground does
+     *  under it, and the columns take up the difference.
      *
      *  The piers: one per segment boundary, every two tiles, which is
      *  the spec's 30 m span (7.2).  The type comes from what is under
@@ -310,7 +317,7 @@ const char *net_loft_works(void)
         return NULL;
     if (loft_profile_post(&s_lx) != 0)
         return NULL;
-    tq = prof_now(), net_prof_add(NET_PROF_PROFILE, tq - s_lx_tp), s_lx_tp = tq;
+    tq = prof_now(), prof_add(PROF_PROFILE, tq - s_lx_tp), s_lx_tp = tq;
     if (!s_ldv.records_only)
         loft_note(&s_lx); /* what it is, for the inspector, before anything of it is drawn */
     if (!net_family_has(s_ldv.fam, NH_WORKS) && !net_family_stations(s_ldv.fam))
@@ -319,22 +326,14 @@ const char *net_loft_works(void)
     return net_family_stage_rule(s_ldv.fam, NH_WORKS);
 }
 
-/*  THE RECORD: what the strip leaves for the traffic and the passes that
- *  read it, the furniture beside it and the corridor surface under it.
- *  The slab follows.  It is the only stage that draws the way.  So the
- *  loft ends with everything it worked out still standing and the strip
- *  composed from outside. */
-/*  THE RECORD is what the strip leaves for the traffic and the passes
- *  that read it.  It holds a line's graph edge and its two margins, a
- *  thread's thread, a slab's edge under its own class (line.c, thread.c,
- *  band.c).  The grading pass records nothing: it lays the corridor and
- *  no more. */
 /*  HOW FAR THE NEAREST LEVEL MEET IS, at every station of a strip that
  *  is crossed at grade.  A family that declares `crossed` gets it.
  *  Scripts/compose/strip.lua reads it: the approach markings on a line
  *  run between one distance and another either side of a meet.  Which
- *  bytes are a meet is arc.rules.lap_tiles's, and how near the tile's
- *  center a station must run to count is the family's own knob. */
+ *  bytes are a meet is arc.bytes("lap_tiles")'s, and how near the tile's
+ *  center a station must run to count is the family's own knob.  It is
+ *  measured here and not by the furniture pass, which the driver can
+ *  switch off. */
 void net_strip_laps(Loft *x)
 {
     const RCity *c   = x->c;
@@ -367,12 +366,20 @@ void net_strip_laps(Loft *x)
     }
 }
 
+/*  THE RECORD: what the strip leaves for the traffic and the passes that
+ *  read it, the furniture beside it and the corridor surface under it.
+ *  It holds a line's graph edge and its two margins, a thread's thread,
+ *  and a slab's edge under its own class.  Each is as the family's own
+ *  declaration asks (scripts/families).  The grading pass records
+ *  nothing: it lays the corridor and no more.  The slab follows.  It is
+ *  the only stage that draws the way.  So the loft ends with everything
+ *  it worked out still standing and the strip composed from outside. */
 const char *net_loft_record(void)
 {
     double tq;
     if (!s_lx_live)
         return NULL;
-    tq = prof_now(), net_prof_add(NET_PROF_SLAB_WORKS, tq - s_lx_tp), s_lx_tp = tq;
+    tq = prof_now(), prof_add(PROF_SLAB_WORKS, tq - s_lx_tp), s_lx_tp = tq;
     if (grade_only(g_dev.grade_loft))
         return NULL;
     if (s_lx.ns < 2 || (!net_family_has(s_ldv.fam, NH_RECORD) && !net_family_graphed(s_ldv.fam)))
@@ -429,7 +436,7 @@ int net_loft_recorded(void)
         return -1;
     if (loft_record_surface(&s_lx) != 0)
         return -1;
-    tq = prof_now(), net_prof_add(NET_PROF_RECORD, tq - s_lx_tp), s_lx_tp = tq;
+    tq = prof_now(), prof_add(PROF_RECORD, tq - s_lx_tp), s_lx_tp = tq;
     /*  The slab's own time runs from the end of the record, not from
      *  wherever the composer is reached. */
     s_slab_tp = s_lx_tp;
@@ -458,9 +465,9 @@ Loft *net_loft_strip(void)
 static void net_loft_slab_done(double tp)
 {
     double tq = prof_now();
-    net_prof_add(NET_PROF_SLAB, tq - tp);
+    prof_add(PROF_SLAB, tq - tp);
     if (s_ldv.fam == net_band)
-        net_prof_add(NET_PROF_SLAB_SLAB, tq - tp);
+        prof_add(PROF_SLAB_SLAB, tq - tp);
     s_slab_ready = 0;
 }
 
@@ -477,7 +484,7 @@ static int net_loft_draws(void)
  *  the grading pass draws none of them. */
 Loft *net_loft_curves(void)
 {
-    if (!s_slab_ready || s_slab_records_only || s_tune.show_curves <= 0.5f || s_pass == 1)
+    if (!s_slab_ready || s_slab_records_only || TUNE(show_curves) <= 0.5f || s_pass == 1)
         return NULL;
     return &s_slab_x;
 }
@@ -493,11 +500,11 @@ int net_loft_close(void)
     return 0;
 }
 
-/*  The strip is one width in the world whatever direction it runs.  The
+/*  The strip is one width IN THE WORLD whatever direction it runs.  The
  *  oblique camera then draws a line toward it wider than one across it,
- *  as it draws everything else.  (A build that scaled the world width by
- *  direction to equalise the screen width was rejected: "you are not
- *  keeping line widths consistent".) */
+ *  as it draws everything else.  Scaling the world width by direction
+ *  would even the screen width up.  It would also leave the world's own
+ *  widths inconsistent, which is the wrong half to keep. */
 float width_factor(float dx, float dy, int compensate)
 {
     (void)dx;
@@ -548,15 +555,6 @@ static float wide_at(const float *ws, const float *wv, int n, float at)
     return wv[n - 1];
 }
 
-/*  Every station along the pieces, at the density the caller asked for.
- *  A step of nought puts a station at each piece's two ends and nowhere
- *  between.  This is exact for a straight and coarse for an arc: how
- *  finely a curve reads is the caller's to say and not this file's.
- *
- *  The seat is the ground plus the lift, one height outright, or the
- *  HEIGHTS the caller gave at distances along the chain.  Between two of
- *  those it is eased, so the sweep leaves each one level.  Past the first
- *  and the last it holds their height. */
 /*  The height the knots give at `at` along the chain.  The knots come
  *  sorted by distance.  Between two the seat is the cubic that meets
  *  each at its own height and slope, so the grade is continuous through
@@ -580,6 +578,15 @@ static float knot_height(const LoftSweep *how, float at)
     return how->knot_z[how->nknot - 1];
 }
 
+/*  Every station along the pieces, at the density the caller asked for.
+ *  A step of nought puts a station at each piece's two ends and nowhere
+ *  between.  This is exact for a straight and coarse for an arc: how
+ *  finely a curve reads is the caller's to say and not this file's.
+ *
+ *  The seat is the ground plus the lift, one height outright, or the
+ *  HEIGHTS the caller gave at distances along the chain.  Between two of
+ *  those it is eased, so the sweep leaves each one level.  Past the first
+ *  and the last it holds their height. */
 static int sweep_stations(const RCity *c, uint8_t mask_bit, const Piece *pc, int np,
                           const LoftSweep *how, SweepSt *st, int cap)
 {

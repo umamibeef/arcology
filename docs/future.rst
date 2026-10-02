@@ -6,11 +6,11 @@ Future plans
 
 .. container:: eyebrow
 
-   The enhanced world · decided in conversation, not built
+   The enhanced world · decided, not built
 
 .. container:: lede
 
-  The front page states the goal: a game that supports everything original, and an engine far more flexible than that. This page is where the second half lives. Everything on it was settled or raised in conversation on 1 September 2026, and nothing on it exists in code. Each item carries its status, and where a decision rests on a measured fact the fact is stated with it.
+  The front page states the goal: a game that supports everything original, and an engine far more flexible than that. This page is where the second half lives. Everything on it is decided and not built. Each item carries its status, and where a decision rests on a measured fact the fact is stated with it.
 
 .. warning::
 
@@ -53,21 +53,6 @@ The renderer becomes 2.5D
    - depth equals sweep order, so the nearer tile overpaints exactly where the sprite did.
 
    Two facts from the shipped cities decide the mesh's topology. **A lifted corner is one level, never two**: the art confirms it, sprite 257 raising two corners by twelve pixels and sprite 263 three. **Shared corners disagree in the data**: across all 103 cities, under that reading, neighbouring tiles agree on a shared corner's height 97.0% of the time, and no other reading of the corner bits or of ``ALTM`` comes close. The remaining 3% are diagonal ramps, where altitude climbs one level per tile in both directions and no shape spans the two levels a plane would need; the high-side tile puts the corner one level above the low-side tile, and the nearer sprite overpaints the mismatch. So the terrain is separate per-tile quads overpainted in sweep order, because that is what the art contains. A joined surface would draw a ramp the game never drew.
-
-What is done first
-~~~~~~~~~~~~~~~~~~
-
-.. container:: eyebrow
-
-   Done · 1 September 2026
-
-.. container:: col
-
-   - **The provenance plane** is in the software rasteriser, written by ``--provenance``: the sprite that painted each pixel, with a flag for the shadow pass. Adding it changed no pixel of any existing output.
-   - **The per-code table** is ``tools/terrain_shapes.py`` and ``assets/terrain-shapes.json``. It found two things the mechanics page now states: the far edges that slope down from a raised corner are drawn at three pixels per four rows where the projection gives four per five, so a polygon filled from the true geometry differs from the sprite by one pixel on about half the rows of such an edge, and code 13 is drawn as a flat tile raised one level, not as a saddle. Code 7 fixes the diagonal at north-east to south-west; every other code is indifferent.
-   - **The 2.5D composition** is ``arcology --soft --mesh`` (see :doc:`enhanced-renderer`): the terrain drawn first as its own pass writing a depth plane, everything else after it in the sweep's order and tested against the plane. With the terrain drawn back to front it reproduces every shipped city file at 8 px and the ten dense and hilly cities at 16 and 32 px, pixel for pixel, while rejecting over a million sprite pixels behind nearer terrain at 32 px. The plate-and-step test was superseded by that, since a whole city is a harder plate. The :doc:`enhanced-renderer` page carries the table.
-
-   What the first finding changes: at the snap views the coverage of each terrain face comes from the sprite's own mask, and polygon rasterisation of the geometry is the off-snap path, one pixel different along those edges by the art's choice.
 
 Later, in this order
 ~~~~~~~~~~~~~~~~~~~~
@@ -220,7 +205,7 @@ The minimum playable game
 
 .. container:: eyebrow
 
-   Decided · 1 September 2026
+   Decided
 
 .. container:: col
 
@@ -231,21 +216,13 @@ The interface
 
 .. container:: eyebrow
 
-   Decided · 1 September 2026
+   Decided
 
 .. container:: col
 
-   **The canon interface is the original's, and its port has begun.** The game's interface (:doc:`enhanced-renderer`) is the original's tool palette from its own picture, its menus from its own menu resources, and System 7 chrome, with Dear ImGui as the engine underneath and behind a C interface (``src/render/ui.h``). What remains: the sub-tool menus and the tools themselves, which need the original's placement routines reconstructed; the map, ordinances, industry, neighbours and newspaper windows from their pictures; the shift-click help from ``TEXT`` 1100 onward; and rotation.
+   **The canon interface is the original's, and its port has begun.** The game's interface (:doc:`enhanced-renderer`) is the original's tool palette from its own picture, its menus from its own menu resources, and System 7 chrome, with Dear ImGui as the engine underneath and behind a C interface (``src/ui/ui.h``). What remains: the sub-tool menus and the tools themselves, which need the original's placement routines reconstructed; the map, ordinances, industry, neighbours and newspaper windows from their pictures; the shift-click help from ``TEXT`` 1100 onward; and rotation.
 
-  **The original's interface is to be ported from its own resources.** The survey of 1 September 2026 found the art intact in the application's resource fork: the tool palette, status bar, demand bars, newspaper mastheads, budget panels and growth icons are ``PICT`` resources, the thirty tool cursors ``CURS`` resources, the menus ``MENU`` resources, and the shift-click help texts, ``TEXT`` 1100 to 1133, enumerate the toolbar's thirty-four buttons in order. There is no dialog resource: every window is a hand-drawn ``NewCWindow`` over a ``PICT`` with its own hit-testing. The fonts are the system's (Chicago, Geneva, Monaco), not the game's. The decoder for the QuickDraw ``PICT`` opcodes now exists (``tools/pict.py``); the fork reader existed.
-
-.. container:: eyebrow
-
-   Built · 1 September 2026
-
-.. container:: col
-
-  **Kaleidoscope schemes as themes.** Built the day it was earmarked: ``tools/scheme.py`` reads a scheme into a theme pack and ``--theme`` dresses the menu bar, the menus and every title bar in it (:doc:`enhanced-renderer`); scroll bars, buttons, patterns and the inactive states remain. The earmark as it was: the interface is to be themable with Kaleidoscope schemes, the classic Mac OS 8 and 9 theming extension whose scheme files (Kaleidoscope 2.x, resource-fork based: window frames, buttons, scrollbars, menus, patterns and colours as ``PICT``, ``ppat`` and colour resources) are still archived, for instance the mass:werk collection at https://www.masswerk.at/schemes.php. The consequences: theming stays in one place (``apply_theme`` in ``ui.cpp`` today); a scheme is textured frames, not colours alone, so an ImGui theme can take its palette from a scheme while the frames wait for the vintage interface, which draws its own; and the scheme reader is the same resource-fork and ``PICT`` work the port needs.
+  **The original's interface is to be ported from its own resources.** The art is intact in the application's resource fork: the tool palette, status bar, demand bars, newspaper mastheads, budget panels and growth icons are ``PICT`` resources, the thirty tool cursors ``CURS`` resources, the menus ``MENU`` resources, and the shift-click help texts, ``TEXT`` 1100 to 1133, enumerate the toolbar's thirty-four buttons in order. There is no dialog resource: every window is a hand-drawn ``NewCWindow`` over a ``PICT`` with its own hit-testing. The fonts are the system's (Chicago, Geneva, Monaco), not the game's. The decoder for the QuickDraw ``PICT`` opcodes now exists (``tools/pict.py``); the fork reader existed.
 
 Still open
 ----------
@@ -267,11 +244,11 @@ The road system spec, part by part
 
 .. container:: eyebrow
 
-   Open · for review together
+   Open
 
 .. container:: col
 
-  The user's road system specification is the reference for the road renderer (:doc:`appendix-road-spec`, brought in whole on 2 September 2026). What follows is its feasibility against what the original game and its save format provide, part by part, with what is built so far. The save stores one road family (``XBLD`` ``0x1D`` to ``0x2B``), one highway family, rails and power lines, each with fifteen pieces on a four-neighbour grid; it stores no road class, no one-way flag, no lane count and no true diagonal. Everything the spec keys off the class must therefore be derived, or belong to the enhanced mode's own data.
+  The road system specification is the reference for the road renderer (:doc:`appendix-road-spec`). What follows is its feasibility against what the original game and its save format provide, part by part, with what is built so far. The save stores one road family (``XBLD`` ``0x1D`` to ``0x2B``), one highway family, rails and power lines, each with fifteen pieces on a four-neighbour grid; it stores no road class, no one-way flag, no lane count and no true diagonal. Everything the spec keys off the class must therefore be derived, or belong to the enhanced mode's own data.
 
 .. list-table::
    :header-rows: 1
@@ -399,7 +376,7 @@ Lanes as primitives
 
 .. container:: eyebrow
 
-   Decided · 4 September 2026
+   Decided
 
 .. container:: col
 
@@ -427,11 +404,9 @@ Lanes as primitives
       matches its connector's end.
    2. **Ramps**, routed from the deck's outer lane at the gore to the
       road's lane at the ramp tile, replacing the drifted strip. The
-      user's drawing (a lane peeling off the deck's edge, running beside
-      it, landing on the road's side) is the acceptance case, on the
-  Atlanta tiles named in the session. *Built*: two
-      routed legs, the descent and the join, lofted by the road's loft;
- the look is judged by eye.
+      acceptance case is a lane peeling off the deck's edge, running
+      beside it, and landing on the road's side. The look is judged by
+      eye.
    3. **Rail**: the branch into the through track, crossovers.
    4. **Lane counts** that differ between segments: matched lanes route
       straight, the unmatched ones taper into their neighbour.
@@ -570,3 +545,54 @@ layout alone, exactly as 7.3's closing note says it should be. There is
 nothing to load and nothing to migrate; an imported city gets its ramp
 forms computed the first time it is drawn.
 
+
+.. _fit-safe-corridor:
+
+The corridor fit by safe-corridor optimization
+----------------------------------------------
+
+The fit in the tree decides curvature locally and after the fact. Each
+corner asks for the widest arc that fits between its two edges, and a
+corner with no legal arc is drawn hard. Several symptoms follow from
+that one choice. Nodes can lie too close to sweep. A radius floor rises
+with the band, which leaves a corner with no legal arc at all.
+
+The standard method solves it a different way. Put the path in a basis
+whose CONTROL POINTS bound the curve, by the convex hull property of a
+uniform cubic B-spline. Box each control point into the corridor, then
+minimize curvature. Containment stops being a test applied afterwards
+and becomes a constraint on the points. Curvature is continuous by
+construction, so there is no such thing as a hard corner in the result.
+Quadrotor and self-driving planners fit paths this way, and the civil
+engineering equivalent is the tangent, spiral and arc alignment that
+line design has used for a century.
+
+Minimizing the discrete bending energy
+:math:`\sum |p_{i-1} - 2p_i + p_{i+1}|^2` makes the stationary condition
+a fourth difference of zero, so one sweep of projected Gauss-Seidel is
+
+.. code-block:: text
+
+    p[i] <- box( (4(p[i-1] + p[i+1]) - (p[i-2] + p[i+2])) / 6 )
+
+which is a few dozen iterations of arithmetic per segment. It needs no
+solver, no global system and no per-corner search.
+
+.. caution::
+
+   **Boxing each control point into its own tile proves nothing about the
+   curve between them.** The convex hull property bounds a span by its
+   four control points, so a span is safe exactly when all four lie in
+   one CONVEX piece of the corridor. The corridor is a run of unit tiles,
+   so its convex pieces are the solid rectangles it contains: the four
+   tiles' bounding rectangle where the corridor fills it, and otherwise
+   the middle tile alone, which forces the span's points together and
+   turns the corner tightly but legally.
+
+.. note::
+
+   A fit whose pieces are dense samples has no fillets. Two things in the
+   tree read piece boundaries and would have to change with it: the curve
+   overlay marks a vertex per boundary, and a tangent read from a piece a
+   few hundredths of a tile long points wherever that fragment happens
+   to. Both are noted where they stand.

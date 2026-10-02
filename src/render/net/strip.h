@@ -7,6 +7,7 @@
 #define ARC_NET_STRIP_H
 
 #include "net/types.h"
+#include "mesh/loft.h"
 
 float width_factor(float dx, float dy, int compensate);
 /*  Answers how many faces it laid, or -1 where the mesh would not take

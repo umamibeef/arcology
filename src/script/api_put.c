@@ -64,6 +64,9 @@
 #include "pipeline.h"
 #include "net/net.h"
 #include "mesh/model.h"
+#include "mesh/shapes.h"
+#include "mesh/emit.h"
+#include "mesh/surface.h"
 
 /*  The world a prop is being drawn into, and what it is drawn with.  Set
  *  for the length of one rule call and cleared after it. */

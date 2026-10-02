@@ -1,4 +1,4 @@
---  slab.lua -- what a freeway slab carries beside its way.
+--  deck.lua -- what a freeway slab carries beside its way.
 --
 --  A slab is a slab on columns, nothing under or beside it: the side
 --  faces show through the way from the far edge.  Two things are

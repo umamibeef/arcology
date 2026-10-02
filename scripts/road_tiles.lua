@@ -1,4 +1,4 @@
---  line_tiles.lua -- which of the city's building bytes carry a line.
+--  road_tiles.lua -- which of the city's building bytes carry a line.
 --
 --  Three answers, because three different things want to know.
 --
@@ -107,3 +107,34 @@ arc.bytes("lap_tiles", {[0x45] = true, [0x46] = true})
 --  And the same two for the pose store, with the line's piece: 0 runs
 --  east and west, 1 north and south.
 arc.lap_tiles = {[0x45] = {line = 0}, [0x46] = {line = 1}}
+
+--  WHY A MARGIN'S END MEETS NOTHING, by the byte of the tile beyond it.
+--  1 is a tile the margin cannot cross: a slab stands over it, or a
+--  structure fills it.  2 is open ground, where the margin simply
+--  stops.  0 is every other byte, and that is the answer worth
+--  reporting, because the margin should have gone on.
+do
+    local t = {}
+    for b = 0x49, 0xFF do t[b] = 1 end
+    t[0x00] = 2
+    arc.bytes("margin_beyond", t, "number")
+end
+
+--  WHAT MUST CARRY GEOMETRY.  A tile the city says a network runs on
+--  has to have geometry drawn on it.  A tile with none is a piece the
+--  walk did not draw, which the watertightness check reports.
+--
+--  1 is a tile of a surface network or a level meet, whose geometry
+--  lies within the cell.  2 is a band tile, whose fit may sweep outside
+--  it: an arc cuts inside a corner and a staircase becomes one sweep,
+--  so the check looks two tiles around before it reports one.
+--
+--  The bridges are left out.  Nothing builds them yet.
+do
+    local t = {}
+    for b = 0x0E, 0x3A do t[b] = 1 end
+    for b = 0x43, 0x48 do t[b] = 1 end
+    for b = 0x49, 0x50 do t[b] = 2 end
+    for b = 0x5D, 0x68 do t[b] = 2 end
+    arc.bytes("geometry_tiles", t, "number")
+end

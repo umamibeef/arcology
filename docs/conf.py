@@ -14,21 +14,86 @@ author = "Recovered from the retail Macintosh binary, 1.2 (22 June 1995)"
 copyright = "SimCity 2000 is a trademark of its rights holders; this is an independent study"
 release = ""
 
-extensions = ["sphinx.ext.githubpages", "sphinx_design",
-              "sphinxcontrib.images",
-              "m68k"]   # a Pygments lexer for the 68000 listings
+#  The preview pages embed pictures that tools/gen_previews.py renders
+#  from the game's own files, which the repository does not carry.  The
+#  lightbox extension refuses a picture that is not there, so it is
+#  loaded only where the manifest a render writes exists.  Without it,
+#  every `thumbnail` becomes a note that names the missing picture (see
+#  setup below), and the pages and every reference to them still build
+#  clean on a clone without the game.
+PREVIEWS_PRESENT = os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                               "img", "preview", "manifest.json"))
 
-#  the terrain previews are whole maps at 4224x2468.  They are shown
-#  scaled to the column; clicking one opens it full size in a lightbox
-#  rather than navigating away from the page.
-images_config = {
-    "override_image_directive": False,
-    "default_image_width": "100%",
-    "default_group": "previews",
-    "show_caption": True,
-}
+extensions = ["sphinx.ext.githubpages", "sphinx_design",
+              "m68k"]   # a Pygments lexer for the 68000 listings
+if PREVIEWS_PRESENT:
+    extensions.append("sphinxcontrib.images")
+    #  the terrain previews are whole maps at 4224x2468.  They are shown
+    #  scaled to the column; clicking one opens it full size in a lightbox
+    #  rather than navigating away from the page.
+    images_config = {
+        "override_image_directive": False,
+        "default_image_width": "100%",
+        "default_group": "previews",
+        "show_caption": True,
+    }
 templates_path = ["_templates"]
 exclude_patterns = ["_build", ".venv", "Thumbs.db", ".DS_Store"]
+
+def setup(app):
+    if PREVIEWS_PRESENT:
+        return
+    from docutils import nodes
+    from docutils.parsers.rst import Directive
+
+    class AnyOption(dict):
+        """Every option the real directive takes, accepted as text."""
+
+        def __missing__(self, key):
+            return str
+
+    class MissingThumbnail(Directive):
+        required_arguments = 1
+        final_argument_whitespace = True
+        has_content = True
+        option_spec = AnyOption()
+
+        def run(self):
+            text = ("Picture %s is rendered from the game's own files by "
+                    "tools/gen_previews.py, and this build did not have it."
+                    % self.arguments[0])
+            return [nodes.note("", nodes.paragraph(text=text))]
+
+    app.add_directive("thumbnail", MissingThumbnail, override=True)
+
+    #  A plain image under img/preview/ is the same case.
+    from docutils.parsers.rst.directives.images import Image
+
+    class MissingImage(Image):
+        def run(self):
+            uri = self.arguments[0]
+            if uri.startswith("img/preview/") and not os.path.exists(
+                    os.path.join(os.path.dirname(os.path.abspath(__file__)), uri)):
+                text = ("Picture %s is rendered from the game's own files by "
+                        "tools/gen_previews.py, and this build did not have it." % uri)
+                return [nodes.note("", nodes.paragraph(text=text))]
+            return super().run()
+
+    app.add_directive("image", MissingImage, override=True)
+
+    from docutils.parsers.rst.directives.images import Figure
+
+    class MissingFigure(Figure):
+        def run(self):
+            uri = self.arguments[0]
+            if uri.startswith("img/preview/") and not os.path.exists(
+                    os.path.join(os.path.dirname(os.path.abspath(__file__)), uri)):
+                text = ("Picture %s is rendered from the game's own files by "
+                        "tools/gen_previews.py, and this build did not have it." % uri)
+                return [nodes.note("", nodes.paragraph(text=text))]
+            return super().run()
+
+    app.add_directive("figure", MissingFigure, override=True)
 
 #  the pages carry inline SVG figures through `raw:: html`
 html_theme = "furo"

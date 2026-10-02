@@ -3,8 +3,7 @@
 
     python3 tools/layer_check.py
 
-sim.c was one 8,438-line file.  Splitting it meant taking `static` off
-every routine that turned out to be called from another part, and the
+A routine one sim file calls from another cannot be `static`, and the
 danger in that is silent: drop a `static` you did not have to drop and
 the name becomes global, linking against anything in the program that
 happens to share it.  Nothing would say so.  These are names like

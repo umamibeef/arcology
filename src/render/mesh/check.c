@@ -4,9 +4,16 @@
 #include "mesh/internal.h"
 #include "pipeline.h"
 #include "opt.h"
+#include "net/cell.h"
+#include "net/network.h"
+#include "script.h"
 #include <string.h>
 
 /* ---- the check --------------------------------------------------------- */
+
+/*  How close in height two faces lie before the check calls them one
+ *  surface.  The script names it (arc.geo). */
+static int gix_coplanar_z = -1;
 
 /*  Every edge of every triangle must belong to another triangle too: a
  *  surface with no free edge has no crack.  Edges are keyed on their
@@ -70,27 +77,32 @@ static int span_cmp(const void *pa, const void *pb)
     return 0;
 }
 
+/*  WHICH MATERIAL a number is: the nearest of the built-in ones within
+ *  half a step, or MAT_COUNT for one a script declared.  A variant such
+ *  as a spur's lane lies beside its whole neighbor, so the nearest is
+ *  the one that names it. */
+static int mat_slot(float m)
+{
+    int   i, best = MAT_COUNT;
+    float near = 0.5f;
+    for (i = 0; i < r_materials_n; ++i)
+    {
+        float d = m - r_materials[i].value;
+        if (d < 0.0f)
+            d = -d;
+        if (d < near)
+            near = d, best = i;
+    }
+    return best;
+}
+
+/*  A material's name, as materials.def gives it.  The report reads the
+ *  generated table.  A second copy of the list here would say one thing
+ *  where the mesh and the shaders say another. */
 static const char *mat_name(float m)
 {
-    switch ((int)(m + 0.5f))
-    {
-        case 0:
-            return "ground";
-        case 1:
-            return "blocks";
-        case 2:
-            return "sediment";
-        case 3:
-            return "glass";
-        case 4:
-            return "seabed";
-        case 5:
-            return "earth";
-        case 6:
-            return "water";
-        default:
-            return "?";
-    }
+    int k = mat_slot(m);
+    return k < MAT_COUNT ? r_materials[k].name : "a script's";
 }
 
 /*  The clipping check: no terrain face may rise above a line or margin
@@ -288,19 +300,24 @@ static int coll_pair(const float a[3][3], const float b[3][3])
     return 0;
 }
 
+/*  The triangles under one tile, for the two checks and the probe that
+ *  walk the tiles in turn.  One buffer and one size: none of the three
+ *  calls another. */
+enum
+{
+    CHECK_MAXT = 4096
+};
+static uint32_t s_tri[CHECK_MAXT];
+
 /*  The whole mesh swept for them, tile by tile, since two faces that
  *  cross must share a tile.  Answers how many pairs collide.  With
  *  `verbose` it prints where. */
 int mesh_check_collide(const RMesh *m, int verbose)
 {
-    enum
-    {
-        MAXT = 4096
-    };
-    static uint32_t tri[MAXT];
-    static CollBox  box[MAXT];
-    static float    pos[MAXT][3][3];
-    static uint32_t comp[MAXT];
+    uint32_t       *tri = s_tri;
+    static CollBox  box[CHECK_MAXT];
+    static float    pos[CHECK_MAXT][3][3];
+    static uint32_t comp[CHECK_MAXT];
     int32_t         col, row;
     int             hits = 0, tiles = 0, shown = 0;
     if (!m || !m->tri_comp)
@@ -308,7 +325,7 @@ int mesh_check_collide(const RMesh *m, int verbose)
     for (row = 0; row < R_MAP; ++row)
         for (col = 0; col < R_MAP; ++col)
         {
-            int n = mesh_tris_at(m, col, row, tri, MAXT), i, j, here = 0;
+            int n = mesh_tris_at(m, col, row, tri, CHECK_MAXT), i, j, here = 0;
             for (i = 0; i < n; ++i)
             {
                 int k;
@@ -356,11 +373,7 @@ int mesh_check_collide(const RMesh *m, int verbose)
 
 int mesh_check_overlap(const RMesh *m, int verbose)
 {
-    enum
-    {
-        MAXT = 4096
-    };
-    static uint32_t tri[MAXT];
+    uint32_t *tri = s_tri;
     int32_t         col, row;
     int             pairs = 0, fights = 0, buried = 0, tiles = 0;
     int             kind_a[32], kind_b[32], kind_n[32], nkinds = 0;
@@ -369,7 +382,7 @@ int mesh_check_overlap(const RMesh *m, int verbose)
     for (row = 0; row < R_MAP; ++row)
         for (col = 0; col < R_MAP; ++col)
         {
-            int n = mesh_tris_at(m, col, row, tri, MAXT), i, j, here = 0;
+            int n = mesh_tris_at(m, col, row, tri, CHECK_MAXT), i, j, here = 0;
             for (i = 0; i < n; ++i)
                 for (j = i + 1; j < n; ++j)
                 {
@@ -386,7 +399,7 @@ int mesh_check_overlap(const RMesh *m, int verbose)
                         continue;
                     za = ov_z(pa, at);
                     zb = ov_z(pb, at);
-                    if (fabsf(za - zb) > 0.004f)
+                    if (fabsf(za - zb) > geo_num(&gix_coplanar_z, "coplanar_z"))
                         continue; /* one stands clear of the other */
                     /*  Two faces at one height are ordinary.  The line
                      *  network lies ON the ground, and the painter's
@@ -407,7 +420,7 @@ int mesh_check_overlap(const RMesh *m, int verbose)
                          *  margin is another matter and is counted with
                          *  the rest. */
                         {
-                            int     wa_is = wa > 12.5f && wa < 13.5f, wb_is = wb > 12.5f && wb < 13.5f;
+                            int     wa_is = MAT_IS(wa, MAT_WALK), wb_is = MAT_IS(wb, MAT_WALK);
                             ShapeId walk  = wa_is ? sa : sb, under = wa_is ? sb : sa;
                             ShapeId owner = shape_parent(walk);
                             /*  The margin's OWNER is the piece it
@@ -488,10 +501,9 @@ void mesh_probe(const RMesh *m, float px, float py)
 {
     enum
     {
-        MAXT = 4096,
         MAXH = 64
     };
-    static uint32_t tri[MAXT];
+    uint32_t *tri = s_tri;
     typedef struct
     {
         float    z, mat, order;
@@ -505,7 +517,7 @@ void mesh_probe(const RMesh *m, float px, float py)
     for (dr = -1; dr <= 1; ++dr)
         for (dc = -1; dc <= 1; ++dc)
         {
-            int n = mesh_tris_at(m, bc + dc, br + dr, tri, MAXT), k;
+            int n = mesh_tris_at(m, bc + dc, br + dr, tri, CHECK_MAXT), k;
             for (k = 0; k < n && nh < MAXH; ++k)
             {
                 float    p[3][3], d1, d2, d3, area, l0, l1, l2;
@@ -585,7 +597,7 @@ int mesh_check_clip(const RMesh *m, int verbose)
         float            bx = v[2].pos[0] - v[0].pos[0], by = v[2].pos[1] - v[0].pos[1];
         float            cx, cy;
         int32_t          col, row;
-        if (v[0].col[2] > 6.5f || fabsf(ax * by - ay * bx) < 1e-6f)
+        if (MAT_ABOVE(v[0].col[2], MAT_SURFACE) || fabsf(ax * by - ay * bx) < 1e-6f)
             continue;
         cx  = (v[0].pos[0] + v[1].pos[0] + v[2].pos[0]) / 3.0f;
         cy  = (v[0].pos[1] + v[1].pos[1] + v[2].pos[1]) / 3.0f;
@@ -605,7 +617,7 @@ int mesh_check_clip(const RMesh *m, int verbose)
         float            bx = v[2].pos[0] - v[0].pos[0], by = v[2].pos[1] - v[0].pos[1];
         float            cx, cy;
         int32_t          col, row, t;
-        if (v[0].col[2] > 6.5f || fabsf(ax * by - ay * bx) < 1e-6f)
+        if (MAT_ABOVE(v[0].col[2], MAT_SURFACE) || fabsf(ax * by - ay * bx) < 1e-6f)
             continue;
         cx  = (v[0].pos[0] + v[1].pos[0] + v[2].pos[0]) / 3.0f;
         cy  = (v[0].pos[1] + v[1].pos[1] + v[2].pos[1]) / 3.0f;
@@ -646,7 +658,7 @@ int mesh_check_clip(const RMesh *m, int verbose)
         const RMeshVert *v   = &m->land[i * 3u];
         float            mat = v[0].col[2];
         int              a, b;
-        if (!(mat > 6.5f && mat < 7.5f) && !(mat > 9.5f && mat < 11.5f) && !(mat > 12.5f && mat < 14.5f) && !(mat > 15.5f && mat < 17.5f) && !(mat > 18.5f && mat < 19.5f))
+        if (!MAT_IS(mat, MAT_LINE) && !MAT_IN(mat, MAT_ZEBRA, MAT_THREAD) && !MAT_IN(mat, MAT_WALK, MAT_THREAD_X) && !MAT_IN(mat, MAT_XPANEL, MAT_XAPPROACH) && !MAT_IS(mat, MAT_BAND))
             continue; /* the bands, the margin corners, the meet surface and approach.  Not props, not vehicles, not a pier, whose foot is buried.  A slab is checked like any other way */
         if (v[0].nrm[3] >= 3.5f)
             continue; /* a quad in a cut: the ground over it is meant, held back by retaining walls */
@@ -727,13 +739,14 @@ int mesh_check_clip(const RMesh *m, int verbose)
      *  tile.  A piece the walk could not draw would otherwise vanish,
      *  its sprite skipped and nothing in its place. */
     {
-        uint32_t missing = 0;
+        uint32_t             missing = 0;
+        const unsigned char *owes    = script_bytes("geometry_tiles");
         memset(count, 0, ((size_t)R_MAP * R_MAP + 1u) * sizeof *count);
         for (i = 0; i < n_tri; ++i)
         {
             const RMeshVert *v = &m->land[i * 3u];
             int              k;
-            if (v[0].col[2] < 6.5f || (v[0].col[2] > 14.5f && v[0].col[2] < 15.5f))
+            if (MAT_UPTO(v[0].col[2], MAT_SURFACE) || MAT_IS(v[0].col[2], MAT_VEHICLE))
                 continue; /* a vehicle is no network geometry */
             /* the face touches every tile a vertex, an edge's midpoint or the centroid lies on */
             for (k = 0; k < 7; ++k)
@@ -749,13 +762,14 @@ int mesh_check_clip(const RMesh *m, int verbose)
         }
         for (i = 0; i < (uint32_t)R_MAP * R_MAP; ++i)
         {
-            uint8_t b = s_check_xbld ? s_check_xbld[i] : 0;
-            /* the networks, the meets, and the band family the slab walk builds: slabs, on-spurs, end cells, blocks: not the bridges, 0x51-0x5C, which nothing builds yet */
-            if (!((b >= 0x0Eu && b <= 0x3Au) || (b >= 0x43u && b <= 0x48u) || (b >= 0x49u && b <= 0x50u) || (b >= 0x5Du && b <= 0x68u)))
+            uint8_t b   = s_check_xbld ? s_check_xbld[i] : 0;
+            int     due = owes[b];
+            /* which bytes owe geometry, and which of those a fit may sweep out of, is arc.bytes("geometry_tiles")'s */
+            if (!due)
                 continue;
             if (count[i] == 0 && net_tile_served((int32_t)i))
                 continue; /* a thread piece bypassed by its line, fitted across the free ground beside it: its segment was drawn (walk/walk.c) */
-            if (count[i] == 0 && b >= 0x49u && b <= 0x68u)
+            if (count[i] == 0 && due == 2)
             {
                 /* A band is a viaduct on its own fit.  The fit keeps only within the free air beside the band.  An arc cuts inside a corner, and a staircase becomes one sweep.  The tiles it left are ground under open air, by design.
                  * Bare is a slab tile with no network geometry within
@@ -825,7 +839,7 @@ int mesh_check(const RMesh *m, int verbose)
             const RMeshVert *v  = &m->land[i * 3u];
             float            z0 = v[0].pos[2], z1 = z0, x0 = v[0].pos[0], x1 = x0, y0 = v[0].pos[1], y1 = y0;
             int              k;
-            if (v[0].col[2] > 0.5f)
+            if (MAT_ABOVE(v[0].col[2], MAT_GROUND))
                 continue;
             for (k = 1; k < 3; ++k)
             {
@@ -850,7 +864,7 @@ int mesh_check(const RMesh *m, int verbose)
     Span    *spans;
     uint32_t n_spans = 0;
     uint32_t shown   = 0;
-    uint32_t by_mat[8];
+    uint32_t by_mat[MAT_COUNT + 1];
     memset(by_mat, 0, sizeof by_mat);
     while (cap < n_tri * 6u)
         cap *= 2u;
@@ -868,7 +882,7 @@ int mesh_check(const RMesh *m, int verbose)
                                                 : &m->water[i * 3u - m->n_land];
         int32_t          q[3][3];
         int              k;
-        if (v[0].col[2] > 6.5f)
+        if (MAT_ABOVE(v[0].col[2], MAT_SURFACE))
             continue; /* a line strip lies on the surface.  It is not the surface */
         for (k = 0; k < 3; ++k)
             quantise(v[k].pos, q[k]);
@@ -924,7 +938,7 @@ int mesh_check(const RMesh *m, int verbose)
         if (e->a[2] == 0 && e->b[2] == 0)
             continue; /* the floor */
         free_edges++;
-        by_mat[(int)(e->mat + 0.5f) & 7]++;
+        by_mat[mat_slot(e->mat)]++;
         if (verbose && shown++ < 40)
             dumpf("free edge  (%g,%g,%g)-(%g,%g,%g)  tile c%d r%d  %s\n",
                   e->a[0] / 16.0,
@@ -981,7 +995,7 @@ int mesh_check(const RMesh *m, int verbose)
                 if (cover == 1)
                 {
                     free_spans++;
-                    by_mat[(int)(mat + 0.5f) & 7]++;
+                    by_mat[mat_slot(mat)]++;
                     if (verbose && shown++ < 40)
                         dumpf("free span  corner (%g,%g) z %g..%g  %s\n",
                               spans[s0].x / 16.0,
@@ -1001,9 +1015,9 @@ int mesh_check(const RMesh *m, int verbose)
                (unsigned)n_tri,
                (unsigned)free_edges,
                (unsigned)free_spans);
-        for (k = 0; k < 8; ++k)
+        for (k = 0; k <= MAT_COUNT; ++k)
             if (by_mat[k])
-                dumpf("  %-9s %u\n", mat_name((float)k), (unsigned)by_mat[k]);
+                dumpf("  %-9s %u\n", k < MAT_COUNT ? r_materials[k].name : "a script's", (unsigned)by_mat[k]);
     }
     free(tab);
     free(spans);

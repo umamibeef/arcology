@@ -14,6 +14,7 @@
 #include <stddef.h>
 
 #include "pipeline.h"
+#include "mesh/mesh.h"
 
 /*  The two every layer asks. */
 int  incr_want_tile(int32_t col, int32_t row);

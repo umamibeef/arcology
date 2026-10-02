@@ -33,7 +33,7 @@ local f32 = arc.put.f32
 --  slab's lift over it (arc.arm_floor, by band and end), and the
 --  node it meets (arc.arm_node).  The grading pass settles every arm's
 --  height over the node's ways, with the arms free to rise
---  (scripts/compose/interchange.lua, arc.arm_z), and the band is then
+--  (scripts/compose/interchange/arms.lua, arc.arm_z), and the band is then
 --  brought to it over its last tiles at the ramp's grade: down to it
 --  where the stiff profile rides higher, never below its own envelope,
 --  and up to it where it rides lower.  A slab is faded down to the
@@ -147,6 +147,10 @@ local function slab_end(g, x, y, ax, ay)
     return pa.z[k], grade * (pa.dx[k] * ax + pa.dy[k] * ay), math.sqrt(best)
 end
 
+--  OVER 150 LINES, and one page on purpose: it is ONE relaxation over
+--  one strip's samples.  The heights, the grades and the holds are
+--  three views of the same array, settled together in a loop.  There is
+--  no seam to cut it at.
 arc.rules.profile = function (p)
     local d = p:info()
     local n = d.n
