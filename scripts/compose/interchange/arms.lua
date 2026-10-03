@@ -28,7 +28,7 @@ local function settle_arms(nodes, size, grade)
         table.sort(list, function (p, q) return p.key < q.key end)
         local arms, ms = {}, {}
         local c1 = nodes[k].cells[1]
-        local tc, tr = c1 % size, c1 // size
+        local tc, tr = c1 % size, math.floor(c1 / size)
         --  Every arm is one group: the arms stand at one height (the
         --  highest floor among them), which leaves every way the whole
         --  grade to climb over what it crosses.  Two highways parted a

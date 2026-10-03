@@ -104,8 +104,8 @@ looked (`tools/frame.py` frames a difference) and only in the same change as the
     ctest --test-dir build -L oracle     # what needs the game's own files
 
 The views frame no water, because the water shader moves every frame and a hashed river cries wolf.  They frame the
-2x2 highway INTERCHANGE twice (views seven and eight), because nothing else does.  They say nothing about the traffic:
-a headless frame draws no movers, so the battery's `traffic` section hashes every car, gate and train instead.  The
+2x2 highway INTERCHANGE twice (views seven and eight), because nothing else does.  They draw the movers, but a car is
+a few pixels and most views hold only a handful, so the battery's `traffic` section hashes every car, gate and train.  The
 simulation's four checks (`verify`, `microsim`, `allocmicro`, `arco_roundtrip`) are behind `-DARC_SIM_TESTS=ON`: the
 simulation is verified against the original and the renderer cannot move a simulation layer.
 

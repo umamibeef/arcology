@@ -59,6 +59,7 @@
 #include "dump.h"
 #include "options.h"
 #include "project.h"
+#include "show.h"
 #include "soft/soft.h"
 #include "sound.h"
 #include "ui.h"
@@ -237,6 +238,7 @@ RGpuView frame_view(const App *a)
     fv.margins = a->gv.margins;
     if (a->opts.underground && fv.geometry)
         fv.underground = 1;
+    show_uniform(fv.show);
     return fv;
 }
 
@@ -278,6 +280,15 @@ static void build_failed(void)
     s_build_bad = 1;
 }
 
+/*  The pieces an edit shows going and coming, to the device whenever
+ *  their states changed. */
+static void show_upload(App *a)
+{
+    static uint8_t st[SHOW_PIECES];
+    if (show_states(st) && a->gpu && gpu_set_show(a->gpu, st) != 0)
+        R_WARN("app", "the pieces an edit shows could not be uploaded");
+}
+
 static void build_ok(void)
 {
     if (s_build_bad)
@@ -297,7 +308,35 @@ int app_advance(App *a, SDL_Window *win, float dt, float time)
         a->dirty = 1;
     if (a->dirty && resweep(a) != 0)
         return -1;
-    if (a->mesh_dirty)
+    if (a->building)
+    {
+        /*  A build on its own thread: done or not, once a frame.  Until
+         *  it is, a bar says how far it has got, unless what it is for
+         *  is an edit, which shows its pieces going instead. */
+        int r = remesh_poll(a);
+        if (r == 1)
+        {
+            if (!show_active())
+            {
+                snprintf(a->us.loading, sizeof a->us.loading, "Building the world");
+                a->us.loading_note[0] = 0;
+                a->us.loading_step    = a->build_step_i;
+                a->us.loading_steps   = a->build_step_n;
+            }
+        }
+        else
+        {
+            if (r < 0)
+            {
+                build_failed();
+                s_build_stamp = script_stamp();
+            }
+            else
+                build_ok();
+            a->us.loading[0] = 0;
+        }
+    }
+    else if (a->mesh_dirty)
     {
         /*  A BUILD THAT FAULTED IS NOT TRIED AGAIN every frame.  The
          *  fault stands until the scripts are read again.  A retry
@@ -306,6 +345,18 @@ int app_advance(App *a, SDL_Window *win, float dt, float time)
          *  one. */
         if (s_build_bad && script_stamp() == s_build_stamp)
             a->mesh_dirty = 0;
+        else if ((a->live && a->ui && !a->offscreen) || g_dev.async_build)
+        {
+            /*  The live window builds on a thread of its own and draws
+             *  meanwhile.  Whatever asks for a build while it runs asks
+             *  for the next one. */
+            a->mesh_dirty = 0;
+            if (remesh_begin(a) != 0)
+            {
+                build_failed();
+                s_build_stamp = script_stamp();
+            }
+        }
         else if (remesh(a) != 0)
         {
             build_failed();
@@ -318,11 +369,21 @@ int app_advance(App *a, SDL_Window *win, float dt, float time)
          *  build puts it up, and the last thing it says is said while
          *  the mesh goes to the card.  So the end of the build is where
          *  it goes, and nothing else has to take it down. */
-        a->us.loading[0] = 0;
+        if (!a->building)
+            a->us.loading[0] = 0;
     }
+    /*  What the edit shows.  The world built for it goes up once its last
+     *  piece has gone.  Once its last piece has come, every piece is
+     *  still again.  The device hears of each. */
+    if (a->upload_held && !show_holds() && world_upload(a) != 0)
+        R_ERR("app", "the world built for the edit could not be uploaded");
+    show_tick();
+    show_upload(a);
     a->gv.time = time;
     music_update(a->mus); /* the original's scheduler, once a pass */
-    if (traffic_frame(a, a->gv.time) != 0)
+    /*  The moving world reads the lanes a build lays.  While one is laid
+     *  the movers stand where they were last drawn. */
+    if (!a->building && traffic_frame(a, a->gv.time) != 0)
         R_ERR("app", "traffic build failed");
     if (dt >= 0.0f)
     {
@@ -376,10 +437,33 @@ static void build_bar(void *ud, const char *step, int i, int n)
     RGpuView fv;
     if (!a || !a->ui || a->offscreen)
         return;
-    snprintf(a->us.loading, sizeof a->us.loading, "Building the world");
-    snprintf(a->us.loading_note, sizeof a->us.loading_note, "%s", step ? step : "");
-    a->us.loading_step  = i;
-    a->us.loading_steps = n;
+    /*  A build on its own thread only says how far it has got.  The
+     *  frame's thread draws, and draws the bar from that. */
+    if (SDL_GetCurrentThreadID() != a->main_thread)
+    {
+        a->build_step_i = i;
+        a->build_step_n = n;
+        return;
+    }
+    /*  An edit's build shows its pieces going instead of a bar.  A frame
+     *  every thirtieth of a second is enough for that, and each one is
+     *  time the build does not spend building. */
+    if (show_active())
+    {
+        uint64_t now = SDL_GetTicksNS();
+        if (now - a->show_painted < 33000000u)
+            return;
+        a->show_painted  = now;
+        a->us.loading[0] = 0;
+        show_upload(a);
+    }
+    else
+    {
+        snprintf(a->us.loading, sizeof a->us.loading, "Building the world");
+        snprintf(a->us.loading_note, sizeof a->us.loading_note, "%s", step ? step : "");
+        a->us.loading_step  = i;
+        a->us.loading_steps = n;
+    }
     /*  The state the rest of the window reads was filled on the last
      *  frame the app drew, and the build moves none of it.  So the bar
      *  is the only thing to put in. */
@@ -402,7 +486,7 @@ int app_frame(App *a, SDL_Window *win, float dt, float time, RImage *out)
      *  read again when it changes.  The world is drawn again on that or
      *  on the script asking for it.  Which is what makes a change to a
      *  rule a file save rather than a compile. */
-    if (script_stale() && script_reload())
+    if (!a->building && script_stale() && script_reload())
     {
         R_NOTE("lua", "read again: %d rules", script_rules());
         /*  The rebuild waits a frame where there is a window to say so
@@ -432,7 +516,7 @@ int app_frame(App *a, SDL_Window *win, float dt, float time, RImage *out)
         a->us.loading[0]   = 0;
         a->mesh_dirty      = 1;
     }
-    if (script_take_dirty())
+    if (!a->building && script_take_dirty())
         a->mesh_dirty = 1;
     if (app_advance(a, win, dt, time) != 0)
         return -1;
@@ -514,7 +598,7 @@ static void frame_loop(App *a, SDL_Window *win)
             else if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
                      e.button.button == SDL_BUTTON_LEFT)
             {
-                if (a->inspect && (SDL_GetModState() & SDL_KMOD_SHIFT))
+                if (a->inspect && (SDL_GetModState() & SDL_KMOD_SHIFT) && !a->building)
                 {
                     /*  Shift-click while inspecting: the report on what is
                      *  under the pointer, on the clipboard.  The pick and
@@ -537,11 +621,38 @@ static void frame_loop(App *a, SDL_Window *win)
                     a->sel_c0 = a->sel_c1 = a->q_col;
                     a->sel_r0 = a->sel_r1 = a->q_row;
                 }
+                else if (gesture_ready(a))
+                {
+                    /*  The selected tool works from the press of the
+                     *  button, and the map holds still while it does. */
+                    pick_tile(a, e.button.x, e.button.y, win);
+                    a->drag = 0;
+                    if (a->q_col >= 0)
+                        gesture_begin(a, a->q_col, a->q_row, (SDL_GetModState() & KMOD_CMD) != 0);
+                }
                 else
                 {
                     a->drag     = 1;
                     a->drag_len = 0.0f;
                 }
+            }
+            else if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
+                     (e.button.button == SDL_BUTTON_RIGHT || e.button.button == SDL_BUTTON_MIDDLE))
+            {
+                /*  The right and middle buttons always drag the map, so
+                 *  it can move while the left button works a tool. */
+                a->drag     = 1;
+                a->drag_len = 0.0f;
+            }
+            else if (e.type == SDL_EVENT_MOUSE_BUTTON_UP &&
+                     (e.button.button == SDL_BUTTON_RIGHT || e.button.button == SDL_BUTTON_MIDDLE))
+                a->drag = 0;
+            else if (e.type == SDL_EVENT_MOUSE_BUTTON_UP &&
+                     e.button.button == SDL_BUTTON_LEFT && a->gesturing)
+            {
+                pick_tile(a, e.button.x, e.button.y, win);
+                gesture_end(a, a->q_col, a->q_row);
+                a->drag = 0;
             }
             else if (e.type == SDL_EVENT_MOUSE_BUTTON_UP &&
                      e.button.button == SDL_BUTTON_LEFT && a->sel)
@@ -575,7 +686,8 @@ static void frame_loop(App *a, SDL_Window *win)
                  *  without the press that would have started the drag.
                  *  Either report is enough.  The first such motion
                  *  starts the drag itself. */
-                int held = (e.motion.state & SDL_BUTTON_LMASK) || (SDL_GetMouseState(NULL, NULL) & SDL_BUTTON_LMASK);
+                const SDL_MouseButtonFlags pan = SDL_BUTTON_LMASK | SDL_BUTTON_RMASK | SDL_BUTTON_MMASK;
+                int                        held = (e.motion.state & pan) || (SDL_GetMouseState(NULL, NULL) & pan);
                 /*  SHIFT IN THE MAP VIEW SELECTS, AND THE MAP HOLDS
                  *  STILL.  The test is made every motion.  A drag can
                  *  be armed with no press in front of it.  The button
@@ -585,7 +697,7 @@ static void frame_loop(App *a, SDL_Window *win)
                  *  armed, and the map then slides under every later
                  *  selection. */
                 int selecting = a->sel || (a->plan && (SDL_GetModState() & SDL_KMOD_SHIFT));
-                if (selecting)
+                if (selecting || a->gesturing)
                     a->drag = 0;
                 else if (held && !a->drag)
                     a->drag = 1, a->drag_len = 0.0f;
@@ -604,6 +716,8 @@ static void frame_loop(App *a, SDL_Window *win)
                     a->gv.scroll_y -= dy;
                 }
                 pick_tile(a, e.motion.x, e.motion.y, win);
+                if (a->gesturing && a->q_col >= 0)
+                    gesture_step(a, a->q_col, a->q_row);
                 if (a->sel && a->q_col >= 0)
                 {
                     a->sel_c1 = a->q_col;
@@ -624,7 +738,16 @@ static void frame_loop(App *a, SDL_Window *win)
                 int         pw, ph;
                 SDL_GetWindowSizeInPixels(win, &pw, &ph);
                 if (k == SDLK_ESCAPE)
-                    a->quit = 1;
+                {
+                    /*  Escape puts the selected tool down first, and
+                     *  quits only when there is none. */
+                    if (a->gesturing)
+                        ;
+                    else if (a->us.tool >= 0)
+                        a->us.tool = -1;
+                    else
+                        a->quit = 1;
+                }
                 else if (k >= SDLK_1 && k <= SDLK_5)
                     set_speed(a, (int32_t)(k - SDLK_0));
                 else if (k == SDLK_SPACE)
@@ -932,6 +1055,7 @@ int game_main(int argc, char **argv)
      *  SDL_Init.  The system then lists the process as BackgroundOnly. */
     headless = check || run_frames || shot_out || want_mesh_check || have_pick || g_dev.area != NULL;
     a.live   = !headless;
+    a.main_thread = SDL_GetCurrentThreadID(); /* the frame's thread: a build on another only says how far it got */
     if (headless)
         SDL_SetHint(SDL_HINT_MAC_BACKGROUND_APP, "1");
     if (!SDL_Init(SDL_INIT_VIDEO))
@@ -964,6 +1088,7 @@ int game_main(int argc, char **argv)
         a.offscreen = shot_out != NULL; /* the interface's pipeline is made for the readback's format, so every frame is read back */
         a.ui        = ui_create(win, gpu_device(a.gpu), a.offscreen ? gpu_offscreen_format() : gpu_swapchain_format(a.gpu), 1.0f, assets_dir);
         build_watch(build_bar, &a); /* the bar moves from inside the build */
+        show_enable((a.ui && a.live && !a.offscreen) || g_dev.show_edits); /* an edit's pieces go and come where a person watches */
         R_DBG("ui", "%s", a.ui ? "imgui" : "none");
         if (a.ui)
         {
@@ -1202,6 +1327,43 @@ int game_main(int argc, char **argv)
     R_NOTE("init", "ready in %.0f ms (atlas %.0f, city %.0f, gpu %.0f, sweep %.0f)", NS_MS(SDL_GetTicksNS() - t_start), NS_MS(t_atlas), NS_MS(t_city), NS_MS(t_gpu), NS_MS(t_sweep));
 #undef PHASE_MS
 
+    /*  --gesture SPEC: build, work the player's tools as the mouse would,
+     *  and let the paths below run and build again.  The gestures come
+     *  first, so a run after them simulates the city they left.  A bar
+     *  between two specs builds between them, as the edits of a player
+     *  one after another do. */
+    if (g_dev.gesture)
+    {
+        const char *s = g_dev.gesture;
+        if (remesh(&a) != 0)
+            build_failed();
+        for (;;)
+        {
+            const char *bar  = strchr(s, '|');
+            size_t      n    = bar ? (size_t)(bar - s) : strlen(s);
+            char       *spec = (char *)malloc(n + 1);
+            int         ok;
+            if (!spec)
+                return 1;
+            memcpy(spec, s, n);
+            spec[n] = 0;
+            ok      = gesture_script(&a, spec);
+            free(spec);
+            if (!ok)
+            {
+                R_ERR("app", "--gesture %s: a tool that does not read, or is not reconstructed", g_dev.gesture);
+                return 1;
+            }
+            if (resweep(&a) != 0)
+                R_ERR("app", "sweep failed");
+            if (!bar)
+                break;
+            if (remesh(&a) != 0)
+                build_failed();
+            s = bar + 1;
+        }
+        a.mesh_dirty = 1;
+    }
     if (run_frames > 0)
     {
         /*  Headless: the game's own frame a number of times at a speed,
@@ -1441,6 +1603,7 @@ done:
      *  builds the same world as the game does.  So it gives back the
      *  same world: a mode that let itself out early left the whole mesh
      *  behind. */
+    remesh_wait(&a);          /* a build still running finishes before what it builds into goes */
     traffic_free(&a.traffic); /* the cars, the trains and their own scratch mesh */
     mesh_free(&a.mesh);
     incr_free(); /* the incremental rebuild's scratch (mesh/incr.c) */

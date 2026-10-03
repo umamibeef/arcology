@@ -384,6 +384,6 @@ arc.rules.drop = function (dr)
         end
     end
     if arc.band_fitting then arc.fan_nose[arc.band_fitting] = nose end
-    for key, w in pairs(widths) do dr:width(key // 2, key % 2, w) end
+    for key, w in pairs(widths) do dr:width(math.floor(key / 2), key % 2, w) end
     return true
 end

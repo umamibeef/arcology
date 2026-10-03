@@ -31,6 +31,53 @@ Everything here is open.  Finished work is not repeated: the rules are in `CLAUD
 - `flint` has an on-spur lane under the terrain on three tiles.
 - `tokyo`, `babar` and `manhattan` carry more colliding face pairs than the commit before.
 
+## Editing a city: the player's tools
+
+The action layer is `src/sim/sim_tool.c`: a gesture is begun, stepped from tile to tile and ended, and the app
+drives it from the mouse (`src/app/uiglue.c`) or from `--gesture`.  `tools/tool_check.py` runs the original's
+own tool loop under the interpreter with a scripted mouse and compares every layer, the funds, the census, the
+military tallies and the transit count.  The bulldozer's Demolish and Raise, and the five network fitters and
+the water edge fitter they share, are exact on every city in `cities/`.
+
+Not yet reconstructed, from the decoding of `$2512` (the cost table is `TOOL_COST`, A5+0x616):
+
+- **The bulldozer's other sub-tools:** Level `$8008`, Lower `$8B04`, De-zone `$1E782`.
+- **Zones** `$1E782` with its rectangle drag `$1DAB2`, and Ports through the same routine.
+- **Buildings** `$3212`: one routine for every power plant, pump, school, park and reward, with the NIMBY roll,
+  the department counts and the power and water reflood after it.
+- **The line tools:** the drag `$1DDFE`, the walks `$1E046` and `$1E2EC`, and the per-tile placers road `$1F4AC`,
+  rail `$1F9DA`, power `$1F196`, pipe `$1FEB0` and subway `$20252`.  Bridges `$1A820`, and the map-edge links
+  that write XTXT `$FA`.
+- **Highway** `$1BF18`, **tunnel** `$20622`, **onramp** `$3B98`, **sub to rail** `$3E9C`, hydro `$3972`.
+- **Landscape** trees `$2C86` and water `$2EF0`, the terrain editor's tools under `$78F6`, dispatch
+  `$11466`..`$11736`, and signs `$F8A0`.
+- **The interface:** the drag preview for lines and rectangles, the thirty tool cursors (`CURS` 1000..1029), the
+  sub-tool availability masks at A5+0x5CE, and a repeating bulldozer sound.
+
+What an edit shows (`src/render/show.c`, `scripts/compose/edit_show.lua`): the pieces near the edit sink and
+dissolve while the world is rebuilt, and the pieces the build changed rise back, both as a wave out from the
+edited tiles.  The look is the `arc.geo.edit_show_*` knobs and the rule; it is unjudged in a window.  Open:
+
+- The build itself (about 280 ms) still freezes input and the clock; only the pieces move.  The going wave's tail
+  after the build, and the coming wave, run in ordinary frames.  `--show-edits --show-at S --shot` draws the
+  pieces as they stand S seconds into the going wave, which is how the look is checked without a window.
+- A one-tile bulldoze changes the line class of strips 30 to 50 tiles away (seen as `nrm.w` 1 before, 0 after on
+  `line strip 60,88 to 65,88` in Atlanta).  Either the class reads something the edit moves, or the first build
+  read it stale.
+- The family-word checker reads `.glsl` but not `.vert`/`.frag`, and the terrain shaders' text carries the words.
+
+## Performance
+
+- The live window builds on a thread of its own (`src/app/world.c`, `remesh_begin`), so frames, the
+  simulation and the edit show go on during a build.  The cars stand still while it runs and are
+  respawned after it (`traffic_init`), which shows as a jump.
+- Cars, trains and signals are rebuilt as triangles on the CPU every frame (`traffic_build`), about
+  1 ms a frame.  GPU instancing would draw them from models uploaded once; it changes what the
+  battery's traffic digest hashes, so the reference moves with it.
+- The simulation is polled once a frame (`step_clock`): at most one phase a frame at speeds 2 to 4,
+  and speed 5 spends 4 ms of every frame.  It has no file-scope state and could run on a thread.
+- `static_analysis` wants the build configured with `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`.
+
 ## The highway interchange
 
 - The pad over a 2x2 block is a slab with no filleted turn geometry.  Two turns a block, and "straightest

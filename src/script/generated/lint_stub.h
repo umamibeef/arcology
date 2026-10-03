@@ -52,6 +52,8 @@
     "trims = function () return 0 end," \
     "shelf = function () return nil end," \
     "progress = function () end," \
+    "tick = function () end," \
+    "edit_show = function () return nil end," \
     "controls = function () return 0 end," \
     "control = function () return nil, nil end," \
     "control_is = function () end," \

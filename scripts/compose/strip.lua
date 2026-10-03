@@ -44,6 +44,14 @@ local function station(s, i)
             wl = wl, wr = wr, xd = xd, zorig = zorig}
 end
 
+--  The same station, read into a table the caller holds.  The sweep
+--  reads two stations a pair and keeps neither, so it fills the same
+--  two tables at every pair rather than making two more.
+local function station_into(t, s, i)
+    t.x, t.y, t.z, t.dx, t.dy, t.s, t.wl, t.wr, t.xd, t.zorig = s:at(i)
+    return t
+end
+
 --  OVER 150 LINES, and one page on purpose: it is ONE SWEEP along one
 --  strip.  Each station is drawn from the station before it, so the
 --  loop carries the whole of the strip's state.  Cut in two, both
@@ -53,7 +61,7 @@ arc.rules.strip = function (s)
     local d = s:info()
     local n = s:count()
     if n < 2 then return true end
-    local fam = arc.rules.family({name = d.family, width = d.half * 2})
+    local fam = arc.family_of(d.family, d.half * 2)
     --  A family that carries a margin keeps only the way here:
     --  the outer share of the band is the margin's own, laid from the
     --  network, and the two meet along that line rather than one being
@@ -112,8 +120,15 @@ arc.rules.strip = function (s)
         end
     end
 
+    --  The width of a slab's lanes at one station and side, as a share
+    --  of its half width: what is left of the lane behind a lane drop.
+    local function lane_w(i0, side)
+        local t = d.slab and arc.fan_lane_w
+        return t and t[i0 * 2 + side] or 1.0
+    end
+    local held_pv, held_cu = {}, {}
     for i = 1, n - 1 do
-        local pv, cu = station(s, i - 1), station(s, i)
+        local pv, cu = station_into(held_pv, s, i - 1), station_into(held_cu, s, i)
         --  The ground's own line at the two STATIONS, which a pair cut
         --  short at a meet band still answers to: a station below it
         --  is in a cut whatever the quad was trimmed to.
@@ -149,10 +164,6 @@ arc.rules.strip = function (s)
             --  merge lane's widening painted as a ramp's lane, or the
             --  exit lane tapering to nothing, painted as the lane it is,
             --  its edge line converging on the lane line.
-            local function lane_w(i0, side)
-                local t = d.slab and arc.fan_lane_w
-                return t and t[i0 * 2 + side] or 1.0
-            end
             local pwr, pwl = math.min(pv.wr, lane_w(i - 1, 0)), math.min(pv.wl, lane_w(i - 1, 1))
             local cwr, cwl = math.min(cu.wr, lane_w(i, 0)), math.min(cu.wl, lane_w(i, 1))
             local a0x, a0y = arc.band_edge(pv.x, pv.y, pv.dx, pv.dy, ha, pwr, 1)
@@ -263,8 +274,8 @@ arc.rules.strip = function (s)
                                ala, alb, mat, order + slot, cwl, 0.94)
                     end
                 end
-                local bare = d.lane_piece and (not slab_of or arc.slab_away(slab_of, mx, my)
-                                         < arc.tune.band_w * (1.0 + arc.geo.ramp_lane_w) + d.half + 0.05)
+                local bare = d.lane_piece and (not slab_of or arc.slab_within(slab_of, mx, my,
+                                         arc.tune.band_w * (1.0 + arc.geo.ramp_lane_w) + d.half + 0.05))
                 if not bare then
                     arc.slab.under(s, d, i, n, pv, cu, e0x, e0y, e1x, e1y, f0x, f0y, f1x, f1y, order,
                                    open[(i - 1) * 2] or open[i * 2], open[(i - 1) * 2 + 1] or open[i * 2 + 1])

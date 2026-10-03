@@ -127,7 +127,7 @@ add_executable(arcology
     ../app/modes.cpp
     ../util/log.cpp ../util/devopts.c ../util/fs.c ../util/dump.c
     adapt.c
-    mesh/mesh.c mesh/tile.c mesh/emit.c mesh/shapes.c mesh/check.c incr.c
+    mesh/mesh.c mesh/tile.c mesh/emit.c mesh/shapes.c mesh/check.c incr.c show.c
     ../script/script.c ../script/lint.c
     mesh/shape.c
     walk/walk.c walk/cursor.c net/cell.c net/walkway.c prof.c net/fits.c
@@ -153,23 +153,72 @@ install(TARGETS arcology RUNTIME DESTINATION bin)
 #  draw the terrain and nothing else -- not a smaller city, no city.  It
 #  needs no window either, so `--lua-lint` reads the whole layer whether
 #  SDL3 is installed or not.
-FetchContent_Declare(lua
-    GIT_REPOSITORY https://github.com/lua/lua.git
-    GIT_TAG        v5.4.7
-    GIT_SHALLOW    TRUE)
-FetchContent_MakeAvailable(lua)
-set(ARC_LUA_SRC lapi lcode lctype ldebug ldo ldump lfunc lgc llex lmem
-    lobject lopcodes lparser lstate lstring ltable ltm lundump lvm lzio
-    lauxlib lbaselib lcorolib ldblib liolib lmathlib loadlib loslib
-    lstrlib ltablib lutf8lib linit)
-list(TRANSFORM ARC_LUA_SRC PREPEND "${lua_SOURCE_DIR}/")
-list(TRANSFORM ARC_LUA_SRC APPEND ".c")
-add_library(arc_lua STATIC ${ARC_LUA_SRC})
-target_include_directories(arc_lua SYSTEM PUBLIC ${lua_SOURCE_DIR})
-if(APPLE)
-    target_compile_definitions(arc_lua PRIVATE LUA_USE_MACOSX)
-elseif(UNIX)
-    target_compile_definitions(arc_lua PRIVATE LUA_USE_LINUX)
+#
+#  The scripts run on LuaJIT, which compiles the composition's numeric
+#  loops to machine code.  LuaJIT does not fuse a multiply and an add
+#  unless it is asked to, so its arithmetic rounds as Lua 5.4's does.
+#  ARC_LUAJIT=OFF runs them on Lua 5.4 instead, which src/script/luavm.c
+#  gives LuaJIT's `bit` library, so one set of scripts runs on both and
+#  the two can be compared.  LuaJIT ships a Makefile and no CMake, so its
+#  own make builds the static library.
+if(MSVC)
+    set(_arc_luajit_default OFF)
+else()
+    set(_arc_luajit_default ON)
+endif()
+option(ARC_LUAJIT "Run the scripts on LuaJIT; off runs them on Lua 5.4" ${_arc_luajit_default})
+if(ARC_LUAJIT)
+    FetchContent_Declare(luajit
+        GIT_REPOSITORY https://github.com/LuaJIT/LuaJIT.git
+        GIT_TAG        c6ffc141a8762b41703f9287d63d93622a13dd8f
+        SOURCE_SUBDIR  no-cmake)
+    FetchContent_MakeAvailable(luajit)
+    set(_arc_luajit_lib "${luajit_SOURCE_DIR}/src/libluajit.a")
+    set(_arc_luajit_env "")
+    if(APPLE)
+        if(CMAKE_OSX_DEPLOYMENT_TARGET)
+            set(_arc_luajit_env "MACOSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}")
+        else()
+            execute_process(COMMAND sw_vers -productVersion
+                            OUTPUT_VARIABLE _arc_macos OUTPUT_STRIP_TRAILING_WHITESPACE)
+            string(REGEX MATCH "^[0-9]+" _arc_macos "${_arc_macos}")
+            set(_arc_luajit_env "MACOSX_DEPLOYMENT_TARGET=${_arc_macos}.0")
+        endif()
+    endif()
+    add_custom_command(OUTPUT "${_arc_luajit_lib}"
+        COMMAND make -C "${luajit_SOURCE_DIR}/src" libluajit.a BUILDMODE=static
+                "CC=${CMAKE_C_COMPILER}" ${_arc_luajit_env}
+        COMMENT "Building LuaJIT"
+        VERBATIM)
+    add_custom_target(arc_luajit_build DEPENDS "${_arc_luajit_lib}")
+    add_library(arc_lua STATIC IMPORTED GLOBAL)
+    set_target_properties(arc_lua PROPERTIES
+        IMPORTED_LOCATION "${_arc_luajit_lib}"
+        INTERFACE_INCLUDE_DIRECTORIES "${luajit_SOURCE_DIR}/src"
+        INTERFACE_COMPILE_DEFINITIONS ARC_LUAJIT=1)
+    add_dependencies(arc_lua arc_luajit_build)
+    if(UNIX AND NOT APPLE)
+        set_property(TARGET arc_lua APPEND PROPERTY INTERFACE_LINK_LIBRARIES m dl)
+    endif()
+else()
+    FetchContent_Declare(lua
+        GIT_REPOSITORY https://github.com/lua/lua.git
+        GIT_TAG        v5.4.7
+        GIT_SHALLOW    TRUE)
+    FetchContent_MakeAvailable(lua)
+    set(ARC_LUA_SRC lapi lcode lctype ldebug ldo ldump lfunc lgc llex lmem
+        lobject lopcodes lparser lstate lstring ltable ltm lundump lvm lzio
+        lauxlib lbaselib lcorolib ldblib liolib lmathlib loadlib loslib
+        lstrlib ltablib lutf8lib linit)
+    list(TRANSFORM ARC_LUA_SRC PREPEND "${lua_SOURCE_DIR}/")
+    list(TRANSFORM ARC_LUA_SRC APPEND ".c")
+    add_library(arc_lua STATIC ${ARC_LUA_SRC})
+    target_include_directories(arc_lua SYSTEM PUBLIC ${lua_SOURCE_DIR})
+    if(APPLE)
+        target_compile_definitions(arc_lua PRIVATE LUA_USE_MACOSX)
+    elseif(UNIX)
+        target_compile_definitions(arc_lua PRIVATE LUA_USE_LINUX)
+    endif()
 endif()
 #  The script layer.  api_object.c is the handle and the list of kinds;
 #  each obj_*.c holds the methods of the kinds it names, and api_tile.c
@@ -177,9 +226,9 @@ endif()
 target_sources(arcology PRIVATE
     ../script/api_tune.c ../script/api_rules.c ../script/api_world.c ../script/api_put.c ../script/api_model.c
     ../script/api_object.c ../script/api_tile.c ../script/api_family.c ../script/api_data.c ../script/api_art.c
-    ../script/api_fit.c
+    ../script/api_fit.c ../script/luavm.c
     ../script/obj_world.c ../script/obj_strip.c ../script/obj_path.c ../script/obj_node.c
-    ../script/obj_band.c ../script/obj_lane.c ../script/obj_ground.c)
+    ../script/obj_band.c ../script/obj_lane.c ../script/obj_ground.c ../script/obj_show.c)
 target_link_libraries(arcology PRIVATE arc_lua)
 
 # ---- the GAME, where SDL3 was found --------------------------------------
@@ -228,11 +277,11 @@ if(SDL3_FOUND)
         else()
             target_compile_options(arc_imgui PRIVATE -w)
         endif()
-        target_sources(arcology PRIVATE ../ui/ui.cpp)
+        target_sources(arcology PRIVATE ../ui/ui.cpp ../ui/names.c)
         target_link_libraries(arcology PRIVATE arc_imgui)
         target_compile_definitions(arcology PRIVATE ARC_IMGUI=1)
     else()
-        target_sources(arcology PRIVATE ../ui/ui_none.c)
+        target_sources(arcology PRIVATE ../ui/ui_none.c ../ui/names.c)
     endif()
 else()
     #  No SDL3, so no game -- but the developer modes are still

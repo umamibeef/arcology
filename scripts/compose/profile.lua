@@ -124,7 +124,7 @@ local function hand_gores(p, s, z, n)
                 g.grade  = s[b] > s[a] and (z[b] - z[a]) / (s[b] - s[a]) or 0.0
                 if arc.geo.pose_dump > 0.5 then
                     arc.dump(string.format("GORE %d,%d: slab station %d of %d at %.2f,%.2f, %.3f high, grade %.3f",
-                        cell % P.n, cell // P.n, k, n, xs[k], ys[k], z[k], g.grade))
+                        cell % P.n, math.floor(cell / P.n), k, n, xs[k], ys[k], z[k], g.grade))
                 end
             end
         end

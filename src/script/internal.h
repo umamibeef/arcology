@@ -6,10 +6,8 @@
 #define ARC_SCRIPT_INTERNAL_H
 
 
-#include "lauxlib.h"
-#include "lua.h"
+#include "luavm.h"
 #include "script.h"
-#include "lualib.h"
 #include "net/net.h"
 
 /*  The one state, or NULL when none is up. */

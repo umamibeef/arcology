@@ -16,6 +16,11 @@
 #include "internal.h"
 #include "opt.h"
 
+#ifdef ARC_LUAJIT
+    #include <errno.h>
+    #include <pthread.h>
+#endif
+
 lua_State *s_L;
 int        s_dirty;
 
@@ -414,6 +419,63 @@ static int run_file(const char *path)
     return 0;
 }
 
+/*  THE MODULES A READING RAN, forgotten before the next reading.
+ *  `require` keeps every module it has run in package.loaded and never
+ *  runs one twice.  A reading empties arc.rules and then runs init.lua
+ *  again.  Its requires would find every module kept, run none, and leave
+ *  the rules empty.  So the libraries the state opened with are noted
+ *  once, under BUILTIN in the registry.  A reading forgets every other
+ *  module first. */
+#define BUILTIN "arc.builtin_modules"
+
+static void modules_note(lua_State *L)
+{
+    lua_newtable(L);
+    lua_getglobal(L, "package");
+    lua_getfield(L, -1, "loaded");
+    lua_pushnil(L);
+    while (lua_next(L, -2))
+    {
+        lua_pop(L, 1);
+        lua_pushvalue(L, -1);
+        lua_pushboolean(L, 1);
+        lua_settable(L, -6);
+    }
+    lua_pop(L, 2);
+    lua_setfield(L, LUA_REGISTRYINDEX, BUILTIN);
+}
+
+static void modules_forget(lua_State *L)
+{
+    int k, n = 0;
+    lua_getfield(L, LUA_REGISTRYINDEX, BUILTIN);
+    lua_getglobal(L, "package");
+    lua_getfield(L, -1, "loaded");
+    /*  The names to drop are gathered first: a table is not changed
+     *  while it is walked. */
+    lua_newtable(L);
+    lua_pushnil(L);
+    while (lua_next(L, -3))
+    {
+        lua_pop(L, 1);
+        lua_pushvalue(L, -1);
+        lua_rawget(L, -6);
+        if (lua_isnil(L, -1))
+        {
+            lua_pushvalue(L, -2);
+            lua_rawseti(L, -4, ++n);
+        }
+        lua_pop(L, 1);
+    }
+    for (k = 1; k <= n; ++k)
+    {
+        lua_rawgeti(L, -1, k);
+        lua_pushnil(L);
+        lua_rawset(L, -4);
+    }
+    lua_pop(L, 4);
+}
+
 int script_open(const char *dir, const char *path)
 {
     if (s_L)
@@ -424,8 +486,9 @@ int script_open(const char *dir, const char *path)
         fail("state", "no memory");
         return -1;
     }
-    luaL_openlibs(s_L);
+    luavm_open(s_L);
     arc_open(s_L);
+    modules_note(s_L);
     script_family_reset();
     script_data_reset();
     fault_reset();
@@ -620,11 +683,24 @@ int script_take_dirty(void)
     return d;
 }
 
+/*  The folder is looked at four times a second, not every frame.  A walk
+ *  of it and a stat of each file costs more than a frame should spend,
+ *  and a save is made by hand. */
+#define STALE_EVERY_MS 250.0
+
 int script_stale(void)
 {
-    struct stat st;
+    static double   last;
+    struct stat     st;
+    struct timespec ts;
+    double          now;
     if (!s_L || !s_path[0])
         return 0;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    now = (double)ts.tv_sec * 1e3 + (double)ts.tv_nsec / 1e6;
+    if (s_have_stat && now - last < STALE_EVERY_MS)
+        return 0;
+    last = now;
     watched_stamp(&st);
     if (!s_have_stat)
         return 1;
@@ -651,6 +727,7 @@ int script_reload(void)
     lua_newtable(s_L);
     lua_setfield(s_L, -2, "rules");
     lua_pop(s_L, 1);
+    modules_forget(s_L);
     s_reloading = 1;
     run_watched();
     s_reloading = 0;
@@ -697,9 +774,78 @@ static clock_t s_rule_clock;
  *
  *  The one shape it cannot see is a loop that calls nothing at all.
  *  Every rule in the tree walks the map or reads arc.*, and both are
- *  calls.  The battery's own timeout is the backstop for the rest. */
+ *  calls.  The battery's own timeout is the backstop for the rest.
+ *
+ *  LuaJIT compiles nothing while any hook stands.  So on LuaJIT the hook
+ *  is set only when the budget is spent.  A watchdog thread waits out the
+ *  budget, and sets the hook then if the rule is still running.  A rule
+ *  that answers in time runs with no hook, compiled.  LuaJIT's own
+ *  profiler sets its hook from another thread in the same way. */
+#ifdef ARC_LUAJIT
+static pthread_mutex_t s_dog_mx = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t  s_dog_cv = PTHREAD_COND_INITIALIZER;
+static lua_State      *s_dog_L;
+static int             s_dog_up, s_dog_armed;
+static unsigned        s_dog_gen;
+static struct timespec s_dog_due;
+
+static int rule_budget(void);
+
+/*  The watchdog.  It wakes when a rule starts, and again when the
+ *  rule's budget is spent.  The hook is set and cleared under the same
+ *  lock, so it is never set for a rule that has already answered. */
+static void *rule_dog(void *arg)
+{
+    (void)arg;
+    pthread_mutex_lock(&s_dog_mx);
+    for (;;)
+    {
+        unsigned gen;
+        while (!s_dog_armed)
+            pthread_cond_wait(&s_dog_cv, &s_dog_mx);
+        gen = s_dog_gen;
+        while (s_dog_armed && s_dog_gen == gen)
+            if (pthread_cond_timedwait(&s_dog_cv, &s_dog_mx, &s_dog_due) == ETIMEDOUT)
+            {
+                if (s_dog_armed && s_dog_gen == gen)
+                    lua_sethook(s_dog_L, api_rule_runaway, LUA_MASKCALL, 0);
+                break;
+            }
+        while (s_dog_armed && s_dog_gen == gen)
+            pthread_cond_wait(&s_dog_cv, &s_dog_mx);
+    }
+    return NULL;
+}
+#endif
+
 void api_rule_watch(lua_State *L, int on)
 {
+#ifdef ARC_LUAJIT
+    pthread_mutex_lock(&s_dog_mx);
+    if (!s_dog_up)
+    {
+        pthread_t t;
+        s_dog_up = pthread_create(&t, NULL, rule_dog, NULL) == 0;
+        if (s_dog_up)
+            pthread_detach(t);
+    }
+    s_dog_gen++;
+    if (on)
+    {
+        s_rule_clock = clock();
+        s_dog_L      = L;
+        s_dog_armed  = 1;
+        clock_gettime(CLOCK_REALTIME, &s_dog_due);
+        s_dog_due.tv_sec += rule_budget();
+    }
+    else
+    {
+        s_dog_armed = 0;
+        lua_sethook(L, NULL, 0, 0);
+    }
+    pthread_cond_signal(&s_dog_cv);
+    pthread_mutex_unlock(&s_dog_mx);
+#else
     if (on)
     {
         s_rule_clock = clock();
@@ -707,6 +853,7 @@ void api_rule_watch(lua_State *L, int on)
     }
     else
         lua_sethook(L, NULL, 0, 0);
+#endif
 }
 
 /*  The budget, in whole seconds.  --rule-seconds shortens it while

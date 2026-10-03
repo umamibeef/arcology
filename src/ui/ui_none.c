@@ -5,14 +5,6 @@
 
 #include "ui.h"
 
-const char *const RUI_TOOL_NAME[RUI_N_TOOLS] = {
-    "Bulldozer", "Landscape", "Dispatch", "Power", "Water", "City Bonus",
-    "Roads", "Rail", "Ports", "Residential", "Commercial", "Industrial",
-    "Education", "Health & Safety", "Recreation", "Place Sign", "Query",
-    "Center Display", "Zoom Out", "Zoom In", "Zone Demand", "Rotate CCW",
-    "Rotate CW", "Map", "Population", "Neighbors", "Graphs", "Industry",
-    "Budget", "Buildings", "Signs", "Roads & Trees", "Zones", "Under-view"};
-
 RUi *ui_create(struct SDL_Window *win, struct SDL_GPUDevice *dev,
                  int swap_fmt, float dpi, const char *assets_dir)
 {

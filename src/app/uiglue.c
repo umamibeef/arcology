@@ -55,6 +55,48 @@ static void poly_wind(float p[4][2])
         }
 }
 
+/*  The tiles from column x0 to x1 and row y0 to y1, outlined on the
+ *  surface the mesh draws, as four points on the screen.  A building's
+ *  pad is flat, and a lone cell follows its own plane.  In the
+ *  underground view the outline lies on the ground drawn there, the
+ *  seabed under water.  Returns 0 when the corners cannot be found. */
+static int area_poly(App *a, int x0, int y0, int x1, int y1, float poly[4][2])
+{
+    const RAtlasLevel *lv = a->sw.level;
+    int                ug = a->opts.underground;
+    float              t[4], z[4];
+    float              f, dens;
+    int                ok = lv != NULL && !a->building, kq;
+    /*  NW, NE, SE, SW of the footprint, each from its corner tile.  The
+     *  surface is the build's, so a build under way leaves no outline. */
+    ok   = ok && mesh_tile_corners(a->view, x0, y0, ug, t) == 0;
+    z[0] = t[0];
+    ok   = ok && mesh_tile_corners(a->view, x1, y0, ug, t) == 0;
+    z[1] = t[1];
+    ok   = ok && mesh_tile_corners(a->view, x1, y1, ug, t) == 0;
+    z[2] = t[2];
+    ok   = ok && mesh_tile_corners(a->view, x0, y1, ug, t) == 0;
+    z[3] = t[3];
+    if (!ok)
+        return 0;
+    f    = (float)a->gv.scale * (a->gv.zoom > 0.0f ? a->gv.zoom : 1.0f);
+    dens = a->win_density > 0.0f ? a->win_density : 1.0f;
+    /*  The corners go to grid_to_canvas UNTURNED: it turns them about the
+     *  view's pivot itself.  Turning them here first turns them twice,
+     *  and in the map view (yaw 45) the outline comes out a diamond on a
+     *  square grid. */
+    for (kq = 0; kq < 4; ++kq)
+    {
+        static const int dc[4] = {0, 1, 1, 0}, dr[4] = {0, 0, 1, 1};
+        float            cx, cy;
+        grid_to_canvas(a, (float)(dc[kq] ? x1 + 1 : x0), (float)(dr[kq] ? y1 + 1 : y0), z[kq], &cx, &cy);
+        poly[kq][0] = (cx - (float)a->gv.scroll_x) * f / dens;
+        poly[kq][1] = (cy - (float)a->gv.scroll_y) * f / dens;
+    }
+    poly_wind(poly);
+    return 1;
+}
+
 /*  What the UI shows this frame. */
 /*  The pointer inside a triangle as the camera projects it, by the sign
  *  of the three edge tests.  `z` comes back as the triangle's highest
@@ -175,6 +217,17 @@ void ui_fill(App *a)
     s->power_pct      = c->power_pct;
     s->water_pct      = c->water_pct;
     s->unemployment   = c->unemployment;
+    for (k = 0; k < RUI_N_MAP_TOOLS; ++k)
+    {
+        int j;
+        s->sub_ready[k] = 0;
+        for (j = 0; j < RUI_N_SUB; ++j)
+        {
+            s->sub_cost[k][j] = TOOL_COST[k * N_SUBTOOL + j];
+            if (sim_tool_ported(k, j))
+                s->sub_ready[k] |= (uint16_t)(1u << j);
+        }
+    }
     s->land_value_tot = c->land_value_tot;
     s->crime_tot      = c->crime_tot;
     s->traffic_tot    = c->traffic_tot;
@@ -184,7 +237,8 @@ void ui_fill(App *a)
     gpu_stats(a->gpu, &inst, &culled);
     s->instances  = inst;
     s->culled     = culled;
-    s->mesh_verts = a->mesh.n_land;
+    if (!a->building)
+        s->mesh_verts = a->mesh.n_land;
     s->driver     = gpu_driver(a->gpu);
     for (k = 0; k < RUI_N_GRAPH && k < N_GRAPH; ++k)
     {
@@ -213,7 +267,7 @@ void ui_fill(App *a)
     s->comp_n_also                                       = 0;
     s->comp_mat                                          = 0.0f;
     s->comp_tris = s->comp_gen_tris = 0;
-    if (a->inspect && a->q_col >= 0 && a->q_row >= 0 && a->sw.level)
+    if (a->inspect && a->q_col >= 0 && a->q_row >= 0 && a->sw.level && !a->building)
     {
         float    f    = (float)a->gv.scale * (a->gv.zoom > 0.0f ? a->gv.zoom : 1.0f);
         float    dens = a->win_density > 0.0f ? a->win_density : 1.0f;
@@ -455,7 +509,8 @@ void ui_fill(App *a)
     }
     else
         a->inspect_c = a->inspect_r = -1;
-    s->q_ok = a->q_col >= 0 && a->q_row >= 0;
+    s->q_ok         = a->q_col >= 0 && a->q_row >= 0;
+    s->tool_poly_ok = 0;
     if (s->q_ok)
     {
         int y = a->q_row, x = a->q_col;
@@ -472,15 +527,12 @@ void ui_fill(App *a)
                                              : (int32_t)(s->q_altm & 0x1F);
         s->q_water_level = c->water_level;
         s->q_building    = BUILDING[s->q_xbld].name;
-        if (mesh_query(a->view, x, y, s->q_mesh, sizeof s->q_mesh) != 0)
+        if (a->building || mesh_query(a->view, x, y, s->q_mesh, sizeof s->q_mesh) != 0)
             s->q_mesh[0] = 0;
         /*  The footprint the cell belongs to, as the original finds it
          *  ($763A).  It gives its edge n and its north-east tile, so it
          *  covers rows oy..oy+n-1 and columns ox-n+1..ox.  The highlight
-         *  outlines the whole footprint, on the surface the mesh draws.
-         *  A building's pad is flat, a lone cell follows its own plane.
-         *  Or, in the underground view, on the ground drawn there, the
-         *  seabed under water. */
+         *  outlines the whole footprint. */
         {
             int n, x0, y0;
             s->q_orow = y; /* $763A moves the cell's own coordinates to the origin */
@@ -497,41 +549,19 @@ void ui_fill(App *a)
                 s->q_orow = y;
             }
             s->q_size    = n;
-            s->q_poly_ok = 0;
+            s->q_poly_ok = area_poly(a, x0, y0, x0 + n - 1, y0 + n - 1, s->q_poly);
+        }
+        /*  The selected tool's area under the pointer: what it would work
+         *  on, and whether it would refuse, as the simulation says. */
+        if (s->tool >= 0 && s->tool < RUI_N_MAP_TOOLS && s->tool != RUI_TOOL_QUERY)
+        {
+            ToolPreview pv;
+            const int   flags = s->underground ? GESTURE_UNDERGROUND : 0;
+            if (sim_tool_preview(c, s->tool, s->sub[s->tool], flags, y, x, &pv))
             {
-                const RAtlasLevel *lv = a->sw.level;
-                int                ug = a->opts.underground;
-                float              t[4], z[4];
-                int                ok = lv != NULL;
-                /* NW, NE, SE, SW of the footprint, each from its corner tile */
-                ok   = ok && mesh_tile_corners(a->view, x0, y0, ug, t) == 0;
-                z[0] = t[0];
-                ok   = ok && mesh_tile_corners(a->view, x0 + n - 1, y0, ug, t) == 0;
-                z[1] = t[1];
-                ok   = ok && mesh_tile_corners(a->view, x0 + n - 1, y0 + n - 1, ug, t) == 0;
-                z[2] = t[2];
-                ok   = ok && mesh_tile_corners(a->view, x0, y0 + n - 1, ug, t) == 0;
-                z[3] = t[3];
-                if (ok)
-                {
-                    float f    = (float)a->gv.scale * (a->gv.zoom > 0.0f ? a->gv.zoom : 1.0f);
-                    float dens = a->win_density > 0.0f ? a->win_density : 1.0f;
-                    int   kq;
-                    /*  The corners go to grid_to_canvas UNTURNED: it turns
-                     *  them about the view's pivot itself.  Turning them here
-                     *  first turns them twice, and in the map view (yaw 45)
-                     *  the outline comes out a diamond on a square grid. */
-                    for (kq = 0; kq < 4; ++kq)
-                    {
-                        static const int dc[4] = {0, 1, 1, 0}, dr[4] = {0, 0, 1, 1};
-                        float            cx, cy;
-                        grid_to_canvas(a, (float)(x0 + dc[kq] * n), (float)(y0 + dr[kq] * n), z[kq], &cx, &cy);
-                        s->q_poly[kq][0] = (cx - (float)a->gv.scroll_x) * f / dens;
-                        s->q_poly[kq][1] = (cy - (float)a->gv.scroll_y) * f / dens;
-                    }
-                    poly_wind(s->q_poly);
-                    s->q_poly_ok = 1;
-                }
+                s->tool_poly_ok = area_poly(a, pv.x0 - pv.n + 1, pv.y0, pv.x0, pv.y0 + pv.n - 1, s->tool_poly);
+                s->tool_refused = !pv.ok;
+                s->tool_price   = pv.price;
             }
         }
     }
@@ -561,30 +591,8 @@ void ui_fill(App *a)
                                                                   : a->sel_r1,
                     y1 = hover ? a->q_row : a->sel_r0 < a->sel_r1 ? a->sel_r1
                                                                   : a->sel_r0;
-            int     ug = a->opts.underground, ok = a->sw.level != NULL;
-            float   t[4], z[4];
-            ok   = ok && mesh_tile_corners(a->view, x0, y0, ug, t) == 0;
-            z[0] = t[0];
-            ok   = ok && mesh_tile_corners(a->view, x1, y0, ug, t) == 0;
-            z[1] = t[1];
-            ok   = ok && mesh_tile_corners(a->view, x1, y1, ug, t) == 0;
-            z[2] = t[2];
-            ok   = ok && mesh_tile_corners(a->view, x0, y1, ug, t) == 0;
-            z[3] = t[3];
-            if (ok)
+            if (area_poly(a, x0, y0, x1, y1, s->sel_poly))
             {
-                float f    = (float)a->gv.scale * (a->gv.zoom > 0.0f ? a->gv.zoom : 1.0f);
-                float dens = a->win_density > 0.0f ? a->win_density : 1.0f;
-                int   kq;
-                for (kq = 0; kq < 4; ++kq)
-                {
-                    static const int dc[4] = {0, 1, 1, 0}, dr[4] = {0, 0, 1, 1};
-                    float            cx, cy;
-                    grid_to_canvas(a, (float)(dc[kq] ? x1 + 1 : x0), (float)(dr[kq] ? y1 + 1 : y0), z[kq], &cx, &cy);
-                    s->sel_poly[kq][0] = (cx - (float)a->gv.scroll_x) * f / dens;
-                    s->sel_poly[kq][1] = (cy - (float)a->gv.scroll_y) * f / dens;
-                }
-                poly_wind(s->sel_poly);
                 s->sel_ok = 1;
                 if (a->sel)
                     snprintf(s->sel_text, sizeof s->sel_text, "Area %d,%d to %d,%d (%d x %d)", (int)x0, (int)y0, (int)x1, (int)y1, (int)(x1 - x0 + 1), (int)(y1 - y0 + 1));
@@ -639,7 +647,10 @@ void ui_fill(App *a)
         s->cell_ok   = 1;
     }
     /*  The console's status line: which script, how many times it has
-     *  been read, what it sets, and the last thing that went wrong. */
+     *  been read, what it sets, and the last thing that went wrong.  The
+     *  rules are counted in the scripts' own state, which a build on its
+     *  own thread owns.  So the line stands as it was until it is done. */
+    if (!a->building)
     {
         const char *p = script_path(), *e = script_error();
         snprintf(s->script_status, sizeof s->script_status, "%s  read %d, %d rules%s%s",
@@ -663,8 +674,11 @@ void ui_apply(App *a, SDL_Window *win, int pw, int ph)
         set_speed(a, s->speed);
     /*  A line typed at the console, run against the live state.  Its
      *  answer is caught from the dump sink rather than printed, so the
-     *  window shows it and stdout stays the program's own. */
-    if (s->script_run)
+     *  window shows it and stdout stays the program's own.  It waits
+     *  while a build runs on its own thread, which owns the scripts until
+     *  it is done.  A reading of the scripts and a change of the knobs
+     *  wait too. */
+    if (s->script_run && !a->building)
     {
         size_t n = strlen(s->script_out);
         char   got[4096];
@@ -691,13 +705,13 @@ void ui_apply(App *a, SDL_Window *win, int pw, int ph)
         if (script_take_dirty())
             a->mesh_dirty = 1;
     }
-    if (s->script_reload)
+    if (s->script_reload && !a->building)
     {
         s->script_reload = 0;
         if (script_reload())
             a->mesh_dirty = 1;
     }
-    if (s->tune_changed)
+    if (s->tune_changed && !a->building)
     {
         /*  The knobs are a tuning session's.  The window writes back only
          *  what it drew a slider for, so a knob some other control owns
@@ -715,7 +729,7 @@ void ui_apply(App *a, SDL_Window *win, int pw, int ph)
         a->gv.geometry = s->geometry;
         a->mesh_dirty  = 1; /* the roads are part of the mesh */
     }
-    if (!!s->outline != (TUNE(show_curves) > 0.5f))
+    if (!!s->outline != (TUNE(show_curves) > 0.5f) && !a->building)
     {
         /*  Outline stands the roads aside and draws the fitted curves and
          *  the margin network on bare ground.  It is geometry, so the
@@ -748,11 +762,12 @@ void ui_apply(App *a, SDL_Window *win, int pw, int ph)
         a->gv.furniture = s->furniture;
         a->gv.margins = s->margins;
         margin_enable(a->gv.margins); /* markings and margins are draws: instant */
-        if (furniture_on() != !!a->gv.furniture)
-        {
-            furniture_enable(a->gv.furniture); /* furniture is built in: a rebuild */
-            a->mesh_dirty = 1;
-        }
+    }
+    /*  Furniture is built in: a rebuild, once no build is running. */
+    if (furniture_on() != !!a->gv.furniture && !a->building)
+    {
+        furniture_enable(a->gv.furniture);
+        a->mesh_dirty = 1;
     }
     if (!!s->show_cells != !!a->cells_pref)
     {
@@ -975,7 +990,150 @@ static int building_sound(const City *c, int32_t row, int32_t col)
     return 0;
 }
 
-/*  The selected tool on the tile under the pointer. */
+/*  The palette's map tools are the simulation's tools, in the same
+ *  order, with room for the same number of sub-tools. */
+typedef char tool_order_matches[(RUI_N_MAP_TOOLS == N_TOOL && RUI_N_SUB == N_SUBTOOL && RUI_TOOL_BULLDOZER == TOOL_BULLDOZER &&
+                                 RUI_TOOL_LANDSCAPE == TOOL_LANDSCAPE && RUI_TOOL_DISPATCH == TOOL_DISPATCH &&
+                                 RUI_TOOL_POWER == TOOL_POWER && RUI_TOOL_WATER == TOOL_WATER && RUI_TOOL_BONUS == TOOL_REWARD &&
+                                 RUI_TOOL_ROADS == TOOL_ROAD && RUI_TOOL_RAIL == TOOL_RAIL && RUI_TOOL_PORTS == TOOL_PORT &&
+                                 RUI_TOOL_RESIDENTIAL == TOOL_RESIDENTIAL && RUI_TOOL_COMMERCIAL == TOOL_COMMERCIAL &&
+                                 RUI_TOOL_INDUSTRIAL == TOOL_INDUSTRIAL && RUI_TOOL_EDUCATION == TOOL_EDUCATION &&
+                                 RUI_TOOL_HEALTH == TOOL_SAFETY && RUI_TOOL_RECREATION == TOOL_RECREATION &&
+                                 RUI_TOOL_SIGN == TOOL_SIGN && RUI_TOOL_QUERY == TOOL_QUERY && RUI_TOOL_CENTER == TOOL_CENTRE)
+                                    ? 1
+                                    : -1];
+
+/*  The gesture under way.  There is one mouse, so there is one gesture,
+ *  and App.gesturing says whether it is on. */
+static SimGesture s_gesture;
+
+int gesture_ready(const App *a)
+{
+    const RUiState *s = &a->us;
+    return s->tool >= 0 && s->tool < RUI_N_MAP_TOOLS && sim_tool_ported(s->tool, s->sub[s->tool]);
+}
+
+/*  What the tool asked of the interface: its sounds, a picture in a
+ *  window, a story for the newspaper.  The tile it worked on changed, so
+ *  the city is swept again at once, which takes well under a
+ *  millisecond.  The mesh is rebuilt once, when the gesture ends.  With
+ *  the networks drawn a rebuild takes seconds, and one a tile would stop
+ *  the drag dead. */
+static void gesture_after(App *a)
+{
+    int k;
+    for (k = 0; k < s_gesture.n_ev; ++k)
+    {
+        const ToolEvent *e = &s_gesture.ev[k];
+        switch (e->kind)
+        {
+            case TOOL_EV_SOUND_LOOP:
+            case TOOL_EV_SOUND:
+                sound_play(a->snd, (int)e->arg);
+                break;
+            case TOOL_EV_PICTURE:
+                a->us.show_picture = e->arg;
+                break;
+            case TOOL_EV_NEWS:
+                ui_log(&a->us, "The newspaper has story %d", (int)e->arg);
+                break;
+            default:
+                break;
+        }
+    }
+    s_gesture.n_ev = 0;
+    a->dirty       = 1;
+    if (!a->gesturing)
+        a->mesh_dirty = 1;
+}
+
+/*  The left button goes down over (col,row).  The Command key is the one
+ *  the original tests at $810: with it down, a tile labeled $FF may go. */
+void gesture_begin(App *a, int32_t col, int32_t row, int cmd_down)
+{
+    const RUiState *s     = &a->us;
+    const int       flags = (cmd_down ? GESTURE_KEY : 0) | (s->underground ? GESTURE_UNDERGROUND : 0);
+    a->gesturing          = sim_tool_begin(a->city, &s_gesture, s->tool, s->sub[s->tool], flags, row, col);
+    gesture_after(a);
+}
+
+/*  The pointer came onto another tile with the button down. */
+void gesture_step(App *a, int32_t col, int32_t row)
+{
+    if (!a->gesturing)
+        return;
+    sim_tool_step(a->city, &s_gesture, row, col);
+    gesture_after(a);
+}
+
+/*  The button came up over (col,row).  Off the map, the original keeps
+ *  the last tile the tool worked on. */
+void gesture_end(App *a, int32_t col, int32_t row)
+{
+    if (!a->gesturing)
+        return;
+    if (col < 0 || row < 0)
+    {
+        col = s_gesture.x;
+        row = s_gesture.y;
+    }
+    sim_tool_end(a->city, &s_gesture, row, col);
+    a->gesturing = 0;
+    gesture_after(a);
+}
+
+/*  --gesture: the same gestures from the command line, for a run under
+ *  test.  The spec is TOOL,SUB[,FLAGS]:C,R/C,R/...  A semicolon
+ *  parts two gestures.  FLAGS is 1 for the Command key and 2 for the underground
+ *  view.  Returns 0 when the spec does not read, or the tool is not
+ *  reconstructed. */
+int gesture_script(App *a, const char *spec)
+{
+    while (*spec)
+    {
+        int tool, sub, flags = 0, col = -1, row = -1, n = 0, used = 0;
+        if (sscanf(spec, "%d,%d,%d:%n", &tool, &sub, &flags, &used) != 3 || !used)
+        {
+            flags = 0;
+            used  = 0;
+            if (sscanf(spec, "%d,%d:%n", &tool, &sub, &used) != 2 || !used)
+                return 0;
+        }
+        if (tool < 0 || tool >= RUI_N_MAP_TOOLS || sub < 0 || sub >= RUI_N_SUB)
+            return 0;
+        spec += used;
+        a->us.tool        = tool;
+        a->us.sub[tool]   = sub;
+        a->us.underground = (flags & 2) != 0;
+        while (sscanf(spec, "%d,%d%n", &col, &row, &used) == 2)
+        {
+            if (n++ == 0)
+            {
+                gesture_begin(a, col, row, flags & 1);
+                if (!a->gesturing)
+                    return 0;
+            }
+            else
+                gesture_step(a, col, row);
+            spec += used;
+            if (*spec != '/')
+                break;
+            ++spec;
+        }
+        if (!n)
+            return 0;
+        gesture_end(a, col, row);
+        if (*spec == ';')
+            ++spec;
+        else if (*spec)
+            return 0;
+    }
+    return 1;
+}
+
+/*  The selected tool on the tile under the pointer, for the tools that
+ *  act on a click.  A tool the simulation can do is worked as a gesture
+ *  instead, from the press of the button. */
 void use_tool(App *a, SDL_Window *win)
 {
     RUiState *s   = &a->us;
@@ -986,13 +1144,6 @@ void use_tool(App *a, SDL_Window *win)
         return;
     switch (s->tool)
     {
-        case RUI_TOOL_BULLDOZER:
-            sim_demolish_tile(a->city, row, col, 0, 0);
-            ui_log(s, "Bulldozed %d, %d", (int)col, (int)row);
-            sound_play(a->snd, R_SND_BULLDOZE);
-            a->dirty      = 1;
-            a->mesh_dirty = 1;
-            break;
         case RUI_TOOL_QUERY:
             s->show_query = 1;
             sound_play(a->snd, building_sound(a->city, row, col));
@@ -1017,7 +1168,10 @@ void use_tool(App *a, SDL_Window *win)
             }
             break;
         default:
-            ui_log(s, "%s: not yet ported", RUI_TOOL_NAME[s->tool]);
+            if (s->tool < RUI_N_MAP_TOOLS && RUI_SUB_NAME[s->tool][1])
+                ui_log(s, "%s: %s is not yet ported", RUI_TOOL_NAME[s->tool], RUI_SUB_NAME[s->tool][s->sub[s->tool]]);
+            else
+                ui_log(s, "%s: not yet ported", RUI_TOOL_NAME[s->tool]);
             sound_play(a->snd, R_SND_ERROR);
             break;
     }

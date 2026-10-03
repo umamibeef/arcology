@@ -31,6 +31,9 @@ void                margin_stats_print(void);
  *  the bands stand aside and the network is drawn in their place. */
 int                 margin_count(void);
 int                 margin_outline(void);
+/*  The box margin path i's stations lie in, as min x, min y, max x,
+ *  max y.  0 where it has none. */
+int                 margin_box(int i, float box[4]);
 int                 margin_gather(RMesh *m, const RCity *c, uint8_t mask_bit, int i, WalkFan *out, ShapeId *sh);
 int                 margin_junction(const JBox *jb, const V2 *poly, const JuncArm *arms, int np);
 /*  The outline the junction's FILL is laid on.  It is the box's outline,

@@ -77,7 +77,22 @@ typedef struct
     RSound  *snd;
     float    fps, frame_ms;
     uint64_t last_ns;
-    int      drag;             /* the left button drags the map     */
+    uint64_t show_painted; /* when a frame was last drawn from inside a build that shows an edit */
+    int      upload_held;  /* a built world waits for an edit's last piece to go before the device takes it */
+    /*  A build on a thread of its own (world.c, remesh_begin): the frames
+     *  go on while it runs.  It reads `build_view`, a copy of the city
+     *  taken as it began.  It owns the mesh, the stores and the script
+     *  state until it is done. */
+    struct SDL_Thread *builder;
+    SDL_AtomicInt      build_done;
+    int                building, build_rc, build_under, build_lines;
+    int                build_step_i, build_step_n; /* how far it has got, as it says */
+    int                build_frames;               /* the frames drawn while it ran */
+    uint64_t           build_t0;
+    RCity             *build_view;
+    SDL_ThreadID       main_thread;
+    int      drag;             /* a mouse button drags the map      */
+    int      gesturing;        /* the left button works the selected tool: uiglue.c holds the gesture */
     float    drag_ax, drag_ay; /* sub-pixel remainder of the drag    */
     float    drag_len;         /* how far the button traveled       */
     int32_t  q_col, q_row;     /* the tile under the pointer, or -1 */
@@ -133,10 +148,27 @@ RGpuView frame_view(const App *a);
 void ui_fill(App *a);
 void ui_apply(App *a, SDL_Window *win, int pw, int ph);
 void use_tool(App *a, SDL_Window *win);
+/*  The selected tool, worked tile by tile while the left button is down.
+ *  Ready says the simulation can do the tool and sub-tool selected. */
+int  gesture_ready(const App *a);
+void gesture_begin(App *a, int32_t col, int32_t row, int cmd_down);
+void gesture_step(App *a, int32_t col, int32_t row);
+void gesture_end(App *a, int32_t col, int32_t row);
+int  gesture_script(App *a, const char *spec);
 
 /*  Building what gets drawn: world.c */
 int            resweep(App *a);
 int            remesh(App *a);
+/*  The same build on a thread of its own, for the live window.  It is
+ *  begun, then asked once a frame whether it is done.  The poll answers 1
+ *  while it runs, 0 once its world is up, and -1 for a build that
+ *  failed.  The wait waits for one still running, as the program ends. */
+int            remesh_begin(App *a);
+int            remesh_poll(App *a);
+void           remesh_wait(App *a);
+/*  The built world to the device, when an edit's last piece has gone:
+ *  remesh holds it back until then (render/show.h). */
+int            world_upload(App *a);
 /*  Where the scripts are: the models the props are drawn from live
  *  there (app/paths.c). */
 int            find_scripts(char *out, size_t n, const char *argv0);

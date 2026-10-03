@@ -56,7 +56,7 @@ M.take = function (x, n)
                         for ci = 1, #cells do
                             local q  = cells[ci]
                             local qx = q % size + 0.5
-                            local qy = q // size + 0.5
+                            local qy = math.floor(q / size) + 0.5
                             local d  = (px - qx) * (px - qx) + (py - qy) * (py - qy)
                             if d <= far then return true end
                         end
@@ -105,7 +105,7 @@ M.take = function (x, n)
                         for ci = 1, #cells do
                             local q = cells[ci]
                             local qx = q % size + 0.5
-                            local qy = q // size + 0.5
+                            local qy = math.floor(q / size) + 0.5
                             local d  = (px - qx) * (px - qx) + (py - qy) * (py - qy)
                             if d < reach then reach = d end
                         end

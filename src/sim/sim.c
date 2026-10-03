@@ -50,8 +50,13 @@ static int infra_slot(int bld)
  *  Besides writing XBLD it keeps a running census of every building id
  *  on the map.  That census is what lets the growth pass ask questions
  *  like "how many churches are there" without walking the map.
+ *
+ *  The id is a word.  XBLD keeps its low byte, and the census counts the
+ *  whole word.  The network fitters read a table past its end, and then
+ *  give a word of $100 or more.  That count lands past the end of the
+ *  census, outside anything the city keeps, so the low byte gets none.
  * ================================================================== */
-void sim_set_tile(City *c, int y, int x, uint8_t bld)
+void sim_set_tile(City *c, int y, int x, int bld)
 {
     uint8_t old;
 
@@ -67,14 +72,15 @@ void sim_set_tile(City *c, int y, int x, uint8_t bld)
          *  table does not name, lands on slot 0. */
         c->infra[infra_slot(c->xbld[y][x])]--; /* $41B8 */
         c->infra[infra_slot(bld)]++;           /* $42AC */
-        c->xbld[y][x] = bld;                   /* $4396 */
+        c->xbld[y][x] = (uint8_t)bld;          /* $4396 */
         return;
     }
 
     old = c->xbld[y][x]; /* $4166 */
     c->census[old]--;    /* $4174 */
-    c->census[bld]++;    /* $417E */
-    c->xbld[y][x] = bld; /* $4184 */
+    if (bld < 0x100)
+        c->census[bld]++;         /* $417E */
+    c->xbld[y][x] = (uint8_t)bld; /* $4184 */
 }
 
 /*  Rebuild the census from scratch.  The game maintains it incrementally

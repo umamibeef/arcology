@@ -192,12 +192,12 @@ local f32 = arc.put.f32
 function arc.lip_lane(s, d)
     local best, bd, boff
     for i = 0, d.n - 1 do
-        local c = s:at(i)
-        if c.line and c.dot > d.dot and c.dist < d.reach then
-            local off = math.abs(c.off)
+        local _, _, line, _, _, c_off, dist, dot = s:at(i)
+        if line and dot > d.dot and dist < d.reach then
+            local off = math.abs(c_off)
             if not boff or off < f32(boff - 1e-4)
-               or (off < f32(boff + 1e-4) and c.dist < bd) then
-                bd, boff, best = c.dist, off, i
+               or (off < f32(boff + 1e-4) and dist < bd) then
+                bd, boff, best = dist, off, i
             end
         end
     end

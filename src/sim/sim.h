@@ -583,7 +583,7 @@ int  city_save(const char *path, const City *c);
 void city_free(City *c);
 
 /* ---- sim.c ------------------------------------------------------- */
-void sim_set_tile(City *c, int y, int x, uint8_t bld);            /* $4110  */
+void sim_set_tile(City *c, int y, int x, int bld);                /* $4110  */
 int  sim_place_special(City *c, int y, int x, int bld, int zone); /* $333C8 */
 int  sim_auto_rail_station(City *c, int y, int x);                /* $B058 */
 /*  $0221A8.  Returns 1 for a win, -1 for a loss, 0 while the scenario
@@ -634,6 +634,125 @@ int  sim_disaster_volcano(City *c);                /* $37DD6 */
 void sim_raise_tile(City *c, int y, int x);        /* $896C */
 int  sim_footprint_origin(const City *c, int *py, int *px, int bld);
 /* $763A */
+
+/*  The player's tools.  $2512 takes a click in the city window and gives
+ *  it to one of eighteen tools.  Each tool runs a loop of its own while
+ *  the mouse button is down.  The loop belongs to the interface, and the
+ *  work the loop does at each tile belongs to the simulation.  A gesture
+ *  is that split: the caller owns the mouse, and calls begin, step and
+ *  end as the pointer moves from tile to tile.  The order of the tools
+ *  is the order of the palette and of TOOL_COST. */
+enum
+{
+    TOOL_BULLDOZER = 0,
+    TOOL_LANDSCAPE,
+    TOOL_DISPATCH,
+    TOOL_POWER,
+    TOOL_WATER,
+    TOOL_REWARD,
+    TOOL_ROAD,
+    TOOL_RAIL,
+    TOOL_PORT,
+    TOOL_RESIDENTIAL,
+    TOOL_COMMERCIAL,
+    TOOL_INDUSTRIAL,
+    TOOL_EDUCATION,
+    TOOL_SAFETY,
+    TOOL_RECREATION,
+    TOOL_SIGN,
+    TOOL_QUERY,
+    TOOL_CENTRE,
+    N_TOOL,
+    N_SUBTOOL = 12
+};
+extern const int32_t TOOL_COST[N_TOOL * N_SUBTOOL]; /* A5+0x616 */
+
+/*  What the five network fitters read.  See the tables for each. */
+extern const uint8_t NET_SLOPED[16];      /* A5-0x433A */
+extern const int16_t NET_SLOPE_PIECE[48]; /* A5-0x42A2 */
+extern const int16_t NET_PIECE[16];       /* A5-0x42C2 */
+extern const uint8_t NET_JOIN_X[256];     /* A5-0x4298 */
+extern const uint8_t NET_JOIN_Y[256];     /* A5-0x4252 */
+
+/*  What the water edge fitter reads. */
+extern const int16_t WATER_EDGE_SHAPE[16];   /* A5-0x4E46 */
+extern const int16_t WATER_CORNER_SHAPE[16]; /* A5-0x4E26 */
+
+/*  What a gesture reads from the interface.  The original reads both from
+ *  the interface's own state, so the caller says them. */
+enum
+{
+    GESTURE_KEY         = 1, /* the key $810 tests is down: a tile labeled $FF may go */
+    GESTURE_UNDERGROUND = 2  /* the underground view, A5-0x7DE4                        */
+};
+
+/*  What a gesture asks the interface to do.  The simulation plays and
+ *  shows nothing, so each request is recorded for the caller. */
+enum
+{
+    TOOL_EV_SOUND_LOOP = 1, /* $30D6: start sound `arg`, repeated until stopped */
+    TOOL_EV_SOUND_STOP,     /* $30EE: stop sound `arg`                          */
+    TOOL_EV_SOUND,          /* $3F636: play sound `arg` once                    */
+    TOOL_EV_PICTURE,        /* $154A: open a window that shows PICT `arg`       */
+    TOOL_EV_NEWS            /* $2EDE4: print newspaper story `arg`              */
+};
+typedef struct
+{
+    int16_t kind;
+    int32_t arg;
+} ToolEvent;
+
+enum
+{
+    GESTURE_EVENTS = 16
+};
+typedef struct SimGesture
+{
+    int16_t   tool, sub; /* sub is the word at A5+0x1F88 + 2 * tool     */
+    int16_t   y, x;      /* the tile it worked at last, $7D44's d6, d7  */
+    int16_t   start_alt; /* $7D6C, the altitude Level works toward      */
+    uint8_t   flags;     /* GESTURE_                                    */
+    int32_t   spent;     /* what the gesture took from the funds        */
+    int       n_ev;      /* the caller reads ev and sets n_ev to 0      */
+    ToolEvent ev[GESTURE_EVENTS];
+} SimGesture;
+
+/*  Begin a gesture at a tile and work there.  Step moves it to the next
+ *  tile and works there.  End is the button coming up over a tile.  Each
+ *  returns 0 when the tool or the sub-tool is not reconstructed. */
+int sim_tool_begin(City *c, SimGesture *g, int tool, int sub, int flags, int y, int x);
+int sim_tool_step(City *c, SimGesture *g, int y, int x);
+int sim_tool_end(City *c, SimGesture *g, int y, int x);
+int sim_tool_ported(int tool, int sub);
+
+/*  What a tool would work on at a tile, for the interface to show before
+ *  the button goes down.  The area is the n by n square whose north-east
+ *  tile is (y0,x0), as $763A gives a footprint.  It covers rows y0 to
+ *  y0+n-1 and columns x0-n+1 to x0.  Ok is 0 when the tool would refuse the tile
+ *  for a reason that is known in advance.  A roll of the dice, as for
+ *  the tree huggers, is not known in advance.  Returns 0 when the tool
+ *  is not reconstructed. */
+typedef struct
+{
+    int16_t y0, x0, n;
+    int32_t price;
+    int     ok;
+} ToolPreview;
+int  sim_tool_preview(const City *c, int tool, int sub, int flags, int y, int x, ToolPreview *p);
+int  sim_bulldoze_tile(City *c, SimGesture *g, int y, int x); /* $8064 */
+void sim_refit_surface(City *c, int y, int x);                /* $20BAA */
+void sim_refit_under(City *c, int y, int x);                  /* $20D6E */
+
+/*  Each network fits the piece on one tile to its neighbors.  The road,
+ *  rail and power lines are on the surface.  The pipes and the subway
+ *  are underground.  The water is the canal the bulldozer leaves. */
+void sim_fit_road(City *c, int y, int x);   /* $1F632 */
+void sim_fit_rail(City *c, int y, int x);   /* $1FB60 */
+void sim_fit_power(City *c, int y, int x);  /* $1F2FE */
+void sim_fit_pipe(City *c, int y, int x);   /* $1FFB8 */
+void sim_fit_subway(City *c, int y, int x); /* $20352 */
+void sim_fit_water(City *c, int y, int x);  /* $122E0 */
+
 void           sim_rebuild_census(City *c);
 void           sim_power_grid(City *c);                                       /* powerGridReset $20FC4 */
 void           sim_water_grid(City *c);                                       /* waterGrid $2156E */
@@ -774,7 +893,6 @@ extern const int16_t BLD_CHOICE_COUNT[20];  /* A5-0x1446                   */
 extern const uint8_t MICRO_CLASS[58];       /* A5-0x5D42 */
 extern const uint8_t MICRO_LABEL[928];      /* A5-0x60E2 */
 extern const int16_t MICRO_REBUILD_IDX[11]; /* A5-0x5198 */
-extern const int32_t BUILD_COST[24];        /* A5+0x6A6   */
 extern const int16_t ROT_CORNER_4[16];      /* A5-0x7DCC                   */
 extern const uint8_t WALK_TURN_MASK[4];     /* A5-0x38AE                */
 extern const int16_t WALK_DY[4];            /* A5-0x392C                */

@@ -35,7 +35,7 @@ local COUNT, ONLY = {}, {}
 for m = 0, 15 do
     local n, last = 0, 0
     for e = 0, 3 do
-        if m & (1 << e) ~= 0 then n = n + 1; last = e end
+        if bit.band(m, bit.lshift(1, e)) ~= 0 then n = n + 1; last = e end
     end
     COUNT[m], ONLY[m] = n, last
 end
@@ -79,7 +79,7 @@ arc.rules.network = function (o)
             end
             local at = cr * n + cc
             local lk = links[at]
-            if lk & (1 << back) == 0 then return k, "stuck", ee end
+            if bit.band(lk, bit.lshift(1, back)) == 0 then return k, "stuck", ee end
             seen[at * 4 + back] = true
             steps = steps + 1
             if k + 2 >= d.max_cells or steps > d.max_steps then
@@ -91,7 +91,7 @@ arc.rules.network = function (o)
             end
             cells[k] = at
             k = k + 1
-            ee = ONLY[lk & ~(1 << back)]
+            ee = ONLY[bit.band(lk, bit.bnot(bit.lshift(1, back)))]
             seen[at * 4 + ee] = true
             if cc == col and cr == row then return k, "loop", ee end
         end
@@ -119,7 +119,7 @@ arc.rules.network = function (o)
                 else
                     if node[at] == 2 then o:junction(at) end
                     for e = 0, 3 do
-                        if links[at] & (1 << e) ~= 0 then keep(col, row, e) end
+                        if bit.band(links[at], bit.lshift(1, e)) ~= 0 then keep(col, row, e) end
                     end
                 end
             end
@@ -133,7 +133,7 @@ arc.rules.network = function (o)
             local at = row * n + col
             if COUNT[links[at]] == 2 then
                 for e = 0, 3 do
-                    if links[at] & (1 << e) ~= 0 then keep(col, row, e) end
+                    if bit.band(links[at], bit.lshift(1, e)) ~= 0 then keep(col, row, e) end
                 end
             end
         end
@@ -150,7 +150,7 @@ arc.rules.network = function (o)
             if art[at] ~= 0 and links[at] ~= 0 and node[at] ~= 2 then
                 local off = true
                 for e = 0, 3 do
-                    if links[at] & (1 << e) ~= 0 then
+                    if bit.band(links[at], bit.lshift(1, e)) ~= 0 then
                         local nc, nr = col + DC[e], row + DR[e]
                         if nc >= 0 and nr >= 0 and nc < n and nr < n then off = false end
                     end

@@ -352,6 +352,8 @@ Its methods are in ``src/script/obj_world.c``.
      - \-
    * - ``w:cuts``
      - ---- the paths waiting to be cut --------------------------------------- Cutting a fitted path into pieces is arc.rules.pieces's, and only the drive may ask for it
+   * - ``w:edit_show``
+     - The pieces an edit's build may show going, as its grading pass begins
    * - ``w:emitted``
      - \-
    * - ``w:field``
@@ -542,6 +544,8 @@ Its methods are in ``src/script/obj_world.c``.
      - \-
    * - ``w:terrain``
      - \-
+   * - ``w:tick``
+     - A moment inside a long step
    * - ``w:tile``
      - \-
    * - ``w:traffic_run``
@@ -770,6 +774,8 @@ Its methods are in ``src/script/obj_lane.c``.
 
    * - Method
      - What it does
+   * - ``f:edit_show``
+     - Once the passes are done, the pieces an edit's build may show leaving, then those it may show coming, by the phase named
    * - ``f:info``
      - ---- THE TURN THE WORLD IS HANDED ------------------------------------ The handle ``arc.rules.frame`` holds, and the only one C ever hands over of itself
    * - ``f:moving``
@@ -1229,7 +1235,7 @@ Its methods are in ``src/script/obj_band.c``.
    * - Method
      - What it does
    * - ``s:at``
-     - One candidate
+     - One candidate, as plain values
    * - ``s:info``
      - ---- the lanes within reach of a spur's end ---------------------------- Which lane a spur fastens to
    * - ``s:is``
@@ -1535,6 +1541,8 @@ Every rule ``src/script/lint.c`` knows, with the shape of the answer its caller 
    * - ``arc.rules.curves``
      - boolean
    * - ``arc.rules.drop``
+     - boolean
+   * - ``arc.rules.edit_show``
      - boolean
    * - ``arc.rules.family``
      - table

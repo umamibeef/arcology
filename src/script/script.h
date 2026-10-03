@@ -104,6 +104,11 @@ const ScriptByteKind        *script_byte_kind(const char *name);
  *  unknown name answers a table of noughts, and a reading of the scripts
  *  clears the lot. */
 const unsigned char *script_bytes(const char *name);
+/*  A count that moves whenever the byte tables change: at a push, and
+ *  at a reading of the scripts.  A reader that runs at every sample of
+ *  the ground keeps the table it read, and reads it again only when the
+ *  count has moved. */
+extern unsigned      script_bytes_moved;
 /*  And the named numbers it pushed with arc.numbers: `keys` and `out`
  *  are n long and line up.  A key the table does not name keeps whatever
  *  `out` held.  Answers 0 where no table of that name was pushed at all:

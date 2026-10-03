@@ -115,11 +115,11 @@ arc.rules.network = function (o)
                 if at < 0 or at >= n * n then say("run %d leaves the map at %d", runs, at) end
                 if i > 0 then
                     local a, b = cells[i - 1], at
-                    local ac, ar, bc, br = a % n, a // n, b % n, b // n
+                    local ac, ar, bc, br = a % n, math.floor(a / n), b % n, math.floor(b / n)
                     local e = bc > ac and 1 or bc < ac and 3 or br > ar and 2 or 0
                     if math.abs(ac - bc) + math.abs(ar - br) ~= 1 then
                         say("run %d steps from %d,%d to %d,%d", runs, ac, ar, bc, br)
-                    elseif links[a] & (1 << e) == 0 or links[b] & (1 << ((e + 2) % 4)) == 0 then
+                    elseif bit.band(links[a], bit.lshift(1, e)) == 0 or bit.band(links[b], bit.lshift(1, (e + 2) % 4)) == 0 then
                         say("run %d crosses an edge neither cell returns, %d,%d to %d,%d",
                             runs, ac, ar, bc, br)
                     end
@@ -193,7 +193,7 @@ arc.rules.network = function (o)
                 return
             end
             local at, lk = cr * n + cc, links[cr * n + cc]
-            if lk & (1 << back) == 0 then return end
+            if bit.band(lk, bit.lshift(1, back)) == 0 then return end
             seen[at * 4 + back] = true
             if node[at] ~= 0 or COUNT[lk] ~= 2 then
                 cells[k] = at
@@ -201,7 +201,7 @@ arc.rules.network = function (o)
                 return
             end
             cells[k] = at; k = k + 1
-            ee = ONLY[lk & ~(1 << back)]
+            ee = ONLY[bit.band(lk, bit.bnot(bit.lshift(1, back)))]
             seen[at * 4 + ee] = true
             if cc == col and cr == row then
                 if col % 2 == 0 then o:segment(cells, k, "loop", ee) end

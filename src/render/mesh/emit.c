@@ -377,7 +377,11 @@ int put_wall(RMesh *m, const float t0[3], const float t1[3], const float b0[3], 
  *  every slope code (`fold_ne_sw`). */
 int cut_ne_sw(int32_t code)
 {
-    return script_bytes("fold_ne_sw")[code];
+    static const unsigned char *t;
+    static unsigned             moved;
+    if (!t || moved != script_bytes_moved)
+        t = script_bytes("fold_ne_sw"), moved = script_bytes_moved;
+    return t[code];
 }
 
 /*  The two triangles of a tile's top, cut on the diagonal the sprite is

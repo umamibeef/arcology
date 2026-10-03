@@ -30,6 +30,7 @@ SHADERS = [
     "sprite.vert", "sprite.frag", "shadow.frag",
     "resolve.vert", "resolve.frag",
     "terrain.vert", "terrain.frag",
+    "terrain_show.vert", "terrain_show.frag",
     "sprite_water.frag",
 ]
 
@@ -44,9 +45,11 @@ def run(cmd):
 
 #  A shader asks for another file with a line of its own.  glslang needs
 #  an extension for #include, and the text is the same either way, so the
-#  file is spliced in here instead.  The materials are the only one: the
-#  shader reads a material by range, and the ranges must be the ones the
-#  mesh writes.
+#  file is spliced in here instead, and again inside what it splices.
+#  The materials are one: the shader reads a material by range, and the
+#  ranges must be the ones the mesh writes.  The terrain's two bodies,
+#  terrain_body.vert and terrain_body.frag, are the others: each is one
+#  shader written once and built twice, plain and with EDIT_SHOW defined.
 INCLUDE = re.compile(r'^//#include "([A-Za-z0-9_.]+)"\s*$', re.M)
 
 
@@ -55,13 +58,16 @@ def splice(glsl):
         p = SRC / m.group(1)
         if not p.exists():
             raise SystemExit("no such shader include: %s" % m.group(1))
-        return p.read_text(encoding="utf-8").rstrip("\n")
+        return splice(p.read_text(encoding="utf-8").rstrip("\n"))
     return INCLUDE.sub(one, glsl)
 
 
-def counts(glsl):
-    samplers = len(re.findall(r"\buniform\s+u?sampler2D\b", glsl))
-    ubos = len(re.findall(r"\buniform\s+\w+\s*\{", glsl))
+#  What the shader declares once the preprocessor has run, so a sampler
+#  or a block under a #ifdef that is off is not counted.
+def counts(glsl, path):
+    pre = run(["glslang", "-E", str(path)]).stdout
+    samplers = len(re.findall(r"\buniform\s+u?sampler2D\b", pre))
+    ubos = len(re.findall(r"\buniform\s+\w+\s*\{", pre))
     return samplers, ubos
 
 
@@ -109,7 +115,7 @@ def main():
             w(c_bytes(ident + "_spv", spv_b))
             w(c_bytes(ident + "_msl", msl_b))
             w("")
-            ns, nu = counts(glsl)
+            ns, nu = counts(glsl, whole)
             table.append((name, stage, ident, len(spv_b), len(msl_b) - 1, ns, nu))
     w("const RShaderSrc shaders_all[] = {")
     for name, stage, ident, ls, lm, ns, nu in table:

@@ -23,7 +23,7 @@ local DV = {[0] = -1, 0, 1, 0}
 arc.rules.node_control = function (at)
     local arms = {}
     for e = 0, 3 do
-        if at.links & (1 << e) ~= 0 then
+        if bit.band(at.links, bit.lshift(1, e)) ~= 0 then
             local c, r = at.col + DU[e], at.row + DV[e]
             local tv = arc.city.at("xtrf", c, r)
             if tv then

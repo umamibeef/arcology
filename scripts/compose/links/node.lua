@@ -127,7 +127,7 @@ M.plan = function (x, c, g, k)
         say(string.format(
             "interchange %d,%d: %d bands reach it but the node has %d edges, "
             .. "so an arm has nothing to join (%s)",
-            c1 % size, c1 // size, #bands, #eds, table.concat(near, " ")))
+            c1 % size, math.floor(c1 / size), #bands, #eds, table.concat(near, " ")))
     end
 
     --  WHICH LANE EACH MOVEMENT TAKES, by the side it turns to.  The
@@ -196,7 +196,7 @@ M.plan = function (x, c, g, k)
                 for _, l in ipairs(lanes) do ls[#ls + 1] = string.format("%d@%+.2f", l.i, l.lat) end
                 for _, t in ipairs(targets) do ts[#ts + 1] = string.format("%d@%+.2f->lane %s", t.tb, t.side, tostring(out_for[fb][t.tb])) end
                 arc.dump(string.format("LANES node %d,%d arm %d out at %.2f,%.2f heading %.2f,%.2f: lanes by left %s; targets by side %s",
-                    nodes[k].cells[1] % size, nodes[k].cells[1] // size, fb, cx, cy, dx, dy, table.concat(ls, " "), table.concat(ts, " ")))
+                    nodes[k].cells[1] % size, math.floor(nodes[k].cells[1] / size), fb, cx, cy, dx, dy, table.concat(ls, " "), table.concat(ts, " ")))
             end
         end
     end
@@ -377,7 +377,7 @@ M.plan = function (x, c, g, k)
     end
     if wiggly > 0 or tight > 0 or curved > 0 then
         arc.log(string.format("interchange %d,%d: of %d movements, %d change their turn more than twice, %d carry an arc under %.1f tiles and %d begin or end on an arc",
-            nd.cells[1] % size, nd.cells[1] // size, #moves, wiggly, tight, arc.geo.interchange_rmin, curved))
+            nd.cells[1] % size, math.floor(nd.cells[1] / size), #moves, wiggly, tight, arc.geo.interchange_rmin, curved))
     end
     if arc.geo.interchange_dump > 0.5 then
         local bs = {}
@@ -385,7 +385,7 @@ M.plan = function (x, c, g, k)
             bs[#bs + 1] = string.format("%.2f/%d", mv.bulge, mv.pc and wiggles(mv.pc) or -1)
         end
         arc.dump(string.format("ANNEAL interchange %d,%d: %d trials, cost %.2f to %.2f, bulge/turns %s",
-            nd.cells[1] % size, nd.cells[1] // size, trials, first, best, table.concat(bs, " ")))
+            nd.cells[1] % size, math.floor(nd.cells[1] / size), trials, first, best, table.concat(bs, " ")))
     end
     for _, mv in ipairs(moves) do
         if mv.pc then
@@ -407,7 +407,7 @@ M.plan = function (x, c, g, k)
     --  whether anyone asked or not; the rest is a report line and
     --  waits to be asked for.
     local c0 = nodes[k].cells[1]
-    local where = string.format("%d,%d", c0 % size, c0 // size)
+    local where = string.format("%d,%d", c0 % size, math.floor(c0 / size))
     if #missed > 0 then
         say(string.format(
             "interchange %s: %d tiles, %d arms -- %d movements have no lane left (%s)",

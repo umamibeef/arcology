@@ -18,6 +18,7 @@
  *  A reading of the scripts clears the lot.  So what stands is exactly
  *  what this reading pushed: the same rule the families and the
  *  materials keep. */
+#include <stdint.h>
 #include <string.h>
 
 #include "log.h"
@@ -86,6 +87,21 @@ static struct
 } s_tab[BYTES_MAX];
 static int s_n;
 
+/*  The last answer to each name, kept by the address of the name.  A
+ *  reader asks for its table by a name of its own, in a loop over every
+ *  sample of the ground.  So the address finds the answer, and one
+ *  strcmp makes sure that the address still holds the name the answer
+ *  is for.  A push and a reading of the scripts both empty it. */
+#define BYTES_SEEN 64
+static struct
+{
+    const char          *at;
+    const unsigned char *b;
+    char                 name[32];
+} s_seen[BYTES_SEEN];
+
+unsigned script_bytes_moved;
+
 /*  A name nothing pushed.  Said ONCE, since the reader that asked is
  *  nearly always in a per-tile loop.  It matters: a table that was never
  *  pushed reads as nought at every byte, and nought is a plausible
@@ -108,15 +124,29 @@ static void no_table(const char *kind, const char *why, const char *name)
 const unsigned char *script_bytes(const char *name)
 {
     static const unsigned char none[256] = {0};
+    const unsigned char       *b = none;
+    unsigned                   h;
     int                        i;
-    for (i = 0; name && i < s_n; ++i)
+    if (!name)
+        return none;
+    h = (unsigned)(((uintptr_t)name >> 3) & (BYTES_SEEN - 1));
+    if (s_seen[h].at == name && strcmp(s_seen[h].name, name) == 0)
+        return s_seen[h].b;
+    for (i = 0; i < s_n; ++i)
         if (strcmp(s_tab[i].name, name) == 0)
-            return s_tab[i].b;
-    if (name && !script_byte_kind(name))
+            break;
+    if (i < s_n)
+        b = s_tab[i].b;
+    else if (!script_byte_kind(name))
         no_table("arc.bytes", "that no reader declares:", name);
-    else if (name)
+    else
         no_table("arc.bytes", "that no script pushed:", name);
-    return none;
+    /*  A name too long for the copy never matches it, and is looked for
+     *  in the list each time. */
+    s_seen[h].at = name;
+    s_seen[h].b  = b;
+    snprintf(s_seen[h].name, sizeof s_seen[h].name, "%s", name);
+    return b;
 }
 
 /*  arc.bytes(name, t [, "number"]).  Answers whether it was kept: a
@@ -137,6 +167,8 @@ static int l_bytes(lua_State *L)
         R_WARN("lua", "arc.bytes(%s) is %s, and %s reads it as %s", name,
                number ? "pushed as a number" : "pushed as a flag", kind->what,
                kind->number ? "a number" : "a flag");
+    memset(s_seen, 0, sizeof s_seen);
+    ++script_bytes_moved;
     for (i = 0; i < s_n; ++i)
         if (strcmp(s_tab[i].name, name) == 0)
             at = i;
@@ -561,6 +593,8 @@ void api_data_open(lua_State *L)
 void script_data_reset(void)
 {
     memset(s_tab, 0, sizeof s_tab);
+    memset(s_seen, 0, sizeof s_seen);
+    ++script_bytes_moved;
     memset(s_num, 0, sizeof s_num);
     memset(s_word, 0, sizeof s_word);
     memset(s_flt, 0, sizeof s_flt);

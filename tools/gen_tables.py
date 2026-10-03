@@ -190,15 +190,61 @@ emit_bytes('MICRO_LABEL', -0x60E2, 58 * 16,
 emit_words('MICRO_REBUILD_IDX', -0x5198, 11,
            'A5-0x5198.  $10392 in the microsim reads this.  A worn-out '
            'power plant\'s building id, less 0xC6, indexes it to reach '
-           'BUILD_COST.  Eleven entries, $C6..$D0.  Past that the table '
+           'the power tool\'s row of TOOL_COST.  Eleven entries, $C6..$D0.  Past that the table '
            'runs into the string pool.')
 
-emit_longs('BUILD_COST', 0x6A6, 24,
-           'A5+0x616 + 0x90.  What the build menu charges, indexed through '
-           'MICRO_REBUILD_IDX.  The nine power plants come out at the '
-           'prices the game charges.  Hydro 400, wind 100, gas 2000, oil '
-           '6600, nuclear 15000, solar 1300, microwave 28000, fusion '
-           '40000, coal 4000.')
+emit_longs('TOOL_COST', 0x616, 18 * 12,
+           'A5+0x616.  What each tool charges, twelve longs a tool, indexed'
+           ' [tool * 12 + sub-tool].  The selected sub-tool is the word at'
+           ' A5+0x1F88 + 2 * tool.  $8064 reads the bulldozer row, so a'
+           ' demolished tile costs 1.  The code only reads this table.')
+
+#  The five network fitters read the same five tables: power $1F2FE,
+#  road $1F632, rail $1FB60, pipe $1FFB8 and subway $20352.  A piece in
+#  them is counted from the first piece of the network being fitted.  The
+#  tables sit back to back in the A5 image, and the fitters read three of
+#  them past their ends.  The original acts on what it reads there, so
+#  each is carried as far as the fitters reach.
+emit_bytes('NET_SLOPED', -0x433A, 16,
+           'A5-0x433A, indexed by the slope in the low four bits of the'
+           ' terrain byte.  Where it is not zero, a network tile takes its piece from'
+           ' NET_SLOPE_PIECE and does not look at its neighbors.  Those are'
+           ' slopes 1 to 4, which raise one side, and 9 to 12, which raise'
+           ' one corner.')
+
+emit_words('NET_SLOPE_PIECE', -0x42A2, 48,
+           'A5-0x42A2.  The piece on a slope NET_SLOPED marks.  The table'
+           ' proper is five words, for slopes 0 to 4.  The fitters index it'
+           ' with more than that, so the words from entry 5 are NET_JOIN_X'
+           ' and NET_JOIN_Y read two bytes at a time.  All 48 are carried.')
+
+emit_words('NET_PIECE', -0x42C2, 16,
+           'A5-0x42C2.  The piece for the neighbors a network tile joins.'
+           '  The index adds 8 for y-1, 2 for y+1, 1 for x-1 and 4 for x+1.'
+           '  The fitters read a tile that joins nothing as entry 15.')
+
+emit_bytes('NET_JOIN_X', -0x4298, 256,
+           'A5-0x4298.  Indexed by the XTER of the neighbor at x-1 or x+1.'
+           '  Not zero where a network tile joins that neighbor.  The table'
+           ' proper is 70 bytes, XTER $00 to $45, and NET_JOIN_Y follows it.'
+           '  The index is a whole byte, so all 256 are carried.')
+
+emit_bytes('NET_JOIN_Y', -0x4252, 256,
+           'A5-0x4252.  The same for the neighbor at y-1 or y+1.  All 256'
+           ' are carried.')
+
+emit_words('WATER_EDGE_SHAPE', -0x4E46, 16,
+           'A5-0x4E46.  $122E0 copies it to its frame and reads it.  The'
+           ' water shape for each set of water neighbors.  Bit 0 is the'
+           ' tile at x-1, bit 1 at y+1, bit 2 at x+1, bit 3 at y-1.  XTER'
+           ' is 0x30 plus the entry.  Entry 15, water on all four sides, is'
+           ' not read.')
+
+emit_words('WATER_CORNER_SHAPE', -0x4E26, 16,
+           'A5-0x4E26.  $122E0 copies it to its frame and reads it when all'
+           ' four sides are water.  The shape for each set of dry diagonal'
+           ' neighbors.  Bit 0 is the tile at (y-1, x-1), bit 1 at'
+           ' (y+1, x-1), bit 2 at (y+1, x+1), bit 3 at (y-1, x+1).')
 
 emit_words('DISASTER_ODDS', -0x15EA, 4,
            'A5-0x15EA  read twice at $310B0 and $310D0, indexed by difficulty.'

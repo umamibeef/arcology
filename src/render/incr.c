@@ -33,6 +33,7 @@
 #include "net/net.h"
 #include "opt.h"
 #include "script.h"
+#include "show.h"
 
 /*  The incremental rebuild's own scratch, kept between builds because
  *  every build wants the same three arrays at about the same size.  They
@@ -84,6 +85,46 @@ int mesh_chunk_of(int32_t col, int32_t row)
 int mesh_want_xy(float x, float y)
 {
     return s_want[mesh_chunk_of((int32_t)floorf(x), (int32_t)floorf(y))];
+}
+
+int incr_editing(void)
+{
+    return s_incr_on;
+}
+
+int incr_dirty_tile(int32_t col, int32_t row)
+{
+    return col >= 0 && row >= 0 && col < R_MAP && row < R_MAP && s_dirty[row * R_MAP + col];
+}
+
+int incr_dirty_box(int32_t box[4])
+{
+    int32_t t, n = 0;
+    box[0] = box[1] = R_MAP;
+    box[2] = box[3] = -1;
+    for (t = 0; t < NT; ++t)
+        if (s_dirty[t])
+        {
+            int32_t col = t % R_MAP, row = t / R_MAP;
+            box[0] = col < box[0] ? col : box[0];
+            box[1] = row < box[1] ? row : box[1];
+            box[2] = col > box[2] ? col : box[2];
+            box[3] = row > box[3] ? row : box[3];
+            ++n;
+        }
+    return n ? 0 : -1;
+}
+
+int incr_want_rect(int32_t c0, int32_t r0, int32_t c1, int32_t r1)
+{
+    const int per = R_MAP / MESH_CHUNK;
+    const int a = mesh_chunk_of(c0, r0), b = mesh_chunk_of(c1, r1);
+    int       cr, cc;
+    for (cr = a / per; cr <= b / per; ++cr)
+        for (cc = a % per; cc <= b % per; ++cc)
+            if (s_want[cr * per + cc])
+                return 1;
+    return 0;
 }
 
 /*  A tile's faces reach a quarter step past its edges (the seabed, the
@@ -595,6 +636,11 @@ static int meet(RMeshVert **list, uint32_t *n, uint32_t *cap, int split, uint32_
             int              w   = s_want[nk == MESH_CHUNKS ? k : k / 2];
             const RMeshVert *src = w ? &tmp[pstart[k]] : &old[ostart[k]];
             uint32_t         cnt = w ? pcount[k] : ocount[k];
+            /*  A network range the edit drew again: which of its pieces
+             *  changed, for what the edit shows coming. */
+            if (w && (k & 1) && aux && aux_old)
+                show_meet(&old[ostart[k]], &aux_old[ostart[k] / 3u], ocount[k] / 3u,
+                          &tmp[pstart[k]], &aux[pstart[k] / 3u], pcount[k] / 3u);
             if (cnt)
                 memcpy(&(*list)[pos], src, (size_t)cnt * sizeof **list);
             if (aux && aux_old && cnt)

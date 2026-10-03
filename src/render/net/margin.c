@@ -407,6 +407,28 @@ int margin_outline(void)
  *  In outline the bands stand aside with the rest of the line works and
  *  the network is drawn in their place.  This is a different rule over
  *  the same paths.  `outline` says which the script should ask for. */
+int margin_box(int i, float box[4])
+{
+    const WalkPath *w  = walk_net_get(i);
+    const WalkSt   *st = walk_net_st(w);
+    int             k;
+    if (!w || !st || w->nst < 1)
+        return 0;
+    box[0] = box[2] = st[0].outer.x;
+    box[1] = box[3] = st[0].outer.y;
+    for (k = 0; k < w->nst; ++k)
+    {
+        const V2 p[2] = {st[k].outer, st[k].inner};
+        int      q;
+        for (q = 0; q < 2; ++q)
+        {
+            box[0] = fminf(box[0], p[q].x), box[1] = fminf(box[1], p[q].y);
+            box[2] = fmaxf(box[2], p[q].x), box[3] = fmaxf(box[3], p[q].y);
+        }
+    }
+    return 1;
+}
+
 int margin_gather(RMesh *m, const RCity *c, uint8_t mask_bit, int i, WalkFan *out, ShapeId *sh)
 {
     const WalkPath *w  = walk_net_get(i);

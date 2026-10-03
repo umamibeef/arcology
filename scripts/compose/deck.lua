@@ -33,17 +33,17 @@ function arc.slab.gore(s, d, i, pv, cu, ha, hb, order, ala, alb)
     if d.structure then return end
     local pl, pzr0, pzr1 = s:lane(i - 1)
     local cl, czr0, czr1 = s:lane(i)
-    if (pl | cl) == 0 then return end
+    if bit.bor(pl, cl) == 0 then return end
     for sd = 0, 1 do
-        local bit = sd == 1 and 2 or 1
+        local mask = sd == 1 and 2 or 1
         local sg = sd == 1 and -1.0 or 1.0
         local wa = sd == 1 and pv.wl or pv.wr
         local wb = sd == 1 and cu.wl or cu.wr
         local za = sd == 1 and pzr1 or pzr0
         local zb = sd == 1 and czr1 or czr0
-        if (pl | cl) & bit ~= 0 and 1.0 - 0.5 * (wa + wb) >= 0.01 then
-            if cl & bit == 0 then zb = za end
-            if pl & bit == 0 then za = zb end
+        if bit.band(bit.bor(pl, cl), mask) ~= 0 and 1.0 - 0.5 * (wa + wb) >= 0.01 then
+            if bit.band(cl, mask) == 0 then zb = za end
+            if bit.band(pl, mask) == 0 then za = zb end
             local i0x, i0y = arc.band_edge(pv.x, pv.y, pv.dx, pv.dy, ha, wa, sg)
             local o0x, o0y = arc.band_edge(pv.x, pv.y, pv.dx, pv.dy, ha, 1.0, sg)
             local i1x, i1y = arc.band_edge(cu.x, cu.y, cu.dx, cu.dy, hb, wb, sg)

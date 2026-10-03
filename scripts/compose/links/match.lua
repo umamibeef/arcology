@@ -35,6 +35,25 @@ local M = {}
 
 M.run = function (x, d, n)
     local route = arc.chain_between
+--  Every lane read once, the slab lanes and the line lanes listed apart
+--  in order, since each search below wants one or the other.  A link
+--  laid takes its two ends as the pipeline marks them (lane_ends_take,
+--  src/render/net/lane.c): refused where either is taken already, and
+--  both marked otherwise.  The copy is marked the same way as each link
+--  is laid, so every search reads the ends as they stand.
+local lanes, slabs, lines = {}, {}, {}
+for i = 0, n - 1 do
+    local r = x:lane(i)
+    lanes[i] = r
+    if r and r.slab then slabs[#slabs + 1] = i end
+    if r and r.line then lines[#lines + 1] = i end
+end
+local function take(from, to)
+    local a, b = from >= 0 and lanes[from], to >= 0 and lanes[to]
+    if (a and not a.open1) or (b and not b.open0) then return end
+    if a then a.open1 = false end
+    if b then b.open0 = false end
+end
 --  One link laid: the chain the router answers, cut into pieces the
 --  same way every other path in the city is.
 local function join(ax, ay, adx, ady, bx, by, bdx, bdy, w, from, to, band)
@@ -49,6 +68,7 @@ local function join(ax, ay, adx, ady, bx, by, bdx, bdy, w, from, to, band)
         return
     end
     x:link(pc, w, from, to, band)
+    take(from, to)
     return pc
 end
 
@@ -61,9 +81,9 @@ end
 local function continuation(li, which, pdx, pdy, ddx, ddy)
     local best, ba = nil, d.band_reach
     local bx, by, bdx, bdy
-    for lj = 0, n - 1 do
+    for _, lj in ipairs(slabs) do
         if lj ~= li then
-            local r = x:lane(lj)
+            local r = lanes[lj]
             if r and r.slab and (which == 1 and r.open0 or which == 0 and r.open1) then
                 local p2x, p2y, d2x, d2y = x:pose(lj, which == 1 and 0 or 1)
                 if dot(d2x, d2y, ddx, ddy) >= d.band_dot then
@@ -100,8 +120,12 @@ local function continuation(li, which, pdx, pdy, ddx, ddy)
     end
     return best, bx, by, bdx, bdy
 end
-for li = 0, n - 1 do
-    local l = x:lane(li)
+for _, li in ipairs(slabs) do
+    --  The lane as it stood when this end was reached: a join laid for
+    --  one end leaves the other end as it was read here.
+    local r0 = lanes[li]
+    local l = {slab = r0.slab, line = r0.line, band = r0.band, off = r0.off, w = r0.w,
+               len = r0.len, open0 = r0.open0, open1 = r0.open1}
     if l and l.slab then
         for which = 0, 1 do
             --  which 1: the lane's travel leaves the slab here; 0: it
@@ -112,9 +136,9 @@ for li = 0, n - 1 do
                 --  band and side -- looks for the line; the others go
                 --  to it.
                 local inner = true
-                for lj = 0, n - 1 do
+                for _, lj in ipairs(slabs) do
                     if lj ~= li then
-                        local r = x:lane(lj)
+                        local r = lanes[lj]
                         if r and r.slab and r.band == l.band
                            and (r.off > 0.0) == (l.off > 0.0)
                            and math.abs(r.off) < math.abs(l.off) then
@@ -139,8 +163,8 @@ for li = 0, n - 1 do
                         local back = math.abs(l.off) > f32(d.outer * l.w) and d.taper_far or d.taper_near
                         if l.len >= f32(back + d.taper_room) then
                             local in_li, in_off = nil, 1e9
-                            for lj = 0, n - 1 do
-                                local r = x:lane(lj)
+                            for _, lj in ipairs(slabs) do
+                                local r = lanes[lj]
                                 if r and r.slab and r.band == l.band
                                    and (r.off > 0.0) == (l.off > 0.0)
                                    and math.abs(r.off) < in_off then
@@ -181,8 +205,8 @@ for li = 0, n - 1 do
                     --  faces this one, nearest first.
                     local best, bd = nil, d.reach
                     local brx, bry, bdx2, bdy2
-                    for lj = 0, n - 1 do
-                        local r = x:lane(lj)
+                    for _, lj in ipairs(lines) do
+                        local r = lanes[lj]
                         if r and r.line
                            and (which == 1 and r.open0 or which == 0 and r.open1) then
                             local p2x, p2y, d2x, d2y = x:pose(lj, which == 1 and 0 or 1)

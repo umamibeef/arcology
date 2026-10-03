@@ -68,14 +68,14 @@ local LAND, BASE, SEA = 0, 1, 2
 local function anchor_of(xbld, xzon, n, col, row, corner, buildings)
     local at = row * n + col
     local b  = xbld[at]
-    if not buildings[b] or xzon[at] & corner ~= 0 then return at end
+    if not buildings[b] or bit.band(xzon[at], corner) ~= 0 then return at end
     local best, ai = 99, at
     for dr = 0, -3, -1 do
         for dc = 0, 3 do
             local ar, ac = row + dr, col + dc
             if ar >= 0 and ac < n and -dr + dc < best then
                 local i = ar * n + ac
-                if xbld[i] == b and xzon[i] & corner ~= 0 then
+                if xbld[i] == b and bit.band(xzon[i], corner) ~= 0 then
                     best, ai = -dr + dc, i
                 end
             end
@@ -148,12 +148,12 @@ arc.rules.terrain = function (o)
 
             --  An elevated piece that does not carry the corner bit
             --  itself takes the place of the neighbour that does.
-            if not order[at] and elevated[b] and xzon[at] & corner == 0 then
+            if not order[at] and elevated[b] and bit.band(xzon[at], corner) == 0 then
                 for q = 1, 3 do
                     local ar, ac = row + QDR[q], col + QDC[q]
                     if ar >= 0 and ac < n then
                         local ai = ar * n + ac
-                        if elevated[xbld[ai]] and xzon[ai] & corner ~= 0 then
+                        if elevated[xbld[ai]] and bit.band(xzon[ai], corner) ~= 0 then
                             order[at] = ai
                             break
                         end

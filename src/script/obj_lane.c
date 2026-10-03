@@ -17,6 +17,7 @@
 #include "mesh/model.h"
 #include "log.h"
 #include "build.h"
+#include "show.h"
 #include "incr.h"
 #include "mesh/shapes.h"
 #include "mesh/emit.h"
@@ -170,6 +171,21 @@ static int api_frame_pass(lua_State *L)
     return 1;
 }
 
+/*  Once the passes are done, the pieces an edit's build may show leaving,
+ *  then those it may show coming, by the phase named.  It answers a handle
+ *  of the kind edit_show.  It answers nothing where the build was no edit
+ *  being shown (render/show.h). */
+static int api_frame_edit_show(lua_State *L)
+{
+    static int  token;
+    const char *phase = luaL_checkstring(L, 2);
+    int         which = strcmp(phase, "leaving") == 0 ? SHOW_LEAVING : strcmp(phase, "coming") == 0 ? SHOW_COMING : -1;
+    if (!rec_of(L, "frame") || net_drive_what() != DRIVE_BUILD || which < 0 || show_offer(which, build_mesh()) < 0)
+        return 0;
+    api_object_push(L, "edit_show", &token);
+    return 1;
+}
+
 /*  And the world that moves. */
 static int api_frame_moving(lua_State *L)
 {
@@ -186,6 +202,7 @@ const luaL_Reg FRAME[] = {
     {"info",   api_frame_info  },
     {"pass",   api_frame_pass  },
     {"moving", api_frame_moving},
+    {"edit_show", api_frame_edit_show},
     {NULL,     NULL            }
 };
 

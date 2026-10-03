@@ -14,7 +14,7 @@
 arc.rules.walks = function (s)
     local d = s:info()
     if not d.lips then return false end
-    local fam = arc.rules.family({name = d.family, width = d.half * 2})
+    local fam = arc.family_of(d.family, d.half * 2)
     if not fam.margin then return false end
     local n = s:count()
     if n < 2 then return false end

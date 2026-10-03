@@ -413,9 +413,22 @@ static void draw_mesh(RGpu *g, SDL_GPUCommandBuffer *cmd, SDL_GPURenderPass *rp,
         SDL_GPUTextureSamplerBinding fb;
         fb.texture = g->shore;
         fb.sampler = g->linear;
-        SDL_BindGPUGraphicsPipeline(rp, g->pipe_mesh);
+        /*  While pieces an edit reached move, the shaders that move them
+         *  draw (show.h).  They read every piece's state by its id, and
+         *  the numbers that say how the pieces move.  A still frame draws
+         *  with the plain ones. */
+        const int                    moving = v->show[15] > 0.5f;
+        SDL_GPUTextureSamplerBinding sb;
+        sb.texture = g->show;
+        sb.sampler = g->nearest;
+        SDL_BindGPUGraphicsPipeline(rp, moving ? g->pipe_mesh_show : g->pipe_mesh);
         SDL_BindGPUFragmentSamplers(rp, 0, &fb, 1);
         SDL_PushGPUVertexUniformData(cmd, 0, cam, sizeof *cam);
+        if (moving)
+        {
+            SDL_BindGPUVertexSamplers(rp, 0, &sb, 1);
+            SDL_PushGPUVertexUniformData(cmd, 1, v->show, sizeof v->show);
+        }
         SDL_PushGPUFragmentUniformData(cmd, 0, &lu, sizeof lu);
         vb.buffer = g->mbuf;
         vb.offset = 0;
@@ -467,7 +480,10 @@ static void draw_mesh(RGpu *g, SDL_GPUCommandBuffer *cmd, SDL_GPURenderPass *rp,
                             SDL_DrawGPUPrimitives(rp, g->slot[2 * k + 1].count, 1, g->slot[2 * k + 1].first, 0);
                 }
             }
+            /*  The base draw again, before the movers.  Under pass 1 or 2
+             *  the fragment shader discards every one of them. */
             lu.flags[0] = 0.0f;
+            SDL_PushGPUFragmentUniformData(cmd, 0, &lu, sizeof lu);
         }
         if (g->movers_n && g->mvbuf)
         {
@@ -483,9 +499,14 @@ static void draw_mesh(RGpu *g, SDL_GPUCommandBuffer *cmd, SDL_GPURenderPass *rp,
         if (slots_held(g, 2 * MESH_CHUNKS, 1))
         {
             int k;
-            SDL_BindGPUGraphicsPipeline(rp, g->pipe_mesh_blend);
+            SDL_BindGPUGraphicsPipeline(rp, moving ? g->pipe_mesh_blend_show : g->pipe_mesh_blend);
             SDL_BindGPUFragmentSamplers(rp, 0, &fb, 1);
             SDL_PushGPUVertexUniformData(cmd, 0, cam, sizeof *cam);
+            if (moving)
+            {
+                SDL_BindGPUVertexSamplers(rp, 0, &sb, 1);
+                SDL_PushGPUVertexUniformData(cmd, 1, v->show, sizeof v->show);
+            }
             SDL_PushGPUFragmentUniformData(cmd, 0, &lu, sizeof lu);
             for (k = 0; k < MESH_CHUNKS; ++k)
                 if (g->slot[2 * MESH_CHUNKS + k].count)

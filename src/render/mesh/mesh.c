@@ -87,8 +87,8 @@ int mesh_ground_fan(int32_t col, int32_t row, TileFan *out)
     const int     underground = s_tp.underground;
     const int32_t dump_r = s_tp.dump_r, dump_c = s_tp.dump_c;
     (void)m, (void)underground;
-    if (s_pass != 1 && !incr_want_tile(col, row))
-        return 0; /* an edit's build: this chunk stands */
+    if (s_pass == 1 || !incr_want_tile(col, row))
+        return 0; /* the grading pass draws no ground, and an edit's build keeps this chunk */
     int32_t idx  = row * R_MAP + col;
     uint8_t xter = c->xter[idx], xbld = c->xbld[idx];
     int32_t code  = slope_code(xter);
@@ -183,8 +183,8 @@ int mesh_tint_fan(int32_t col, int32_t row, TileFan *out)
     const RCity  *c        = s_tp.c;
     const uint8_t mask_bit = s_tp.mask_bit;
     (void)m;
-    if (s_pass != 1 && !incr_want_tile(col, row))
-        return 0;
+    if (s_pass == 1 || !incr_want_tile(col, row))
+        return 0; /* the grading pass draws no tint, and an edit's build keeps this chunk */
     int32_t idx  = row * R_MAP + col;
     /*  Which half of a zoning byte is the zone is the script's:
      *  arc.bytes("zone_of").  Read once a generation, since every tile

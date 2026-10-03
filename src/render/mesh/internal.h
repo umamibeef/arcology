@@ -217,4 +217,7 @@ void    mesh_origins_reset(void);
 void    mesh_origins_clear_wanted(void);
 int        mesh_chunk_of(int32_t col, int32_t row);
 int        mesh_want_xy(float x, float y);           /* the emitter: does this triangle's chunk build */
+/*  Does any chunk under the tiles from (c0,r0) to (c1,r1) build.  An
+ *  emitter asks it before the work of a piece that lies there. */
+int incr_want_rect(int32_t c0, int32_t r0, int32_t c1, int32_t r1);
 #endif

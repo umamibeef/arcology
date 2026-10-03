@@ -307,7 +307,7 @@ static int api_tile_walled(lua_State *L)
     return 0;
 }
 
-static const luaL_Reg TILE[] = {
+const luaL_Reg TILE[] = {
     {"info",   api_tile_info  },
     {"at",     api_tile_at    },
     {"colour", api_tile_colour},
@@ -321,10 +321,4 @@ static const luaL_Reg TILE[] = {
     {"walled", api_tile_walled},
     {NULL,     NULL    }
 };
-
-const luaL_Reg *api_tile_methods(int *n)
-{
-    *n = (int)(sizeof TILE / sizeof TILE[0]) - 1;
-    return TILE;
-}
 

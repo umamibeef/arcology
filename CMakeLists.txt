@@ -212,7 +212,24 @@ if(Python3_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/cities" AND ARC_SIM_TES
         add_test(NAME oracle_multicycle
                  COMMAND ${Python3_EXECUTABLE}
                          ${CMAKE_CURRENT_SOURCE_DIR}/tools/multicycle_check.py 3 ${_oracle_cities})
-        foreach(t oracle_demolish oracle_footprint oracle_raise oracle_settile oracle_things oracle_growth oracle_cycle oracle_multicycle)
+        #  The player's tools, against the original's own: each tile routine
+        #  at its own tiles, then whole gestures through the tool's mouse
+        #  loop.  These five carry every network between them, a tunnel,
+        #  and trees by a raised tile.
+        set(_tool_cities "")
+        foreach(c atlanta flint bridgepo peter3 tomg-b3)
+            list(APPEND _tool_cities "${CMAKE_CURRENT_SOURCE_DIR}/cities/${c}.sc2")
+        endforeach()
+        foreach(addr 8064 1F632 1FB60 1F2FE 1FFB8 20352 122E0)
+            add_test(NAME oracle_tool_${addr}
+                     COMMAND ${Python3_EXECUTABLE}
+                             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tool_check.py --call ${addr} ${_tool_cities})
+            set_tests_properties(oracle_tool_${addr} PROPERTIES LABELS "oracle" TIMEOUT 3600)
+        endforeach()
+        add_test(NAME oracle_tool_gestures
+                 COMMAND ${Python3_EXECUTABLE}
+                         ${CMAKE_CURRENT_SOURCE_DIR}/tools/tool_check.py --tool ${_tool_cities})
+        foreach(t oracle_demolish oracle_footprint oracle_raise oracle_settile oracle_things oracle_growth oracle_cycle oracle_multicycle oracle_tool_gestures)
             set_tests_properties(${t} PROPERTIES LABELS "oracle" TIMEOUT 3600)
         endforeach()
     endif()

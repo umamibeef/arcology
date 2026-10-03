@@ -38,6 +38,12 @@ add_library(arc_core STATIC
     sim_place.c     # putting something down: zones, specials, auto stations
     sim_thing.c     # the moving things: trains, boats, ships, aircraft
     sim_disaster.c  # the nineteen disasters, and the roll that picks one
+    sim_tool.c      # the player's tools: the work each one does at a tile
+    sim_road.c      # each network fits its piece to its neighbors
+    sim_rail.c
+    sim_power.c
+    sim_pipe.c
+    sim_subway.c
     sim_micro.c     # the XMIC records, aged a year at a time
     rotate.c        # the map turned a quarter, as the original rewrites it
     sim_queue.c     # the 512-entry ring those passes walk the map with

@@ -243,7 +243,7 @@ local function orient(o, xbld, n, col, row, pass)
         local lk, n_arm, road_arm = o:links(tc, tr), 0, {}
         for k = 0, 3 do
             local ac, ar = tc + DC[k], tr + DR[k]
-            if lk & (1 << k) ~= 0 and roadish(xbld, n, ac, ar) and not spur(xbld, n, ac, ar) then
+            if bit.band(lk, bit.lshift(1, k)) ~= 0 and roadish(xbld, n, ac, ar) and not spur(xbld, n, ac, ar) then
                 road_arm[k] = true
                 n_arm = n_arm + 1
             end

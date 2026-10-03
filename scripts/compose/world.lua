@@ -15,6 +15,8 @@
 --  quad a hair over the ground, so they follow it; the networks read the
 --  shelves the ground was cut to, so they follow both.
 
+local memo = require "compose.memo"
+
 --  WHAT EACH PASS DID, said once as the pass ends.
 --
 --  A build is not a frame: this is two lines a build and silent while
@@ -36,7 +38,7 @@
 --  than its share moves the bar slower, which is what a bar is for.
 local function steps_of(d, pass)
     local n = 4
-    if d.lines and not d.underground then n = n + 14 end
+    if d.lines and not d.underground then n = n + 15 end
     if pass == 1 then n = n + 1 end
     return n
 end
@@ -101,6 +103,20 @@ arc.rules.world = function (w)
     --  Which pass this is, for a rule that has to know (the grading
     --  pass and the building pass read a spur differently).
     arc.current_pass = d.pass
+    --  And whether the build is an edit's, which may answer again what
+    --  the last build kept (compose/memo.lua).  A whole build starts
+    --  every store empty.
+    arc.editing = d.edit
+    if d.pass == 1 and not d.edit then memo.reset() end
+    arc.family_forget()
+    --  What an edit's build shows going: asked as its grading pass begins,
+    --  while the world on the screen is still the last build's
+    --  (scripts/compose/edit_show.lua).
+    local show = arc.rules.edit_show
+    if d.edit and d.pass == 1 and show then
+        local e = w:edit_show()
+        if e then show(e) end
+    end
     local n_tile, n_junc, n_seg, n_band = 0, 0, 0, 0
     step_first(w, d)
     --  WHAT THE GROUND IS, before anything reads a tile: where every
@@ -462,6 +478,9 @@ arc.rules.world = function (w)
         for fk = 0, w:net_families() - 1 do
             w:junction_boxes(fk)
             while true do
+                --  A moment inside the step, where whatever shows an
+                --  edit going may draw a frame.
+                w:tick()
                 local j = w:junction_box()
                 if j == nil then break end
                 n_junc = n_junc + 1
@@ -513,6 +532,7 @@ arc.rules.world = function (w)
             end
             w:segments(fk)
             while w:segment() do
+                w:tick()
                 n_seg = n_seg + 1
                 lofted()
                 --  What its lanes do where it simply stops, and then the
@@ -635,6 +655,7 @@ arc.rules.world = function (w)
         local lk = w:band_links()
         if lk and links then links(lk) end
         w:band_links_done()
+        step("interchanges")
 
         --  And the ways each interchange is crossed on, swept from the
         --  map (scripts/compose/interchange/arms.lua): the grading pass

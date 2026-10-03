@@ -29,13 +29,13 @@ local f32 = arc.put.f32
 function arc.lip_lane(s, d)
     local best, bd, boff
     for i = 0, d.n - 1 do
-        local c = s:at(i)
+        local _, _, line, _, _, c_off, dist, dot = s:at(i)
         --  Running the spur's way, and near enough to fasten to.
-        if c.line and c.dot > d.dot and c.dist < d.reach then
-            local off = math.abs(c.off)
+        if line and dot > d.dot and dist < d.reach then
+            local off = math.abs(c_off)
             if not boff or off > f32(boff + 1e-4)
-               or (off > f32(boff - 1e-4) and c.dist < bd) then
-                bd, boff, best = c.dist, off, i
+               or (off > f32(boff - 1e-4) and dist < bd) then
+                bd, boff, best = dist, off, i
             end
         end
     end
@@ -49,10 +49,10 @@ arc.rules.spur_lane = function (s)
     if d.what == "slab" then
         --  the spur's own band, nearest station
         for i = 0, d.n - 1 do
-            local c = s:at(i)
-            if c.dot > d.dot and c.dist < d.reach
-               and c.slab and c.band == d.band and (not bd or c.dist < bd) then
-                bd, best = c.dist, i
+            local _, slab, _, _, band, _, dist, dot = s:at(i)
+            if dot > d.dot and dist < d.reach
+               and slab and band == d.band and (not bd or dist < bd) then
+                bd, best = dist, i
             end
         end
     else
@@ -62,10 +62,10 @@ arc.rules.spur_lane = function (s)
     --  No line lane at all: the nearest turn inside a junction's box.
     if not best and d.what == "line" then
         for i = 0, d.n - 1 do
-            local c = s:at(i)
-            if c.turn and c.dot > d.dot and c.dist < d.reach
-               and (not bd or c.dist < bd) then
-                bd, best = c.dist, i
+            local _, _, _, turn, _, _, dist, dot = s:at(i)
+            if turn and dot > d.dot and dist < d.reach
+               and (not bd or dist < bd) then
+                bd, best = dist, i
             end
         end
     end

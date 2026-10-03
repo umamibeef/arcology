@@ -19,20 +19,20 @@ typedef struct
     int         margin_dump;                   /* the margin ends that meet nothing */
     int         buried_all;                      /* every margin with its own piece under it, not the first few */
     const char *line_dump_at, *lane_dump_at; /* ... and at a tile, C,R, or NULL */
-    const char *mesh_dump, *tile_dump, *field_dump, *sweep_probe;
+    const char *mesh_dump, *tile_dump, *field_dump, *sweep_probe, *show_at;
     const char *probe; /* --probe X,Y: every surface over one point of the map */
     const char *dump_to; /* the dumps' sink: a file, or NULL for stdout */
     const char *lua;      /* --lua FILE: the script, watched and read again when it changes */
     const char *lua_eval; /* --lua-eval SRC: one chunk, run once the world is up */
     /* the build, one stage at a time */
-    int noscale, no_sort, no_shadow, no_cap, no_replay, no_incr, no_smp_cache, grade_loft, grade_all, grade_junc, grade_lanes, gpu_tight, spike_check, check_open;
+    int noscale, no_sort, no_shadow, no_cap, no_replay, no_incr, no_smp_cache, grade_loft, grade_all, grade_junc, grade_lanes, gpu_tight, spike_check, check_open, show_edits, async_build;
     /*  The runaway guard's budget, in whole seconds, or 0 for the
      *  generous default.  A rule that will never finish costs that long
      *  EVERY build, so a short one is worth having while chasing one. */
     const char *rule_seconds;
     int times;
     /* the window and the run */
-    const char *tune, *win, *cities, *traffic_t, *edit, *seed, *area, *turn;
+    const char *tune, *win, *cities, *traffic_t, *edit, *gesture, *seed, *area, *turn;
     int         tunewin, scriptwin, mute;
     /* the device */
     int         gpu_debug, gpu_dump;

@@ -35,9 +35,6 @@ unsigned lodepng_decode32_file(unsigned char **out, unsigned *w, unsigned *h, co
     #include "imgui_freetype.h"
 #endif
 
-extern "C" const char *const RUI_TOOL_NAME[RUI_N_TOOLS] = {
-    "Bulldozer", "Landscape", "Dispatch", "Power", "Water", "City Bonus", "Roads", "Rail", "Ports", "Residential", "Commercial", "Industrial", "Education", "Health & Safety", "Recreation", "Place Sign", "Query", "Center Display", "Zoom Out", "Zoom In", "Zone Demand", "Rotate CCW", "Rotate CW", "Map", "Population", "Neighbors", "Graphs", "Industry", "Budget", "Buildings", "Signs", "Roads & Trees", "Zones", "Under-view"};
-
 static const ImU32 BLACK = IM_COL32(0, 0, 0, 255);
 static const ImU32 WHITE = IM_COL32(255, 255, 255, 255);
 
@@ -85,6 +82,7 @@ struct RUi
     bool            save_popup;
     float           dpi;
     bool            help_mode;
+    int             sub_for; /* the tool whose sub-tool menu is open */
     Theme           theme;
 };
 
@@ -663,7 +661,12 @@ static void palette(RUi *u, RUiState *s)
         if (pressed)
             draw_pict(u, dl, 100500, b0, b.x0, b.y0, b.x1 - b.x0 + 1, b.y1 - b.y0 + 1);
         if (ImGui::IsItemHovered() && b.tool >= 0)
-            ImGui::SetTooltip("%s", RUI_TOOL_NAME[b.tool]);
+        {
+            if (b.tool < RUI_N_MAP_TOOLS && RUI_SUB_NAME[b.tool][1])
+                ImGui::SetTooltip("%s: %s", RUI_TOOL_NAME[b.tool], RUI_SUB_NAME[b.tool][s->sub[b.tool]]);
+            else
+                ImGui::SetTooltip("%s", RUI_TOOL_NAME[b.tool]);
+        }
         if (!clicked)
             continue;
         s->want_sound = 505; /* Click */
@@ -724,11 +727,40 @@ static void palette(RUi *u, RUiState *s)
                 ui_log(s, "%s layer toggle: not yet ported", RUI_TOOL_NAME[b.tool]);
                 break;
             default:
+                if (b.tool < RUI_N_MAP_TOOLS && RUI_SUB_NAME[b.tool][1])
+                {
+                    /*  A tool with sub-tools stays selected, and its
+                     *  menu opens under the button as in the original. */
+                    s->tool    = b.tool;
+                    u->sub_for = b.tool;
+                    ImGui::SetNextWindowPos(ImVec2(b0.x + sz.x, b0.y));
+                    ImGui::OpenPopup("##subtool");
+                    break;
+                }
                 s->tool = (s->tool == b.tool) ? -1 : b.tool;
                 if (s->tool == RUI_TOOL_QUERY)
                     s->show_query = 1;
                 break;
         }
+    }
+    if (ImGui::BeginPopup("##subtool"))
+    {
+        /*  A sub-tool the simulation cannot do yet is shown and greyed
+         *  out.  Its price is the original's all the same. */
+        const int t = u->sub_for;
+        for (int k = 0; k < RUI_N_SUB && RUI_SUB_NAME[t][k]; ++k)
+        {
+            char price[24] = "";
+            if (s->sub_cost[t][k] > 0)
+                snprintf(price, sizeof price, "$%d", (int)s->sub_cost[t][k]);
+            const bool ready = (s->sub_ready[t] >> k) & 1;
+            if (ImGui::MenuItem(RUI_SUB_NAME[t][k], price, s->sub[t] == k, ready))
+            {
+                s->sub[t]     = k;
+                s->want_sound = 505; /* Click */
+            }
+        }
+        ImGui::EndPopup();
     }
     ImGui::End();
     ImGui::PopStyleVar();
@@ -1254,6 +1286,27 @@ static void graphs_window(RUiState *s)
     ImGui::End();
 }
 
+/*  A picture in a window of its own, as $154A opens one.  The window
+ *  closes when its close box is clicked. */
+static void picture_window(RUi *u, RUiState *s)
+{
+    const Pict *p = find_pict(u, (int)s->show_picture);
+    int         open = 1;
+    if (!p)
+    {
+        s->show_picture = 0;
+        return;
+    }
+    if (mac_begin("", &open, (float)p->w + 16.0f, ImVec2(200.0f, 160.0f)))
+    {
+        draw_pict(u, ImGui::GetWindowDrawList(), (int)s->show_picture, ImGui::GetCursorScreenPos());
+        ImGui::Dummy(ImVec2((float)p->w, (float)p->h));
+    }
+    ImGui::End();
+    if (!open)
+        s->show_picture = 0;
+}
+
 static void query_window(RUiState *s)
 {
     if (!mac_begin("Query", &s->show_query, 280.0f, ImVec2(110.0f, 300.0f)))
@@ -1717,6 +1770,8 @@ extern "C" void ui_frame(RUi *u, RUiState *s)
         graphs_window(s);
     if (s->show_query)
         query_window(s);
+    if (s->show_picture)
+        picture_window(u, s);
     if (s->show_inspect)
         inspect_window(s);
     if (s->show_tuning)
@@ -1736,6 +1791,32 @@ extern "C" void ui_frame(RUi *u, RUiState *s)
         ImDrawList *dl = ImGui::GetBackgroundDrawList();
         dl->AddPolyline(pts, 4, IM_COL32(0, 0, 0, 220), ImDrawFlags_Closed, 3.0f);
         dl->AddPolyline(pts, 4, IM_COL32(255, 255, 255, 255), ImDrawFlags_Closed, 1.0f);
+    }
+    if (s->tool_poly_ok)
+    {
+        /*  What the selected tool would work on: white over dark as the
+         *  query's outline, and red where the tool would refuse it.  The
+         *  price sits beside the outline's top corner. */
+        ImVec2 pts[4];
+        int    top = 0;
+        for (int k = 0; k < 4; ++k)
+        {
+            pts[k] = ImVec2(s->tool_poly[k][0], s->tool_poly[k][1]);
+            if (pts[k].y < pts[top].y)
+                top = k;
+        }
+        ImDrawList *dl   = ImGui::GetBackgroundDrawList();
+        const ImU32 line = s->tool_refused ? IM_COL32(255, 72, 72, 255) : IM_COL32(255, 255, 255, 255);
+        dl->AddPolyline(pts, 4, IM_COL32(0, 0, 0, 220), ImDrawFlags_Closed, 3.0f);
+        dl->AddPolyline(pts, 4, line, ImDrawFlags_Closed, 1.5f);
+        if (s->tool_price > 0)
+        {
+            char price[24];
+            snprintf(price, sizeof price, "$%d", (int)s->tool_price);
+            ImVec2 at(pts[top].x + 6.0f, pts[top].y - ImGui::GetFontSize() - 2.0f);
+            dl->AddText(ImVec2(at.x + 1.0f, at.y + 1.0f), IM_COL32(0, 0, 0, 220), price);
+            dl->AddText(at, line, price);
+        }
     }
     if (s->comp_ok && s->comp_n >= 2)
     {

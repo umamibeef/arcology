@@ -72,12 +72,12 @@ do
     for code = 0, 13 do
         local mask, raised, odd = m[code], 0, nil
         for k = 0, 3 do
-            if mask & (1 << k) ~= 0 then raised = raised + 1 end
+            if bit.band(mask, bit.lshift(1, k)) ~= 0 then raised = raised + 1 end
         end
         if raised == 1 or raised == 3 then
             local want = raised == 1 and 1 or 0
             for k = 0, 3 do
-                if (mask >> k) & 1 == want then odd = k end
+                if bit.band(bit.rshift(mask, k), 1) == want then odd = k end
             end
         end
         f[code] = code == 13 or odd == NW or odd == SE

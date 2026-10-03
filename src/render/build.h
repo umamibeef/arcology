@@ -73,5 +73,8 @@ typedef void (*BuildWatcher)(void *ud, const char *step, int i, int n);
 void build_watch(BuildWatcher fn, void *ud);
 /*  One step begun, as the script names it. */
 void build_step(const char *step, int i, int n);
+/*  The same step again, from inside it, where an edit is showing what it
+ *  changes: whoever watches may draw a frame. */
+void build_tick(void);
 
 #endif /* ARC_BUILD_H */

@@ -20,7 +20,7 @@ local EDGE_SLOT, EDGE_OVER, EDGE_PAINT = 0.44, 0.05, 7.0
 arc.rules.curves = function (s)
     local d = s:info()
     local n = s:count()
-    local fam = arc.rules.family({name = d.family, width = d.half * 2})
+    local fam = arc.family_of(d.family, d.half * 2)
     local wide = fam.strip.line_wide
 
     for i = 1, n - 1 do

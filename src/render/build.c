@@ -11,6 +11,7 @@
  *  drive left.  Composing a pass is the SCRIPT'S, so nothing here
  *  enters one: the door is net/drive.c's and the order is
  *  scripts/compose/world.lua's. */
+#include <stdio.h>
 #include <string.h>
 
 #include "geo.h"
@@ -30,6 +31,7 @@
 #include "net/walkway.h"
 #include "script.h"
 #include "prof.h"
+#include "show.h"
 
 static int build_passes(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel *l, int underground, int rotated, int lines, int mode);
 
@@ -85,6 +87,8 @@ int build_world(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel *l,
     mode = incr_begin(m, c, &key, sizeof key);
     if (mode < 0)
         return 0; /* the same city under the same key: the mesh stands */
+    if (mode != 1)
+        show_reset();
     rc = build_passes(m, c, a, l, underground, rotated, lines, mode);
     /*  A rule that raised answered nothing, so whatever it was to draw
      *  is missing from what the passes just built.  The mesh is
@@ -105,6 +109,8 @@ int build_world(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel *l,
     }
     if (rc == 0)
         rc = incr_snapshot(m, c, &key, sizeof key);
+    if (mode != 1 || rc != 0)
+        show_reset();
     /*  HOWEVER THE BUILD FAILED, WHAT IT MADE IS KEPT.  A rule that
      *  raised and a pass that answered nothing both come here.  A
      *  person who cannot see how far the build got cannot tell which
@@ -473,10 +479,24 @@ void build_watch(BuildWatcher fn, void *ud)
     s_watch_ud = ud;
 }
 
+/*  The step under way, kept so a tick inside it can name it again. */
+static char s_step_name[64];
+static int  s_step_i, s_step_n;
+
 void build_step(const char *step, int i, int n)
 {
-    if (s_watch && step)
+    if (!step)
+        return;
+    snprintf(s_step_name, sizeof s_step_name, "%s", step);
+    s_step_i = i, s_step_n = n;
+    if (s_watch)
         s_watch(s_watch_ud, step, i, n);
+}
+
+void build_tick(void)
+{
+    if (s_watch && s_step_name[0] && show_active())
+        s_watch(s_watch_ud, s_step_name, s_step_i, s_step_n);
 }
 
 int grade_only(int allowed)

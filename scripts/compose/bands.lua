@@ -84,10 +84,10 @@ local function readings(xbld, n, tiles)
                         local sd = 0
                         for k = 0, 1 do
                             local x, y = bc + k, br + k
-                            if band(x, br - 1) == false then sd = sd | 1 end
-                            if band(x, br + 2) == false then sd = sd | 4 end
-                            if band(bc + 2, y) == true  then sd = sd | 2 end
-                            if band(bc - 1, y) == true  then sd = sd | 8 end
+                            if band(x, br - 1) == false then sd = bit.bor(sd, 1) end
+                            if band(x, br + 2) == false then sd = bit.bor(sd, 4) end
+                            if band(bc + 2, y) == true  then sd = bit.bor(sd, 2) end
+                            if band(bc - 1, y) == true  then sd = bit.bor(sd, 8) end
                         end
                         side[at] = sd
                     end
@@ -170,7 +170,7 @@ arc.rules.bands = function (o)
         for _ = 1, depth do
             local next_ = {}
             for _, at in ipairs(front) do
-                local c, r = at % n, at // n
+                local c, r = at % n, math.floor(at / n)
                 for _, s in ipairs {{1, 0}, {-1, 0}, {0, 1}, {0, -1}} do
                     local cc, cr = c + s[1], r + s[2]
                     if cc >= 0 and cr >= 0 and cc < n and cr < n then
@@ -181,9 +181,9 @@ arc.rules.bands = function (o)
                             next_[#next_ + 1] = p
                             if block[p] then
                                 local bi = block[p]
-                                local bc, br = bi % n, bi // n
+                                local bc, br = bi % n, math.floor(bi / n)
                                 for _, q in ipairs {bi, bi + 1, bi + n, bi + n + 1} do
-                                    if q // n <= br + 1 and not near[q] then
+                                    if math.floor(q / n) <= br + 1 and not near[q] then
                                         near[q] = true
                                         next_[#next_ + 1] = q
                                     end
@@ -234,7 +234,7 @@ arc.rules.bands = function (o)
                 while tc >= 0 and tr >= 0 and tc < n and tr < n and k + 2 < d.max_cells do
                     local bi = block[tr * n + tc]
                     if not bi or seen[bi] then break end
-                    local bc, br = bi % n, bi // n
+                    local bc, br = bi % n, math.floor(bi / n)
                     seen[bi] = true
                     seen[br * n + bc + 1] = true
                     seen[(br + 1) * n + bc] = true
@@ -250,7 +250,7 @@ arc.rules.bands = function (o)
                            qc >= 0 and qr >= 0 and qc < n and qr < n then
                             local mi = block[qr * n + qc]
                             if mi and not seen[mi] then
-                                tc, tr = mi % n, mi // n
+                                tc, tr = mi % n, math.floor(mi / n)
                                 sx, sy = off[1], off[2]
                                 have = true
                                 break
@@ -263,11 +263,11 @@ arc.rules.bands = function (o)
                     do
                         local sd, out = side[bi], nil
                         for j = 0, 3 do
-                            if sd & (1 << j) ~= 0 and ODX[j] * sx + ODY[j] * sy > 0 then out = j end
+                            if bit.band(sd, bit.lshift(1, j)) ~= 0 and ODX[j] * sx + ODY[j] * sy > 0 then out = j end
                         end
                         if not out then
                             for j = 0, 3 do
-                                if sd & (1 << j) ~= 0 and not (ODX[j] * sx + ODY[j] * sy < 0) then out = j end
+                                if bit.band(sd, bit.lshift(1, j)) ~= 0 and not (ODX[j] * sx + ODY[j] * sy < 0) then out = j end
                             end
                         end
                         if not out then break end
@@ -276,7 +276,7 @@ arc.rules.bands = function (o)
                         cc = bc + (out == 1 and 2 or out == 3 and -1 or 0)
                         cr = br + (out == 2 and 2 or out == 0 and -1 or 0)
                     end
-                    break
+                    do break end
                     ::chain::
                 end
                 if chained then goto next end
@@ -293,7 +293,7 @@ arc.rules.bands = function (o)
                 end
                 if found then goto next end
             end
-            break
+            do break end
             ::next::
         end
         --  The approach trimmed from each end.  The cells stay taken, so
@@ -337,7 +337,7 @@ arc.rules.bands = function (o)
             arc.band_ends[#arc.band_ends + 1] = {head = head, tail = tail}
             if arc.geo.interchange_dump > 0.5 then
                 arc.dump(string.format("ENDS band %d from %d,%d: trimmed %d/%d, head %s tail %s",
-                    #arc.band_ends, e[0].cell % n, e[0].cell // n, lo, k0 - k - lo, tostring(head), tostring(tail)))
+                    #arc.band_ends, e[0].cell % n, math.floor(e[0].cell / n), lo, k0 - k - lo, tostring(head), tostring(tail)))
             end
             o:band(e, k, e[0].cell, e[0].ew, sign)
         end

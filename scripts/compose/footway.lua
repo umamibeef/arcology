@@ -21,7 +21,7 @@ arc.rules.margin = function (b)
     local d = b:info()
     local n = b:count()
     if n < 2 then return true end
-    local fam = arc.rules.family({name = "line"})
+    local fam = arc.family_of("line")
     local fw = fam.margin
     if not fw then return true end
     local cross = d.band == "meet"

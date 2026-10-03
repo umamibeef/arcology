@@ -110,10 +110,10 @@ arc.rules.power_tile = function (at)
     --  A line running only north and south turns its crossarm the other
     --  way; the wires' heights are over the ground, which the wire
     --  itself adds.
-    local ns = (at.links & 5) == 5 and (at.links & 10) == 0
+    local ns = bit.band(at.links, 5) == 5 and bit.band(at.links, 10) == 0
     arc.put.model("pylon", at.x, at.y, ns and 0 or 1, ns and 1 or 0)
     for e = 0, 3 do
-        if at.links & (1 << e) ~= 0 then
+        if bit.band(at.links, bit.lshift(1, e)) ~= 0 then
             arc.put.wire(at.x, at.y, arc.geo.wire_hang,
                          at.col + MU[e + 1], at.row + MV[e + 1], arc.geo.wire_hang,
                          arc.geo.wire_sag)
@@ -425,11 +425,36 @@ for _, name in ipairs {"line", "thread", "band", "power"} do
     arc.family.rules(name, arc.rules.family {name = name})
 end
 
+--  The family's answer for one name and width, asked once a build pass.
+--  It reads nothing but the knobs, and the knobs hold still through a
+--  pass.  So the strips and margins a pass lays share one answer, and
+--  none of them builds the whole table again.  The drive forgets the
+--  answers as each pass begins (scripts/compose/world.lua).
+local family_kept = {}
+function arc.family_of(name, width)
+    local by = family_kept[name]
+    if not by then
+        by = {}
+        family_kept[name] = by
+    end
+    local key = width or false
+    local f = by[key]
+    if f == nil then
+        f = arc.rules.family({name = name, width = width})
+        by[key] = f
+    end
+    return f
+end
+
+function arc.family_forget()
+    family_kept = {}
+end
+
 --  A power line meet a line or a railway: no pole on the tile, since
 --  the line owns the ground, and the wire spanning it edge to edge where
 --  the neighbours' wires meet it.
 arc.rules.power_meet = function (at)
-    if (at.links & 5) == 5 then
+    if bit.band(at.links, 5) == 5 then
         arc.put.wire(at.x, at.row, arc.geo.wire_hang,
                      at.x, at.row + 1, arc.geo.wire_hang, arc.geo.wire_span_sag)
     else
@@ -549,7 +574,7 @@ end
 --  tiles instead -- everything arc.city can be asked about them.
 arc.rules.seg_class = function (at)
     local n    = at.classes
-    local half = (n[1] + n[2] + n[3] + 1) // 2
+    local half = math.floor((n[1] + n[2] + n[3] + 1) / 2)
     local acc  = 0
     for cls = 1, 2 do
         acc = acc + n[cls]

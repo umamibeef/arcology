@@ -58,6 +58,10 @@ typedef struct
     int sweep_quarter;          /* the quarter the sweep was made for: its art
                                  * is drawn with the turn left from there    */
     float time;                 /* seconds, for the water                    */
+    float show[24];             /* what an edit shows going and coming: the
+                                 * clocks, the edited tiles, the waves and how
+                                 * a piece moves (show.h).  All nought:
+                                 * nothing moves */
 } RGpuView;
 
 /*  The point the view turns about.  A quarter turn on the game's own
@@ -113,6 +117,9 @@ int gpu_set_movers(RGpu *g, const RMeshVert *v, uint32_t n);
  *  vary smoothly.  `n` is the map side, R_MAP. */
 #define R_SHORE_SCALE 16
 int gpu_set_shore(RGpu *g, const uint8_t *field, int32_t n);
+/*  Every piece's state as an edit shows it, SHOW_PIECES of them by the
+ *  piece's id (show.h): still, going or coming. */
+int gpu_set_show(RGpu *g, const uint8_t *state);
 
 /*  The sun for the lit material.
  *

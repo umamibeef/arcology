@@ -69,7 +69,8 @@ void sim_disaster_roll(City *c);
 /*  sim_map.c: the bulldozer's helpers, which placement needs too: it
  *  clears a tile before it builds on one. */
 int  near_powered(const City *c, int y, int x);
-void set_under(City *c, int y, int x, uint8_t und);
+void set_under(City *c, int y, int x, int und);
+void fit_water_around(City *c, int y, int x);
 void clear_tile(City *c, int y, int x);
 void clear_footprint(City *c, int y, int x);
 int  stamp_footprint(City *c, int y, int x, int bld, int size);

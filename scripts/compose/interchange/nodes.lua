@@ -36,7 +36,7 @@ local function stub(xbld, tiles, inside, n, q)
     local leaves = false
     while #st > 0 do
         local w = table.remove(st)
-        local wc, wr = w % n, w // n
+        local wc, wr = w % n, math.floor(w / n)
         for _, s in ipairs(STEP) do
             local cc, cr = wc + s[1], wr + s[2]
             if cc >= 0 and cr >= 0 and cc < n and cr < n then
@@ -88,7 +88,7 @@ function arc.interchange_nodes()
             while #stack > 0 do
                 local q = table.remove(stack)
                 cells[#cells + 1] = q
-                local qc, qr = q % n, q // n
+                local qc, qr = q % n, math.floor(q / n)
                 for _, s in ipairs(STEP) do
                     local cc, cr = qc + s[1], qr + s[2]
                     if cc >= 0 and cr >= 0 and cc < n and cr < n then
@@ -125,7 +125,7 @@ function arc.interchange_nodes()
                             local beyond = false
                             for _, q2 in ipairs {br * n + bc, br * n + bc + 1,
                                                  (br + 1) * n + bc, (br + 1) * n + bc + 1} do
-                                local c2, r2 = q2 % n, q2 // n
+                                local c2, r2 = q2 % n, math.floor(q2 / n)
                                 for _, s2 in ipairs(STEP) do
                                     local c3, r3 = c2 + s2[1], r2 + s2[2]
                                     if c3 >= 0 and r3 >= 0 and c3 < n and r3 < n then
@@ -162,7 +162,7 @@ function arc.interchange_nodes()
             local inside, arms, side = {}, {}, {}
             for _, q in ipairs(cells) do inside[q] = true end
             for _, q in ipairs(cells) do
-                local qc, qr = q % n, q // n
+                local qc, qr = q % n, math.floor(q / n)
                 for si, s in ipairs(STEP) do
                     local cc, cr = qc + s[1], qr + s[2]
                     if cc >= 0 and cr >= 0 and cc < n and cr < n then
@@ -189,7 +189,7 @@ function arc.interchange_nodes()
                     while #st > 0 do
                         local w = table.remove(st)
                         group[#group + 1] = w
-                        local wc, wr = w % n, w // n
+                        local wc, wr = w % n, math.floor(w / n)
                         for _, sp in ipairs(STEP) do
                             local cc, cr = wc + sp[1], wr + sp[2]
                             if cc >= 0 and cr >= 0 and cc < n and cr < n then
@@ -218,7 +218,7 @@ function arc.interchange_nodes()
                         local px2, py2 = 0.0, 0.0
                         for _, w in ipairs(part) do
                             px2 = px2 + (w % n) + 0.5
-                            py2 = py2 + (w // n) + 0.5
+                            py2 = py2 + math.floor(w / n) + 0.5
                         end
                         edges[#edges + 1] = {cells = part,
                                              x = px2 / #part, y = py2 / #part}
@@ -228,7 +228,7 @@ function arc.interchange_nodes()
             local sx, sy = 0.0, 0.0
             for _, q in ipairs(cells) do
                 sx = sx + (q % n) + 0.5
-                sy = sy + (q // n) + 0.5
+                sy = sy + math.floor(q / n) + 0.5
             end
             local k = #nodes + 1
             nodes[k] = {cells = cells, inside = inside, arms = arms,
@@ -249,7 +249,7 @@ function arc.interchange_nodes()
             local halo = 2 + math.floor(arc.geo.interchange_approach + 0.5)
             for _, q in ipairs(cells) do
                 of_tile[q] = k
-                local qc, qr = q % n, q // n
+                local qc, qr = q % n, math.floor(q / n)
                 for dc = -halo, halo do
                     for dr = -halo, halo do
                         local cc, cr = qc + dc, qr + dr

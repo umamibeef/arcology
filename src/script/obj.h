@@ -12,8 +12,7 @@
 
 #include <stddef.h>
 
-#include "lauxlib.h"
-#include "lua.h"
+#include "luavm.h"
 
 #include "city.h"
 
@@ -51,6 +50,7 @@ extern const luaL_Reg CAPS[];
 extern const luaL_Reg CHAIN[];
 extern const luaL_Reg CROSS[];
 extern const luaL_Reg DROP[];
+extern const luaL_Reg EDIT_SHOW[];
 extern const luaL_Reg FIT[];
 extern const luaL_Reg FRAME[];
 extern const luaL_Reg GROUND[];
@@ -79,6 +79,7 @@ extern const luaL_Reg SWEEP[];
 extern const luaL_Reg TARGET[];
 extern const luaL_Reg TERRAIN[];
 extern const luaL_Reg THREADS[];
+extern const luaL_Reg TILE[];
 extern const luaL_Reg TURNS[];
 extern const luaL_Reg WORLD[];
 

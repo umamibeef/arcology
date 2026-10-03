@@ -18,6 +18,18 @@
 
 /*  The two every layer asks. */
 int  incr_want_tile(int32_t col, int32_t row);
+/*  Whether the build under way is an edit's, which keeps the chunks its
+ *  closure did not name.  A script keeps what it may answer again from
+ *  the last build only in one of these. */
+int incr_editing(void);
+/*  Whether any chunk under the tiles from (c0,r0) to (c1,r1) builds.  A
+ *  piece of work that draws only there is passed over where none does. */
+int incr_want_rect(int32_t c0, int32_t r0, int32_t c1, int32_t r1);
+/*  The box round the tiles an edit changed: the least column and row,
+ *  then the greatest.  Nonzero when no tile changed. */
+int incr_dirty_box(int32_t box[4]);
+/*  Whether the edit changed this tile. */
+int incr_dirty_tile(int32_t col, int32_t row);
 int  incr_near(int32_t col, int32_t row);
 
 /*  And the build's own: begin one, close it, and say which chunks the

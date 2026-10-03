@@ -56,15 +56,15 @@ static int micro_find_tile(const City *c, int rec)
 }
 
 /*  $10392.  What the city is charged to put a worn-out plant back:
- *  A5-0x5198 maps the plant's id onto an index.  A5+0x616 is the cost
- *  table the build menu prices from. */
+ *  A5-0x5198 maps the plant's id onto an index into the power tool's
+ *  prices in TOOL_COST, the table the build menu prices from. */
 static int32_t micro_rebuild_cost(int type)
 {
     int n;
     if (type < 0xC6 || type > 0xD0)
         return 0;
     n = MICRO_REBUILD_IDX[type - 0xC6];
-    return (n >= 0 && n < 24) ? BUILD_COST[n] : 0;
+    return (n >= 0 && n < 24) ? TOOL_COST[TOOL_POWER * N_SUBTOOL + n] : 0; /* $103A4 */
 }
 
 int micro_cap(const City *c, int want, int per)

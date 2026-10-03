@@ -133,10 +133,15 @@ static int api_snap_info(lua_State *L)
     return 1;
 }
 
-/*  One candidate.  It gives the lane, what it is, and the band it
- *  belongs to.  It also gives how far off its centerline it lies.  It
- *  gives how far away that station is, and how nearly it runs the way
- *  the spur does. */
+/*  One candidate, as plain values.  A spur end has thousands of them, so
+ *  it makes no table.
+ *
+ *      The lane.
+ *      Whether it is a slab's lane, a line's, or a turn's.
+ *      The band it belongs to.
+ *      How far off its centerline it lies.
+ *      How far away that station is.
+ *      How nearly it runs the way the spur does. */
 static int api_snap_at(lua_State *L)
 {
     int   lane, cls, band;
@@ -144,16 +149,15 @@ static int api_snap_at(lua_State *L)
     if (!rec_of(L, "snap") ||
         !lane_snap_at((int)luaL_checkinteger(L, 2), &lane, &cls, &band, &off, &dist, &dot, &x, &y, &dx, &dy))
         return 0;
-    lua_createtable(L, 0, 9);
-    lua_pushinteger(L, lane), lua_setfield(L, -2, "lane");
-    lua_pushboolean(L, cls == 2), lua_setfield(L, -2, "slab");
-    lua_pushboolean(L, cls == 0), lua_setfield(L, -2, "line");
-    lua_pushboolean(L, cls == 1), lua_setfield(L, -2, "turn");
-    lua_pushinteger(L, band), lua_setfield(L, -2, "band");
-    lua_pushnumber(L, off), lua_setfield(L, -2, "off");
-    lua_pushnumber(L, dist), lua_setfield(L, -2, "dist");
-    lua_pushnumber(L, dot), lua_setfield(L, -2, "dot");
-    return 1;
+    lua_pushinteger(L, lane);
+    lua_pushboolean(L, cls == 2);
+    lua_pushboolean(L, cls == 0);
+    lua_pushboolean(L, cls == 1);
+    lua_pushinteger(L, band);
+    lua_pushnumber(L, off);
+    lua_pushnumber(L, dist);
+    lua_pushnumber(L, dot);
+    return 8;
 }
 
 /*  And the pick, or nothing for an end that fastens to no lane. */

@@ -72,6 +72,9 @@ struct RGpu
     SDL_GPUGraphicsPipeline *pipe_terrain, *pipe_sprite, *pipe_sprite_depth, *pipe_shadow;
     SDL_GPUGraphicsPipeline *pipe_mesh, *pipe_mesh_blend, *pipe_water, *pipe_resolve,
         *pipe_resolve_off;
+    /*  The mesh's two again, moving the pieces an edit shows going and
+     *  coming (show.h).  Bound only while some piece moves. */
+    SDL_GPUGraphicsPipeline *pipe_mesh_show, *pipe_mesh_blend_show;
 
     SDL_GPUTexture *atlas[R_MAX_LEVELS];
     int32_t         atlas_transparent[R_MAX_LEVELS];
@@ -79,6 +82,7 @@ struct RGpu
     int32_t         n_atlas;
     SDL_GPUTexture *pal;
     SDL_GPUTexture *shore;
+    SDL_GPUTexture *show; /* every piece's state as an edit shows it (show.h), by the piece's id */
     SDL_GPUSampler *nearest, *linear;
 
     SDL_GPUTexture *color, *shadow, *depth, *offscreen;
@@ -101,6 +105,8 @@ struct RGpu
     uint32_t               mesh_n;  /* vertices held, all slots: nothing to draw when 0 */
     SDL_GPUBuffer         *mvbuf;   /* the movers */
     uint32_t               mvbuf_cap, movers_n;
+    SDL_GPUTransferBuffer *mvtb; /* the movers' transfer buffer, kept from frame to frame */
+    uint32_t               mvtb_cap;
     SDL_GPUTransferBuffer *ptb; /* palette */
     SDL_GPUTransferBuffer *dtb; /* download */
     uint32_t               dtb_cap;

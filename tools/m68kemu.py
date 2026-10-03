@@ -78,6 +78,7 @@ class Emu:
         self.stores = []                # (miscIndex, provenance)
         self.trail = []                 # recent pcs, for diagnosing a bad jump
         self.tb_seed = 1                # Toolbox _Random, same LCG as rng.c
+        self.still_down = None          # _StillDown, for a tool's loop
         self.rng_log = None             # set to a list to record every draw
         self.miscbuf = None
 
@@ -580,6 +581,11 @@ class Emu:
                     #  value the real routine would have returned.
                     if isinstance(stubs, dict):
                         v = stubs.get(tgt)
+                        #  A function answers a different value each
+                        #  call: a tool check feeds $8E60 the tiles a
+                        #  mouse would cross, one per call.
+                        if callable(v):
+                            v = v(self)
                         if v is not None:
                             self.d[0] = v & MASK
                 else:
@@ -637,6 +643,18 @@ class Emu:
                 pt = self.rd(self.a[7] + 4, 4)
                 self.wr(pt, 2, v); self.wr(pt + 2, 2, h)
                 self.a[7] = (self.a[7] + 8) & MASK
+            elif base == '_StillDown':
+                #  The mouse button, asked by a tool's loop.  A check that
+                #  drives a tool sets `still_down` to a function that says
+                #  whether the button is still held.  With none set, the
+                #  button is up.  A Pascal Boolean is the high byte.
+                down = bool(self.still_down(self)) if self.still_down else False
+                self.wr(self.a[7], 2, 0x0100 if down else 0)
+            elif base == '_GetMouse':
+                #  GetMouse(VAR pt).  The point is left alone: a check that
+                #  drives a tool stubs $8E60, which turns it into a tile,
+                #  so nothing reads it.
+                self.a[7] = (self.a[7] + 4) & MASK
             elif base == '_BlockMove':
                 src, dst, cnt = self.a[0], self.a[1], self.d[0] & MASK
                 self.mem[dst:dst+cnt] = self.mem[src:src+cnt]

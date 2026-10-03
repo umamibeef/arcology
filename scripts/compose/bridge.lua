@@ -122,7 +122,7 @@ arc.rules.bridge = function (b)
         --  Something symmetric held: the slid ones are for when nothing
         --  did.
         if si == 1 and best >= 0.0 then break end
-        local shift = (si + 1) // 2 * ((si % 2 == 1) and -1 or 1)
+        local shift = math.floor((si + 1) / 2) * ((si % 2 == 1) and -1 or 1)
         local sa    = f32(SLIDE * shift)
         for f = STEPS, 0, -1 do
             local a = f32(f32(f32(ba * f) / STEPS) + sa)

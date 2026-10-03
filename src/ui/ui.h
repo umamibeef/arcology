@@ -28,6 +28,8 @@ union SDL_Event;
 #define RUI_N_GRAPH       16
 #define RUI_MAX_THEMES    16
 #define RUI_GRAPH_SAMPLES 52
+#define RUI_N_MAP_TOOLS   18 /* the palette's tools that act on the map, Bulldozer to Center */
+#define RUI_N_SUB         12 /* the most sub-tools a tool has room for                       */
 #define RUI_N_DEPT        16
 
 enum
@@ -90,6 +92,11 @@ typedef struct
     const char *q_building;   /* a name when one is known, else NULL */
     char        q_mesh[160];  /* what the mesh made of the tile        */
     float       q_poly[4][2]; /* the tile's outline on screen, points  */
+    /*  The selected tool's area under the pointer, outlined on the map:
+     *  red where the tool would refuse it, with its price beside it. */
+    float   tool_poly[4][2];
+    int     tool_poly_ok, tool_refused;
+    int32_t tool_price;
     int         q_poly_ok;
     /*  The map view's Shift-drag selection for the area report (app/area.c):
      *  its outline on screen, and its caption while the drag is on. */
@@ -102,6 +109,12 @@ typedef struct
 
     /* --- the canon interface: the tool palette ------------------ */
     int tool; /* the selected tool, 0..33, or -1   */
+    /*  The sub-tool each map tool has selected.  The original keeps the
+     *  same at A5+0x1F88.  The app fills in what each sub-tool costs, and
+     *  one bit a sub-tool for those the simulation can do. */
+    int      sub[RUI_N_MAP_TOOLS];
+    int32_t  sub_cost[RUI_N_MAP_TOOLS][RUI_N_SUB];
+    uint16_t sub_ready[RUI_N_MAP_TOOLS];
     int show_palette, show_demand;
 
     /* --- switches: shown and edited in place -------------------- */
@@ -138,6 +151,9 @@ typedef struct
     int32_t view; /* 0..11, the game's map views       */
     int     show_city, show_budget, show_graphs, show_disasters,
         show_query, show_renderer, show_log;
+    /*  A picture the game shows in a window of its own: a PICT id, or 0.
+     *  $154A opens one, for the protest that stops the bulldozer. */
+    int32_t show_picture;
     /*  The component under the pointer, outlined: the edges of its
      *  silhouette as PAIRS of canvas points, in no order round it, with
      *  its name. */
@@ -241,6 +257,7 @@ enum
     RUI_N_TOOLS
 };
 extern const char *const RUI_TOOL_NAME[RUI_N_TOOLS];
+extern const char *const RUI_SUB_NAME[RUI_N_MAP_TOOLS][RUI_N_SUB]; /* NULL past the last */
 
 typedef struct RUi RUi;
 

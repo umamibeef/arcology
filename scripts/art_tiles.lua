@@ -75,7 +75,7 @@ do
                         if v == PIECE_FILL or v == PIECE_DASH then n = n + 1 end
                     end
                 end
-                if n >= 2 then links = links + (1 << e) end
+                if n >= 2 then links = links + bit.lshift(1, e) end
             end
             t[piece] = links
         end

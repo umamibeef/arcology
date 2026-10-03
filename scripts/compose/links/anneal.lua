@@ -16,11 +16,16 @@
 --  cells, so it answers the same every build.
 
 local geom = require "compose.links.chain"
+local memo = require "compose.memo"
 local dist = geom.dist
 
 local M = {}
 
-M.settle = function (moves, nd, size)
+--  While a search is being kept, every cell of the map it reads is told
+--  here: the layer, the column, the row and what the cell holds.
+local watch = nil
+
+local function search(moves, nd, size)
     local lead   = arc.geo.interchange_lead
     local radius = arc.geo.interchange_radius
     --  A movement between two arms whose lines MEET ahead of the one
@@ -109,11 +114,25 @@ M.settle = function (moves, nd, size)
         return arc.arm_z[e.band * 2 + (at_tail and 1 or 0)] or 0.0
     end
     local plateau = arc.geo.interchange_plateau > 0.5
+    --  Each way's samples, kept by the chain they were taken from.  A
+    --  trial moves one way, so every other way hands the weave planner
+    --  the very tables it had before, and the planner files their
+    --  crossings again from `seen_pairs` without comparing a step.
+    local sampled, seen_pairs = {}, {}
+    local function samples_of(pc)
+        local sp = sampled[pc]
+        if not sp then
+            local pts, len = arc.weave.sample(pc, step)
+            sp = {pts = pts, len = len}
+            sampled[pc] = sp
+        end
+        return sp.pts, sp.len
+    end
     local function cost_of()
         local ms = {}
         for _, mv in ipairs(moves) do
             if mv.pc then
-                local pts, len = arc.weave.sample(mv.pc, step)
+                local pts, len = samples_of(mv.pc)
                 ms[#ms + 1] = {pts = pts, len = len, za = deck_of(mv.a, 1), zb = deck_of(mv.b, 0),
                                ma = 0.0, mb = 0.0, tc = 0, tr = 0,
                                hold_a = mv.hold_a, hold_b = mv.hold_b}
@@ -123,8 +142,12 @@ M.settle = function (moves, nd, size)
                                        lift = 0.0, round = 0, stack = 0.0,
                                        crest = arc.geo.interchange_crest, plateau = plateau,
                                        ground = plateau and function (x, y)
-                                           return arc.city.at("surface", math.floor(x), math.floor(y)) end or nil,
-                                       near = 2.0 * arc.geo.interchange_lane_w + 0.01})
+                                           local c, r = math.floor(x), math.floor(y)
+                                           local z = arc.city.at("surface", c, r)
+                                           if watch then watch("surface", c, r, z) end
+                                           return z end or nil,
+                                       near = 2.0 * arc.geo.interchange_lane_w + 0.01,
+                                       pairs = seen_pairs})
         --  What a layout costs.  A crossing that cannot be weaved is
         --  the worst thing; then one lifted short of the gap; then
         --  ground a way may not cross.  BENDING costs more than
@@ -141,8 +164,10 @@ M.settle = function (moves, nd, size)
             climb = climb + top
             for _, pt in ipairs(m.pts) do
                 local c, r = math.floor(pt.x), math.floor(pt.y)
-                if c >= 0 and r >= 0 and c < size and r < size and xbld[r * size + c] > 0x69 then
-                    bad = bad + 1
+                if c >= 0 and r >= 0 and c < size and r < size then
+                    local b = xbld[r * size + c]
+                    if watch then watch("xbld", c, r, b) end
+                    if b > 0x69 then bad = bad + 1 end
                 end
             end
             --  the turning beyond the unavoidable: the sweep of every
@@ -179,8 +204,12 @@ M.settle = function (moves, nd, size)
     end
     local trials = math.floor(arc.geo.interchange_anneal + 0.5)
     local seed = ((nd.cells[1] or 1) * 7919 + 17) % 2147483648
+    --  The step is seed * 1103515245 + 12345, modulo 2^31.  The product
+    --  reaches 2^61, past what a double holds exactly, so the multiplier
+    --  is taken in two halves, 16838 * 65536 + 20077.  Every part then
+    --  stays under 2^47 and the step is exact in any Lua.
     local function rnd()
-        seed = (seed * 1103515245 + 12345) % 2147483648
+        seed = (((seed * 16838) % 32768) * 65536 + seed * 20077 + 12345) % 2147483648
         return seed / 2147483648
     end
     local cur = #moves > 0 and cost_of() or 0.0
@@ -219,4 +248,70 @@ M.settle = function (moves, nd, size)
     end
     return first, best, trials
 end
+--  THE SEARCH AT EACH NODE, kept (compose/memo.lua).  What a search
+--  reads is the geometry of the node's ways, the node, the decks the
+--  ends stand on, and the cells of the map its ways are laid over.  An
+--  edit away from the node changes none of them, and the search then
+--  answers what it answered before.
+local kept = memo.store("anneal")
+
+--  What the search reads off the ways and the node, in order.
+local function key_of(moves, nd, size)
+    local k = {size, nd.x, nd.y, nd.cells[1] or 1}
+    local function deck(e)
+        if not arc.arm_z or not e.band then return false end
+        return {arc.arm_z[e.band * 2] or false, arc.arm_z[e.band * 2 + 1] or false}
+    end
+    for _, mv in ipairs(moves) do
+        local a, b = mv.a, mv.b
+        k[#k + 1] = {a.x, a.y, a.dx, a.dy, a.off or false, a.band or false, deck(a),
+                     b.x, b.y, b.dx, b.dy, b.off or false, b.band or false, deck(b),
+                     mv.hold_a or false, mv.hold_b or false}
+    end
+    return k
+end
+
+--  Whether every cell a kept search read holds what it held.
+local function cells_hold(cells, size)
+    local plane = arc.city.plane("xbld")
+    for _, c in ipairs(cells) do
+        local v
+        if c.layer == "xbld" then v = plane[c.r * size + c.c]
+        else v = arc.city.at("surface", c.c, c.r) end
+        if not memo.same(v, c.v) then return false end
+    end
+    return true
+end
+
+M.settle = function (moves, nd, size)
+    local said = arc.geo.interchange_dump > 0.5 or arc.geo.pose_dump > 0.5
+    local key = key_of(moves, nd, size)
+    local at = (nd.cells[1] or 1) .. "/" .. (arc.current_pass or 0)
+    local was = kept[at]
+    if memo.on() and not said and was and memo.same(was.key, key) and cells_hold(was.cells, size) then
+        for i, mv in ipairs(moves) do
+            local o = was.moves[i]
+            mv.bulge, mv.best, mv.pc = o.bulge, o.best, memo.copy(o.pc)
+        end
+        return was.first, was.best, was.trials
+    end
+    local cells, seen = {}, {}
+    watch = function (layer, c, r, v)
+        local k = layer == "xbld" and c * 1024 + r or -(c * 1024 + r) - 1
+        if not seen[k] then
+            seen[k] = true
+            cells[#cells + 1] = {layer = layer, c = c, r = r, v = v}
+        end
+    end
+    local ok, first, best, trials = pcall(search, moves, nd, size)
+    watch = nil
+    if not ok then error(first, 0) end
+    local out = {}
+    for i, mv in ipairs(moves) do
+        out[i] = {bulge = mv.bulge, best = mv.best, pc = memo.copy(mv.pc)}
+    end
+    kept[at] = {key = key, cells = cells, moves = out, first = first, best = best, trials = trials}
+    return first, best, trials
+end
+
 return M

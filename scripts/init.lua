@@ -16,8 +16,11 @@
 
 --  ---- THE NUMBERS AND WHAT A BYTE MEANS ----------------------------
 --
---  The numbers first.  Then what each of the city's bytes means, which
---  is pushed down once and read out of a table for the rest of a build.
+--  The arithmetic first, since every file below takes arc.put.f32 as it
+--  loads (arith.lua).  Then the numbers.  Then what each of the city's
+--  bytes means, which is pushed down once and read out of a table for
+--  the rest of a build.
+require "arith"
 require "geo"
 require "tune"
 require "hiway_tiles"  -- sets arc.band_tiles
@@ -76,6 +79,7 @@ require "compose.crossing_panel"
 require "compose.curves"
 require "compose.deck"
 require "compose.drop"
+require "compose.edit_show"
 require "compose.fit"
 require "compose.footway"
 require "compose.frame"

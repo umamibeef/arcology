@@ -178,6 +178,7 @@ static const struct
     {"node_threads", "boolean"},
     {"cap",       "boolean"},
     {"spur_target", "boolean"},
+    {"edit_show", "boolean"},
 };
 
 /*  arc.tune and arc.geo.  A name that is not a setting is a fault on the
@@ -1421,9 +1422,8 @@ static void rule_args(lua_State *L, const char *rule, int *nargs)
                           "   return {kind = 'snap',"
                           "     info = function () return {n = 2, what = 'line', band = -1,"
                           "       reach = 4.0, dot = 0.5} end,"
-                          "     at = function (_, i) return {lane = i, line = true, slab = false,"
-                          "       turn = false, band = -1, off = i * 0.5, dist = 1.0 + i,"
-                          "       dot = 0.9} end,"
+                          "     at = function (_, i) return i, false, true, false, -1, i * 0.5,"
+                          "       1.0 + i, 0.9 end,"
                           "     is = function () end} end,"
                           " exits = function () return false end,"
                           " keep = function () end,"
@@ -1637,7 +1637,7 @@ static void rule_args(lua_State *L, const char *rule, int *nargs)
                           " info = function () return {col = 64, row = 0, xter = 0, xbld = 0,"
                           "   code = 0, order = 100, kind = 0, wet = false, underground = false,"
                           "   corridor = false, surface = 5.0, zone = 1} end,"
-                          " at = function (_, k) return 64 + (k % 2), k // 3, 5.0, 4.0, 5.0 end,"
+                          " at = function (_, k) return 64 + (k % 2), math.floor(k / 3), 5.0, 4.0, 5.0 end,"
                           " colour = function () return 0.0, 0.0, 1.0 end,"
                           " edge = function (_, e) return e ~= 0, 4.5, 4.5, false, 0, false,"
                           "   1, 2, e == 1, false end,"
@@ -1788,10 +1788,32 @@ static void rule_args(lua_State *L, const char *rule, int *nargs)
                           "return {kind = 'snap',"
                           " info = function () return {n = 3, what = 'slab', band = 1,"
                           "   reach = 1.0, dot = 0.5} end,"
-                          " at = function (_, i) return c[i] end,"
+                          " at = function (_, i) local e = c[i]"
+                          "   return e.lane, e.slab, e.line, e.turn, e.band, e.off, e.dist, e.dot end,"
                           " is = function () end}") != LUA_OK)
         {
             bad("the lint's own spur lane: %s", lua_tostring(L, -1));
+            lua_pop(L, 1);
+            lua_pushnil(L);
+        }
+        *nargs = 1;
+    }
+    else if (strcmp(rule, "edit_show") == 0)
+    {
+        /*  The coming phase, with four pieces: one that changed, one the
+         *  same as before, one that came back and one that went and
+         *  stands.  So every arm of the choice is walked. */
+        if (luaL_dostring(L,
+                          "local c = {[0] = {1.0, false, false, false}, {2.0, true, false, false},"
+                          "  {3.0, true, true, false}, {0.5, true, true, true}}\n"
+                          "return {kind = 'edit_show',"
+                          " info = function () return {phase = 'coming', n = 4,"
+                          "   c0 = 64, r0 = 64, c1 = 65, r1 = 65} end,"
+                          " at = function (_, i) local e = c[i]"
+                          "   return e[1], e[2], e[3], e[4] end,"
+                          " mark = function () end}") != LUA_OK)
+        {
+            bad("the lint's own edit show: %s", lua_tostring(L, -1));
             lua_pop(L, 1);
             lua_pushnil(L);
         }
@@ -1912,7 +1934,8 @@ static void rule_args(lua_State *L, const char *rule, int *nargs)
                           "return {kind = 'frame',"
                           " info = function () return {build = true, moving = true} end,"
                           " pass = function () n = n - 1; if n >= 0 then return nil end end,"
-                          " moving = function () return nil end}") != LUA_OK)
+                          " moving = function () return nil end,"
+                          " edit_show = function () return nil end}") != LUA_OK)
         {
             bad("the lint's own frame: %s", lua_tostring(L, -1));
             lua_pop(L, 1);
@@ -2353,7 +2376,7 @@ static int lint_all(char **paths, int n)
     int        k, read;
     if (!L)
         return 1;
-    luaL_openlibs(L);
+    luavm_open(L);
     arc_open(L);
     /*  A write to an undeclared global is caught.  A read of one is not,
      *  since that is how the standard library is reached. */

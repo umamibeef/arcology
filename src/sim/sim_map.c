@@ -93,9 +93,12 @@ int near_powered(const City *c, int y, int x)
  *  counter straight.  A tile counts toward transit if its value is
  *  1..15, or one of $1F, $20, $22, $23.  The old value is subtracted and
  *  the new one added.  Tiles inside a military zone are exempt from the
- *  bookkeeping but still get written.
+ *  bookkeeping but still get written.  The value is a word.  XUND keeps
+ *  its low byte, and the test reads the whole word, so a word of $100
+ *  or more never counts.  The network fitters give one when they read a
+ *  table past its end.
  * ================================================================== */
-void set_under(City *c, int y, int x, uint8_t und)
+void set_under(City *c, int y, int x, int und)
 {
     static const int counts[] = {0x1F, 0x20, 0x22, 0x23};
     int              i;
@@ -117,7 +120,7 @@ void set_under(City *c, int y, int x, uint8_t und)
         if (n)
             c->transit_term++; /* $4430 */
     }
-    c->xund[y][x] = und; /* $443A */
+    c->xund[y][x] = (uint8_t)und; /* $443A */
 }
 
 /* ================================================================== *
@@ -264,6 +267,41 @@ static void clear_pair(City *c, int y, int x)
         c->xzon[ty][tx] = (uint8_t)(c->xzon[ty][tx] & 0x0F);  /* $6442 */
         c->xbit[ty][tx] = (uint8_t)(c->xbit[ty][tx] & ~0x02); /* $645C */
     }
+}
+
+/* ================================================================== *
+ *  $6E4A  a tunnel mouth, $3F to $42.  The id says which way the tunnel
+ *  runs from it: $3F toward y-1, $40 toward x-1, $41 toward y+1 and $42
+ *  toward x+1.  Both mouths go, and every tile from one to the other
+ *  loses its tunnel depth, the ALTM bits from 10 up.  The terrain is not
+ *  fixed afterward.  The collapse is drawn at each mouth whether or not
+ *  the caller asks for it, so each mouth takes two numbers from the
+ *  generator.  The original does not stop at the edge of the map.  The C
+ *  does, so the two can differ only for a tunnel with no far mouth.
+ * ================================================================== */
+static void demolish_tunnel(City *c, int y, int x, int bld)
+{
+    static const int DY[4] = {-1, 0, 1, 0}, DX[4] = {0, -1, 0, 1};
+    const int        dy = DY[bld - 0x3F], dx = DX[bld - 0x3F]; /* $6E76 */
+
+    sim_set_tile(c, y, x, 0);                          /* $6EB8 */
+    c->xzon[y][x] = (uint8_t)(c->xzon[y][x] & 0x0F);   /* $6ED8 */
+    c->altm[y][x] = (uint16_t)(c->altm[y][x] & 0x3FF); /* $6F02 */
+    (void)Random(c);                                   /* $6F12, the debris shape */
+    (void)Random(c);                                   /* $6F68, the mirror */
+    do
+    {
+        y += dy; /* $6F98 */
+        x += dx;
+        if (y < 0 || y >= MAP_H || x < 0 || x >= MAP_W)
+            return;
+        c->altm[y][x] = (uint16_t)(c->altm[y][x] & 0x3FF); /* $6FC0 */
+        bld           = c->xbld[y][x];
+    } while (bld < 0x3F || bld >= 0x43); /* $6FDA */
+    sim_set_tile(c, y, x, 0);                        /* $6FFA */
+    c->xzon[y][x] = (uint8_t)(c->xzon[y][x] & 0x0F); /* $701A */
+    (void)Random(c);                                 /* $701C, the debris shape */
+    (void)Random(c);                                 /* $707A, the mirror */
 }
 
 /* ================================================================== *
@@ -419,6 +457,11 @@ void sim_demolish_and_place(City *c, int y, int x, int even_bare)
     if (bld == 0xDD || bld == 0xDE)
     {
         demolish_run(c, oy, ox, 0xDD, 0xDE, 1, even_bare);
+        return;
+    }
+    if (bld >= 0x3F && bld < 0x43)
+    {
+        demolish_tunnel(c, oy, ox, bld); /* $6E4A */
         return;
     }
 
@@ -606,6 +649,115 @@ void sim_fix_neighbourhood(City *c, int y, int x)
     int i;
     for (i = 0; i < 9; i++) /* $12C52 */
         sim_fix_terrain(c, y + N9_DY[i], x + N9_DX[i]);
+}
+
+/* ================================================================== *
+ *  $122E0  fitWater: fit the water shape in XTER on (y,x) to its
+ *  neighbors, and make the tile water if it is not.
+ *
+ *  XTER $2E and $3E are left alone.  A slope, $01..$0F, takes shape 14.
+ *  Any other tile takes its shape from WATER_EDGE_SHAPE, by which of its
+ *  four sides are water.  With water on all four sides, the shape comes
+ *  from WATER_CORNER_SHAPE, by which of its four diagonals are dry.
+ *  What is written depends on the XTER the tile has:
+ *      $00..$0F    $30 plus the shape.
+ *      $10..$1F    nothing.
+ *      $20..$2F    XTER less $10, unless the low four bits of the shape
+ *                  and of XTER agree.
+ *      $30..$FF    $30 plus the shape.  This goes as high as $45.
+ *  When the shape agrees with XTER at $20 and up, the routine stops.
+ *  The original compares a shape with a slope code at $20..$2F, and it
+ *  writes the slope code under water, not the shape.  This is kept.
+ *
+ *  A tile that is not water then becomes water.  The building goes, the
+ *  water surface in ALTM is set to the height of the ground, and XBIT
+ *  $04 is set.  Then each of the eight neighbors that is water is fitted
+ *  in turn.  A tile that stops early is not made water, even when it is
+ *  dry.  The original does not make sure (y,x) is on the map.  Every
+ *  caller reads the tile first.
+ * ================================================================== */
+void sim_fit_water(City *c, int y, int x)
+{
+    const int ter   = c->xter[y][x]; /* $12320 */
+    int       sides = 0, dry = 0, shape;
+
+    if (ter == 0x2E || ter == 0x3E)
+        return; /* $12330 */
+    if (ter > 0 && ter < 0x10)
+        shape = 14; /* $1233E */
+    else
+    {
+        if (x > 0 && (c->xbit[y][x - 1] & XBIT_WATER))
+            sides |= 1; /* $12364 */
+        if (y < 127 && (c->xbit[y + 1][x] & XBIT_WATER))
+            sides |= 2; /* $12388 */
+        if (x < 127 && (c->xbit[y][x + 1] & XBIT_WATER))
+            sides |= 4; /* $123AE */
+        if (y > 0 && (c->xbit[y - 1][x] & XBIT_WATER))
+            sides |= 8; /* $123CE */
+        if (sides < 15)
+            shape = WATER_EDGE_SHAPE[sides]; /* $123DE */
+        else
+        {
+            if (x > 0 && y > 0 && !(c->xbit[y - 1][x - 1] & XBIT_WATER))
+                dry |= 1; /* $1240C */
+            if (x > 0 && y < 127 && !(c->xbit[y + 1][x - 1] & XBIT_WATER))
+                dry |= 2; /* $12438 */
+            if (x < 127 && y < 127 && !(c->xbit[y + 1][x + 1] & XBIT_WATER))
+                dry |= 4; /* $12468 */
+            if (x < 127 && y > 0 && !(c->xbit[y - 1][x + 1] & XBIT_WATER))
+                dry |= 8;                    /* $12494 */
+            shape = WATER_CORNER_SHAPE[dry]; /* $1249E */
+        }
+    }
+
+    if (ter < 0x10)
+        c->xter[y][x] = (uint8_t)(0x30 + shape); /* $124BA */
+    else if (ter >= 0x30)
+    {
+        if (ter == 0x30 + shape)
+            return;                              /* $124CC */
+        c->xter[y][x] = (uint8_t)(0x30 + shape); /* $124E2 */
+    }
+    else if (ter >= 0x20)
+    {
+        if ((shape & 0x0F) == (ter & 0x0F))
+            return;                            /* $124FC */
+        c->xter[y][x] = (uint8_t)(ter - 0x10); /* $12512 */
+    }
+
+    if (c->xbit[y][x] & XBIT_WATER)
+        return;               /* $1252A */
+    sim_set_tile(c, y, x, 0); /* $12534 */
+    c->altm[y][x] = (uint16_t)((c->altm[y][x] & 0xFC1F) |
+                               ((c->altm[y][x] & 0x1F) << 5)); /* $1256E */
+    c->xbit[y][x] |= XBIT_WATER;                               /* $12572 */
+
+    fit_water_around(c, y, x); /* $125AA */
+}
+
+/*  Each of the eight neighbors of (y,x) that is water fits its edge
+ *  again: the four sides first, then the four corners.  The original
+ *  carries this same run of calls twice, at $125AA in $122E0 and at
+ *  $8330 in the bulldozer. */
+void fit_water_around(City *c, int y, int x)
+{
+    if (y > 0 && (c->xbit[y - 1][x] & XBIT_WATER))
+        sim_fit_water(c, y - 1, x);
+    if (x < MAP_W - 1 && (c->xbit[y][x + 1] & XBIT_WATER))
+        sim_fit_water(c, y, x + 1);
+    if (y < MAP_H - 1 && (c->xbit[y + 1][x] & XBIT_WATER))
+        sim_fit_water(c, y + 1, x);
+    if (x > 0 && (c->xbit[y][x - 1] & XBIT_WATER))
+        sim_fit_water(c, y, x - 1);
+    if (x > 0 && y > 0 && (c->xbit[y - 1][x - 1] & XBIT_WATER))
+        sim_fit_water(c, y - 1, x - 1);
+    if (x > 0 && y < MAP_H - 1 && (c->xbit[y + 1][x - 1] & XBIT_WATER))
+        sim_fit_water(c, y + 1, x - 1);
+    if (x < MAP_W - 1 && y < MAP_H - 1 && (c->xbit[y + 1][x + 1] & XBIT_WATER))
+        sim_fit_water(c, y + 1, x + 1);
+    if (x < MAP_W - 1 && y > 0 && (c->xbit[y - 1][x + 1] & XBIT_WATER))
+        sim_fit_water(c, y - 1, x + 1);
 }
 
 /* ================================================================== *

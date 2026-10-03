@@ -390,7 +390,7 @@ if __name__ == "__main__" and not (len(sys.argv) > 1 and sys.argv[1] == "--atlas
 UI_PICTS = ([500, 522, 503, 505, 506, 507, 513, 514, 519, 128, 129, 131, 132] +
             list(range(300, 312)) + list(range(700, 713)) +
             list(range(200, 206)) + list(range(600, 608)) +
-            list(range(10000, 10008)))
+            list(range(10000, 10008)) + list(range(400, 412)))
 
 
 def atlas(rsrc, out_dir):

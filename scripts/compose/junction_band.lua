@@ -27,12 +27,14 @@ arc.rules.band = function (b)
     local d = b:info()
     local n = d.n
     if n < 3 then return true end
-    local mouth = arc.rules.family({name = "line"}).margin.mouth
+    local mouth = arc.family_of("line").margin.mouth
 
-    local p = {}
+    --  Every vertex, normal and moved edge is held as a pair of arrays
+    --  rather than a table a point: a ring has dozens of points, and a
+    --  city has hundreds of rings.
+    local px, py = {}, {}
     for i = 0, n - 1 do
-        local x, y = b:at(i)
-        p[i] = {x = x, y = y}
+        px[i], py[i] = b:at(i)
     end
 
     --  Which side of an edge the junction is on comes from the ring's own
@@ -43,8 +45,8 @@ arc.rules.band = function (b)
     --  with fill and the margin lying on the grass outside it.
     local area2 = 0.0
     for i = 0, n - 1 do
-        local q = p[(i + 1) % n]
-        area2 = area2 + p[i].x * q.y - q.x * p[i].y
+        local j = (i + 1) % n
+        area2 = area2 + px[i] * py[j] - px[j] * py[i]
     end
     local ccw = area2 > 0.0
 
@@ -61,9 +63,9 @@ arc.rules.band = function (b)
         if have then
             local best, bd = -1, mouth
             for i = 0, n - 1 do
-                local q = p[(i + 1) % n]
-                local s1 = arc.dist(p[i].x, p[i].y, ax, ay) + arc.dist(q.x, q.y, bx, by)
-                local s2 = arc.dist(p[i].x, p[i].y, bx, by) + arc.dist(q.x, q.y, ax, ay)
+                local j = (i + 1) % n
+                local s1 = arc.dist(px[i], py[i], ax, ay) + arc.dist(px[j], py[j], bx, by)
+                local s2 = arc.dist(px[i], py[i], bx, by) + arc.dist(px[j], py[j], ax, ay)
                 local sc = math.min(s1, s2)
                 if sc < bd then bd, best = sc, i end
             end
@@ -74,17 +76,17 @@ arc.rules.band = function (b)
     --  The inward normal of each edge, and whether it carries a band.  A
     --  mouth keeps its normal -- that is the way a meet laid there
     --  runs into the junction -- but carries no margin.
-    local nrm, has = {}, {}
+    local nrx, nry, has = {}, {}, {}
     for i = 0, n - 1 do
-        local q = p[(i + 1) % n]
-        local ex, ey = q.x - p[i].x, q.y - p[i].y
+        local j = (i + 1) % n
+        local ex, ey = px[j] - px[i], py[j] - py[i]
         local el = math.sqrt(ex * ex + ey * ey)
         if el < 1e-4 then
-            nrm[i], has[i] = {x = 0.0, y = 0.0}, false
+            nrx[i], nry[i], has[i] = 0.0, 0.0, false
         else
             local nx, ny = f32(-ey / el), f32(ex / el)
             if not ccw then nx, ny = -nx, -ny end
-            nrm[i], has[i] = {x = nx, y = ny}, edge_arm[i] < 0
+            nrx[i], nry[i], has[i] = nx, ny, edge_arm[i] < 0
         end
     end
 
@@ -95,9 +97,9 @@ arc.rules.band = function (b)
     --  vertex.  Against a mouth, which carries no band, there is nothing
     --  to mitre with and the edge keeps its own normal.
     local function mitre(own, other)
-        local nx, ny = nrm[own].x, nrm[own].y
+        local nx, ny = nrx[own], nry[own]
         if not has[other] then return nx, ny end
-        local bx, by = f32(nrm[other].x + nx), f32(nrm[other].y + ny)
+        local bx, by = f32(nrx[other] + nx), f32(nry[other] + ny)
         local bl = f32(math.sqrt(f32(bx * bx) + f32(by * by)))
         if bl <= 1e-4 then return nx, ny end
         bx, by = f32(bx / bl), f32(by / bl)
@@ -110,23 +112,22 @@ arc.rules.band = function (b)
         local ip, j = (i - 1) % n, (i + 1) % n
         local m0x, m0y = mitre(i, ip)
         local m1x, m1y = mitre(i, j)
-        b:edge(i, has[i], nrm[i].x, nrm[i].y, edge_arm[i], m0x, m0y, m1x, m1y)
+        b:edge(i, has[i], nrx[i], nry[i], edge_arm[i], m0x, m0y, m1x, m1y)
     end
 
     --  And the ring moved in, where one was asked for.
-    local org, dir = {}, {}
+    local ox, oy, dx, dy = {}, {}, {}, {}
     for i = 0, n - 1 do
-        local q = p[(i + 1) % n]
+        local j = (i + 1) % n
         local inw = edge_arm[i] < 0 and d.width or 0.0
-        org[i] = {x = f32(p[i].x + f32(nrm[i].x * inw)), y = f32(p[i].y + f32(nrm[i].y * inw))}
-        dir[i] = {x = q.x - p[i].x, y = q.y - p[i].y}
+        ox[i], oy[i] = f32(px[i] + f32(nrx[i] * inw)), f32(py[i] + f32(nry[i] * inw))
+        dx[i], dy[i] = px[j] - px[i], py[j] - py[i]
     end
     for i = 0, n - 1 do
         local ip = (i - 1) % n
-        local x, y = line_meet(org[ip].x, org[ip].y, dir[ip].x, dir[ip].y,
-                               org[i].x, org[i].y, dir[i].x, dir[i].y)
+        local x, y = line_meet(ox[ip], oy[ip], dx[ip], dy[ip], ox[i], oy[i], dx[i], dy[i])
         --  Two edges in a line: the moved point serves.
-        if not x then x, y = org[i].x, org[i].y end
+        if not x then x, y = ox[i], oy[i] end
         b:inset(x, y)
     end
     b:close()

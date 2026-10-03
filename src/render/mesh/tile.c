@@ -51,7 +51,11 @@ int is_water(uint8_t xter)
 /*  The slope a terrain byte carries, 0 flat. */
 int32_t slope_code(uint8_t xter)
 {
-    return script_bytes("slope_codes")[xter];
+    static const unsigned char *t;
+    static unsigned             moved;
+    if (!t || moved != script_bytes_moved)
+        t = script_bytes("slope_codes"), moved = script_bytes_moved;
+    return t[xter];
 }
 
 /*  The map view's tint for a tile something was placed on, or 0 to leave
@@ -104,9 +108,14 @@ int saddle_lift(const RCity *c, int32_t idx)
  *  a water body this is the bed. */
 static void own_plane(const RCity *c, int32_t idx, float z[4])
 {
-    uint8_t mask = script_bytes("corner_lifts")[slope_code(c->xter[idx])];
-    float   base = ground_of(c, idx);
-    int     k;
+    static const unsigned char *lifts;
+    static unsigned             moved;
+    uint8_t                     mask;
+    float                       base = ground_of(c, idx);
+    int                         k;
+    if (!lifts || moved != script_bytes_moved)
+        lifts = script_bytes("corner_lifts"), moved = script_bytes_moved;
+    mask = lifts[slope_code(c->xter[idx])];
     for (k = 0; k < 4; ++k)
         z[k] = base + (((mask >> k) & 1u) ? 1.0f : 0.0f);
 }

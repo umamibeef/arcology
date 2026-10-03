@@ -15,6 +15,7 @@
 
 #include "dump.h"
 #include "shaders.h"
+#include "show.h"
 
 /* ---- shaders and pipelines ------------------------------------------- */
 
@@ -51,7 +52,8 @@ enum
 {
     L_NONE = 0,
     L_INSTANCE,
-    L_MESH
+    L_MESH,
+    L_MESH_SHOW /* the mesh with pos.w read as the word an edit's show keeps there (show.h) */
 };
 
 static SDL_GPUGraphicsPipeline *make_pipe(RGpu *g, const char *vs_name, const char *fs_name, SDL_GPUTextureFormat target, int depth_test, int depth_write, int layout, int blend)
@@ -107,14 +109,14 @@ static SDL_GPUGraphicsPipeline *make_pipe(RGpu *g, const char *vs_name, const ch
         pi.vertex_input_state.vertex_attributes          = va;
         pi.vertex_input_state.num_vertex_attributes      = 4;
     }
-    else if (layout == L_MESH)
+    else if (layout == L_MESH || layout == L_MESH_SHOW)
     {
         vb.slot                                          = 0;
         vb.pitch                                         = sizeof(RMeshVert);
         vb.input_rate                                    = SDL_GPU_VERTEXINPUTRATE_VERTEX;
         va[0].location                                   = 0;
         va[0].buffer_slot                                = 0;
-        va[0].format                                     = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4;
+        va[0].format                                     = layout == L_MESH_SHOW ? SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3 : SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4;
         va[0].offset                                     = 0;
         va[1].location                                   = 1;
         va[1].buffer_slot                                = 0;
@@ -124,10 +126,14 @@ static SDL_GPUGraphicsPipeline *make_pipe(RGpu *g, const char *vs_name, const ch
         va[2].buffer_slot                                = 0;
         va[2].format                                     = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4;
         va[2].offset                                     = 32;
+        va[3].location                                   = 3;
+        va[3].buffer_slot                                = 0;
+        va[3].format                                     = SDL_GPU_VERTEXELEMENTFORMAT_UINT;
+        va[3].offset                                     = 12;
         pi.vertex_input_state.vertex_buffer_descriptions = &vb;
         pi.vertex_input_state.num_vertex_buffers         = 1;
         pi.vertex_input_state.vertex_attributes          = va;
-        pi.vertex_input_state.num_vertex_attributes      = 3;
+        pi.vertex_input_state.num_vertex_attributes      = layout == L_MESH_SHOW ? 4 : 3;
     }
 
     pi.rasterizer_state.fill_mode         = SDL_GPU_FILLMODE_FILL;
@@ -245,8 +251,10 @@ static int upload_texture(RGpu *g, SDL_GPUTexture *tex, const void *px, int32_t 
     cp = SDL_BeginGPUCopyPass(cmd);
     SDL_UploadToGPUTexture(cp, &src, &dst, false);
     SDL_EndGPUCopyPass(cp);
+    /*  No wait for the device.  It runs what it is handed in order, so
+     *  the frames after this read the new texels.  The transfer buffer is
+     *  freed once the copy is done with it. */
     SDL_SubmitGPUCommandBuffer(cmd);
-    SDL_WaitForGPUIdle(g->dev);
     SDL_ReleaseGPUTransferBuffer(g->dev, tb);
     return 0;
 }
@@ -378,11 +386,13 @@ RGpu *gpu_create(SDL_Window *win, const RAtlas *a, char *err, size_t err_len)
     /*  The water column faces of the map edge's cut: blended over the
      *  seabed behind them, tested against depth but not writing it. */
     g->pipe_mesh_blend  = make_pipe(g, "terrain.vert", "terrain.frag", GPU_COLOR_FMT, 1, 0, L_MESH, 1);
+    g->pipe_mesh_show       = make_pipe(g, "terrain_show.vert", "terrain_show.frag", GPU_COLOR_FMT, 1, 1, L_MESH_SHOW, 0);
+    g->pipe_mesh_blend_show = make_pipe(g, "terrain_show.vert", "terrain_show.frag", GPU_COLOR_FMT, 1, 0, L_MESH_SHOW, 1);
     g->pipe_resolve     = make_pipe(g, "resolve.vert", "resolve.frag", g->swap_fmt, 0, 0, L_NONE, 0);
     g->pipe_resolve_off = make_pipe(g, "resolve.vert", "resolve.frag", GPU_COLOR_FMT, 0, 0, L_NONE, 0);
     if (!g->pipe_terrain || !g->pipe_sprite || !g->pipe_sprite_depth || !g->pipe_shadow ||
         !g->pipe_water || !g->pipe_mesh || !g->pipe_resolve ||
-        !g->pipe_resolve_off)
+        !g->pipe_resolve_off || !g->pipe_mesh_show || !g->pipe_mesh_blend_show)
     {
         snprintf(err, err_len, "pipeline creation failed: %s", SDL_GetError());
         gpu_destroy(g);
@@ -425,11 +435,25 @@ RGpu *gpu_create(SDL_Window *win, const RAtlas *a, char *err, size_t err_len)
     g->pal   = make_texture(g, SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, SDL_GPU_TEXTUREUSAGE_SAMPLER, 256, 1);
     g->ptb   = make_transfer(g, 0, 256u * 4u);
     g->shore = make_texture(g, SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, SDL_GPU_TEXTUREUSAGE_SAMPLER, R_MAP, R_MAP);
-    if (!g->pal || !g->ptb || !g->nearest || !g->linear || !g->shore)
+    g->show  = make_texture(g, SDL_GPU_TEXTUREFORMAT_R8_UNORM, SDL_GPU_TEXTUREUSAGE_SAMPLER, SHOW_W, SHOW_H);
+    if (!g->pal || !g->ptb || !g->nearest || !g->linear || !g->shore || !g->show)
     {
         snprintf(err, err_len, "resource creation failed: %s", SDL_GetError());
         gpu_destroy(g);
         return NULL;
+    }
+    /*  Every piece still: a texture starts with whatever the device left
+     *  in it. */
+    {
+        uint8_t *still = (uint8_t *)calloc(SHOW_PIECES, 1);
+        if (!still || gpu_set_show(g, still) != 0)
+        {
+            free(still);
+            snprintf(err, err_len, "resource creation failed: %s", SDL_GetError());
+            gpu_destroy(g);
+            return NULL;
+        }
+        free(still);
     }
     gpu_set_palette(g, a);
     /*  The sun, fitted to the slope sprites.  Of the four plain slopes
@@ -456,6 +480,8 @@ void gpu_destroy(RGpu *g)
             SDL_ReleaseGPUTexture(g->dev, g->pal);
         if (g->shore)
             SDL_ReleaseGPUTexture(g->dev, g->shore);
+        if (g->show)
+            SDL_ReleaseGPUTexture(g->dev, g->show);
         if (g->nearest)
             SDL_ReleaseGPUSampler(g->dev, g->nearest);
         if (g->linear)
@@ -468,6 +494,8 @@ void gpu_destroy(RGpu *g)
             SDL_ReleaseGPUBuffer(g->dev, g->mbuf);
         if (g->mvbuf)
             SDL_ReleaseGPUBuffer(g->dev, g->mvbuf);
+        if (g->mvtb)
+            SDL_ReleaseGPUTransferBuffer(g->dev, g->mvtb);
         if (g->ptb)
             SDL_ReleaseGPUTransferBuffer(g->dev, g->ptb);
         if (g->dtb)
@@ -484,6 +512,10 @@ void gpu_destroy(RGpu *g)
             SDL_ReleaseGPUGraphicsPipeline(g->dev, g->pipe_mesh);
         if (g->pipe_mesh_blend)
             SDL_ReleaseGPUGraphicsPipeline(g->dev, g->pipe_mesh_blend);
+        if (g->pipe_mesh_show)
+            SDL_ReleaseGPUGraphicsPipeline(g->dev, g->pipe_mesh_show);
+        if (g->pipe_mesh_blend_show)
+            SDL_ReleaseGPUGraphicsPipeline(g->dev, g->pipe_mesh_blend_show);
         if (g->pipe_water)
             SDL_ReleaseGPUGraphicsPipeline(g->dev, g->pipe_water);
         if (g->pipe_resolve)
@@ -527,6 +559,11 @@ int gpu_set_shore(RGpu *g, const uint8_t *field, int32_t n)
     if (n != R_MAP)
         return -1;
     return upload_texture(g, g->shore, field, n, n, 4);
+}
+
+int gpu_set_show(RGpu *g, const uint8_t *state)
+{
+    return upload_texture(g, g->show, state, SHOW_W, SHOW_H, 1);
 }
 
 void gpu_set_light(RGpu *g, float x, float y, float z, float ambient, float diffuse)
@@ -821,7 +858,7 @@ static int slots_lay(RGpu *g, const uint32_t *count)
  *      One copy pass.
  *      No cycling.
  *      So the other slots' contents stay. */
-static int slots_upload(RGpu *g, const uint32_t *first, const uint32_t *count, const RMeshVert *const *list, const uint8_t *up)
+static int slots_upload(RGpu *g, const uint32_t *first, const uint32_t *count, const RMeshVert *const *list, const uint8_t *up, const uint32_t *ids)
 {
     uint32_t               bytes = 0, at = 0;
     int                    k;
@@ -846,7 +883,16 @@ static int slots_upload(RGpu *g, const uint32_t *first, const uint32_t *count, c
     for (k = 0; k < GPU_SLOTS; ++k)
         if (up[k] && count[k])
         {
-            memcpy(map + at, list[k] + first[k], count[k] * sizeof(RMeshVert));
+            RMeshVert *dv = (RMeshVert *)(map + at);
+            uint32_t   v;
+            memcpy(dv, list[k] + first[k], count[k] * sizeof(RMeshVert));
+            /*  The device's copy carries a key in pos.w for what an edit
+             *  shows (show.h): the piece and the way to its triangle's
+             *  middle.  The painter's order the mesh keeps there is the
+             *  checks', and the plain shader reads none of it.  The water
+             *  has no pieces. */
+            for (v = 0; v + 2u < count[k]; v += 3u)
+                show_key_tri(&dv[v], k < 2 * MESH_CHUNKS && ids ? ids[(first[k] + v) / 3u] : SHAPE_NONE);
             at += count[k] * (uint32_t)sizeof(RMeshVert);
         }
     SDL_UnmapGPUTransferBuffer(g->dev, tb);
@@ -869,8 +915,9 @@ static int slots_upload(RGpu *g, const uint32_t *first, const uint32_t *count, c
             at += dst.size;
         }
     SDL_EndGPUCopyPass(cp);
+    /*  No wait for the device, as for a texture: the frames after this
+     *  draw what it copies. */
     SDL_SubmitGPUCommandBuffer(cmd);
-    SDL_WaitForGPUIdle(g->dev);
     SDL_ReleaseGPUTransferBuffer(g->dev, tb);
     return 0;
 }
@@ -903,7 +950,7 @@ int gpu_set_mesh(RGpu *g, const RMesh *m)
         n += count[k];
         up_n += up[k] ? count[k] : 0u;
     }
-    if (slots_upload(g, first, count, list, up) != 0)
+    if (slots_upload(g, first, count, list, up, m->tri_comp && m->cap_tri_comp >= m->n_land / 3u ? m->tri_comp : NULL) != 0)
         return -1;
     g->mesh_n = n;
     if (g_dev.times)
@@ -943,16 +990,30 @@ int gpu_set_movers(RGpu *g, const RMeshVert *v, uint32_t n)
         }
         g->mvbuf_cap = cap;
     }
-    tb = make_transfer(g, 0, bytes);
-    if (!tb)
-        return -1;
+    /*  One transfer buffer, kept and mapped afresh each frame.  Mapping
+     *  it cycled hands back memory the device is not still reading. */
+    if (bytes > g->mvtb_cap)
+    {
+        if (g->mvtb)
+            SDL_ReleaseGPUTransferBuffer(g->dev, g->mvtb);
+        g->mvtb     = make_transfer(g, 0, g->mvbuf_cap * (uint32_t)sizeof(RMeshVert));
+        g->mvtb_cap = g->mvtb ? g->mvbuf_cap * (uint32_t)sizeof(RMeshVert) : 0u;
+        if (!g->mvtb)
+            return -1;
+    }
+    tb  = g->mvtb;
     map = SDL_MapGPUTransferBuffer(g->dev, tb, true);
     if (!map)
-    {
-        SDL_ReleaseGPUTransferBuffer(g->dev, tb);
         return -1;
-    }
     memcpy(map, v, bytes);
+    {
+        /*  A mover is no piece of the world: nothing an edit shows moves it. */
+        RMeshVert     *dv   = (RMeshVert *)map;
+        const uint32_t none = SHOW_KEY_NONE;
+        uint32_t       i;
+        for (i = 0; i < n; ++i)
+            memcpy(&dv[i].pos[3], &none, sizeof none);
+    }
     SDL_UnmapGPUTransferBuffer(g->dev, tb);
     memset(&src, 0, sizeof src);
     memset(&dst, 0, sizeof dst);
@@ -964,8 +1025,6 @@ int gpu_set_movers(RGpu *g, const RMeshVert *v, uint32_t n)
     SDL_UploadToGPUBuffer(cp, &src, &dst, true);
     SDL_EndGPUCopyPass(cp);
     SDL_SubmitGPUCommandBuffer(cmd);
-    SDL_WaitForGPUIdle(g->dev);
-    SDL_ReleaseGPUTransferBuffer(g->dev, tb);
     g->movers_n = n;
     return 0;
 }

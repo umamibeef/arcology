@@ -187,6 +187,13 @@ static int draped_tri(const char *where, const char *who, RMesh *m, const RCity 
         if (tri[k][1] > maxy)
             maxy = tri[k][1];
     }
+    /*  An edit's build keeps the chunks it does not rebuild, and drops
+     *  every triangle that lands in one.  The pieces of this triangle lie
+     *  in its box.  So where no chunk under the box builds, all of them
+     *  would be dropped, and none is cut.  The box is a tile wider on
+     *  every side, for a piece the cutting rounds just past it. */
+    if (s_incr_on && !incr_want_rect((int32_t)floorf(minx) - 1, (int32_t)floorf(miny) - 1, (int32_t)floorf(maxx) + 1, (int32_t)floorf(maxy) + 1))
+        return 0;
     frac = order - floorf(order);
     /*  Within one tile it is drawn as it is, in that tile's slot.  A
      *  face of a train car lying wholly in the tile ahead of the car's
@@ -338,7 +345,20 @@ int strip_quad_z_at(const char *where, const char *who, RMesh *m, const RCity *c
     float        line_col[3] = {0.0f, 0.0f, mat};
     float        p[4][3], tri[3][3], ref[3], ref2[3];
     const float *pt[4] = {a0, a1, b1, b0};
+    float        lo[2] = {a0[0], a0[1]}, hi[2] = {a0[0], a0[1]};
     int          k;
+    /*  The grading pass draws nothing, and an edit's build draws nothing
+     *  in a chunk it keeps: draped_tri drops the two triangles there.  So
+     *  the ground is not read for their corners either. */
+    if (s_pass == 1)
+        return 0;
+    for (k = 1; k < 4; ++k)
+    {
+        lo[0] = fminf(lo[0], pt[k][0]), lo[1] = fminf(lo[1], pt[k][1]);
+        hi[0] = fmaxf(hi[0], pt[k][0]), hi[1] = fmaxf(hi[1], pt[k][1]);
+    }
+    if (s_incr_on && !incr_want_rect((int32_t)floorf(lo[0]) - 1, (int32_t)floorf(lo[1]) - 1, (int32_t)floorf(hi[0]) + 1, (int32_t)floorf(hi[1]) + 1))
+        return 0;
     for (k = 0; k < 4; ++k)
     {
         float z = k < 2 ? za : zb;

@@ -1069,6 +1069,168 @@ static int dev_raise(int argc, char **argv)
     return 0;
 }
 
+/*  What the tool checks compare after a run: every full-resolution layer
+ *  of every tile, the funds and the census.  Also the military tallies,
+ *  the transit count and the first moving-object record, which the
+ *  bulldozer drives. */
+static void dump_tool_state(const City *c)
+{
+    int i;
+    for (i = 0; i < MAP_H * MAP_W; i++)
+        printf("a %d %04X %02X %02X %02X %02X %02X %02X\n", i, ((const uint16_t *)c->altm)[i], ((const uint8_t *)c->xbit)[i], ((const uint8_t *)c->xzon)[i], ((const uint8_t *)c->xter)[i], ((const uint8_t *)c->xbld)[i], ((const uint8_t *)c->xund)[i], ((const uint8_t *)c->xtxt)[i]);
+    printf("m 0 %08X\n", (unsigned)c->funds);
+    for (i = 0; i < 256; i++)
+        printf("c %d %04X\n", i, (unsigned)c->census[i]);
+    for (i = 0; i < 16; i++)
+        printf("i %d %04X\n", i, (unsigned)(uint16_t)c->infra[i]);
+    printf("x 0 %04X\n", (unsigned)(uint16_t)c->transit_term);
+    if (c->xthg && c->xthg_len >= 12)
+    {
+        printf("t 0");
+        for (i = 0; i < 12; i++)
+            printf(" %02X", c->xthg[i]);
+        printf("\n");
+    }
+}
+
+static int parse_tile(const char *s, int *y, int *x)
+{
+    return sscanf(s, "%d,%d", y, x) == 2 && *y >= 0 && *y < MAP_H && *x >= 0 && *x < MAP_W;
+}
+
+static int dev_tool(int argc, char **argv)
+{
+    /*  --tool <city> <gesture>...: each gesture is TOOL,SUB,FLAGS:Y,X/Y,X/...
+     *  It begins at the first tile, steps onto each tile after it, and
+     *  ends over the last.  Then the state the tool checks compare is
+     *  printed, with every request the gestures made of the interface. */
+    static City c;
+    int         k;
+    if (!city_load(argv[2], &c))
+    {
+        fprintf(stderr, "not a city\n");
+        return 1;
+    }
+    c.funds = 25000;
+    rng_seed(&c, 1, 1);
+    for (k = 3; k < argc; k++)
+    {
+        SimGesture  g;
+        int         tool, sub, flags, y, x, n = 0, e;
+        const char *p = strchr(argv[k], ':');
+        if (sscanf(argv[k], "%d,%d,%d", &tool, &sub, &flags) != 3 || !p)
+        {
+            fprintf(stderr, "a gesture is TOOL,SUB,FLAGS:Y,X/Y,X/...: %s\n", argv[k]);
+            return 1;
+        }
+        for (p++; p && *p; p = strchr(p, '/') ? strchr(p, '/') + 1 : NULL)
+        {
+            if (!parse_tile(p, &y, &x))
+            {
+                fprintf(stderr, "not a tile: %s\n", p);
+                return 1;
+            }
+            if (n++ == 0)
+            {
+                if (!sim_tool_begin(&c, &g, tool, sub, flags, y, x))
+                {
+                    fprintf(stderr, "tool %d sub-tool %d is not reconstructed\n", tool, sub);
+                    return 1;
+                }
+            }
+            else
+                sim_tool_step(&c, &g, y, x);
+        }
+        if (n)
+            sim_tool_end(&c, &g, y, x);
+        for (e = 0; n && e < g.n_ev; e++)
+            printf("e %d %d %d\n", k - 3, g.ev[e].kind, (int)g.ev[e].arg);
+    }
+    dump_tool_state(&c);
+    city_free(&c);
+    return 0;
+}
+
+/*  The ported tile routines the oracle can call by address, each taking
+ *  a tile and nothing else.  A tool's routines are tested here one at a
+ *  time before the tool is tested whole. */
+static SimGesture s_call_gesture;
+static void       call_bulldoze(City *c, int y, int x)
+{
+    sim_bulldoze_tile(c, &s_call_gesture, y, x);
+}
+static const struct
+{
+    unsigned addr;
+    void (*fn)(City *, int, int);
+} TILE_ROUTINES[] = {
+    {0x08064, call_bulldoze        },
+    {0x20BAA, sim_refit_surface    },
+    {0x20D6E, sim_refit_under      },
+    {0x1F632, sim_fit_road         },
+    {0x1FB60, sim_fit_rail         },
+    {0x1F2FE, sim_fit_power        },
+    {0x1FFB8, sim_fit_pipe         },
+    {0x20352, sim_fit_subway       },
+    {0x122E0, sim_fit_water        },
+    {0x0896C, sim_raise_tile       },
+    {0x128DE, sim_fix_terrain      },
+    {0x12C04, sim_fix_neighbourhood},
+};
+
+static int dev_call(int argc, char **argv)
+{
+    /*  --call <city> <addr> <y,x>...: call one ported tile routine at each
+     *  tile in turn, then print what the tool checks compare.  A tile
+     *  written Y,X=Bhh, Y,X=Uhh, Y,X=Thh or Y,X=Ihh is not called.  XBLD,
+     *  XUND, XTER or XBIT there is set to hh directly, so the census does
+     *  not see it.  The check uses that to leave a network with gaps for
+     *  a fitter, and to move the edge of the water. */
+    static City c;
+    unsigned    addr             = (unsigned)strtoul(argv[3], NULL, 16);
+    void (*fn)(City *, int, int) = NULL;
+    size_t i;
+    int    k, y, x;
+    for (i = 0; i < sizeof TILE_ROUTINES / sizeof TILE_ROUTINES[0]; i++)
+        if (TILE_ROUTINES[i].addr == addr)
+            fn = TILE_ROUTINES[i].fn;
+    if (!fn)
+    {
+        fprintf(stderr, "no ported tile routine at $%X\n", addr);
+        return 1;
+    }
+    if (!city_load(argv[2], &c))
+    {
+        fprintf(stderr, "not a city\n");
+        return 1;
+    }
+    c.funds = 25000;
+    rng_seed(&c, 1, 1);
+    memset(&s_call_gesture, 0, sizeof s_call_gesture);
+    for (k = 4; k < argc; k++)
+    {
+        const char *set = strchr(argv[k], '=');
+        if (!parse_tile(argv[k], &y, &x))
+        {
+            fprintf(stderr, "not a tile: %s\n", argv[k]);
+            return 1;
+        }
+        if (set && set[1] == 'B')
+            c.xbld[y][x] = (uint8_t)strtoul(set + 2, NULL, 16);
+        else if (set && set[1] == 'U')
+            c.xund[y][x] = (uint8_t)strtoul(set + 2, NULL, 16);
+        else if (set && set[1] == 'T')
+            c.xter[y][x] = (uint8_t)strtoul(set + 2, NULL, 16);
+        else if (set && set[1] == 'I')
+            c.xbit[y][x] = (uint8_t)strtoul(set + 2, NULL, 16);
+        else
+            fn(&c, y, x);
+    }
+    dump_tool_state(&c);
+    city_free(&c);
+    return 0;
+}
+
 static int dev_settile(int argc, char **argv)
 {
     (void)argc; /* the list says how long its line must be */
@@ -1529,6 +1691,8 @@ const ArcDevMode ARC_DEV_MODES[] = {
     {"--demolish",        "<city>",                            "demolition, city-wide",                                        3, dev_demolish       },
     {"--terrain",         "<city> [nb]",                       "the terrain pass",                                             3, dev_terrain        },
     {"--raise",           "<city>",                            "raise terrain",                                                3, dev_raise          },
+    {"--tool",            "<city> <gesture>...",               "the player's tools, one gesture each: TOOL,SUB,FLAGS:Y,X/Y,X", 4, dev_tool           },
+    {"--call",            "<city> <addr> <y,x>...",            "one ported tile routine, by its address, at each tile",        5, dev_call           },
     {"--settile",         "<city>",                            "set a tile",                                                   3, dev_settile        },
     {"--footprint",       "<city>",                            "the buildings' footprints",                                    3, dev_footprint      },
     {"--scenario",        "<city> [zero|hard]",                "the scenario's conditions",                                    3, dev_scenario       },

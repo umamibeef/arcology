@@ -8,6 +8,7 @@
 #include "opt.h"
 #include "project.h"
 #include "sim.h"
+#include "show.h"
 
 #include <SDL3/SDL.h>
 
@@ -27,6 +28,7 @@
 int resweep(App *a)
 {
     const RCity *sv = a->view;
+    uint64_t     t0 = SDL_GetTicksNS();
     adapt_city(a->view, a->city);
     a->opts.draw_traffic = !geometry_on(a); /* the 3D networks carry their own vehicles */
     /*  At a quarter turn the sweep runs on the renderer's view of the
@@ -46,6 +48,8 @@ int resweep(App *a)
     if (gpu_set_ops(a->gpu, &a->ops, &a->sw) != 0)
         return -1;
     a->dirty = 0;
+    if (g_dev.times)
+        dumpf("time  resweep %.1f ms\n", (double)(SDL_GetTicksNS() - t0) / 1e6);
     return 0;
 }
 
@@ -146,30 +150,41 @@ int traffic_frame(App *a, float time)
     return gpu_set_movers(a->gpu, a->traffic.scratch.land, a->traffic.scratch.n_land);
 }
 
-int remesh(App *a)
+/*  The water's field, kept from the build for the upload, which an edit
+ *  may hold back a moment. */
+static uint8_t s_shore[R_MAP * R_MAP * 4];
+
+int world_upload(App *a)
 {
-    const RAtlasLevel *l = a->sw.level;
-    static uint8_t     shore[R_MAP * R_MAP * 4];
-    /*  A build that FAILED, and this still answers that it did.  The
-     *  rest of this runs on the half of a mesh the build did make.  A
-     *  city whose FIRST build faults then has what was finished on the
-     *  screen instead of an empty window.  Every check still fails and
-     *  the exit code is unchanged: what is SHOWN is not what is
-     *  reported. */
-    int faulted = 0;
-    if (!l)
+    a->upload_held = 0;
+    if (gpu_set_shore(a->gpu, s_shore, R_MAP) != 0)
         return -1;
-    if (build_world(&a->mesh, a->view, &a->atlas, l, a->opts.underground, 1 /* the full mesh, every side and surface, once */, geometry_on(a) && !a->opts.underground) != 0)
-    {
-        /*  THE MOVING WORLD IS DOWN FROM HERE, whatever is shown.  It
-         *  reads the lane model the build lays, and a build that
-         *  faulted left that model half made.  The flag is set before
-         *  anything returns.  So the movers are not driven over it, and
-         *  the drive is not asked for a turn it cannot take. */
+    if (gpu_set_mesh(a->gpu, &a->mesh) != 0)
+        return -1;
+    show_arrive();
+    return 0;
+}
+
+/*  What a build leaves to the thread that owns the device.  That is the
+ *  water's field, the world's upload or its hold, and the moving world on
+ *  the new lanes.  `v` is the city the build read.
+ *
+ *  A build that FAILED, and this still answers that it did.  The rest of
+ *  this runs on the half of a mesh the build did make.  A city whose
+ *  FIRST build faults then has what was finished on the screen instead
+ *  of an empty window.  Every check still fails and the exit code is
+ *  unchanged: what is SHOWN is not what is reported. */
+static int remesh_finish(App *a, int faulted, const RCity *v)
+{
+    const RAtlasLevel *l     = a->sw.level;
+    uint8_t           *shore = s_shore;
+    /*  THE MOVING WORLD IS DOWN FROM HERE, whatever is shown.  It reads
+     *  the lane model the build lays, and a build that faulted left that
+     *  model half made.  So the movers are not driven over it, and the
+     *  drive is not asked for a turn it cannot take. */
+    if (faulted)
         a->world_faulted = 1;
-        faulted          = 1;
-    }
-    shore_field(a->view, shore);
+    shore_field(v, shore);
     /*  --field-dump path writes the field as a binary PPM (r: water's
      *  distance to land, g: depth, b: land's distance to water; all x16). */
     if (g_dev.field_dump)
@@ -184,9 +199,12 @@ int remesh(App *a)
             fclose(fp);
         }
     }
-    if (gpu_set_shore(a->gpu, shore, R_MAP) != 0)
-        return -1;
-    if (gpu_set_mesh(a->gpu, &a->mesh) != 0)
+    /*  An edit's pieces still going keep the last world on the device
+     *  until they have gone.  The frames go on meanwhile, and the next
+     *  one that finds them gone puts this one up. */
+    if (show_holds())
+        a->upload_held = 1;
+    else if (world_upload(a) != 0)
         return -1;
     /*  THE MOVING WORLD NEEDS A WHOLE ONE.  It is driven off the lane
      *  model.  A build that faulted part way through left that model half
@@ -197,10 +215,9 @@ int remesh(App *a)
     {
         R_WARN("mesh", "the mesh is up and nothing moves on it, because the "
                        "lane model the movers read is half made");
-        a->mesh_dirty = 0;
         return -1;
     }
-    if (traffic_init(&a->traffic, &a->mesh, a->view) != 0)
+    if (traffic_init(&a->traffic, &a->mesh, v) != 0)
         return -1;
     a->traffic_time = 0.0f;
     /*  --traffic-t seconds advances the traffic that far on the
@@ -210,7 +227,7 @@ int remesh(App *a)
         float t = (float)atof(g_dev.traffic_t), at = 0.0f;
         while (at < t)
         {
-            traffic_moving(&a->traffic, &a->mesh, a->view, 0.05f, at, 0);
+            traffic_moving(&a->traffic, &a->mesh, v, 0.05f, at, 0);
             at += 0.05f;
         }
     }
@@ -218,7 +235,6 @@ int remesh(App *a)
         return -1;
     if (g_dev.traffic_t)
         traffic_digest(&a->traffic, &a->mesh);
-    a->mesh_dirty    = 0;
     a->world_faulted = 0;
     R_DBG("mesh", "%u vertices, %u retaining walls; canvas %dx%d origin %d,%d "
                   "tile %dx%d step %d",
@@ -233,6 +249,98 @@ int remesh(App *a)
           (int)l->alt_step);
     /*  Shown, and still a failure. */
     return faulted ? -1 : 0;
+}
+
+int remesh(App *a)
+{
+    int faulted, rc;
+    if (!a->sw.level)
+        return -1;
+    /*  A world built and still held back goes up first: the build after
+     *  it starts from what the device shows. */
+    if (a->upload_held && world_upload(a) != 0)
+        return -1;
+    faulted       = build_world(&a->mesh, a->view, &a->atlas, a->sw.level, a->opts.underground, 1 /* the full mesh, every side and surface, once */, geometry_on(a) && !a->opts.underground) != 0;
+    rc            = remesh_finish(a, faulted, a->view);
+    a->mesh_dirty = 0;
+    return rc;
+}
+
+/*  THE BUILD ON A THREAD OF ITS OWN, for the live window.  A build
+ *  holds the frame for a third of a second or more, and an edit's pieces
+ *  are meant to move meanwhile.  So in the live window the build runs
+ *  here and the frames go on.  It reads a copy of the city taken as it
+ *  began, since the simulation goes on with the city itself.  Until it is
+ *  done it owns the mesh, the stores the networks are built into, and the
+ *  scripts' state.  The frame leaves all three alone meanwhile (app.c,
+ *  uiglue.c).  Everything that reaches the device is done after it, on
+ *  the frame's own thread. */
+static int build_thread(void *ud)
+{
+    App *a      = (App *)ud;
+    a->build_rc = build_world(&a->mesh, a->build_view, &a->atlas, a->sw.level, a->build_under, 1, a->build_lines) != 0;
+    SDL_SetAtomicInt(&a->build_done, 1);
+    return 0;
+}
+
+int remesh_begin(App *a)
+{
+    SDL_PropertiesID props;
+    if (!a->sw.level)
+        return -1;
+    if (a->upload_held && world_upload(a) != 0)
+        return -1;
+    if (!a->build_view && !(a->build_view = (RCity *)malloc(sizeof *a->build_view)))
+        return -1;
+    memcpy(a->build_view, a->view, sizeof *a->build_view);
+    a->build_under  = a->opts.underground;
+    a->build_lines  = geometry_on(a) && !a->opts.underground;
+    a->build_step_i = a->build_step_n = 0;
+    a->build_frames                   = 0;
+    a->build_t0                       = SDL_GetTicksNS();
+    SDL_SetAtomicInt(&a->build_done, 0);
+    /*  The build recurses through the scripts and the stages: a stack
+     *  the size of the main thread's. */
+    props = SDL_CreateProperties();
+    SDL_SetPointerProperty(props, SDL_PROP_THREAD_CREATE_ENTRY_FUNCTION_POINTER, (void *)build_thread);
+    SDL_SetStringProperty(props, SDL_PROP_THREAD_CREATE_NAME_STRING, "build");
+    SDL_SetPointerProperty(props, SDL_PROP_THREAD_CREATE_USERDATA_POINTER, a);
+    SDL_SetNumberProperty(props, SDL_PROP_THREAD_CREATE_STACKSIZE_NUMBER, 64 * 1024 * 1024);
+    a->builder = SDL_CreateThreadWithProperties(props);
+    SDL_DestroyProperties(props);
+    if (!a->builder)
+    {
+        R_WARN("mesh", "no thread for the build (%s), so it runs in the frame", SDL_GetError());
+        return remesh(a);
+    }
+    a->building = 1;
+    return 0;
+}
+
+int remesh_poll(App *a)
+{
+    if (!a->building)
+        return 0;
+    if (!SDL_GetAtomicInt(&a->build_done))
+    {
+        ++a->build_frames;
+        return 1;
+    }
+    SDL_WaitThread(a->builder, NULL);
+    a->builder  = NULL;
+    a->building = 0;
+    R_DBG("mesh", "built on its own thread in %.0f ms, %d frames drawn meanwhile",
+          (double)(SDL_GetTicksNS() - a->build_t0) / 1e6, a->build_frames);
+    return remesh_finish(a, a->build_rc, a->build_view) != 0 ? -1 : 0;
+}
+
+void remesh_wait(App *a)
+{
+    if (!a->building)
+        return;
+    SDL_WaitThread(a->builder, NULL);
+    a->builder  = NULL;
+    a->building = 0;
 }
 
 /*  The backdrop: the sky, except in the underground view, which the

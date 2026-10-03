@@ -37,60 +37,100 @@ function arc.weave.plan(ms, opt)
         a.at[#a.at + 1] = xa
         b.at[#b.at + 1] = xb
     end
+    --  What two ways file against each other: where their lines cross,
+    --  and where their bodies come near.  Put files one crossing.
+    local function pair(a, b, j, put)
+        for _, x in ipairs(crossings(a, b)) do
+            local shared = near_arm(a, x.sa, a.arm_a) and near_arm(b, x.sb, a.arm_a)
+                        or near_arm(a, x.sa, a.arm_b) and near_arm(b, x.sb, a.arm_b)
+            if not shared then put(x.sa, x.sb) end
+        end
+        --  AND THE NEAR MISSES.  Two ways whose bodies would touch
+        --  without their lines crossing -- side by side over one
+        --  spot, or crossing so shallowly that the bodies overlap for
+        --  a stretch -- are a crossing all the same.  Every run of
+        --  samples of the one within a body's width of the other is
+        --  filed as crossings every half tile along it, so the lift
+        --  covers the whole of the overlap.
+        if opt.near and a.pts.x0 and b.pts.x0
+           and not (a.pts.x1 + opt.near < b.pts.x0 or b.pts.x1 + opt.near < a.pts.x0
+                    or a.pts.y1 + opt.near < b.pts.y0 or b.pts.y1 + opt.near < a.pts.y0) then
+            local run
+            local function flush()
+                if not run then return end
+                local n = math.max(1, math.floor((run.s1 - run.s0) / 0.5 + 0.5))
+                for q = 1, n do
+                    local f  = (q - 0.5) / n
+                    local sa = run.s0 + (run.s1 - run.s0) * f
+                    local sb = run.b0 + (run.b1 - run.b0) * f
+                    local dup = false
+                    for _, x in ipairs(a.at) do
+                        if x.other == j and math.abs(x.s - sa) < 0.3 then dup = true break end
+                    end
+                    if not dup then put(sa, sb) end
+                end
+                run = nil
+            end
+            --  A point further than the near from the other way's box
+            --  is further from every step of it.  The margin is far
+            --  wider than any rounding, so the test only ever passes
+            --  over points the steps would all have passed over.
+            local bx0, by0 = b.pts.x0 - opt.near - 1e-6, b.pts.y0 - opt.near - 1e-6
+            local bx1, by1 = b.pts.x1 + opt.near + 1e-6, b.pts.y1 + opt.near + 1e-6
+            for _, pt in ipairs(a.pts) do
+                local best, bs = opt.near * opt.near, nil
+                local far = pt.x < bx0 or pt.x > bx1 or pt.y < by0 or pt.y > by1
+                for q = 1, far and 0 or #b.pts - 1 do
+                    local p0, p1 = b.pts[q], b.pts[q + 1]
+                    local ex, ey = p1.x - p0.x, p1.y - p0.y
+                    local ll = ex * ex + ey * ey
+                    local tt = ll > 1e-12 and ((pt.x - p0.x) * ex + (pt.y - p0.y) * ey) / ll or 0.0
+                    if tt < 0.0 then tt = 0.0 elseif tt > 1.0 then tt = 1.0 end
+                    local dx, dy = pt.x - (p0.x + ex * tt), pt.y - (p0.y + ey * tt)
+                    local dd = dx * dx + dy * dy
+                    if dd < best then best, bs = dd, p0.s + (p1.s - p0.s) * tt end
+                end
+                if bs then
+                    if run then run.s1, run.b1 = pt.s, bs
+                    else run = {s0 = pt.s, s1 = pt.s, b0 = bs, b1 = bs} end
+                else
+                    flush()
+                end
+            end
+            flush()
+        end
+    end
+    --  A caller that plans one node many times over, moving one way at a
+    --  time, keeps opt.pairs from one call to the next.  What two ways file
+    --  against each other depends on their samples alone.  So a pair whose
+    --  samples are the very tables of an earlier call files what it filed
+    --  then, in the same order.  A way that names an arm is planned afresh.
+    local seen_pairs = opt.pairs
     for i = 1, #ms do
         for j = i + 1, #ms do
             local a, b = ms[i], ms[j]
-            for _, x in ipairs(crossings(a, b)) do
-                local shared = near_arm(a, x.sa, a.arm_a) and near_arm(b, x.sb, a.arm_a)
-                            or near_arm(a, x.sa, a.arm_b) and near_arm(b, x.sb, a.arm_b)
-                if not shared then file(a, b, i, j, x.sa, x.sb) end
-            end
-            --  AND THE NEAR MISSES.  Two ways whose bodies would touch
-            --  without their lines crossing -- side by side over one
-            --  spot, or crossing so shallowly that the bodies overlap for
-            --  a stretch -- are a crossing all the same.  Every run of
-            --  samples of the one within a body's width of the other is
-            --  filed as crossings every half tile along it, so the lift
-            --  covers the whole of the overlap.
-            if opt.near and a.pts.x0 and b.pts.x0
-               and not (a.pts.x1 + opt.near < b.pts.x0 or b.pts.x1 + opt.near < a.pts.x0
-                        or a.pts.y1 + opt.near < b.pts.y0 or b.pts.y1 + opt.near < a.pts.y0) then
-                local run
-                local function flush()
-                    if not run then return end
-                    local n = math.max(1, math.floor((run.s1 - run.s0) / 0.5 + 0.5))
-                    for q = 1, n do
-                        local f  = (q - 0.5) / n
-                        local sa = run.s0 + (run.s1 - run.s0) * f
-                        local sb = run.b0 + (run.b1 - run.b0) * f
-                        local dup = false
-                        for _, x in ipairs(a.at) do
-                            if x.other == j and math.abs(x.s - sa) < 0.3 then dup = true break end
-                        end
-                        if not dup then file(a, b, i, j, sa, sb) end
+            local keep = seen_pairs and not (a.arm_a or a.arm_b or b.arm_a or b.arm_b)
+            local row  = keep and seen_pairs[a.pts]
+            local seen = row and row[b.pts]
+            if seen and seen.near == opt.near then
+                for q = 1, #seen, 2 do file(a, b, i, j, seen[q], seen[q + 1]) end
+            else
+                local filed = keep and {near = opt.near} or nil
+                pair(a, b, j, function (sa, sb)
+                    file(a, b, i, j, sa, sb)
+                    if filed then
+                        local n = #filed
+                        filed[n + 1] = sa
+                        filed[n + 2] = sb
                     end
-                    run = nil
+                end)
+                if filed then
+                    if not row then
+                        row = {}
+                        seen_pairs[a.pts] = row
+                    end
+                    row[b.pts] = filed
                 end
-                for _, pt in ipairs(a.pts) do
-                    local best, bs = opt.near * opt.near, nil
-                    for q = 1, #b.pts - 1 do
-                        local p0, p1 = b.pts[q], b.pts[q + 1]
-                        local ex, ey = p1.x - p0.x, p1.y - p0.y
-                        local ll = ex * ex + ey * ey
-                        local tt = ll > 1e-12 and ((pt.x - p0.x) * ex + (pt.y - p0.y) * ey) / ll or 0.0
-                        if tt < 0.0 then tt = 0.0 elseif tt > 1.0 then tt = 1.0 end
-                        local dx, dy = pt.x - (p0.x + ex * tt), pt.y - (p0.y + ey * tt)
-                        local dd = dx * dx + dy * dy
-                        if dd < best then best, bs = dd, p0.s + (p1.s - p0.s) * tt end
-                    end
-                    if bs then
-                        if run then run.s1, run.b1 = pt.s, bs
-                        else run = {s0 = pt.s, s1 = pt.s, b0 = bs, b1 = bs} end
-                    else
-                        flush()
-                    end
-                end
-                flush()
             end
         end
     end

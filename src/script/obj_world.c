@@ -21,6 +21,7 @@
 #include "mesh/model.h"
 #include "log.h"
 #include "build.h"
+#include "show.h"
 #include "incr.h"
 #include "mesh/shapes.h"
 #include "mesh/emit.h"
@@ -57,6 +58,7 @@ static int api_world_info(lua_State *L)
     lua_pushinteger(L, w->pass), lua_setfield(L, -2, "pass");
     lua_pushboolean(L, w->lines), lua_setfield(L, -2, "lines");
     lua_pushboolean(L, w->underground), lua_setfield(L, -2, "underground");
+    lua_pushboolean(L, incr_editing()), lua_setfield(L, -2, "edit");
     return 1;
 }
 
@@ -604,6 +606,17 @@ static int api_world_margin(lua_State *L)
      *  claimed by nothing at all. */
     shape_close(w->shape);
     w->shape = SHAPE_NONE;
+    /*  An edit's build keeps the chunks it does not rebuild, and a margin
+     *  draws nothing else.  So a path wholly in kept chunks is not
+     *  gathered, and its shape is the one the last build opened. */
+    if (incr_editing())
+    {
+        float box[4];
+        if (margin_box((int)luaL_checkinteger(L, 2), box) &&
+            !incr_want_rect((int32_t)floorf(box[0]) - 1, (int32_t)floorf(box[1]) - 1,
+                            (int32_t)floorf(box[2]) + 1, (int32_t)floorf(box[3]) + 1))
+            return 0;
+    }
     if (!margin_gather(w->m, w->c, w->mask_bit, (int)luaL_checkinteger(L, 2),
                          &s_world_walk, &sh))
         return 0;
@@ -739,6 +752,28 @@ static int api_world_progress(lua_State *L)
     if (!world_of(L))
         return 0;
     build_step(luaL_checkstring(L, 2), (int)luaL_checkinteger(L, 3), (int)luaL_checkinteger(L, 4));
+    return 0;
+}
+
+/*  The pieces an edit's build may show going, as its grading pass begins.
+ *  It answers a handle of the kind edit_show for arc.rules.edit_show.  It
+ *  answers nothing where the build is no edit being shown (render/show.h). */
+static int api_world_edit_show(lua_State *L)
+{
+    static int token;
+    if (!world_of(L) || show_offer(SHOW_GOING, build_mesh()) < 0)
+        return 0;
+    api_object_push(L, "edit_show", &token);
+    return 1;
+}
+
+/*  A moment inside a long step.  While an edit shows its pieces going,
+ *  whatever is showing the world draws it again from here, as often as
+ *  it likes.  Otherwise nothing happens. */
+static int api_world_tick(lua_State *L)
+{
+    if (world_of(L))
+        build_tick();
     return 0;
 }
 
@@ -2124,6 +2159,8 @@ const luaL_Reg WORLD[] = {
     {"trims",        api_world_trims       },
     {"shelf",    api_world_shelf   },
     {"progress", api_world_progress},
+    {"tick", api_world_tick},
+    {"edit_show", api_world_edit_show},
     {"controls", api_world_controls},
     {"control",  api_world_control },
     {"control_is", api_world_control_is},

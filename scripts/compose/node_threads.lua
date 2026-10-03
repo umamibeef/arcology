@@ -22,7 +22,7 @@ local f32 = arc.put.f32
 
 arc.rules.node_threads = function (j)
     local d = j:info()
-    local function linked(e) return d.links & (1 << e) ~= 0 end
+    local function linked(e) return bit.band(d.links, bit.lshift(1, e)) ~= 0 end
 
     --  the through lines first, each raised over the last
     local second = 0

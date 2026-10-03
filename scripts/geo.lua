@@ -639,3 +639,40 @@ arc.geo.ground_art         = 256
 arc.geo.ground_red         = 0.45
 arc.geo.ground_green       = 0.62
 arc.geo.ground_blue        = 0.30
+
+--  ---- WHAT AN EDIT SHOWS -----------------------------------------------
+--
+--  What an edit was drawn on goes while the world is built again, the
+--  other pieces the build changed leave once it is built, and the pieces
+--  it made come after them (scripts/compose/edit_show.lua).  A piece
+--  breaks into fragments as it goes and is put together from them as it
+--  comes, and every wave runs from the edited tiles.
+--
+--  How far from them a changed piece may leave, in tiles, and how far one
+--  may come: a change further out takes its place at once, since it would
+--  wait hidden until the wave reached it.
+arc.geo.edit_show_reach       = 3.0
+arc.geo.edit_show_come        = 6.0
+--  For the going and the coming waves, how fast each runs, in tiles a
+--  second, and how long one fragment takes, in seconds.  A time of 0
+--  shows nothing.
+arc.geo.edit_show_go_speed    = 12.0
+arc.geo.edit_show_go_time     = 0.35
+arc.geo.edit_show_come_speed  = 15.0
+arc.geo.edit_show_come_time   = 0.35
+--  The coming wave runs in from its far edge to the edit, 1, or out from
+--  the edit as the going does, 0.
+arc.geo.edit_show_come_inward = 1
+--  A fragment is the triangles whose middles fall in one cell of an
+--  uneven grid this many tiles wide.  It waits up to this many seconds
+--  past the wave, drifts this far in tiles, and dissolves this far as it
+--  goes, 1 to nothing.
+arc.geo.edit_show_piece       = 0.4
+arc.geo.edit_show_jitter      = 0.2
+arc.geo.edit_show_scatter     = 0.3
+arc.geo.edit_show_dissolve    = 0.0
+--  Going, a fragment is thrown this many levels up and falls this many
+--  below its place.  Coming, it drops in from this many levels above it.
+arc.geo.edit_show_hop         = 0.5
+arc.geo.edit_show_depth       = 1.0
+arc.geo.edit_show_drop        = 1.5

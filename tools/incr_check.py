@@ -31,8 +31,21 @@ ROOT = os.path.dirname(HERE)
 
 #  Five places on the map, chosen to reach different work: a junction, a
 #  band band, a spur's foot, a railway, and open ground away from any
-#  of it.
-EDITS = ["66,113", "72,88", "90,81", "105,84", "20,20"]
+#  of it.  Then the player's own bulldozer, which fits the pieces round
+#  what it takes down: across a street, on the interchange, by a slab,
+#  over a railway, and terrain raised away from everything.  Last, four
+#  edits one after another, each built before the next: what a build
+#  keeps for the next edit's (scripts/compose/memo.lua) is then read by
+#  builds that are edits themselves.  Each edit is the switch and its
+#  argument.
+EDITS = [("--edit", "66,113"), ("--edit", "72,88"), ("--edit", "90,81"),
+         ("--edit", "105,84"), ("--edit", "20,20"),
+         ("--gesture", "0,0:112,66/113,66/114,66"),
+         ("--gesture", "0,0:103,60"),
+         ("--gesture", "0,0:90,81/90,82"),
+         ("--gesture", "0,0:105,84"),
+         ("--gesture", "0,2:20,20"),
+         ("--gesture", "0,2:20,20|0,0:105,84|0,0:112,66/113,66/114,66|0,0:103,60")]
 
 CHECK = re.compile(r"^(mesh check|line clip|lanes|margins|on-spurs|tangent|chunks|line pieces)")
 
@@ -75,12 +88,12 @@ def main():
             print("incr: the plain build drew nothing; the mesh check is what to read first")
             return 1
         for e in EDITS:
-            inc = digest(build(a.binary, a.city, one, ("--edit", e)))
-            all_ = digest(build(a.binary, a.city, two, ("--edit", e, "--no-incr")))
+            inc = digest(build(a.binary, a.city, one, e))
+            all_ = digest(build(a.binary, a.city, two, e + ("--no-incr",)))
             if inc == all_:
                 continue
             bad += 1
-            print("incr: the edit at %s does not build the same both ways" % e)
+            print("incr: the edit %s %s does not build the same both ways" % e)
             if inc[0] != all_[0]:
                 print("      the mesh differs: %s incrementally, %s whole (%d and %d triangles)"
                       % (inc[0], all_[0], inc[2], all_[2]))

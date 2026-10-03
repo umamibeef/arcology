@@ -58,8 +58,8 @@ function arc.poses_build()
             if node[i] ~= 0 then
                 local lk = links[i]
                 for e = 0, 3 do
-                    if lk & (1 << e) ~= 0 then
-                        local m = {x = i % n + 0.5 + 0.25 * DC[e], y = i // n + 0.5 + 0.25 * DR[e],
+                    if bit.band(lk, bit.lshift(1, e)) ~= 0 then
+                        local m = {x = i % n + 0.5 + 0.25 * DC[e], y = math.floor(i / n) + 0.5 + 0.25 * DR[e],
                                    dx = -DC[e], dy = -DR[e], kind = node[i]}
                         mouths[i * 4 + e] = m
                         if not P.mouth_at[i * 4 + e] then P.mouth_at[i * 4 + e] = m end
@@ -101,7 +101,7 @@ function arc.poses_build()
     for i = 0, n * n - 1 do
         local t = lap[xbld[i]]
         if t then
-            P.meet[i] = {x = i % n + 0.5, y = i // n + 0.5,
+            P.meet[i] = {x = i % n + 0.5, y = math.floor(i / n) + 0.5,
                          line   = t.line == 0 and {dx = 1, dy = 0} or {dx = 0, dy = 1},
                          thread = t.line == 0 and {dx = 0, dy = 1} or {dx = 1, dy = 0}}
         end
@@ -140,7 +140,7 @@ function arc.slab_at(pa, s)
     if s >= pa.s[n - 1] then return pa.x[n - 1], pa.y[n - 1], pa.dx[n - 1], pa.dy[n - 1] end
     local lo, hi = 0, n - 1
     while hi - lo > 1 do
-        local mid = (lo + hi) // 2
+        local mid = math.floor((lo + hi) / 2)
         if pa.s[mid] <= s then lo = mid else hi = mid end
     end
     local t = (s - pa.s[lo]) / math.max(1e-6, pa.s[hi] - pa.s[lo])
@@ -150,15 +150,41 @@ function arc.slab_at(pa, s)
     return pa.x[lo] + (pa.x[hi] - pa.x[lo]) * t, pa.y[lo] + (pa.y[hi] - pa.y[lo]) * t, dx / l, dy / l
 end
 
---  The distance from a point to the nearest of a gore's slab stations.
-function arc.slab_away(pa, x, y)
-    local best = 1e9
-    for i = 0, pa.n - 1 do
-        local ex, ey = pa.x[i] - x, pa.y[i] - y
-        local dd = ex * ex + ey * ey
-        if dd < best then best = dd end
+--  Whether a point lies nearer than `reach` to any of a gore's slab
+--  stations.  The stations are filed by tile the first time a slab is
+--  asked, so a question looks only at the tiles around the point, one
+--  tile wider than the reach on every side.  A station under the reach
+--  answers as the nearest one would, because the root keeps the order
+--  of what it is given.
+local station_cells = setmetatable({}, {__mode = "k"})
+local function cell_key(c, r) return (c + 4096) * 16384 + (r + 4096) end
+function arc.slab_within(pa, x, y, reach)
+    local cells = station_cells[pa]
+    if not cells then
+        cells = {}
+        for i = 0, pa.n - 1 do
+            local k = cell_key(math.floor(pa.x[i]), math.floor(pa.y[i]))
+            local list = cells[k]
+            if not list then
+                list = {}
+                cells[k] = list
+            end
+            list[#list + 1] = i
+        end
+        station_cells[pa] = cells
     end
-    return math.sqrt(best)
+    for c = math.floor(x - reach) - 1, math.floor(x + reach) + 1 do
+        for r = math.floor(y - reach) - 1, math.floor(y + reach) + 1 do
+            local list = cells[cell_key(c, r)]
+            if list then
+                for _, i in ipairs(list) do
+                    local ex, ey = pa.x[i] - x, pa.y[i] - y
+                    if math.sqrt(ex * ex + ey * ey) < reach then return true end
+                end
+            end
+        end
+    end
+    return false
 end
 
 --  A point beside the slab: `o` half widths out from the stations on
@@ -233,7 +259,7 @@ function arc.slab_z_at(pa, s)
     if s >= pa.s[n - 1] then s = pa.s[n - 1] end
     local lo, hi = 0, n - 1
     while hi - lo > 1 do
-        local mid = (lo + hi) // 2
+        local mid = math.floor((lo + hi) / 2)
         if pa.s[mid] <= s then lo = mid else hi = mid end
     end
     local ds = math.max(1e-6, pa.s[hi] - pa.s[lo])
