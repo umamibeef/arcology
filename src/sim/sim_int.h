@@ -25,7 +25,6 @@
 #define THING_SZ 12
 
 uint8_t *thing(City *c, int slot);
-void     free_thing(City *c, int slot);
 
 /*  The four compass steps, and the two turn tables beside them: shared
  *  because a station places a train with the same table the train then
@@ -71,9 +70,6 @@ void sim_disaster_roll(City *c);
 int  near_powered(const City *c, int y, int x);
 void set_under(City *c, int y, int x, int und);
 void fit_water_around(City *c, int y, int x);
-void clear_tile(City *c, int y, int x);
-void clear_footprint(City *c, int y, int x);
-int  stamp_footprint(City *c, int y, int x, int bld, int size);
 
 /*  sim_place.c: what growth reaches for when a zone earns it. */
 void grow_to_3x3(City *c, int y, int x, int zone);
@@ -83,12 +79,5 @@ int  tile_fits(const City *c, int y, int x, int alt, int zone, int maxbld);
 /*  The age pyramid's head count for one five-year bracket: A5+0x1EDE as
  *  the microsim reads it, three longs to a bracket. */
 #define HEADS_AT(c, b) ((c)->misc[MISC_HIST_BASE + 3 * (b)])
-
-/*  sim_micro.c: one XMIC record, and the words inside it.  The budget
- *  reads a plant's remaining life straight out of the table. */
-uint8_t *micro_rec(const City *c, int i);
-int      micro_w(const uint8_t *r, int k);
-void     micro_set_w(uint8_t *r, int k, int v);
-int      micro_cap(const City *c, int want, int per);
 
 #endif /* SIM_INT_H */

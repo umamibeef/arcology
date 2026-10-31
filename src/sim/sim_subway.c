@@ -39,11 +39,11 @@ void sim_fit_subway(City *c, int y, int x)
 {
     int u, t, slope, mask;
 
-    u = c->xund[y][x];
+    u = T_XUND(c, y, x);
     if (u < 0x01 || u >= 0x10)
         return; /* $20382 */
 
-    t     = c->xter[y][x];
+    t     = T_XTER(c, y, x);
     slope = t > 0x30 ? 0 : t & 0x0F; /* $2039A */
     if (NET_SLOPED[slope])           /* $203B2 */
     {
@@ -52,13 +52,13 @@ void sim_fit_subway(City *c, int y, int x)
     }
 
     mask = 0;
-    if (y > 0 && joins(c->xund[y - 1][x]) && NET_JOIN_Y[c->xter[y - 1][x]])
+    if (y > 0 && joins(T_XUND(c, y - 1, x)) && NET_JOIN_Y[T_XTER(c, y - 1, x)])
         mask += 8; /* $20452 */
-    if (y < MAP_H - 1 && joins(c->xund[y + 1][x]) && NET_JOIN_Y[c->xter[y + 1][x]])
+    if (y < c->h - 1 && joins(T_XUND(c, y + 1, x)) && NET_JOIN_Y[T_XTER(c, y + 1, x)])
         mask += 2; /* $204D2 */
-    if (x > 0 && joins(c->xund[y][x - 1]) && NET_JOIN_X[c->xter[y][x - 1]])
+    if (x > 0 && joins(T_XUND(c, y, x - 1)) && NET_JOIN_X[T_XTER(c, y, x - 1)])
         mask += 1; /* $20560 */
-    if (x < MAP_W - 1 && joins(c->xund[y][x + 1]) && NET_JOIN_X[c->xter[y][x + 1]])
+    if (x < c->w - 1 && joins(T_XUND(c, y, x + 1)) && NET_JOIN_X[T_XTER(c, y, x + 1)])
         mask += 4;                           /* $205F2 */
     set_under(c, y, x, NET_PIECE[mask] + 1); /* $20606 */
 }

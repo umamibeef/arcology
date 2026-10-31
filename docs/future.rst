@@ -14,7 +14,7 @@ Future plans
 
 .. warning::
 
-   Nothing on this page is implemented. A step marked *decided* is a direction the project has chosen; it is not a description of the reconstruction. The checked facts that the decisions rest on are on the Mechanics and renderer pages.
+   This page holds long-range ideas. A step marked *decided* is a direction the project has chosen, not a description of the reconstruction. A step marked *built* is described on the renderer pages. The work in progress is in ``plans/``. The checked facts that the decisions rest on are on the Mechanics and renderer pages.
 
 Two modes
 ---------
@@ -27,7 +27,7 @@ Two modes
 
    **The faithful mode** is the port: original saves, sprites, sounds and music, and a simulation checked against the original by every oracle check the project has. It is the baseline and it stays checkable forever.
 
-   **The enhanced mode** is the sandbox: cliffs of any height, water as a body with physics, weather, regions beyond one city. Original content imports into it exactly and lives under the richer rules. The original save format is therefore an import and the reference baseline, not the limit of what the engine holds. A city that never used an enhanced feature still saves as a 1995 file; one that did has outgrown it.
+   **The enhanced mode** is the sandbox: cliffs of any height, water as a body with physics, weather, regions beyond one city. Original content imports into it exactly and lives under the richer rules. The original save format is therefore an import and the reference baseline, not the limit of what the engine holds. Every world saves as ``.arco``. A ``.sc2`` is only loaded.
 
 The renderer becomes 2.5D
 -------------------------
@@ -38,21 +38,13 @@ The renderer becomes 2.5D
 
 .. container:: col
 
-   The terrain is drawn as geometry. Everything on it stays a sprite, drawn where it is drawn today, in the order it is drawn today. Only the terrain sprites are replaced: the fourteen slope shapes and their submerged, shore and channel variants, the flat ground diamond, and the map-edge skirt.
+   The terrain is drawn as geometry. Everything on it stays a sprite, drawn where the original draws it, in the original's order. Only the terrain sprites are replaced: the fourteen slope shapes and their submerged, shore and channel variants, the flat ground diamond, and the map-edge skirt.
 
-   **The camera reproduces the original projection exactly.** The projection is linear in column, row and altitude, and its vertical scale of 0.75 tile heights per level is not what a tilted orthographic camera produces: it is an oblique projection, one matrix, whose depth axis is free to choose. Depth is chosen as the sweep order, ``row + col``, so a depth buffer reproduces the painter's algorithm tile for tile. The mesh is drawn with depth writes; the sprites follow in the anti-diagonal order, tested against the terrain and writing no depth. Every tile corner lands on an integer pixel at every zoom, so exact silhouettes are attainable rather than approximate.
+   **The camera reproduces the original projection exactly.** The projection is linear in column, row and altitude, and its vertical scale of 0.75 tile heights per level is not what a tilted orthographic camera produces: it is an oblique projection, one matrix, whose depth axis is free to choose. Depth is chosen as the sweep order, ``row + col``, so a depth buffer reproduces the painter's algorithm tile for tile. The mesh is drawn with depth writes. The sprites follow in the anti-diagonal order, tested against the terrain and writing no depth. Every tile corner lands on an integer pixel at every zoom, so exact silhouettes are attainable rather than approximate.
 
-   **The four snap views are the only views for now.** Expressive views come later, and nothing built now may foreclose them: the projection matrix is the only thing that changes.
+   **The four snap views are the only views in this phase.** Expressive views follow it, and nothing built in it may foreclose them: the projection matrix is the only thing that changes.
 
-   **At the snap views the frame is identical to today's**, under five conditions, each of which is a place it could silently stop being true:
-
-   - corner heights are ``ALTM`` plus the lifted corner bits, one level per lift;
-   - the side faces under a raised edge are part of the geometry, because the sprite paints them;
-   - the diagonal that splits a non-planar tile is read from its sprite, code by code, and so is each face's coverage, because the sloped far edges are drawn at 3:4 where the projection gives 4:5;
-   - each face is painted with the sprite's own pixels;
-   - depth equals sweep order, so the nearer tile overpaints exactly where the sprite did.
-
-   Two facts from the shipped cities decide the mesh's topology. **A lifted corner is one level, never two**: the art confirms it, sprite 257 raising two corners by twelve pixels and sprite 263 three. **Shared corners disagree in the data**: across all 103 cities, under that reading, neighbouring tiles agree on a shared corner's height 97.0% of the time, and no other reading of the corner bits or of ``ALTM`` comes close. The remaining 3% are diagonal ramps, where altitude climbs one level per tile in both directions and no shape spans the two levels a plane would need; the high-side tile puts the corner one level above the low-side tile, and the nearer sprite overpaints the mismatch. So the terrain is separate per-tile quads overpainted in sweep order, because that is what the art contains. A joined surface would draw a ramp the game never drew.
+   **The ground is the dual ground** (``plans/terrain.md``). The land is a height per tile. A tile's middle stands at its height, an edge middle at the mean of the two tiles that share it, and a corner at the mean of the four. So each tile is eight triangles, and neighbours always agree on the points they share. A top of its own, such as a pad, a sloped network piece or water, holds the points it touches. The dual ground does not copy the sprites' faces. The ``--soft --mesh`` replica of the sprites does that (:doc:`enhanced-renderer`).
 
 Later, in this order
 ~~~~~~~~~~~~~~~~~~~~
@@ -63,7 +55,7 @@ Later, in this order
 
 .. container:: col
 
-   - **A material per terrain band lit by a fitted sun**: built, one material for all land on a mesh that replicates the sprites' faces, and a sun fitted to the four plain slopes (:doc:`enhanced-renderer`). Measured against the land art on one frame: 1,894 of 204,000 pixels uncovered, the diamonds' edge rows. Relighting at the snap angle has no stated error.
+   - **A material per terrain band lit by a fitted sun**: built: one material for all land, and a sun fitted to the four plain slopes (:doc:`enhanced-renderer`). On the replica of the sprites' faces, measured against the land art on one frame, 1,894 of 204,000 pixels are uncovered: the diamonds' edge rows. The material lights the dual ground the same way. Relighting at the snap angle has no stated error.
    - **A water plane**: built the other way round, as a shader painted inside the water sprites' own outline, so the shore is the art's and only the blue moves (:doc:`enhanced-renderer`). A plane over a continuing bed is not needed for this.
    - **The GPU path**: built, and identical to the software rasteriser at 32 and 8 px on three cities, within ten pixels at 16 px.
    - Buildings as geometry rather than billboards: open, and not foreclosed by billboards.
@@ -79,16 +71,27 @@ Terrain in the enhanced mode
 
    **The one-level rule is the original's, and the enhanced mode breaks it on purpose.** The fourteen shapes express a lift of one level, and two pieces of code keep the world inside that: the raise and lower cascade (``$8758``, ``$896C``), which pushes neighbours along so no edge exceeds a level, and the pit rule in ``fixTerrain`` (:ref:`$128DE <rt-128DE>`), which raises a tile lower than all eight neighbours rather than leave a hole.
 
-   The extension keeps ``ALTM`` as the tile's base and keeps ``XTER`` derived. The lift predicate changes from *a higher neighbour lifts the corner* to *a neighbour exactly one level higher lifts the corner*; anything steeper is a cliff, the low tile stays flat on that side, and the mesh draws a vertical face of however many levels. The cascade survives as a brush, not a law. The pit rule goes, because a pit is a crater floor.
+   The enhanced mode does not keep that rule. Its land and its cliffs are set out in ``plans/terrain.md``:
 
-   What that buys: the save format is untouched, since ``ALTM`` already holds 32 levels and adjacent tiles differing by six is data the original never wrote; ``XTER`` stays derivable, so the sculptor and the disasters only produce ``ALTM``; every tile the original could make is unchanged, so the identity check still holds on all shipped cities; rotation stays free, since walls derive from altitudes like everything else; and the map-edge skirt (:ref:`$17018 <rt-17018>`) already carries the game's own dirt-cliff art, the natural paint for an interior cliff.
+   - **The land is a height per tile.** The slope codes (``XTER``) are not read for the land. Only a sloped network piece and the seabed read them.
+   - **The ground is the dual ground**, as above.
+   - **A cliff** lies between two land tiles side by side that are more than one level apart. Water is never a cliff: it meets land as a shore.
+   - **The lean.** The lip of a cliff sags toward the step below, and a small foot rises at its base.
+   - **A broken face.** The face is laid as facets, a ledge a level.
+   - **One layer cake.** Every cut shows the same strata, as runs of height, with the topsoil 0.2 levels under the surface. The foot shows scree, and patchy scree lies at the foot of the face.
+   - **The map's edge** is a section through a larger world. Grass runs to the edge with no wear, and its cut goes down to a floor below the lowest land.
+   - **No height cap is planned.** The store holds a height up to 31 (``plans/terrain.md``).
+
+   The cascade survives as a brush, not a law. The pit rule goes, because a pit is a crater floor.
 
    .. admonition:: To be read, not assumed
       :class: warning
 
-      Placement rules that read the slope code, roads in particular, must refuse a cliff edge, and those routines have not been read for it. A city with cliffs loaded into the 1995 game draws a flat tile beside a tall one with nothing between them; that is accepted. The extension is a mode, so the oracle checks against the original keep their meaning.
+      Placement rules that read the slope code, roads in particular, must refuse a cliff edge. Those routines have not been read for it.
 
-   **Deformation is a brush plus the rules.** A crater or a cone is a profile, naturally a signed-distance shape, sampled onto ``ALTM``; then the rules run and the mesh is rebuilt from the grid. The mesh never has state of its own. Whether ordinary edits keep the cascade as default behaviour, so that everyday terrain stays inside the sprite vocabulary and only disasters and an explicit cliff tool break the level rule, is open.
+   **Deformation is a brush plus the rules.** A crater or a cone is a profile, naturally a signed-distance shape, sampled onto the tile heights. Then the rules run, and the mesh is rebuilt from the heights. The mesh never has state of its own. Whether ordinary edits keep the cascade as default behavior is open. With it, everyday terrain stays within one level, and only disasters and an explicit cliff tool break the rule.
+
+   **Land is generated from a seed and sliders.** OpenTTD's TerraGenesis is the model. The original's own generator is ported as a classic choice for a single city.
 
 Water as a body
 ---------------
@@ -99,10 +102,10 @@ Water as a body
 
 .. container:: col
 
-   The land heightfield is the bottom of a dish and the water is one continuous body resting in it, with a depth and a horizontal velocity everywhere; the tiles only report where it currently is. The model is the shallow-water equations: depth-averaged, one column per cell, which is the physics of a long wave in a dish at city scale and the standard model of a tsunami. It is a real fluid simulation in two dimensions, not a volumetric one; breaking crests and spray are rendering effects on top of the depth field.
+   The land heightfield is the bottom of a dish and the water is one continuous body resting in it, with a depth and a horizontal velocity everywhere; the tiles only report where it is. The model is the shallow-water equations: depth-averaged, one column per cell, which is the physics of a long wave in a dish at city scale and the standard model of a tsunami. It is a real fluid simulation in two dimensions, not a volumetric one; breaking crests and spray are rendering effects on top of the depth field.
 
    - **Resolution**: about four cells per tile, floating-point depth and velocity, with the bathymetry sampled from the tile quads including their steps.
-   - **The two truths**: the fluid state is the physics and render state during an event; at rest it quantises back into the integer water level in ``ALTM`` bits 5 to 9, from which the shore and submerged codes are derived exactly as today. Any state the water reaches is drawable at the snaps with existing sprites.
+   - **The two truths**: the fluid state is the physics and render state during an event; at rest it quantises back into the integer water level in ``ALTM`` bits 5 to 9, from which the shore and submerged codes are derived exactly as the original derives them. Any state the water reaches is drawable at the snaps with existing sprites.
    - **A tsunami** is an event that displaces the water or the floor, then propagation, shoaling as the floor rises, and run-up onto land tiles, which is the flooding. The original's flood disaster becomes a special case.
    - **Containment** is a property of the equations, not a feature. Cliffs are what make real dishes: a crater becomes a lake, a breach a channel, a drop of several levels a waterfall.
    - **The map edge** is open sea: waves leave rather than reflect.
@@ -121,7 +124,7 @@ Regions
 
 .. container:: col
 
-   A region is a Game-of-Life grid: conceptually infinite, rules functions of a cell's neighbourhood, and undeveloped terrain the quiescent state that costs nothing. A chunk is the storage and streaming unit, and its size is an implementation choice, not a rule: the original's data layers run at half and quarter resolution, so a chunk is a multiple of 4 tiles, and a multiple of 8 keeps the growth-slice arithmetic clean; beyond that the size is a performance question. A 1995 save is a 128 by 128 patch of tiles, and importing it writes that patch into whatever chunks it spans. Active chunks are those with development or water in motion; dormant chunks hold a heightfield and are never ticked. Region terrain is generated from a continuous field so chunk borders do not show, and an imported city's edge is stitched to the land around it.
+   A region is a Game-of-Life grid. Its rules are functions of a cell's neighborhood, and undeveloped terrain is the quiescent state that costs nothing. The region is fixed and very large, and the game shows it as a map. Its size is a parameter, so it can grow later without moving land. A chunk is 32 by 32 tiles, the storage and streaming unit. The original's data layers run at half and quarter resolution, and 32 is a multiple of 8, so the growth-slice arithmetic stays clean. A 1995 save is a 128 by 128 patch of tiles. Importing it writes that patch into the chunks it spans, and its edge is stitched to the land around it. Active chunks hold development or water in motion. Dormant chunks hold heights and are never ticked.
 
    **Most of the original's rules are already local**: the terrain rule reads eight neighbours; pollution, land value, coverage, crime and density are bounded kernels; trips walk a bounded distance; power and water are flood fills, global in extent and local in rule; the growth scan already visits the map in sixteen slices on sixteen days. The original's "neighbour connection" at the map edge becomes a real neighbour, which makes that rule more faithful, not less.
 
@@ -144,7 +147,7 @@ Regions
         - one stream consumed in scan order
         - a stream per city, so which parts of the world are loaded does not change what grows
 
-   **What it costs in the reconstruction.** The sim has 128 baked into its ring loops, its layer sizes and its rotation (:ref:`$3AECA <rt-3AECA>`). It is not forked: every tile access goes through a world accessor, and the faithful mode runs the original's loops over exactly one 128 by 128 window with the original's edge behaviour, so every oracle check runs on the same code. That window exists only in the faithful mode; it is what the original's sim iterates, not a unit the world stores and not a limit on any city. The renderer's "draw the whole map every frame" becomes "draw the visible chunks".
+   **What it costs in the reconstruction.** The sim has 128 baked into its ring loops, its layer sizes and its rotation (:ref:`$3AECA <rt-3AECA>`). It is not forked: every tile access goes through a world accessor, and the faithful mode runs the original's loops over exactly one 128 by 128 window with the original's edge behaviour, so every oracle check runs on the same code. That window exists only in the faithful mode; it is what the original's sim iterates, not a unit the world stores and not a limit on any city. The renderer draws the visible chunks, not the whole map every frame.
 
 Cities as economic units
 ------------------------
@@ -180,14 +183,25 @@ Organic city boundaries
 
 .. container:: col
 
-   A city is a mask over the world grid, an owner id per tile, and its extent is what it can reach: its developed and zoned tiles plus everything within service reach of its road network. The player zones only at that frontier, so the limits move as the roads and services do. Between cities a tile in reach of both goes to the stronger pull, population over distance squared, which is Reilly's breaking point; a strip where neither pull crosses a threshold stays unclaimed, the gap that tree canopies leave between them, and it closes as a city grows. The models behind this are the urban-growth literature's: diffusion-limited aggregation and correlated percolation for where development attaches, constrained cellular automata for local rules, weighted Voronoi and Reilly's law for territory. They decide extent; the original's growth engine already decides, tile by tile, where development happens, and is not replaced.
+   A city is a mask over the world grid, an owner id per tile. Its limits are its roads, zoning and buildings, plus a glow around them, so they grow as the city does. The player zones inside the limits. Cities are independent, and they interact. Where the limits of two cities touch, the cities may grow into each other. The urban-growth literature has models for where development attaches: diffusion-limited aggregation, correlated percolation and constrained cellular automata. They are candidates for the virtual player's policy. The original's growth engine decides, tile by tile, where development happens, and it is not replaced.
 
-   The box in the original is an array bound, not a rule, and three places it leaks into semantics have answers: the sixteen growth slices become row bands of the mask's bounding box, so a box city gets the original's slices exactly; the map-edge rule becomes a mask-edge rule, arriving only where another city is; and the half- and quarter-resolution data layers become world fields rather than per-city arrays, which is a correction, since a neighbour's pollution should drift across a border. The owner id is recomputed only at the frontier when zones or roads change.
+   The box in the original is an array bound, not a rule, and three places it leaks into semantics have answers: the sixteen growth slices become row bands of the mask's bounding box, so a box city gets the original's slices exactly; the map-edge rule becomes a mask-edge rule, arriving only where another city is; and the half- and quarter-resolution data layers become world fields rather than per-city arrays, which is a correction, since a neighbour's pollution should drift across a border. The owner id is recomputed only at the frontier when roads, zones or buildings change.
 
    .. admonition:: Open
       :class: warning
 
-      Whether two cities that meet may coalesce into one economy, as the percolation model says real ones do. The default is to keep them separate and let them trade.
+      Whether two cities that grow into each other also merge into one economy, as the percolation model says real ones do.
+
+Road networks drawn better than their cells
+-------------------------------------------
+
+.. container:: eyebrow
+
+   Decided
+
+.. container:: col
+
+   The renderer draws a road network better than the cells it stands on. A diagonal is drawn as a diagonal, not as a staircase. A highway bends where the original could only turn. A ramp takes its best path. A building near a highway is drawn smaller, or shifted within its cells, so it never blocks a ramp. The simulation's data never changes: only the drawing departs from the cells. How it is drawn is not designed (``plans/network.md``).
 
 Two seats, one action layer
 ---------------------------
@@ -209,7 +223,7 @@ The minimum playable game
 
 .. container:: col
 
-   The first thing to play is the original city size, simulated at the original's speed steps, drawn by the 2.5D renderer with the original sprites, with the terrain switchable to geometry and the water switchable from its sprites to a shader. All four parts exist (:doc:`enhanced-renderer`); what the page above lists as not built is what separates them from a game.
+   The first thing to play is one imported 1995 city, simulated at the original's speed steps. The 2.5D renderer draws it with the original sprites over the dual ground, and the water switches from its sprites to a shader. All of these parts exist (:doc:`enhanced-renderer`). What this page lists as not built separates them from a game.
 
 The interface
 -------------
@@ -222,10 +236,10 @@ The interface
 
    **The canon interface is the original's, and its port has begun.** The game's interface (:doc:`enhanced-renderer`) is the original's tool palette from its own picture, its menus from its own menu resources, and System 7 chrome, with Dear ImGui as the engine underneath and behind a C interface (``src/ui/ui.h``). What remains: the sub-tool menus and the tools themselves, which need the original's placement routines reconstructed; the map, ordinances, industry, neighbours and newspaper windows from their pictures; the shift-click help from ``TEXT`` 1100 onward; and rotation.
 
-  **The original's interface is to be ported from its own resources.** The art is intact in the application's resource fork: the tool palette, status bar, demand bars, newspaper mastheads, budget panels and growth icons are ``PICT`` resources, the thirty tool cursors ``CURS`` resources, the menus ``MENU`` resources, and the shift-click help texts, ``TEXT`` 1100 to 1133, enumerate the toolbar's thirty-four buttons in order. There is no dialog resource: every window is a hand-drawn ``NewCWindow`` over a ``PICT`` with its own hit-testing. The fonts are the system's (Chicago, Geneva, Monaco), not the game's. The decoder for the QuickDraw ``PICT`` opcodes now exists (``tools/pict.py``); the fork reader existed.
+  **The original's interface is to be ported from its own resources.** The art is intact in the application's resource fork: the tool palette, status bar, demand bars, newspaper mastheads, budget panels and growth icons are ``PICT`` resources, the thirty tool cursors ``CURS`` resources, the menus ``MENU`` resources, and the shift-click help texts, ``TEXT`` 1100 to 1133, enumerate the toolbar's thirty-four buttons in order. There is no dialog resource: every window is a hand-drawn ``NewCWindow`` over a ``PICT`` with its own hit-testing. The fonts are the system's (Chicago, Geneva, Monaco), not the game's. ``tools/pict.py`` decodes the QuickDraw ``PICT`` opcodes, and ``tools/rezfork.py`` reads the fork.
 
-Still open
-----------
+Open questions
+--------------
 
 .. container:: eyebrow
 
@@ -234,10 +248,9 @@ Still open
 .. container:: col
 
    - What "more flexibility" in sculpting means on screen: freeform terrain quantised and shown, or a surface that stays continuous on screen while the sim reads the grid.
-   - The chunk size, and at what city size the centrality field replaces the original's single centre.
-   - Weather, named in the goal and not yet discussed.
-   - Sound and music support, named in the goal and not yet discussed.
-   - The original's terrain generator, for the faithful mode's new cities, against a field-based generator for region land.
+   - At what city size the centrality field replaces the original's single centre.
+   - Weather, named in the goal, with no design.
+   - Sound and music support, named in the goal, with no design.
 
 The road system spec, part by part
 ----------------------------------
@@ -248,182 +261,108 @@ The road system spec, part by part
 
 .. container:: col
 
-  The road system specification is the reference for the road renderer (:doc:`appendix-road-spec`). What follows is its feasibility against what the original game and its save format provide, part by part, with what is built so far. The save stores one road family (``XBLD`` ``0x1D`` to ``0x2B``), one highway family, rails and power lines, each with fifteen pieces on a four-neighbour grid; it stores no road class, no one-way flag, no lane count and no true diagonal. Everything the spec keys off the class must therefore be derived, or belong to the enhanced mode's own data.
+  The road system specification (:doc:`appendix-road-spec`) is a real-world reference for classes, dimensions, markings and hardware. It is not the design of the road network: that is ``plans/network.md``, and ``plans/network-status.md`` says what is built. The table below is reference, not the design. It sets out the specification's feasibility against what the original game and its save format provide, part by part. The save stores one road family (``XBLD`` ``0x1D`` to ``0x2B``), one highway family, rails and power lines, each with fifteen pieces on a four-neighbour grid; it stores no road class, no one-way flag, no lane count and no true diagonal. Everything the spec keys off the class must therefore be derived, or belong to the enhanced mode's own data.
 
 .. list-table::
    :header-rows: 1
-   :widths: 18 34 30 18
+   :widths: 20 40 40
 
    * - Spec part
      - What the data and the original give
      - Feasibility
-     - Built so far
    * - 1.1 Road classes
      - No class in the save. One road family, one highway family. Traffic density per half-tile (``XTRF``) and the zoning around a tile are the only signals.
-     - Derive it: LOCAL, COLLECTOR and ARTERIAL by traffic thresholds with hysteresis, HIGHWAY from the highway pieces. ALLEY, FREEWAY, RAMP, ONEWAY and PEDESTRIAN need enhanced-mode fields in the save.
-     - Three classes by traffic, one per segment (the median of its tiles): road, avenue, boulevard.
+     - The street layer: the player's class and direction for each street, per tile edge, in the ``.arco``. An imported city gets it once, from the built population along each street and its traffic, and it never follows the traffic after. HIGHWAY from the highway pieces. ALLEY, FREEWAY and PEDESTRIAN need enhanced-mode fields of their own.
    * - 1.2 Cross-section
      - Nothing in the data beyond the tile.
-     - Every element is an offset of the centreline: feasible in full once the pipeline of 3.10 is in.
-     - Asphalt, curb and sidewalk each side inside the 0.71 band; a planted median between curbs on boulevards; embankment walls where the band stands above the ground.
+     - Every element is a lane of its road, at its class's width: a ``sidewalk`` lane outermost each side, a median, the driving lanes. Feasible in full.
    * - 1.3 Markings
      - None in the data.
      - Longitudinal markings by class and transverse markings at legs are decals on the strip; arrows and stencils are small textured quads.
-     - Dashes, double yellow, lane dashes, crosswalk bars, stop line, at the art's width and never wider than a fixed fraction of the strip.
    * - 3.1 Connectivity and shape
      - Four neighbours, read from each piece's own art. No diagonal connections exist in the data; a diagonal is a staircase of corners.
      - Shape classes fall out of the links. Diagonals come from staircase straightening (3.10 step 4), not from the data.
-     - Links from the art, counted only where the neighbour links back or the map ends; END, STRAIGHT, CORNER, TEE, CROSS; a lone piece as an island; staircases straightened.
    * - 3.2 Roles
      - Nothing in the data.
-     - Segment, intersection, approach and transition are derivable from the links and the class.
-     - Segments walked from node to node; junction tiles; a one-tile approach for crosswalks.
+     - Roads, junctions and lane sections are derivable from the links and the class.
    * - 3.3 Intersection footprint
      - The original's junctions are one tile; the sim places one piece per tile.
      - One-by-one is native. Multi-tile footprints for arterials are a renderer-side union of neighbouring junction tiles, feasible where the player has laid them.
-     - One-by-one.
    * - 3.4 Control selection
      - The art puts a signal at every T and crossing.
      - By class as the spec tables it: stop signs and uncontrolled legs on locals, signals on arterials. Straightforward once classes exist.
-     - By class as the spec tables it: two-way and all-way stops with STOP signs on locals and avenues, signals where a boulevard meets or an avenue junction is busy; the cars obey both.
    * - 3.5 Corner returns
      - Nothing in the data.
-     - Fillet arcs at the box corners by class radius; the sidewalk follows the offset. Feasible now.
-     - Curb returns on a fillet of the sidewalk's width where two arms meet; sidewalk and curb along free sides.
+     - A corner's sidewalk is a connecting road of the junction with one ``sidewalk`` lane, swept at the class radius. Feasible now.
    * - 3.6 Lane assembly
      - Nothing in the data.
-     - Markings only, since the original's traffic model has no lanes: turn pockets and arrows as decals on approach tiles.
-     - Not started.
+     - A turn pocket is a lane gained at a lane section's start, a node of the lane graph; its arrows are markings.
    * - 3.7 Straight segments
      - The tile is the unit; the original restarts its art per tile.
-     - Phase continuity needs arc-length per segment from the nearest stop bar. Furniture placement is one walk per segment.
-     - Arc length per segment from the junction; dashes and crosswalks placed by it; signals, power poles and crossbucks as props.
+     - Phase continuity reads ``s`` along the road. Furniture is placed by its road, ``s`` and ``t``, on the filed sidewalk lane.
    * - 3.8 Right-angle corners
      - One corner piece per tile.
      - The tight fillet is native. The wide sweep consumes the inside tiles, which is an editor rule for the enhanced mode.
-     - Fillet of up to a tile, clamped to the legs; one arc per corner.
    * - 3.9 Diagonals
      - Staircases only.
-     - The 45-degree band is built. The 45-degree merge should be a fillet arc rather than a mitre and fan. Skew and five-way intersections cannot occur from the data.
-     - The 45-degree and 2:1 and 3:1 staircases become lines on the exact midline of their two rows of corners; the band stays 0.71 in every direction (FIT for 1:1, ENCROACH on the shallower stairs); joins to the legs by intersection and fillet; skew intersections cannot occur from the data.
+     - Nothing draws a diagonal: how the network is drawn is not designed. A 45-degree merge is an idea for it: a fillet arc rather than a mitre and fan. Skew and five-way intersections cannot occur from the data.
    * - 3.10 Geometry pipeline
      - Not applicable to the data.
-     - The right architecture, and the one the code is moving to: segments between intersections, straightening, fillets, offsets, arc-length, loft, clip per tile, intersection patches, end caps.
-     - Built: segments between nodes, straightening, fillets, arc-length loft with a station at every tile edge, clipping per tile with each piece's own painter's order, junction boxes with curb returns, end caps on local roads with room. Not built: offsets beyond the band, intersection patch unions.
+     - Not the network's design. ``plans/network.md`` derives the topology and then the road network. How it is drawn is not designed, and it is to be designed in C. Straightening and fillets belong to the drawing.
    * - 3.11 Elevation, bridges, tunnels
      - Slope pieces, bridges and tunnels are pieces in the data.
-     - Slopes are native to the mesh. Bridges and tunnels as geometry are feasible; their sprites are kept until then.
-     - Slopes follow the terrain plane; the profile is capped at a level per tile and rides up over cuts on an embankment; bridges, tunnels and highways keep their sprites and the band runs square onto them.
+     - A slope piece is a top of its own on the dual ground. Nothing draws a road, a bridge or a tunnel as geometry, and their sprites stand in.
    * - 3.12 Transitions and one-way
      - No one-way in the data.
      - Enhanced-mode data only.
-     - Not started.
    * - 3.13 Layer order
      - The sweep's painter order, which the mesh reproduces as depth.
-     - Each layer a small depth bias over the ground, as the strips and props already have.
-     - Ground, strip, sidewalk corner fans, props and signals, each a depth bias over the ground.
+     - Each layer is a pass of one surface, a step nearer the camera than the one under it, and paints only its own pixels (``plans/network.md``, "What the drawing keeps").
    * - 3.14 Validation
      - The sim's placement rules are the original's.
      - Placement rules belong to the enhanced mode's editor, not the renderer.
-     - Not started.
    * - 3.16 Signal operation
      - The art puts a light at every T and crossing; the original has no phases.
      - NEMA rings and barriers, actuation and coordination are a simulation feature; the renderer needs a phase state per movement to draw.
-     - A two-phase twelve-second cycle per junction, on a hash of the tile, which the cars obey.
    * - 3.15 Railway crossings
      - Six crossing pieces in the data, ``0x43`` to ``0x48``: a road under a power line, over a rail, a rail under a power line, each on both axes. No control kind, no angle but square.
-     - The crossing object falls out of the crossing tile. Control by road class as the spec tables it: crossbucks, flashers, gates as props; the RXR stencil and stop line as decals. Skew crossings cannot occur.
-     - The panel surface across both tracks, rails alone through it; gates on every approach with crossbuck, plaque, flashers and striped arm, down with a train within three tiles; stop line, second-train signs, solid approach lines and the X stencil.
+     - A level crossing is a junction of the road network where each network's lanes go straight across, found by the topology, and its road arms yield to the railway. Control by road class as the spec tables it: crossbucks, flashers, gates as props; the RXR stencil and stop line as decals. Skew crossings cannot occur.
    * - 5.1 Rail classes
      - One rail family, one piece layout; no class, no track count, no traffic count for rails in the save.
      - One class for the shipped cities, chosen as the reference look (MAINLINE, one or two tracks); the others need enhanced-mode fields.
-     - One class, a double-track mainline: two tracks 0.38 of a tile apart on one ballast strip, two light rails on ties each.
    * - 5.4 Placement and connectivity
      - The data has T and cross rail pieces and one-tile corners, which the spec forbids; the original built them.
      - Render what the player laid: a T as a turnout, a crossing as a diamond, a one-tile corner as the tightest arc; the placement rules belong to the enhanced mode's editor.
-     - T and cross pieces carry each arm's rails through to the centre; corners on the road's fillet.
    * - 5.5 Curve geometry
      - Staircases and one-tile corners only.
      - Larger fillets than a road's where the legs allow, claiming the inside tiles as the spec's arc does (rail encroaches by default); spirals are a refinement.
-     - The road's fillet, up to a tile.
    * - 5.6 Signalling
      - Nothing in the data.
      - Block signals every eight to twelve tiles, absolute signals at turnouts and diamonds, whistle posts before crossings: props on an arc-length walk, as the road's furniture pass.
-     - Block signals every ten tiles per track on the right of its direction, absolute signals before junctions, whistle posts before crossings; every aspect follows the block's occupancy by the moving trains.
    * - 5.7 Stations and 5.8 yards
      - Rail stations are buildings in the data; no yards.
      - A station's platform beside the track where a rail station building adjoins it; yards need the enhanced mode.
-     - Not started.
    * - 5.9 Rail layer order
      - As 3.13.
-     - Ballast, ties, rails, hardware, signals, wire: depth biases as the road's.
-     - Ballast, ties, rails.
+     - Ballast, ties, rails, hardware, signals, wire: as 3.13.
    * - 5.10 Rail validation
      - The original's placement rules.
      - The enhanced mode's editor.
-     - Not started.
    * - 6 Hardware
      - Nothing in the data; the sprites' props are a few pixels.
      - Every dimension is given in metres; at the road's scale, about seventeen metres to the tile and seven to the level, they are props of the mesh, and the state hooks of 6.7 are lamp codes and box angles.
-     - Crossbuck masts, plaques, flasher bars, gate mechanisms and arms, signal poles and heads, second-train signs, whistle posts and block signals at part 6's metres; the base junction box at every mast; the tracks at 6.1's gauge, spacing and tie pitch. No bells, bungalows, cabinets, street lights or furniture yet.
    * - Traffic
      - The original places a car sprite on a tile whose traffic passes a threshold; cars do not move.
-     - Cars as small meshes in the right-hand lane, moving along the strip and holding at red, in a per-frame buffer; the same threshold keeps the original's density.
-     - Cars move on the lofted network in the lanes their class draws, hold at red and behind the car ahead, turn at junctions and dead ends, seeded by the original's density; trains run the rail network as coupled chains behind their engine, straightest arm at turnouts; crossing gates follow them; every vehicle pitches with the grade.
+     - Cars as small meshes on the filed lanes, following lane links at the nodes and holding at red, in a per-frame buffer; the same threshold keeps the original's density.
 
-Lanes as primitives
--------------------
 
-.. container:: eyebrow
-
-   Decided
+The road network and the street layer
+-------------------------------------
 
 .. container:: col
 
-   Every road segment carries lanes: a lane is a directed polyline of
-   stations (position, heading, height, width) with a class -- road,
-   deck, ramp, rail track -- and an end that names what it joins. A
-   road derives two from its fitted centreline, a deck three each way
-   with the median as the divider between them, a rail line its two
-   tracks. The primitive on top of them is a **router**: given the end
-   of one lane and the end of another, fit the lane between them at the
-   class's turning radius, inside the corridor, under the grade cap.
-   Everything that is today a hand-built strip with its own bugs is
-   that one routing task: a highway's outer lane down to a road (the
-   ramp), a branch track into a through line, a two-lane road meeting a
-   four-lane one, and the turns inside an intersection.
-
-   The renderer gets it right first; traffic comes last. The order:
-
-   1. **Intersections.** Every segment's lanes end at the junction's
-      ports; the router fits a connector from each inbound lane to each
-      outbound lane of the other arms; the box takes its corners from
-      the outer edge of the turning lanes. A lane dump per tile and a
-      check that every port has its connectors, every connector holds
-      its radius and stays inside the box, and every arm's lane pose
-      matches its connector's end.
-   2. **Ramps**, routed from the deck's outer lane at the gore to the
-      road's lane at the ramp tile, replacing the drifted strip. The
-      acceptance case is a lane peeling off the deck's edge, running
-      beside it, and landing on the road's side. The look is judged by
-      eye.
-   3. **Rail**: the branch into the through track, crossovers.
-   4. **Lane counts** that differ between segments: matched lanes route
-      straight, the unmatched ones taper into their neighbour.
-   5. **Traffic**, last: a car is on one lane at one distance along it,
-      and at the lane's end does what the end's kind says -- continue,
-      pick at a split, yield at a merge, turn at a dead end.
-
-.. container:: eyebrow
-
-   Open
-
-.. container:: col
-
-   The turning radius a single lane may take, against the carriageway's;
-   whether the carriageway fit itself becomes one wide routed lane;
-   how a car picks at a split once there is a trip model (a fair random
-   pick until then); whether the through lane makes room at a merge.
+   The road network, its lanes and the street layer are designed in
+   ``plans/network.md``.
 
 Part 7, the raised highways: what the save file gives us
 --------------------------------------------------------
@@ -435,7 +374,8 @@ Part 7, the raised highways: what the save file gives us
    is which. This is that bridge, and it is read off the shipped cities
    rather than off the sprite sheet — a sprite says what a tile looks
    like, its neighbours say what it *is*. ``tools/highway_map.py``
-   regenerates the whole table.
+   regenerates the whole table. This section is reference: the save
+   file's facts, not the network's design (``plans/network.md``).
 
 **The spec's 2×2 premise holds.** Across the 101 cities there are 3547
 squares of four adjacent highway tiles, and a straight run is a solid
@@ -484,10 +424,8 @@ never are.
      - **Bridges** — the road and rail spans over water, single-width
        runs (the deck ``0x57``, the lift span ``0x58``, the raised span
        ``0x59``, with ``0x5A``/``0x5B`` over rail and ``0x5C`` under a
-       power line).  An earlier version of this table read them as ramp
-       runs; a plan view of Hilton's "ramp-densest" window turned out to
-       be its suspension bridge and a causeway.  They are not highway
-       tiles at all, and stay the sprites the bridge code draws.
+       power line).  They are bridges, not highway tiles, and stay the
+       sprites the bridge code draws.
    * - ``0x5D``–``0x60``
      - 1642
      - 17–19 of ~400
@@ -496,9 +434,8 @@ never are.
        beside a surface road, on two adjacent sides — exactly 7.3's
        "one 1×1 tile adjacent to a deck edge, connected to a surface
        road".  In the shipped cities they flank each road that crosses
-       under a deck, one on either side.  The renderer draws each as the
-       quarter circle between its two edges, climbing from the road to
-       the deck.
+       under a deck, one on either side.  Layer 0 reads each as a ramp
+       piece that joins its two edges.
    * - ``0x61``–``0x64``
      - 508
      - 20 cities
@@ -510,9 +447,10 @@ never are.
      - 25 cities
      - 2×2, between two bands at right angles
      - **Curve blocks**, one id per quadrant: the corner a band turns
-       through into another.  The walk arrives through one from the
-       band before it and leaves along the band after; its four tiles
-       are covered by the arc, less what the arc cuts inside.
+       through into another.  A curve block is a unit of a band's road:
+       the road arrives through it from the band before it and leaves
+       along the band after; its four tiles are covered by the arc, less
+       what the arc cuts inside.
    * - ``0x69``
      - 284
      - 20 cities
@@ -520,7 +458,8 @@ never are.
      - **The interchange**: where two decks cross (Toronto 4,40).  Deck
        family, not a building — its sprite, the cloverleaf, measures 2.4
        levels, and read as a structure it lifted every deck through it.
-       Nothing builds it yet; the bands end at it and its sprite draws.
+       The road network builds it as a ``default`` junction of the
+       band, its movements connecting roads.
 
 Two consequences for the implementation.
 
@@ -532,9 +471,8 @@ across, which is why every deck id reports a three-neighbour mask.
 
 **The crossings are the deck, not the thing underneath.** ``0x4D`` is a
 deck tile in an east–west band with a north–south railway beneath it,
-which is why the renderer's ``piece_family`` must answer *rail,
-north–south* for it: the rail is what the mesh has to draw through the
-tile, and the highway above is drawn by the highway family. The same
+which is why layer 0 (``src/sim/net_cell.c``) reads two parts from it:
+the band, and the rail that runs on under it. The same
 holds for ``0x4B``/``0x4C`` over road and ``0x4F``/``0x50`` over power.
 
 **What is not in the data at all.** The save file has no elevation for a
@@ -548,14 +486,19 @@ forms computed the first time it is drawn.
 
 .. _fit-safe-corridor:
 
-The corridor fit by safe-corridor optimization
-----------------------------------------------
+An idea for the shape: safe-corridor optimization
+--------------------------------------------------
 
-The fit in the tree decides curvature locally and after the fact. Each
-corner asks for the widest arc that fits between its two edges, and a
-corner with no legal arc is drawn hard. Several symptoms follow from
-that one choice. Nodes can lie too close to sweep. A radius floor rises
-with the band, which leaves a corner with no legal arc at all.
+.. container:: eyebrow
+
+   Open
+
+How the road network is drawn is not designed. It is to be designed in
+C, and this is an idea for it, not a decision. A fit that
+decides curvature locally and after the fact asks, at each corner, for
+the widest arc that fits between its two edges. A corner with no legal
+arc is then drawn hard. Nodes can lie too close to sweep, and a radius
+floor that rises with the band leaves a corner with no legal arc at all.
 
 The standard method solves it a different way. Put the path in a basis
 whose CONTROL POINTS bound the curve, by the convex hull property of a
@@ -591,8 +534,6 @@ solver, no global system and no per-corner search.
 
 .. note::
 
-   A fit whose pieces are dense samples has no fillets. Two things in the
-   tree read piece boundaries and would have to change with it: the curve
-   overlay marks a vertex per boundary, and a tangent read from a piece a
-   few hundredths of a tile long points wherever that fragment happens
-   to. Both are noted where they stand.
+   A fit whose pieces are dense samples has no fillets. A reader of piece
+   boundaries must allow for that. A tangent read from a piece a few
+   hundredths of a tile long points wherever that fragment happens to.

@@ -57,7 +57,11 @@ typedef struct RSound RSound;
 RSound *sound_create(const char *assets_dir);
 void    sound_destroy(RSound *s);
 void    sound_play(RSound *s, int id);
-int     sound_loaded(const RSound *s);
+/*  A sound played again and again until sound_stop stops it, as the
+ *  original's tools ask for one while the button is held. */
+void sound_loop(RSound *s, int id);
+void sound_stop(RSound *s, int id);
+int  sound_loaded(const RSound *s);
 /*  The device the effects play on, for the music to share. */
 SDL_AudioDeviceID sound_device(const RSound *s);
 

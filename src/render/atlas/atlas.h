@@ -17,7 +17,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define R_MAX_LEVELS 3   /* the 8, 16 and 32 pixel art sets           */
+#define R_MAX_LEVELS 3    /* the 8, 16 and 32 pixel art sets           */
 #define R_MAX_SHAPE  1500 /* SHAP ids run 1..1499                     */
 
 /*  One tile's place in its atlas.  `ax`/`ay` are the blit origin
@@ -38,20 +38,20 @@ typedef struct
 
 typedef struct
 {
-    int32_t zoom;     /* 8, 16 or 32: the tile width in pixels     */
-    int32_t id_base;  /* 0, 500 or 1000                            */
-    int32_t tile_w;   /* ground diamond width                      */
-    int32_t tile_h;   /* ground diamond height, always tile_w / 2  */
-    int32_t alt_step; /* pixels per altitude level at this zoom    */
+    int32_t zoom;        /* 8, 16 or 32: the tile width in pixels     */
+    int32_t id_base;     /* 0, 500 or 1000                            */
+    int32_t tile_w;      /* ground diamond width                      */
+    int32_t tile_h;      /* ground diamond height, always tile_w / 2  */
+    int32_t alt_step;    /* pixels per altitude level at this zoom    */
     int32_t transparent; /* the reserved palette index             */
 
-    int32_t  w, h;     /* atlas dimensions                          */
-    uint8_t *indices;  /* w*h palette indices.  Kept for re-resolve  */
-    uint8_t *rgba;     /* w*h*4, premultiplied, ready for upload    */
+    int32_t  w, h;    /* atlas dimensions                          */
+    uint8_t *indices; /* w*h palette indices.  Kept for re-resolve  */
+    uint8_t *rgba;    /* w*h*4, premultiplied, ready for upload    */
 
-    RTile   *tiles;
-    int32_t  n_tiles;
-    int32_t  by_id[R_MAX_SHAPE]; /* SHAP id -> index into tiles, or -1 */
+    RTile  *tiles;
+    int32_t n_tiles;
+    int32_t by_id[R_MAX_SHAPE]; /* SHAP id -> index into tiles, or -1 */
 } RAtlasLevel;
 
 /*  A run of palette entries the game cycles with _AnimatePalette.  The
@@ -68,8 +68,8 @@ typedef struct RAtlas
 {
     RAtlasLevel level[R_MAX_LEVELS]; /* ordered 8, 16, 32            */
     int32_t     n_levels;
-    uint8_t     palette[256][4];     /* RGBA.  The reserved index is 0 alpha */
-    uint8_t     palette0[256][4];    /* phase 0, so phases compose from it */
+    uint8_t     palette[256][4];  /* RGBA.  The reserved index is 0 alpha */
+    uint8_t     palette0[256][4]; /* phase 0, so phases compose from it */
     RAnim       anim[4];
     int32_t     n_anim;
     char        err[256];
@@ -99,12 +99,5 @@ void atlas_animate(RAtlas *a, int32_t phase);
  *  palette on the GPU).  atlas_resolve brings rgba back in step if
  *  needed. */
 void atlas_animate_runs(RAtlas *a, int32_t steps_a, int32_t steps_b);
-
-/*  Re-resolve `indices` into `rgba` through the current palette.  Cheap
- *  enough per frame for the handful of palette-cycled tiles, which is how
- *  water shimmer and a day and night tint come for free. */
-void atlas_resolve(RAtlas *a, RAtlasLevel *l);
-void atlas_resolve_rect(RAtlas *a, RAtlasLevel *l, int32_t x, int32_t y,
-                          int32_t w, int32_t h);
 
 #endif /* R_ATLAS_H */

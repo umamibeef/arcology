@@ -7,10 +7,12 @@
 #  reproducible from your own copy of the game with a documented command.
 # ---------------------------------------------------------------------
 
-# Build trees.  The project builds from the root into build/.
+# Build trees.  The project builds from the root into build/, and a
+#  tree of another kind (a sanitizer, a release) into build-<kind>/.
+#  Anchored to the root: scripts/build/ is source.
 /build/
-build/
-cmake-build-*/
+/build-*/
+/cmake-build-*/
 
 # Sphinx output.
 docs/_build/
@@ -21,6 +23,7 @@ docs/_build/
 /assets/tiles*.png
 /assets/tiles*.json
 /assets/atlas.json
+/assets/split*/
 /assets/ui.png
 /assets/ui.json
 /assets/sounds/
@@ -56,10 +59,8 @@ docs/_build/
 #  they were assembled from are not.
 media/.frames/
 
-#  The assistant's own directory.  .claude/CLAUDE.md is the fullest
-#  technical record the project has, but it is written AS INSTRUCTIONS
-#  to an assistant -- working notes, quoted conversation, dead ends --
-#  and that is not project documentation.  docs/ is.
+#  The assistant's own directory: its settings and its worktrees.  The
+#  house rules are CLAUDE.md at the root.
 /.claude/
 
 # ---- the usual -------------------------------------------------------
@@ -69,6 +70,12 @@ __pycache__/
 .DS_Store
 *.swp
 *~
+*.o
+*.a
+*.log
+*.tmp
+*.orig
+*.rej
 compile_commands.json
 .cache/
 assets/music/

@@ -19,16 +19,13 @@
 #include <string>
 #include <vector>
 
-#define JSMN_STATIC
 extern "C" {
-#include "internal.h"
 #include "arc_version.h"
+#include "internal.h"
 #include "log.h"
-#include "mesh/mesh.h"
 #include "opt.h"
 #include "options.h"
 #include "soft/soft.h"
-#include "net/net.h"
 }
 #ifndef _WIN32
     #include <sys/utsname.h>
@@ -64,7 +61,6 @@ struct DevValue
 {
     const char  *name;
     const char **val;
-    int         *set; /* when the value is optional: given at all */
     const char  *help;
     const char  *text;
 };
@@ -80,79 +76,60 @@ struct Plain : CLI::Formatter
 };
 
 const DevFlag FLAGS[] = {
-    {"curve-dump",  &g_dev.curve_dump,  "every corner: where, how far it turns, its radius"                            },
-    {"junc-dump",   &g_dev.junc_dump,   "every junction: its arms, their trims, its outline"                           },
-    {"buried-all",  &g_dev.buried_all,  "the mesh check lists every margin with its own piece under it"               },
-    {"margin-dump", &g_dev.margin_dump, "every margin end that meets nothing"},
-    {"path-dump",   &g_dev.path_dump,   "the fit stage by stage, for tools/plan.py"                                    },
-    {"plan-dump",   &g_dev.plan_dump,   "the fit stage by stage, for tools/plan.py"                                    },
-    {"prof-dump",   &g_dev.prof_dump,   "the finished profile of every segment"                                        },
-    {"loft-dump",   &g_dev.loft_dump,   "the loft's stations"                                                          },
-    {"band-dump",  &g_dev.band_dump,  "the bands and their spurs"                                            },
-    {"clip-dump",   &g_dev.clip_dump,   "the road clip check's samples, tile by tile"                                  },
-    {"input-log",   &g_dev.input_log,   "every mouse and touch event as it arrives, to see what the threadpad sends"     },
-    {"inspect",     &g_dev.inspect,     "the inspector on from the start: the mesh under the pointer outlined, named and reported" },
-    {"noscale",     &g_dev.noscale,     "the node approach unscaled by the road's width"                               },
-    {"no-sort",     &g_dev.no_sort,     "draw in the sweep's order, to show what it costs"                             },
-    {"no-shadow",   &g_dev.no_shadow,   "no shadow pass"                                                               },
-    {"no-cap",      &g_dev.no_cap,      "no corridor grading: one pass, the roads over the raw ground"                 },
-    {"no-replay",   &g_dev.no_replay,   "the building pass walks and fits again instead of replaying the segment table"},
-    {"no-incr",     &g_dev.no_incr,     "every build a full one, never the edit's chunks alone"                          },
-    {"no-smp-cache", &g_dev.no_smp_cache, "every loft samples its stations afresh, none from the segment table"             },
-    {"grade-loft",  &g_dev.grade_loft,  "the grading pass runs the loft's record and slab too, as it once did"            },
-    {"gpu-tight",   &g_dev.gpu_tight,   "the mesh's GPU slots with no room to grow, laid out afresh at every upload"      },
-    {"show-edits",  &g_dev.show_edits,  "an edit's pieces go and come even with no window, so a --shot can catch them"    },
-    {"async-build", &g_dev.async_build, "a build the frame asks for runs on its own thread even with no window, as the live one's does"},
-    {"grade-all",   &g_dev.grade_all,   "the grading pass builds everything, boxes, lanes and all"                     },
-    {"grade-junc",  &g_dev.grade_junc,  "the grading pass builds the junction boxes"                                   },
-    {"grade-lanes", &g_dev.grade_lanes, "the grading pass builds the lanes"                                            },
-    {"spike-check", &g_dev.spike_check, "the terrain spike check"                                                      },
-    {"check-open",  &g_dev.check_open,  "--check with the camera off the snap"                                         },
-    {"times",       &g_dev.times,       "where a build's time goes, phase by phase"                                    },
-    {"tunewin",     &g_dev.tunewin,     "open the road tuning window"                                                  },
-    {"scriptwin",   &g_dev.scriptwin,   "open the script console"                                                      },
-    {"mute",        &g_dev.mute,        "no sound and no music: for runs under test"                                   },
-    {"gpu-debug",   &g_dev.gpu_debug,   "the device's validation layer"                                                },
-    {"meet-debug",  &g_dev.lap_debug,  "the level meets, verbosely"                                               },
-    {"box-debug",   &g_dev.box_debug,   "the traffic's boxes, verbosely"                                               },
+    {"net-dump",    &g_dev.net_dump,    "the road network's topology: every end and every road, by place"                                                },
+    {"net-check",   &g_dev.net_check,   "build the road network from the cells and check that every lane goes on and is fed, then stop: nothing is drawn"},
+    {"input-log",   &g_dev.input_log,   "every mouse and touch event as it arrives, to see what the threadpad sends"                                     },
+    {"inspect",     &g_dev.inspect,     "the inspector on from the start: the mesh under the pointer outlined, named and reported"                       },
+    {"gpu-tight",   &g_dev.gpu_tight,   "the mesh's GPU slots with no room to grow, laid out afresh at every upload"                                     },
+    {"show-edits",  &g_dev.show_edits,  "an edit's pieces go and come even with no window, so a --shot can catch them"                                   },
+    {"async-build", &g_dev.async_build, "a build the frame asks for runs on its own thread even with no window, as the live one's does"                  },
+    {"tri-colors",  &g_dev.tri_colors,  "each triangle of the mesh in a color of its own, to see how it is cut (Cmd-Shift-W)"                            },
+    {"whole-build", &g_dev.whole_build, "the live window builds the whole world at once, not a block at a time nearest the camera first"                 },
+    {"spike-check", &g_dev.spike_check, "with --mesh-check: also fail on a ground face that spans over a level or is wider than a tile"                  },
+    {"check-open",  &g_dev.check_open,  "with --mesh-check: check the plain build, whose two uncut map edges are open, to test the checker itself"       },
+    {"times",       &g_dev.times,       "where a build's time goes, phase by phase"                                                                      },
+    {"mute",        &g_dev.mute,        "no sound and no music"                                                                                          },
+    {"gpu-counts",  &g_dev.gpu_counts,  "each frame's count of sprites and mesh triangles drawn, in the debug log (with -v)"                             },
 };
 const DevValue VALUES[] = {
-    {"rule-seconds",&g_dev.rule_seconds, nullptr,          "the runaway guard's budget in seconds, for chasing a rule that never finishes", "N"},
-    {"tune",        &g_dev.tune,         nullptr,          "the knobs the tuning window shows, by name",                                                                            "NAME=VALUE,NAME=VALUE"},
-    {"lua",         &g_dev.lua,          nullptr,          "the script the rules and the knobs are read from, watched and read again when it changes",      "FILE"                                                                     },
-    {"lua-eval",    &g_dev.lua_eval,     nullptr,          "run one chunk of script once the world is built, and print what it answers",                    "SRC"                                                                      },
-    {"win",         &g_dev.win,          nullptr,          "render at a larger framebuffer",                                                       "WxH"                                                                              },
-    {"cities",      &g_dev.cities,       nullptr,          "where the saves are",                                                                  "DIR"                                                                              },
-    {"traffic-t",   &g_dev.traffic_t,    nullptr,          "advance the traffic before a headless frame",                                          "SECONDS"                                                                          },
-    {"edit",        &g_dev.edit,         nullptr,          "build, demolish these tiles, and build again: the incremental rebuild's test",       "C,R[;C,R...]"                                                                     },
-    {"gesture",     &g_dev.gesture,      nullptr,          "build, work the player's tools as the mouse would, and build again. FLAGS 1 Command, 2 underground. A bar builds between two", "TOOL,SUB[,FLAGS]:C,R/C,R[;...][|...]"                                       },
-    {"turn",        &g_dev.turn,         nullptr,          "with --shot: a quarter turn frame by frame at 60 Hz, N frames, each to the shot's name numbered", "N"                                                                    },
-    {"area",        &g_dev.area,         nullptr,          "the debug report of an area, to the dump sink; the map view's Shift-drag makes the same", "C0,R0-C1,R1"},
-    {"seed",        &g_dev.seed,         nullptr,          "seed the generator with N instead of the clock, so two runs draw the same traffic",  "N"                                                                                },
-    {"sweep-probe", &g_dev.sweep_probe,  nullptr,          "the fit's probe at one node",                                                          "X,Y"                                                                              },
-    {"mesh-dump",   &g_dev.mesh_dump,    nullptr,          "every face of one tile",                                                               "R,C"                                                                              },
-    {"tile-dump",   &g_dev.tile_dump,    nullptr,          "every face whose centroid lies on a tile, or 'all' for the whole mesh by tile",        "C,R"                                                                              },
-    {"dump-to", &g_dev.dump_to, nullptr, "write every --x-dump to FILE instead of stdout ('-' is stdout)", "FILE"},
-    {"field-dump",  &g_dev.field_dump,   nullptr,          "the terrain field, to a file",                                                         "FILE"                                                                             },
-    {"show-at",     &g_dev.show_at,      nullptr,          "with --show-edits: an edit's pieces as they stand this long after it, for a --shot",   "SECONDS"                                                                          },
-    {"line-dump",   &g_dev.line_dump_at, &g_dev.line_dump, "the fitted points of every segment, or of one tile's",                                 "[C,R]"                                                                            },
-    {"lane-dump",   &g_dev.lane_dump_at, &g_dev.lane_dump, "a junction's ports, connectors and lanes; bare, the misses and tight turns city-wide", "[C,R]"                                                                            },
-    {"probe",       &g_dev.probe,        nullptr,          "every surface over one point of the map, highest first",                               "X,Y"                                                                              },
-    {"gpu-dump",    &g_dev.gpu_dump_at,  &g_dev.gpu_dump,  "a tile's instances on the device",                                                     "[R,C]"                                                                            },
+    {"limits-glow",   &g_dev.limits_glow,   "the city's limits: the clock writes only within N tiles of what is zoned or built",                                                                                                                                                                     "N"                                   },
+    {"save-to",       &g_dev.save_to,       "once the run is done, the world saved as the Save menu saves it, to a path that ends .arco",                                                                                                                                                            "FILE"                                },
+    {"tune",          &g_dev.tune,          "the knobs the tuning window shows, by name",                                                                                                                                                                                                            "NAME=VALUE,NAME=VALUE"               },
+    {"win",           &g_dev.win,           "the window's size in pixels",                                                                                                                                                                                                                           "WxH"                                 },
+    {"cities",        &g_dev.cities,        "the directory the city files are loaded from",                                                                                                                                                                                                          "DIR"                                 },
+    {"edit",          &g_dev.edit,          "build, demolish these tiles, and build again: the incremental rebuild's test",                                                                                                                                                                          "C,R[;C,R...]"                        },
+    {"gesture",       &g_dev.gesture,       "build, work the player's tools as the mouse would, and build again. FLAGS 1 Command, 2 underground. A bar builds between two",                                                                                                                          "TOOL,SUB[,FLAGS]:C,R/C,R[;...][|...]"},
+    {"record",        &g_dev.record,        "with --shot: N frames at 60 Hz, each to the shot's name numbered.  turn turns the view a quarter, zoom eases it out to half and back, still holds the camera while the land settles and a build comes in",                                              "turn:N|zoom:N|still:N"               },
+    {"work-outside",  &g_dev.work_window,   "with --times and --edit: work further than N tiles from the edited tiles is counted apart, and each unit of it listed.  Without it the count is of work further than 3",                                                                                "N"                                   },
+    {"area",          &g_dev.area,          "the debug report of an area, to the dump sink; the map view's Shift-drag makes the same",                                                                                                                                                               "C0,R0-C1,R1"                         },
+    {"map-tile",      &g_dev.map_tile,      "the renderer draws the city K x K times over, side by side: a map K times as wide, for measuring",                                                                                                                                                      "K"                                   },
+    {"seed",          &g_dev.seed,          "seed the generator with N instead of the clock, so two runs play the same",                                                                                                                                                                             "N"                                   },
+    {"mesh-dump",     &g_dev.mesh_dump,     "every face of one tile, as the build lays it",                                                                                                                                                                                                          "C,R"                                 },
+    {"tile-dump",     &g_dev.tile_dump,     "every face whose centroid lies on a tile, or 'all' for the whole mesh by tile",                                                                                                                                                                         "C,R"                                 },
+    {"dump-to",       &g_dev.dump_to,       "write every --x-dump to FILE instead of stdout ('-' is stdout)",                                                                                                                                                                                        "FILE"                                },
+    {"field-dump",    &g_dev.field_dump,    "the terrain field, to a file",                                                                                                                                                                                                                          "FILE"                                },
+    {"open-menu",     &g_dev.open_menu,     "with --shot: a menu open from the first frame, by its title, tool:N for the palette's sub-tool menu of tool N, tip:N for its tooltip, or window:NAME for a window or dialog (load, save, city, budget, graphs, query, tuning, shading, renderer, log)", "NAME"                                },
+    {"show-at",       &g_dev.show_at,       "with --show-edits: an edit's pieces as they stand this long after it, for a --shot",                                                                                                                                                                    "SECONDS"                             },
+    {"build-window",  &g_dev.build_window,  "a build lays only the chunks the tiles C0,R0 to C1,R1 lie in and reads the map only so far round them.  Each further window is built after it into the mesh standing",                                                                                  "C0,R0,C1,R1[;...]"                   },
+    {"net-svg",       &g_dev.net_svg,       "the road network as a diagram, written to FILE.  It runs the network check (--net-check)",                                                                                                                                                              "FILE"                                },
+    {"net-svg-box",   &g_dev.net_svg_box,   "with --net-svg: the diagram of the tiles from C0,R0 to C1,R1 alone, drawn larger",                                                                                                                                                                      "C0,R0,C1,R1"                         },
+    {"shape-profile", &g_dev.shape_profile, "street and deck profiles read from FILE, each line 'street' or 'deck' and its samples s,h, through the road shape's own solves",                                                                                                                        "FILE"                                },
+    {"probe",         &g_dev.probe,         "every surface over one point of the map, highest first",                                                                                                                                                                                                "X,Y"                                 },
+    {"gpu-dump",      &g_dev.gpu_dump_at,   "a tile's instances on the device",                                                                                                                                                                                                                      "C,R"                                 },
 };
 } // namespace
 
 extern "C" int parse_options(Startup *o, App *a, int argc, char **argv)
 {
-    std::string              pos1, pos2, assets, check_s, shot_s, theme, scroll, centre, pick, angle_s, pitch_s;
-    std::vector<std::string> song;
-    bool                     no_markings = false, no_furniture = false, no_margins = false; /* CLI11 zeroes an int it binds a flag to, and a negated flag on an int counts backwards: bools, then the fields */
+    std::string              pos1, pos2, assets, look, check_s, shot_s, theme, scroll, centre, pick, mark, angle_s, pitch_s, trees_s;
+    std::vector<std::string> song, disable;
     std::vector<std::string> dev_vals(sizeof VALUES / sizeof VALUES[0]);
     int                      ww = 1280, wh = 800;
-    static std::string       hold_check, hold_shot, hold_theme, hold_song[2];
+    static std::string       hold_check, hold_shot, hold_theme, hold_trees, hold_song[2];
 
     memset(a, 0, sizeof *a);
     memset(o, 0, sizeof *o);
+    o->hour = -1.0f; /* the store's own hour, or the saved one */
     memset(&g_dev, 0, sizeof g_dev);
     soft_defaults(&a->opts);
     a->gv.pivot_c = a->gv.pivot_r = 64.0f; /* until the view turns: the map's center */
@@ -176,32 +153,27 @@ extern "C" int parse_options(Startup *o, App *a, int argc, char **argv)
      *  --assets DIR overrides the search, as does --cities. */
     app.add_option("city", pos1, "a city, by name from the cities directory or by path (or the assets directory, with the city after it)");
     app.add_option("second", pos2, "the city, when the first argument was the assets directory")->group("");
-    app.add_option("--assets", assets, "where the art is")->option_text("DIR");
-    app.add_option(ARC_SWITCHES[ARC_SW_ZOOM].name, a->opts.zoom, "8, 16 or 32")->option_text("N");
+    app.add_option("--assets", assets, "the directory the art is imported into (assets/)")->option_text("DIR");
     app.add_option(ARC_SWITCHES[ARC_SW_SCALE].name, o->pixel_scale, "the pixel scale, 1 or 2; auto when not given")->option_text("N");
-    app.add_flag("--sprites", o->sprites, "the original's terrain and water art");
-    app.add_flag("--geometry", o->want_geometry, "the terrain mesh and water shader, even in a headless --run");
-    app.add_flag("--terrain3d,--water3d,--roads3d", a->gv.geometry, "the same switch, by its older names");
-    app.add_flag("--mesh-only", a->gv.mesh_only, "the mesh alone, no sprites");
-    app.add_flag("--mesh-check", o->want_mesh_check, "build the terrain and prove it has no free edge; then the road and lane checks");
+    app.add_option("--look", look, "how the world is drawn: sprites, the original's terrain and water art; geometry, the mesh and the art standing on it; or mesh, the mesh alone.  Every run draws geometry but --compare-renderers, which draws sprites")->check(CLI::IsMember({"sprites", "geometry", "mesh"}))->option_text("sprites|geometry|mesh");
+    app.add_flag("--mesh-check", o->want_mesh_check, "build the world and prove it has no free edge; then the overlap and collision checks");
     app.add_flag("--grid", a->gv.grid, "the sprites' grid outline on the mesh");
     app.add_flag("--cells", a->us.show_cells, "every cell's col,row at its bottom-right corner, in the map view");
-    app.add_flag("--no-markings", no_markings, "no road markings: blank asphalt, the marking pass off");
-    app.add_flag("--no-furniture", no_furniture, "no street furniture: lamps, signs, signals, gates, the furniture pass off");
-    app.add_flag("--no-margins", no_margins, "no margins: the carriageway alone, the margin pass off");
-    app.add_flag("--outline", o->outline, "outline: the roads stand aside and the fitted curves and the margin network are drawn on bare ground");
+    app.add_flag("--outline", o->outline, "the road network's lane graph drawn over the bare ground");
     app.add_flag(std::string("!") + ARC_SWITCHES[ARC_SW_NO_THINGS].name, a->opts.draw_things, "no things: the sprites of what stands on the tiles");
     app.add_flag(ARC_SWITCHES[ARC_SW_UNDERGROUND].name, a->opts.underground, "the underground view");
-    app.add_option("--centre,--center", centre, "put map tile (col,row) in the middle")->option_text("C,R");
+    app.add_option("--center,--centre", centre, "put map tile (col,row) in the middle")->option_text("C,R");
     app.add_option("--scroll", scroll, "the canvas pixel at the top-left")->option_text("X,Y");
     app.add_option("--pick", pick, "what the query tool reads at a window point")->option_text("X,Y");
+    app.add_option("--mark", mark, "map tiles marked as the pointer marks them, for a --shot")->option_text("C,R[,C,R]");
     app.add_flag("--plan", a->plan, "the map view: the camera straight down, north up");
     app.add_option("--pitch", pitch_s, "the camera anywhere between 30 and 90")->option_text("DEG");
-    app.add_option("--angle", angle_s, "turn the camera about the view's centre")->option_text("DEG");
-    app.add_option("--zoomf", o->zoomf, "continuous zoom, 1 = the 32 px set at 1:1")->option_text("F");
-    app.add_option("--rotate", o->rotate_turns, "the city turned N quarters clockwise on load (the original's map rewrite; for tests)")->option_text("N");
+    app.add_option("--angle", angle_s, "turn the camera about the view's center")->option_text("DEG");
+    app.add_option("--hour", o->hour, "the time of day for this run, 0 to 24, as View > Time of day sets it")->check(CLI::Range(0.0f, 24.0f))->option_text("H");
+    app.add_option("--trees", trees_s, "the trees' biome for this run, by its name in View > Trees")->option_text("BIOME");
+    app.add_option("--zoom", o->zoomf, "how near the camera is: 1 draws the art at its own size, 2 twice as near, 0.5 half")->option_text("F");
     app.add_option("--shot", shot_s, "render one frame to a PNG and exit")->option_text("FILE");
-    app.add_option("--check", check_s, "compare the software and GPU renderers, writing FILE")->option_text("FILE");
+    app.add_option("--compare-renderers", check_s, "draw one frame with the software and the GPU renderers, count the pixels that agree, and write the two side by side to FILE")->option_text("FILE");
     app.add_option("--run", o->run_frames, "advance N frames headless")->option_text("N");
     app.add_option("--speed", o->run_speed, "the speed for --run, 1 paused to 5")->option_text("N");
     app.add_option("--theme", theme, "a Kaleidoscope scheme: a pack under assets/themes, a path, or none; the default is classic7")->option_text("NAME");
@@ -211,15 +183,39 @@ extern "C" int parse_options(Startup *o, App *a, int argc, char **argv)
         static int verbose, no_colour;
         verbose = no_colour = 0;
         app.add_flag("-v,--verbose", verbose, "debug logging");
-        app.add_flag("--no-colour,--no-color", no_colour, "no colour in the log");
+        app.add_flag("--no-color,--no-colour", no_colour, "no color in the log");
         for (const DevFlag &f : FLAGS)
             app.add_flag(std::string("--") + f.name, *f.set, f.help)->group("Developer switches");
+        /*  Parts of the drawing or the build turned off for one run, to see
+         *  what each costs or to rule it out. */
+        static const struct
+        {
+            const char *name;
+            int        *off;
+        } PARTS[] = {
+            {"sort",        &g_dev.no_sort  }, /* the sprites in the sweep's order */
+            {"shadows",     &g_dev.no_shadow}, /* the silhouettes under flying things */
+            {"clouds",      &g_dev.no_sky   }, /* the clouds over the mesh */
+            {"incremental", &g_dev.no_incr  }, /* every build a whole one */
+            {"lod",         &g_dev.no_lod   }, /* the mesh whole at every zoom */
+            {"air",         &g_dev.no_air   }, /* the air's haze, smog and scattered light */
+        };
+        std::vector<std::string> part_names;
+        for (const auto &q : PARTS)
+            part_names.push_back(q.name);
+        app.add_option("--disable", disable, "turn parts off for one run: sort (the sprites drawn in the sweep's order), shadows (the silhouettes under flying things), clouds, incremental (every build a whole one), lod (the mesh whole at every zoom), air")
+            ->delimiter(',')
+            ->check(CLI::IsMember(part_names))
+            ->option_text("PART,PART")
+            ->group("Developer switches");
         for (size_t k = 0; k < sizeof VALUES / sizeof VALUES[0]; ++k)
         {
-            auto *opt = app.add_option(std::string("--") + VALUES[k].name, dev_vals[k], VALUES[k].help)->option_text(VALUES[k].text)->group("Developer switches");
-            if (VALUES[k].set)
-                opt->expected(0, 1);
+            app.add_option(std::string("--") + VALUES[k].name, dev_vals[k], VALUES[k].help)->option_text(VALUES[k].text)->group("Developer switches");
         }
+        /*  The window's size, where the cities are, and the sound are the
+         *  player's, so they are listed with the game's own options. */
+        for (const char *name : {"--win", "--cities", "--mute"})
+            app.get_option(name)->group(app.get_option("--assets")->get_group());
         try
         {
             app.parse(argc, argv);
@@ -233,30 +229,30 @@ extern "C" int parse_options(Startup *o, App *a, int argc, char **argv)
         {
             return app.exit(e) ? 2 : 2; /* said already */
         }
+        for (const std::string &d : disable)
+            for (const auto &q : PARTS)
+                if (d == q.name)
+                    *q.off = 1;
         if (verbose)
             log_set_level(R_LOG_DEBUG);
         if (no_colour)
             log_set_colour(0);
         for (size_t k = 0; k < sizeof VALUES / sizeof VALUES[0]; ++k)
         {
-            const bool given = app.count(std::string("--") + VALUES[k].name) > 0;
-            if (VALUES[k].set)
-                *VALUES[k].set = given;
-            if (given && !dev_vals[k].empty())
+            if (app.count(std::string("--") + VALUES[k].name) > 0 && !dev_vals[k].empty())
             {
                 s_hold[k]      = dev_vals[k];
                 *VALUES[k].val = s_hold[k].c_str();
             }
         }
     }
-    a->gv.markings  = no_markings ? 0 : 1;
-    a->gv.furniture = no_furniture ? 0 : 1;
-    a->gv.margins = no_margins ? 0 : 1;
     hold_check = check_s, hold_shot = shot_s, hold_theme = theme;
     o->check     = !check_s.empty();
     o->check_out = check_s.empty() ? NULL : hold_check.c_str();
     o->shot_out  = shot_s.empty() ? NULL : hold_shot.c_str();
     o->theme_dir = theme.empty() ? NULL : hold_theme.c_str();
+    hold_trees   = trees_s;
+    o->trees     = trees_s.empty() ? NULL : hold_trees.c_str();
     if (song.size() == 2)
     {
         hold_song[0] = song[0], hold_song[1] = song[1];
@@ -269,6 +265,14 @@ extern "C" int parse_options(Startup *o, App *a, int argc, char **argv)
         o->have_centre = 1;
     if (!pick.empty() && sscanf(pick.c_str(), "%f,%f", &o->pick_x, &o->pick_y) == 2)
         o->have_pick = 1;
+    if (!mark.empty())
+    {
+        int32_t *m = a->mark_fixed;
+        int      n = sscanf(mark.c_str(), "%d,%d,%d,%d", &m[0], &m[1], &m[2], &m[3]);
+        if (n == 2)
+            m[2] = m[0], m[3] = m[1];
+        a->have_mark_fixed = n == 2 || n == 4;
+    }
     if (!angle_s.empty())
         a->angle = a->gv.angle = (float)atof(angle_s.c_str());
     if (!pitch_s.empty())
@@ -299,16 +303,14 @@ extern "C" int parse_options(Startup *o, App *a, int argc, char **argv)
     }
     o->ww = ww;
     o->wh = wh;
-    /*  The geometry and the water shader are the game's look.  The
-     *  o->sprites are the o->check's baseline and an option
-     *  (--o->sprites, or the t and y keys).  A headless run defaults to
-     *  o->sprites because --o->check and --run are comparison harnesses
-     *  and the o->sprites are what they compare against.  --geometry
-     *  overrides that.  It is how a headless run produces a picture of
-     *  the game as it actually looks, which is what
-     *  tools/gen_showcase.py wants. */
-    if (o->want_geometry || (!o->check && !o->run_frames && !o->sprites))
+    /*  The geometry is the game's look, with a window and without one.
+     *  The sprites are a choice (--look sprites, or Shift-Cmd-T).
+     *  --compare-renderers draws the sprites unless --look says otherwise,
+     *  because the software renderer it compares against draws only the
+     *  sprites. */
+    if (look == "geometry" || look == "mesh" || (look.empty() && !o->check))
         a->gv.geometry = 1;
+    a->gv.mesh_only = look == "mesh";
     /*  --plan starts in the map view: the camera at 90, turned to the
      *  nearest square, which is where set_plan would have taken it. */
     if (a->plan)
@@ -318,10 +320,11 @@ extern "C" int parse_options(Startup *o, App *a, int argc, char **argv)
     }
     a->q_col = a->q_row = -1;
     a->us.show_palette  = 1;
-    a->us.show_tuning   = g_dev.tunewin; /* closed unless asked */
-    a->us.show_script   = g_dev.scriptwin;
+    a->us.open_menu     = g_dev.open_menu;
+    a->us.show_tuning   = 0; /* --open-menu window:tuning opens it */
     a->us.show_log      = 0; /* under Windows > Messages */
     a->us.tool          = -1;
+    a->us.biome         = -1; /* the city's own, until the View menu names one */
     {
         static const char *const BANNER[] = {
             "   ___                __",
@@ -341,7 +344,7 @@ extern "C" int parse_options(Startup *o, App *a, int argc, char **argv)
                 "https://github.com/umamibeef/arcology\n");
     }
     if (o->check)
-        R_NOTE("init", "arcology, o->check against %s", o->check_out ? o->check_out : "the original");
+        R_NOTE("init", "arcology, check against %s", o->check_out ? o->check_out : "the original");
     else if (o->run_frames)
     {
         char speed[32];
@@ -357,7 +360,7 @@ extern "C" int parse_options(Startup *o, App *a, int argc, char **argv)
         R_NOTE("init", "arcology, %dx%d window", ww, wh);
     R_DBG("init", "zoom %d, scale %s, %s", (int)a->opts.zoom, o->pixel_scale < 1 ? "auto" : o->pixel_scale == 1 ? "1"
                                                                                                                 : "2",
-          a->gv.geometry ? "geometry" : "o->sprites");
+          a->gv.geometry ? "geometry" : "sprites");
 
     return 0;
 }

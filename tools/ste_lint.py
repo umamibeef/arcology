@@ -22,7 +22,7 @@ It cannot check whether a sentence is TRUE, or whether the noun is the
 right one.  Those need a reader.
 
     python3 tools/ste_lint.py                # the whole tree
-    python3 tools/ste_lint.py src/render/net # one directory
+    python3 tools/ste_lint.py src/render/mesh # one directory
     python3 tools/ste_lint.py --list         # every fault, to work from
     python3 tools/ste_lint.py --rule long    # one rule at a time
 """

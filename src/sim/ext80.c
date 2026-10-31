@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#if !ARC_NATIVE_FLOAT
 /* ---- construction ------------------------------------------------ */
 static ext80 normalize(int sign, uint64_t sig, int32_t exp)
 {
@@ -242,15 +243,10 @@ static ext80 addsub(ext80 a, ext80 b, int subtract)
 ext80 ext_add(ext80 a, ext80 b) { return addsub(a, b, 0); }
 ext80 ext_sub(ext80 a, ext80 b) { return addsub(a, b, 1); }
 
-int ext_cmp(ext80 a, ext80 b)
-{
-    ext80 d = ext_sub(a, b);
-    if (d.sig == 0)
-        return 0;
-    return d.sign ? -1 : 1;
-}
-
 /* ---- the 10-byte memory form ------------------------------------- */
+#endif
+
+#if !ARC_NATIVE_FLOAT
 ext80 ext_load(const uint8_t p[10])
 {
     ext80   r;
@@ -279,3 +275,31 @@ void ext_store(ext80 a, uint8_t p[10])
     for (i = 0; i < 8; i++)
         p[2 + i] = (uint8_t)(a.sig >> (56 - 8 * i));
 }
+#else
+    #include <math.h>
+
+/*  The 10-byte form the 68k code passes, read into a double and written
+ *  back from one.  It is a sign bit, a 15-bit exponent biased by 16383,
+ *  and a 64-bit significand with its leading bit explicit. */
+ext80 ext_load(const uint8_t p[10])
+{
+    uint64_t sig = 0;
+    int32_t  e   = ((p[0] & 0x7F) << 8) | p[1];
+    int      i;
+    for (i = 0; i < 8; i++)
+        sig = (sig << 8) | p[2 + i];
+    return ext_make(sig ? ((p[0] >> 7) ? -1.0 : 1.0) * ldexp((double)sig, e - 16383 - 63) : 0.0);
+}
+
+void ext_store(ext80 a, uint8_t p[10])
+{
+    int      e = 0, i, sign = a.v < 0.0;
+    double   m   = frexp(sign ? -a.v : a.v, &e); /* m in [0.5, 1) */
+    uint64_t sig = a.v == 0.0 ? 0 : (uint64_t)ldexp(m, 64);
+    int32_t  be  = sig ? e - 1 + 16383 : 0;
+    p[0]         = (uint8_t)((sign << 7) | ((be >> 8) & 0x7F));
+    p[1]         = (uint8_t)be;
+    for (i = 0; i < 8; i++)
+        p[2 + i] = (uint8_t)(sig >> (56 - 8 * i));
+}
+#endif

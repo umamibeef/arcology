@@ -1,19 +1,22 @@
 /*  mesh/check.c: the checks: watertightness, and lines against the
  *  ground.  See mesh/internal.h. */
 #include "dump.h"
+#include "geo.h"
 #include "mesh/internal.h"
-#include "pipeline.h"
+#include "mesh/shape.h"
 #include "opt.h"
-#include "net/cell.h"
-#include "net/network.h"
-#include "script.h"
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+
+static int mesh_ranges_check(const RMesh *m, int verbose);
 
 /* ---- the check --------------------------------------------------------- */
 
 /*  How close in height two faces lie before the check calls them one
- *  surface.  The script names it (arc.geo). */
-static int gix_coplanar_z = -1;
+ *  surface.  The geo store holds it as coplanar_z. */
+static int gix_coplanar_z = -1, gix_map_floor = -1;
 
 /*  Every edge of every triangle must belong to another triangle too: a
  *  surface with no free edge has no crack.  Edges are keyed on their
@@ -22,12 +25,13 @@ static int gix_coplanar_z = -1;
  *  vertical.  The spans there may be split differently by the walls
  *  meeting at the corner.  So those are checked as coverage: every part
  *  of the vertical that any edge covers must be covered at least twice.
- *  The base of the map's cut, z = 0, is the floor and is closed by
- *  definition. */
+ *  The base of the map's cut is the floor, at the height the geo store
+ *  names (map_floor), and is closed by definition. */
 typedef struct
 {
     int32_t a[3], b[3];
-    int32_t count;
+    int32_t count; /* the triangles that meet it */
+    int32_t own;   /* of them, those the build laid: not the world beyond a window */
     float   mat;
 } Edge;
 
@@ -48,6 +52,21 @@ static void quantise(const float p[4], int32_t q[3])
     q[0] = (int32_t)lrintf(p[0] * 16.0f);
     q[1] = (int32_t)lrintf(p[1] * 16.0f);
     q[2] = (int32_t)lrintf(p[2] * 48.0f);
+}
+
+/*  Whether a corner, at 16 units a tile, touches a laid chunk.  A corner
+ *  on a laid chunk's far edge touches it too. */
+static int corner_laid(const RMesh *m, int32_t x, int32_t y)
+{
+    int32_t xs[2], ys[2];
+    int     i, j;
+    xs[0] = (int32_t)floorf((float)(x - 1) / 16.0f), xs[1] = (int32_t)floorf((float)x / 16.0f);
+    ys[0] = (int32_t)floorf((float)(y - 1) / 16.0f), ys[1] = (int32_t)floorf((float)y / 16.0f);
+    for (i = 0; i < 2; ++i)
+        for (j = 0; j < 2; ++j)
+            if (xs[i] >= 0 && ys[j] >= 0 && xs[i] < r_map && ys[j] < r_map && m->chunk_laid[mesh_chunk_of(xs[i], ys[j])])
+                return 1;
+    return 0;
 }
 
 static int key_less(const int32_t *a, const int32_t *b)
@@ -77,10 +96,75 @@ static int span_cmp(const void *pa, const void *pb)
     return 0;
 }
 
+/*  A built-in material past the leveled pad is laid over the surface: a
+ *  line strip, a prop, a lamp or a zone tint.  It is not the surface, so
+ *  the check does not read it.  A material named at run time is a face
+ *  of its own, and the check reads it. */
+static int over_surface(float mat)
+{
+    return MAT_IN(mat, MAT_SURFACE + 1.0f, MAT_RUNTIME_BASE - 1.0f);
+}
+
+/*  One triangle into the edge table and the vertical spans.  `own` is 1
+ *  for a triangle the build laid, and 0 for one of the world beyond its
+ *  window.  That one meets an edge and covers a span, but is not judged. */
+static void tally(Edge *tab, uint32_t cap, Span *spans, uint32_t *n_spans, const float p0[4], const float p1[4], const float p2[4], float mat, int own)
+{
+    const float *p[3] = {p0, p1, p2};
+    int32_t      q[3][3];
+    int          k;
+    for (k = 0; k < 3; ++k)
+        quantise(p[k], q[k]);
+    for (k = 0; k < 3; ++k)
+    {
+        const int32_t *a = q[k], *b = q[(k + 1) % 3];
+        uint32_t       h;
+        if (a[0] == b[0] && a[1] == b[1])
+        {
+            Span *s;
+            if (a[2] == b[2])
+                continue; /* a point, not an edge */
+            s      = &spans[(*n_spans)++];
+            s->x   = a[0];
+            s->y   = a[1];
+            s->z0  = a[2] < b[2] ? a[2] : b[2];
+            s->z1  = a[2] < b[2] ? b[2] : a[2];
+            s->mat = mat;
+            continue;
+        }
+        if (key_less(b, a))
+        {
+            const int32_t *t = a;
+            a                = b;
+            b                = t;
+        }
+        h = edge_hash(a, b) & (cap - 1u);
+        for (;;)
+        {
+            Edge *e = &tab[h];
+            if (e->count == 0)
+            {
+                memcpy(e->a, a, sizeof e->a);
+                memcpy(e->b, b, sizeof e->b);
+                e->count = 1;
+                e->own   = own;
+                e->mat   = mat;
+                break;
+            }
+            if (memcmp(e->a, a, sizeof e->a) == 0 && memcmp(e->b, b, sizeof e->b) == 0)
+            {
+                e->count++;
+                e->own += own;
+                break;
+            }
+            h = (h + 1u) & (cap - 1u);
+        }
+    }
+}
+
 /*  WHICH MATERIAL a number is: the nearest of the built-in ones within
- *  half a step, or MAT_COUNT for one a script declared.  A variant such
- *  as a spur's lane lies beside its whole neighbor, so the nearest is
- *  the one that names it. */
+ *  half a step, or MAT_COUNT for one named at run time.  A variant lies
+ *  beside its whole neighbor, so the nearest is the one that names it. */
 static int mat_slot(float m)
 {
     int   i, best = MAT_COUNT;
@@ -102,21 +186,8 @@ static int mat_slot(float m)
 static const char *mat_name(float m)
 {
     int k = mat_slot(m);
-    return k < MAT_COUNT ? r_materials[k].name : "a script's";
+    return k < MAT_COUNT ? r_materials[k].name : "a run-time one";
 }
-
-/*  The clipping check: no terrain face may rise above a line or margin
- *  face over its footprint.  Every line triangle is sampled on a
- *  barycentric grid.  At each sample the top faces of the tile under it
- *  are evaluated, and a terrain height above the line's by more than a
- *  hair is a penetration.  Returns the number of penetrating samples.
- *  With `verbose` prints the tiles, the deepest first. */
-typedef struct
-{
-    uint32_t n;
-    float    worst;
-} ClipTile;
-
 
 /*  Coplanar overlap: two faces covering the same ground at the same
  *  height.  Nothing in the renderer can separate them.  Both are at one
@@ -125,11 +196,9 @@ typedef struct
  *  as a flicker, a blotch, or one surface simply missing.  Every such
  *  pair is a defect, and the count is meant to be zero.
  *
- *  Two triangles of the SAME shape are passed over.  A shape's own faces
+ *  Two triangles of one shape are held to it too.  A shape's own faces
  *  tile a surface and meet along their edges, which the area test
- *  already ignores.  A shape that overlaps itself is its producer's
- *  business.  What matters here is two different things laid on the same
- *  ground. */
+ *  ignores.  So a pair of them that shares area is a fold in the shape. */
 typedef struct
 {
     float x, y;
@@ -156,7 +225,7 @@ static float ov_clip(const OvPt *in, int n, OvPt a, OvPt b, OvPt *out)
             out[m++] = *p;
         if ((dp < 0.0f) != (dq < 0.0f) && fabsf(dq - dp) > 1e-12f && m < OV_MAX)
         {
-            float t = dp / (dp - dq);
+            float t  = dp / (dp - dq);
             out[m].x = p->x + (q->x - p->x) * t;
             out[m].y = p->y + (q->y - p->y) * t;
             ++m;
@@ -173,8 +242,8 @@ static float ov_area(const float a[3][3], const float b[3][3], OvPt *at)
     /*  Zeroed: the clip walks the ring it was handed and writes as many
      *  points as it keeps.  So a slot past that count stands for the
      *  origin rather than for whatever the stack held. */
-    OvPt poly[2][OV_MAX] = {{{0.0f, 0.0f}}}, tri[3];
-    int  n = 3, k, src = 0;
+    OvPt  poly[2][OV_MAX] = {{{0.0f, 0.0f}}}, tri[3];
+    int   n = 3, k, src = 0;
     float ar = 0.0f;
     for (k = 0; k < 3; ++k)
     {
@@ -211,6 +280,18 @@ static float ov_area(const float a[3][3], const float b[3][3], OvPt *at)
     return fabsf(ar) * 0.5f;
 }
 
+/*  Whether a triangle has no area seen from above. */
+static int ov_flat(const float t[3][3])
+{
+    return fabsf((t[1][0] - t[0][0]) * (t[2][1] - t[0][1]) - (t[1][1] - t[0][1]) * (t[2][0] - t[0][0])) < 1e-7f;
+}
+
+/*  Whether a triangle faces down: wound clockwise seen from above. */
+static int ov_down(const float t[3][3])
+{
+    return (t[1][0] - t[0][0]) * (t[2][1] - t[0][1]) - (t[1][1] - t[0][1]) * (t[2][0] - t[0][0]) < -1e-9f;
+}
+
 /*  The height of a triangle's plane at a point. */
 static float ov_z(const float t[3][3], OvPt p)
 {
@@ -226,10 +307,8 @@ static float ov_z(const float t[3][3], OvPt p)
 
 /*  COLLIDING GEOMETRY: two faces of different shapes that pass THROUGH
  *  one another.  The coplanar test above is two surfaces laid on the
- *  same ground.  This is one surface driven through another.
- *
- *      A slab meet a slab at one height.  A pier standing through a
- *      slab.  A spur cutting the way it leaves.
+ *  same ground.  This is one surface driven through another: a wire
+ *  through the ground, a box through a wall.
  *
  *  Nothing in the renderer can resolve it: the two are interleaved in
  *  space.  So every camera shows part of each and no painter's order can
@@ -239,11 +318,8 @@ static float ov_z(const float t[3][3], OvPt p)
  *  strictly between its own ends.  The meet point must also fall
  *  strictly inside the other triangle.  Touching along an edge, meeting
  *  at a corner and lying in one plane all fail that test.  This is what
- *  keeps two strips laid end to end, or a slab resting on a shelf, from
- *  reading as a fault.
- *
- *  A vehicle is passed over: it is meant to stand on what it drives on
- *  and moves every frame.  So it is no part of the world's own shape. */
+ *  keeps two faces laid end to end, or one resting on another, from
+ *  reading as a fault. */
 #define COLL_EPS 0.002f /* tiles: a hair of contact is contact, not a meet */
 #define COLL_IN  0.001f /* inside the triangle, not on its rim */
 
@@ -276,11 +352,11 @@ static int coll_through(const float t[3][3], const float a[3], const float b[3])
     /*  Inside, in the triangle's own plane: the barycentric weights of
      *  the meet point, each clear of the rim. */
     w0 = px - t[0][0], w1 = py - t[0][1], w2 = pz - t[0][2];
-    uu = ux * ux + uy * uy + uz * uz;
-    uv = ux * vx + uy * vy + uz * vz;
-    vv = vx * vx + vy * vy + vz * vz;
-    wu = w0 * ux + w1 * uy + w2 * uz;
-    wv = w0 * vx + w1 * vy + w2 * vz;
+    uu  = ux * ux + uy * uy + uz * uz;
+    uv  = ux * vx + uy * vy + uz * vz;
+    vv  = vx * vx + vy * vy + vz * vz;
+    wu  = w0 * ux + w1 * uy + w2 * uz;
+    wv  = w0 * vx + w1 * vy + w2 * vz;
     den = uv * uv - uu * vv;
     if (fabsf(den) < 1e-12f)
         return 0;
@@ -320,10 +396,10 @@ int mesh_check_collide(const RMesh *m, int verbose)
     static uint32_t comp[CHECK_MAXT];
     int32_t         col, row;
     int             hits = 0, tiles = 0, shown = 0;
-    if (!m || !m->tri_comp)
+    if (!m || !m->ranged)
         return 0;
-    for (row = 0; row < R_MAP; ++row)
-        for (col = 0; col < R_MAP; ++col)
+    for (row = 0; row < r_map; ++row)
+        for (col = 0; col < r_map; ++col)
         {
             int n = mesh_tris_at(m, col, row, tri, CHECK_MAXT), i, j, here = 0;
             for (i = 0; i < n; ++i)
@@ -335,12 +411,18 @@ int mesh_check_collide(const RMesh *m, int verbose)
                 box[i].z0 = box[i].z1 = pos[i][0][2];
                 for (k = 1; k < 3; ++k)
                 {
-                    if (pos[i][k][0] < box[i].x0) box[i].x0 = pos[i][k][0];
-                    if (pos[i][k][0] > box[i].x1) box[i].x1 = pos[i][k][0];
-                    if (pos[i][k][1] < box[i].y0) box[i].y0 = pos[i][k][1];
-                    if (pos[i][k][1] > box[i].y1) box[i].y1 = pos[i][k][1];
-                    if (pos[i][k][2] < box[i].z0) box[i].z0 = pos[i][k][2];
-                    if (pos[i][k][2] > box[i].z1) box[i].z1 = pos[i][k][2];
+                    if (pos[i][k][0] < box[i].x0)
+                        box[i].x0 = pos[i][k][0];
+                    if (pos[i][k][0] > box[i].x1)
+                        box[i].x1 = pos[i][k][0];
+                    if (pos[i][k][1] < box[i].y0)
+                        box[i].y0 = pos[i][k][1];
+                    if (pos[i][k][1] > box[i].y1)
+                        box[i].y1 = pos[i][k][1];
+                    if (pos[i][k][2] < box[i].z0)
+                        box[i].z0 = pos[i][k][2];
+                    if (pos[i][k][2] > box[i].z1)
+                        box[i].z1 = pos[i][k][2];
                 }
             }
             for (i = 0; i < n; ++i)
@@ -359,10 +441,7 @@ int mesh_check_collide(const RMesh *m, int verbose)
                     if (verbose && shown < 4000)
                     {
                         ++shown;
-                        dumpf("collide   %d,%d: %s through %s, at %.3f,%.3f,%.3f\n", (int)col, (int)row,
-                              shape_name(comp[i]) ? shape_name(comp[i]) : "?",
-                              shape_name(comp[j]) ? shape_name(comp[j]) : "?",
-                              (double)pos[i][0][0], (double)pos[i][0][1], (double)pos[i][0][2]);
+                        dumpf("collide   %d,%d: %s through %s, at %.3f,%.3f,%.3f\n", (int)col, (int)row, shape_name(comp[i]) ? shape_name(comp[i]) : "?", shape_name(comp[j]) ? shape_name(comp[j]) : "?", (double)pos[i][0][0], (double)pos[i][0][1], (double)pos[i][0][2]);
                     }
                 }
             tiles += here;
@@ -374,13 +453,13 @@ int mesh_check_collide(const RMesh *m, int verbose)
 int mesh_check_overlap(const RMesh *m, int verbose)
 {
     uint32_t *tri = s_tri;
-    int32_t         col, row;
-    int             pairs = 0, fights = 0, buried = 0, tiles = 0;
-    int             kind_a[32], kind_b[32], kind_n[32], nkinds = 0;
-    if (!m || !m->tri_comp)
+    int32_t   col, row;
+    int       pairs = 0, fights = 0, tiles = 0;
+    int       kind_a[32], kind_b[32], kind_n[32], nkinds = 0;
+    if (!m || !m->ranged)
         return 0;
-    for (row = 0; row < R_MAP; ++row)
-        for (col = 0; col < R_MAP; ++col)
+    for (row = 0; row < r_map; ++row)
+        for (col = 0; col < r_map; ++col)
         {
             int n = mesh_tris_at(m, col, row, tri, CHECK_MAXT), i, j, here = 0;
             for (i = 0; i < n; ++i)
@@ -392,8 +471,16 @@ int mesh_check_overlap(const RMesh *m, int verbose)
                     float    ar, za, zb;
                     mesh_tri_get(m, tri[i], pa, &sa);
                     mesh_tri_get(m, tri[j], pb, &sb);
-                    if (sa == sb)
-                        continue; /* one shape's own faces are its own business */
+                    /*  A face turned down is the bottom of something, seen
+                     *  only from under the ground.  The camera is always
+                     *  over it, so no pixel shows the pair. */
+                    if (ov_down(pa) || ov_down(pb))
+                        continue;
+                    /*  A face with no area seen from above stands on its
+                     *  edge, a wall.  It covers no ground, and it has no
+                     *  turn to clip the other by. */
+                    if (ov_flat(pa) || ov_flat(pb))
+                        continue;
                     ar = ov_area(pa, pb, &at);
                     if (ar < 1e-4f)
                         continue;
@@ -401,42 +488,14 @@ int mesh_check_overlap(const RMesh *m, int verbose)
                     zb = ov_z(pb, at);
                     if (fabsf(za - zb) > geo_num(&gix_coplanar_z, "coplanar_z"))
                         continue; /* one stands clear of the other */
-                    /*  Two faces at one height are ordinary.  The line
-                     *  network lies ON the ground, and the painter's
-                     *  slot each vertex carries settles which is in
-                     *  front.  A pair is a FIGHT only when the slots
+                    /*  Two faces at one height are ordinary.  A mark
+                     *  lies ON the ground, and the painter's slot each
+                     *  vertex carries settles which is in front.  A pair is a FIGHT only when the slots
                      *  agree too, for then nothing decides and the pixel
                      *  goes to whichever was drawn last. */
                     {
-                        float oa = m->land[3u * tri[i]].pos[3], ob = m->land[3u * tri[j]].pos[3];
-                        float wa = m->land[3u * tri[i]].col[2], wb = m->land[3u * tri[j]].col[2];
+                        float oa = mesh_tri_order(m, tri[i]), ob = mesh_tri_order(m, tri[j]);
                         ++pairs;
-                        /*  A margin with THE THING IT BELONGS TO under
-                         *  it: a junction's fill beneath the junction's
-                         *  own margin, or a strip's way beneath
-                         *  its own.  That means the piece was not drawn
-                         *  back to its own lip, and it is the defect this
-                         *  check exists for.  A lap a
-                         *  margin is another matter and is counted with
-                         *  the rest. */
-                        {
-                            int     wa_is = MAT_IS(wa, MAT_WALK), wb_is = MAT_IS(wb, MAT_WALK);
-                            ShapeId walk  = wa_is ? sa : sb, under = wa_is ? sb : sa;
-                            ShapeId owner = shape_parent(walk);
-                            /*  The margin's OWNER is the piece it
-                             *  belongs to.  What is buried is that piece
-                             *  or anything drawn inside it.  A meet
-                             *  painted on the way is the line's own
-                             *  surface under its own lip as much as the
-                             *  plain fill beside it. */
-                            if (wa_is != wb_is && (owner == under || shape_is_ancestor(owner, under)))
-                            {
-                                ++buried;
-                                if (verbose && (g_dev.buried_all || buried <= 40))
-                                    dumpf("overlap   BURIED %d,%d: %s under its own %s, %.4f tiles at %.3f\n", (int)col, (int)row,
-                                          shape_name(under) ? shape_name(under) : "?", shape_name(walk) ? shape_name(walk) : "?", (double)ar, (double)za);
-                            }
-                        }
                         if (fabsf(oa - ob) > 1e-4f)
                             continue;
                         /*  A shape and a shape drawn INSIDE it are one
@@ -445,14 +504,14 @@ int mesh_check_overlap(const RMesh *m, int verbose)
                          *  hairline its quads share with the fill either
                          *  side of it is a seam, not a fight over the
                          *  same pixel. */
-                        if (shape_is_ancestor(sa, sb) || shape_is_ancestor(sb, sa))
+                        if (sa != sb && (shape_is_ancestor(sa, sb) || shape_is_ancestor(sb, sa)))
                             continue;
                         ++fights;
                         {
                             /*  Which KINDS collide, so the worst can be
                              *  given an order rather than chased one tile
                              *  at a time. */
-                            float ma = m->land[3u * tri[i]].col[2], mb = m->land[3u * tri[j]].col[2];
+                            float ma = mesh_tri_mat(m, tri[i]), mb = mesh_tri_mat(m, tri[j]);
                             int   q, lo = (int)(ma < mb ? ma : mb), hi = (int)(ma < mb ? mb : ma);
                             for (q = 0; q < nkinds; ++q)
                                 if (kind_a[q] == lo && kind_b[q] == hi)
@@ -463,14 +522,13 @@ int mesh_check_overlap(const RMesh *m, int verbose)
                                 ++kind_n[q];
                         }
                         if (!here++ && verbose && tiles < 12)
-                            dumpf("overlap   %d,%d: %s and %s share %.4f tiles at height %.3f and slot %.3f\n", (int)col, (int)row,
-                                  shape_name(sa) ? shape_name(sa) : "?", shape_name(sb) ? shape_name(sb) : "?", (double)ar, (double)za, (double)oa);
+                            dumpf("overlap   %d,%d: %s and %s share %.4f tiles at height %.3f and slot %.3f\n", (int)col, (int)row, shape_name(sa) ? shape_name(sa) : "?", shape_name(sb) ? shape_name(sb) : "?", (double)ar, (double)za, (double)oa);
                     }
                 }
             if (here)
                 ++tiles;
         }
-    dumpf("overlap  %d coplanar face pairs, %d with the same painter's slot on %d tiles, %d of line works buried under a margin\n", pairs, fights, tiles, buried);
+    dumpf("overlap  %d coplanar face pairs, %d with the same painter's slot on %d tiles\n", pairs, fights, tiles);
     {
         int q, r;
         for (r = 0; r < nkinds && r < 10; ++r)
@@ -485,11 +543,8 @@ int mesh_check_overlap(const RMesh *m, int verbose)
             kind_n[best] = 0;
         }
     }
-    /*  The buried margins are the ones a build must never have.  The
-     *  rest is reported and left to the eye for now. */
-    return buried;
+    return fights;
 }
-
 
 /*  The Z probe: every surface over one point of the map, in the order
  *  the renderer sees them.  For each face covering the point it gives
@@ -509,10 +564,10 @@ void mesh_probe(const RMesh *m, float px, float py)
         float    z, mat, order;
         uint32_t shape, t;
     } Hit;
-    Hit hit[MAXH];
+    Hit     hit[MAXH];
     int     nh = 0, i, j;
     int32_t bc = (int32_t)floorf(px), br = (int32_t)floorf(py), dc, dr;
-    if (!m || !m->tri_comp)
+    if (!m || !m->ranged)
         return;
     for (dr = -1; dr <= 1; ++dr)
         for (dc = -1; dc <= 1; ++dc)
@@ -531,14 +586,14 @@ void mesh_probe(const RMesh *m, float px, float py)
                 area = (p[1][0] - p[0][0]) * (p[2][1] - p[0][1]) - (p[2][0] - p[0][0]) * (p[1][1] - p[0][1]);
                 if (fabsf(area) < 1e-9f)
                     continue; /* no area here: it covers no point */
-                l0 = ((p[1][1] - p[2][1]) * (px - p[2][0]) + (p[2][0] - p[1][0]) * (py - p[2][1])) /
-                     ((p[1][1] - p[2][1]) * (p[0][0] - p[2][0]) + (p[2][0] - p[1][0]) * (p[0][1] - p[2][1]));
-                l1 = ((p[2][1] - p[0][1]) * (px - p[2][0]) + (p[0][0] - p[2][0]) * (py - p[2][1])) /
-                     ((p[1][1] - p[2][1]) * (p[0][0] - p[2][0]) + (p[2][0] - p[1][0]) * (p[0][1] - p[2][1]));
-                l2          = 1.0f - l0 - l1;
-                hit[nh].z   = l0 * p[0][2] + l1 * p[1][2] + l2 * p[2][2];
-                hit[nh].mat = m->land[3u * tri[k]].col[2];
-                hit[nh].order = m->land[3u * tri[k]].pos[3];
+                l0            = ((p[1][1] - p[2][1]) * (px - p[2][0]) + (p[2][0] - p[1][0]) * (py - p[2][1])) /
+                                ((p[1][1] - p[2][1]) * (p[0][0] - p[2][0]) + (p[2][0] - p[1][0]) * (p[0][1] - p[2][1]));
+                l1            = ((p[2][1] - p[0][1]) * (px - p[2][0]) + (p[0][0] - p[2][0]) * (py - p[2][1])) /
+                                ((p[1][1] - p[2][1]) * (p[0][0] - p[2][0]) + (p[2][0] - p[1][0]) * (p[0][1] - p[2][1]));
+                l2            = 1.0f - l0 - l1;
+                hit[nh].z     = l0 * p[0][2] + l1 * p[1][2] + l2 * p[2][2];
+                hit[nh].mat   = mesh_tri_mat(m, tri[k]);
+                hit[nh].order = mesh_tri_order(m, tri[k]);
                 hit[nh].shape = sh;
                 hit[nh].t     = tri[k];
                 ++nh;
@@ -562,270 +617,44 @@ void mesh_probe(const RMesh *m, float px, float py)
     {
         const char *nm = shape_name(hit[i].shape);
         const char *pn = shape_name(shape_parent(hit[i].shape));
-        dumpf("probe     z %.5f  slot %9.3f  material %5g  %s%s%s\n", (double)hit[i].z, (double)hit[i].order, (double)hit[i].mat,
-              nm ? nm : "?", pn ? ", in " : "", pn ? pn : "");
+        dumpf("probe     z %.5f  slot %9.3f  material %5g  %s%s%s\n", (double)hit[i].z, (double)hit[i].order, (double)hit[i].mat, nm ? nm : "?", pn ? ", in " : "", pn ? pn : "");
         if (i && fabsf(hit[i].z - hit[i - 1].z) < 0.0005f)
             dumpf("probe       ^ the same height as the face above it, to %.5f\n", (double)fabsf(hit[i].z - hit[i - 1].z));
     }
 }
 
-int mesh_check_clip(const RMesh *m, int verbose)
+/*  THE MESH AS TEXT: every face, in draw order.  Each line holds its
+ *  tile, the shape it is drawn as, its painter's slot and its three
+ *  corners byte for byte.  `which` is "all", or "C,R" for the faces whose middle lies on
+ *  one tile.  Two builds that lay the same faces write the same text. */
+void mesh_tile_dump(const RMesh *m, const char *which)
 {
-    uint32_t  n_tri = m->n_land / 3u, i, *count, *start, *list, hits = 0;
-    ClipTile *tiles;
-    uint32_t *order;
-    const int N = 8;
-    count       = (uint32_t *)calloc((size_t)R_MAP * R_MAP + 1u, sizeof *count);
-    start       = (uint32_t *)calloc((size_t)R_MAP * R_MAP + 1u, sizeof *start);
-    list        = (uint32_t *)malloc((size_t)n_tri * sizeof *list);
-    tiles       = (ClipTile *)calloc((size_t)R_MAP * R_MAP, sizeof *tiles);
-    order       = (uint32_t *)malloc((size_t)R_MAP * R_MAP * sizeof *order);
-    if (!count || !start || !list || !tiles || !order)
+    uint32_t t, n = (m->n_land + m->n_water) / 3u;
+    int      all = strcmp(which, "all") == 0, wc = -1, wr = -1;
+    if (!all && sscanf(which, "%d,%d", &wc, &wr) != 2)
+        return;
+    for (t = 0; t < n; ++t)
     {
-        free(count);
-        free(start);
-        free(list);
-        free(tiles);
-        free(order);
-        return -1;
-    }
-    /*  The terrain's top faces by tile: the ones with an area in plan. */
-    for (i = 0; i < n_tri; ++i)
-    {
-        const RMeshVert *v  = &m->land[i * 3u];
-        float            ax = v[1].pos[0] - v[0].pos[0], ay = v[1].pos[1] - v[0].pos[1];
-        float            bx = v[2].pos[0] - v[0].pos[0], by = v[2].pos[1] - v[0].pos[1];
-        float            cx, cy;
-        int32_t          col, row;
-        if (MAT_ABOVE(v[0].col[2], MAT_SURFACE) || fabsf(ax * by - ay * bx) < 1e-6f)
+        RMeshVert   v[3];
+        const char *name;
+        float       cx, cy;
+        int         k, b;
+        if (mesh_tri_copy(m, t, v) != 0)
             continue;
-        cx  = (v[0].pos[0] + v[1].pos[0] + v[2].pos[0]) / 3.0f;
-        cy  = (v[0].pos[1] + v[1].pos[1] + v[2].pos[1]) / 3.0f;
-        col = (int32_t)floorf(cx);
-        row = (int32_t)floorf(cy);
-        if (col < 0 || row < 0 || col >= R_MAP || row >= R_MAP)
+        cx = (v[0].pos[0] + v[1].pos[0] + v[2].pos[0]) / 3.0f;
+        cy = (v[0].pos[1] + v[1].pos[1] + v[2].pos[1]) / 3.0f;
+        if (!all && ((int)floorf(cx) != wc || (int)floorf(cy) != wr))
             continue;
-        ++count[row * R_MAP + col];
-    }
-    for (i = 0; i < (uint32_t)R_MAP * R_MAP; ++i)
-        start[i + 1] = start[i] + count[i];
-    memset(count, 0, ((size_t)R_MAP * R_MAP + 1u) * sizeof *count);
-    for (i = 0; i < n_tri; ++i)
-    {
-        const RMeshVert *v  = &m->land[i * 3u];
-        float            ax = v[1].pos[0] - v[0].pos[0], ay = v[1].pos[1] - v[0].pos[1];
-        float            bx = v[2].pos[0] - v[0].pos[0], by = v[2].pos[1] - v[0].pos[1];
-        float            cx, cy;
-        int32_t          col, row, t;
-        if (MAT_ABOVE(v[0].col[2], MAT_SURFACE) || fabsf(ax * by - ay * bx) < 1e-6f)
-            continue;
-        cx  = (v[0].pos[0] + v[1].pos[0] + v[2].pos[0]) / 3.0f;
-        cy  = (v[0].pos[1] + v[1].pos[1] + v[2].pos[1]) / 3.0f;
-        col = (int32_t)floorf(cx);
-        row = (int32_t)floorf(cy);
-        if (col < 0 || row < 0 || col >= R_MAP || row >= R_MAP)
-            continue;
-        t                           = row * R_MAP + col;
-        list[start[t] + count[t]++] = i;
-    }
-    /*  --tile-dump col,row prints every face whose centroid lies on
-     *  that tile, any material, for inspection. */
-    {
-        const char *dump = g_dev.tile_dump;
-        int         dc, dr;
-        if (dump && strcmp(dump, "all") == 0)
-            for (i = 0; i < n_tri; ++i)
-            {
-                /* every triangle's material and the tile its centroid lies on, for a whole-mesh diff */
-                const RMeshVert *v  = &m->land[i * 3u];
-                float            cx = (v[0].pos[0] + v[1].pos[0] + v[2].pos[0]) / 3.0f;
-                float            cy = (v[0].pos[1] + v[1].pos[1] + v[2].pos[1]) / 3.0f;
-                dumpf("tri mat %g tile %d,%d\n", (double)v[0].col[2], (int)floorf(cx), (int)floorf(cy));
-            }
-        else if (dump && sscanf(dump, "%d,%d", &dc, &dr) == 2)
-            for (i = 0; i < n_tri; ++i)
-            {
-                const RMeshVert *v  = &m->land[i * 3u];
-                float            cx = (v[0].pos[0] + v[1].pos[0] + v[2].pos[0]) / 3.0f;
-                float            cy = (v[0].pos[1] + v[1].pos[1] + v[2].pos[1]) / 3.0f;
-                if ((int32_t)floorf(cx) == dc && (int32_t)floorf(cy) == dr)
-                    dumpf("tri mat %g order %g (%.3f,%.3f,%.3f) (%.3f,%.3f,%.3f) (%.3f,%.3f,%.3f)\n", (double)v[0].col[2], (double)v[0].pos[3], (double)v[0].pos[0], (double)v[0].pos[1], (double)v[0].pos[2], (double)v[1].pos[0], (double)v[1].pos[1], (double)v[1].pos[2], (double)v[2].pos[0], (double)v[2].pos[1], (double)v[2].pos[2]);
-            }
-    }
-    /*  Every line face, sampled. */
-    for (i = 0; i < n_tri; ++i)
-    {
-        const RMeshVert *v   = &m->land[i * 3u];
-        float            mat = v[0].col[2];
-        int              a, b;
-        if (!MAT_IS(mat, MAT_LINE) && !MAT_IN(mat, MAT_ZEBRA, MAT_THREAD) && !MAT_IN(mat, MAT_WALK, MAT_THREAD_X) && !MAT_IN(mat, MAT_XPANEL, MAT_XAPPROACH) && !MAT_IS(mat, MAT_BAND))
-            continue; /* the bands, the margin corners, the meet surface and approach.  Not props, not vehicles, not a pier, whose foot is buried.  A slab is checked like any other way */
-        if (v[0].nrm[3] >= 3.5f)
-            continue; /* a quad in a cut: the ground over it is meant, held back by retaining walls */
+        name = shape_name(mesh_tri_comp(m, t));
+        dumpf("face %d,%d %s %s slot %a ", (int)floorf(cx), (int)floorf(cy), 3u * t < m->n_land ? "land" : "water", name ? name : "-", (double)mesh_tri_order(m, t));
+        for (k = 0; k < 3; ++k)
         {
-            /*  A sliver of no area draws nothing.  So nothing can show
-             *  through it.  The joints of a path fitted through a
-             *  corridor leave a few where the band's edge crosses a tile
-             *  line at a shallow angle. */
-            float ax = v[1].pos[0] - v[0].pos[0], ay = v[1].pos[1] - v[0].pos[1];
-            float bx = v[2].pos[0] - v[0].pos[0], by = v[2].pos[1] - v[0].pos[1];
-            if (fabsf(ax * by - ay * bx) < 2e-3f) /* under half a square meter: no pixel of its own */
-                continue;
+            const unsigned char *bytes = (const unsigned char *)&v[k];
+            for (b = 0; b < (int)sizeof v[k]; ++b)
+                dumpf("%02x", bytes[b]);
+            dumpf(k < 2 ? " " : "\n");
         }
-        /* strictly inside the face: a sample on an edge would read the
-         * tile across it, which may stand higher behind a wall */
-        for (a = 1; a < N; ++a)
-            for (b = 1; a + b < N; ++b)
-            {
-                float    u = (float)a / (float)N, w = (float)b / (float)N, s = 1.0f - u - w;
-                float    x   = u * v[0].pos[0] + w * v[1].pos[0] + s * v[2].pos[0];
-                float    y   = u * v[0].pos[1] + w * v[1].pos[1] + s * v[2].pos[1];
-                float    z   = u * v[0].pos[2] + w * v[1].pos[2] + s * v[2].pos[2];
-                int32_t  col = (int32_t)floorf(x), row = (int32_t)floorf(y), t;
-                uint32_t j;
-                float    worst = 0.0f;
-                if (col < 0 || row < 0 || col >= R_MAP || row >= R_MAP)
-                    continue;
-                t = row * R_MAP + col;
-                for (j = start[t]; j < start[t + 1]; ++j)
-                {
-                    const RMeshVert *q  = &m->land[list[j] * 3u];
-                    float            d  = (q[1].pos[0] - q[0].pos[0]) * (q[2].pos[1] - q[0].pos[1]) -
-                                          (q[2].pos[0] - q[0].pos[0]) * (q[1].pos[1] - q[0].pos[1]);
-                    float            l1 = ((q[1].pos[0] - x) * (q[2].pos[1] - y) - (q[2].pos[0] - x) * (q[1].pos[1] - y)) / d;
-                    float            l2 = ((q[2].pos[0] - x) * (q[0].pos[1] - y) - (q[0].pos[0] - x) * (q[2].pos[1] - y)) / d;
-                    float            l3 = 1.0f - l1 - l2, zt;
-                    if (l1 < -1e-4f || l2 < -1e-4f || l3 < -1e-4f)
-                        continue;
-                    zt = l1 * q[0].pos[2] + l2 * q[1].pos[2] + l3 * q[2].pos[2];
-                    if (zt - z > worst)
-                        worst = zt - z;
-                }
-                if (worst > 0.02f) /* a hair: a fifth of a pixel at the base zoom */
-                {
-                    ++hits;
-                    ++tiles[t].n;
-                    if (worst > tiles[t].worst)
-                        tiles[t].worst = worst;
-                    if (g_dev.clip_dump && tiles[t].n <= 2)
-                    {
-                        dumpf("  clip at %.2f,%.2f line z %.2f mat %g tri (%.2f,%.2f,%.2f) (%.2f,%.2f,%.2f) (%.2f,%.2f,%.2f) order %g; ground +%.2f\n",
-                              (double)x,
-                              (double)y,
-                              (double)z,
-                              (double)mat,
-                              (double)v[0].pos[0],
-                              (double)v[0].pos[1],
-                              (double)v[0].pos[2],
-                              (double)v[1].pos[0],
-                              (double)v[1].pos[1],
-                              (double)v[1].pos[2],
-                              (double)v[2].pos[0],
-                              (double)v[2].pos[1],
-                              (double)v[2].pos[2],
-                              (double)v[0].pos[3],
-                              (double)worst);
-                        for (j = start[t]; j < start[t + 1]; ++j)
-                        {
-                            const RMeshVert *q = &m->land[list[j] * 3u];
-                            dumpf("     ground mat %g (%.2f,%.2f,%.2f) (%.2f,%.2f,%.2f) (%.2f,%.2f,%.2f)\n", (double)q[0].col[2], (double)q[0].pos[0], (double)q[0].pos[1], (double)q[0].pos[2], (double)q[1].pos[0], (double)q[1].pos[1], (double)q[1].pos[2], (double)q[2].pos[0], (double)q[2].pos[1], (double)q[2].pos[2]);
-                        }
-                    }
-                }
-            }
     }
-    /*  Every tile carrying a network piece must have network geometry
-     *  over it: a face of a line material whose centroid lies on the
-     *  tile.  A piece the walk could not draw would otherwise vanish,
-     *  its sprite skipped and nothing in its place. */
-    {
-        uint32_t             missing = 0;
-        const unsigned char *owes    = script_bytes("geometry_tiles");
-        memset(count, 0, ((size_t)R_MAP * R_MAP + 1u) * sizeof *count);
-        for (i = 0; i < n_tri; ++i)
-        {
-            const RMeshVert *v = &m->land[i * 3u];
-            int              k;
-            if (MAT_UPTO(v[0].col[2], MAT_SURFACE) || MAT_IS(v[0].col[2], MAT_VEHICLE))
-                continue; /* a vehicle is no network geometry */
-            /* the face touches every tile a vertex, an edge's midpoint or the centroid lies on */
-            for (k = 0; k < 7; ++k)
-            {
-                float   x   = k < 3 ? v[k].pos[0] : k < 6 ? 0.5f * (v[k - 3].pos[0] + v[(k - 2) % 3].pos[0])
-                                                          : (v[0].pos[0] + v[1].pos[0] + v[2].pos[0]) / 3.0f;
-                float   y   = k < 3 ? v[k].pos[1] : k < 6 ? 0.5f * (v[k - 3].pos[1] + v[(k - 2) % 3].pos[1])
-                                                          : (v[0].pos[1] + v[1].pos[1] + v[2].pos[1]) / 3.0f;
-                int32_t col = (int32_t)floorf(x), row = (int32_t)floorf(y);
-                if (col >= 0 && row >= 0 && col < R_MAP && row < R_MAP)
-                    ++count[row * R_MAP + col];
-            }
-        }
-        for (i = 0; i < (uint32_t)R_MAP * R_MAP; ++i)
-        {
-            uint8_t b   = s_check_xbld ? s_check_xbld[i] : 0;
-            int     due = owes[b];
-            /* which bytes owe geometry, and which of those a fit may sweep out of, is arc.bytes("geometry_tiles")'s */
-            if (!due)
-                continue;
-            if (count[i] == 0 && net_tile_served((int32_t)i))
-                continue; /* a thread piece bypassed by its line, fitted across the free ground beside it: its segment was drawn (walk/walk.c) */
-            if (count[i] == 0 && due == 2)
-            {
-                /* A band is a viaduct on its own fit.  The fit keeps only within the free air beside the band.  An arc cuts inside a corner, and a staircase becomes one sweep.  The tiles it left are ground under open air, by design.
-                 * Bare is a slab tile with no network geometry within
-                 * two tiles of it.  A band the walk never reached (a
-                 * tile "nothing rendering") still shows, a corner cut
-                 * does not. */
-                int32_t col = (int32_t)(i % R_MAP), row = (int32_t)(i / R_MAP), dc, dr, any = 0;
-                for (dr = -2; dr <= 2 && !any; ++dr)
-                    for (dc = -2; dc <= 2 && !any; ++dc)
-                        if (col + dc >= 0 && row + dr >= 0 && col + dc < R_MAP && row + dr < R_MAP && count[(row + dr) * R_MAP + col + dc])
-                            any = 1;
-                if (any)
-                    continue;
-            }
-            if (count[i] == 0)
-            {
-                ++missing;
-                if (verbose && missing <= 40)
-                    dumpf("  no network geometry on column %3d row %3d, XBLD %02x\n", (int)(i % R_MAP), (int)(i / R_MAP), (unsigned)b);
-            }
-        }
-        if (verbose)
-            dumpf("line pieces without geometry: %u\n", missing);
-        hits += missing;
-    }
-    if (verbose)
-    {
-        uint32_t shown = 0, n_bad = 0;
-        for (i = 0; i < (uint32_t)R_MAP * R_MAP; ++i)
-            if (tiles[i].n)
-                order[n_bad++] = i;
-        /* the deepest first: sort the indices by the tile's worst */
-        {
-            uint32_t p, q;
-            for (p = 1; p < n_bad; ++p)
-                for (q = p; q > 0 && tiles[order[q - 1]].worst < tiles[order[q]].worst; --q)
-                {
-                    uint32_t tmp = order[q];
-                    order[q]     = order[q - 1];
-                    order[q - 1] = tmp;
-                }
-        }
-        dumpf("line clip  %u samples under the terrain on %u tiles\n", hits, n_bad);
-        for (i = 0; i < n_bad && shown < 40; ++i, ++shown)
-            dumpf("  column %3d row %3d  %4u samples, terrain above by %.2f\n",
-                   (int)(order[i] % R_MAP),
-                   (int)(order[i] / R_MAP),
-                   tiles[order[i]].n,
-                   (double)tiles[order[i]].worst);
-    }
-    free(count);
-    free(start);
-    free(list);
-    free(tiles);
-    free(order);
-    return (int)hits;
 }
 
 int mesh_check(const RMesh *m, int verbose)
@@ -836,10 +665,11 @@ int mesh_check(const RMesh *m, int verbose)
         uint32_t i, n = m->n_land / 3u, bad = 0;
         for (i = 0; i < n; ++i)
         {
-            const RMeshVert *v  = &m->land[i * 3u];
-            float            z0 = v[0].pos[2], z1 = z0, x0 = v[0].pos[0], x1 = x0, y0 = v[0].pos[1], y1 = y0;
-            int              k;
-            if (MAT_ABOVE(v[0].col[2], MAT_GROUND))
+            RMeshVert v[3];
+            mesh_tri_copy(m, i, v);
+            float z0 = v[0].pos[2], z1 = z0, x0 = v[0].pos[0], x1 = x0, y0 = v[0].pos[1], y1 = y0;
+            int   k;
+            if (MAT_ABOVE(mesh_vert_mat(&v[0]), MAT_GROUND))
                 continue;
             for (k = 1; k < 3; ++k)
             {
@@ -859,17 +689,28 @@ int mesh_check(const RMesh *m, int verbose)
         }
         dumpf("spikes: %u\n", bad);
     }
-    uint32_t n_tri = (m->n_land + m->n_water) / 3u, cap = 1u, i, free_edges = 0, free_spans = 0;
+    uint32_t n_tri = (m->n_land + m->n_water) / 3u, cap = 1u, i, free_edges = 0, free_spans = 0, n_beyond = 0;
+    int      ch, windowed = 0;
     Edge    *tab;
     Span    *spans;
     uint32_t n_spans = 0;
     uint32_t shown   = 0;
     uint32_t by_mat[MAT_COUNT + 1];
     memset(by_mat, 0, sizeof by_mat);
-    while (cap < n_tri * 6u)
+    /*  A mesh with a chunk not laid is a window's, and the world beyond
+     *  it is the triangles its laid chunks dropped. */
+    for (ch = 0; ch < MESH_CHUNKS; ++ch)
+    {
+        uint32_t n;
+        if (!m->chunk_laid[ch])
+            windowed = 1;
+        else if (mesh_beyond(ch, &n))
+            n_beyond += n;
+    }
+    while (cap < (n_tri + n_beyond) * 6u)
         cap *= 2u;
     tab   = (Edge *)calloc(cap, sizeof *tab);
-    spans = (Span *)malloc((size_t)n_tri * 3u * sizeof *spans);
+    spans = (Span *)malloc((size_t)(n_tri + n_beyond) * 3u * sizeof *spans + sizeof *spans);
     if (!tab || !spans)
     {
         free(tab);
@@ -878,64 +719,34 @@ int mesh_check(const RMesh *m, int verbose)
     }
     for (i = 0; i < n_tri; ++i)
     {
-        const RMeshVert *v = i * 3u < m->n_land ? &m->land[i * 3u]
-                                                : &m->water[i * 3u - m->n_land];
-        int32_t          q[3][3];
-        int              k;
-        if (MAT_ABOVE(v[0].col[2], MAT_SURFACE))
-            continue; /* a line strip lies on the surface.  It is not the surface */
-        for (k = 0; k < 3; ++k)
-            quantise(v[k].pos, q[k]);
-        for (k = 0; k < 3; ++k)
+        RMeshVert v[3];
+        mesh_tri_copy(m, i, v);
+        if (over_surface(mesh_vert_mat(&v[0])))
+            continue;
+        tally(tab, cap, spans, &n_spans, v[0].pos, v[1].pos, v[2].pos, mesh_vert_mat(&v[0]), 1);
+    }
+    /*  And the world beyond a window's border, which meets what the window
+     *  laid there and is judged nowhere else.  A triangle whose own chunk
+     *  is laid is not beyond: that chunk's own triangles stand there. */
+    if (windowed)
+        for (ch = 0; ch < MESH_CHUNKS; ++ch)
         {
-            const int32_t *a = q[k], *b = q[(k + 1) % 3];
-            uint32_t       h;
-            if (a[0] == b[0] && a[1] == b[1])
+            uint32_t     n;
+            const float *beyond = m->chunk_laid[ch] ? mesh_beyond(ch, &n) : NULL;
+            for (i = 0; beyond && i < n; ++i)
             {
-                Span *s;
-                if (a[2] == b[2])
-                    continue; /* a point, not an edge */
-                s      = &spans[n_spans++];
-                s->x   = a[0];
-                s->y   = a[1];
-                s->z0  = a[2] < b[2] ? a[2] : b[2];
-                s->z1  = a[2] < b[2] ? b[2] : a[2];
-                s->mat = v[k].col[2];
-                continue;
-            }
-            if (key_less(b, a))
-            {
-                const int32_t *t = a;
-                a                = b;
-                b                = t;
-            }
-            h = edge_hash(a, b) & (cap - 1u);
-            for (;;)
-            {
-                Edge *e = &tab[h];
-                if (e->count == 0)
-                {
-                    memcpy(e->a, a, sizeof e->a);
-                    memcpy(e->b, b, sizeof e->b);
-                    e->count = 1;
-                    e->mat   = v[k].col[2];
-                    break;
-                }
-                if (memcmp(e->a, a, sizeof e->a) == 0 && memcmp(e->b, b, sizeof e->b) == 0)
-                {
-                    e->count++;
-                    break;
-                }
-                h = (h + 1u) & (cap - 1u);
+                const float *b = &beyond[(size_t)i * 13u];
+                if (!over_surface(b[12]) && !m->chunk_laid[mesh_chunk_of((int32_t)floorf(b[0]), (int32_t)floorf(b[1]))])
+                    tally(tab, cap, spans, &n_spans, &b[0], &b[4], &b[8], b[12], 0);
             }
         }
-    }
+    const int32_t floor_q = (int32_t)lrintf(geo_num(&gix_map_floor, "map_floor") * 48.0f);
     for (i = 0; i < cap; ++i)
     {
         const Edge *e = &tab[i];
-        if (e->count != 1)
-            continue;
-        if (e->a[2] == 0 && e->b[2] == 0)
+        if (e->count != 1 || e->own != 1)
+            continue; /* met, or the world beyond a window's own edge */
+        if (e->a[2] == floor_q && e->b[2] == floor_q)
             continue; /* the floor */
         free_edges++;
         by_mat[mat_slot(e->mat)]++;
@@ -963,6 +774,13 @@ int mesh_check(const RMesh *m, int verbose)
             uint32_t nz = 0, zi;
             while (s1 < n_spans && spans[s1].x == spans[s0].x && spans[s1].y == spans[s0].y)
                 ++s1;
+            /*  A corner of the world beyond a window is not judged: only
+             *  the window's own, its border's included. */
+            if (windowed && !corner_laid(m, spans[s0].x, spans[s0].y))
+            {
+                s0 = s1;
+                continue;
+            }
             for (j = s0; j < s1 && nz < 510; ++j)
             {
                 zs[nz++] = spans[j].z0;
@@ -1012,12 +830,12 @@ int mesh_check(const RMesh *m, int verbose)
     {
         int k;
         dumpf("mesh check: %u triangles, %u free edges, %u free vertical spans\n",
-               (unsigned)n_tri,
-               (unsigned)free_edges,
-               (unsigned)free_spans);
+              (unsigned)n_tri,
+              (unsigned)free_edges,
+              (unsigned)free_spans);
         for (k = 0; k <= MAT_COUNT; ++k)
             if (by_mat[k])
-                dumpf("  %-9s %u\n", k < MAT_COUNT ? r_materials[k].name : "a script's", (unsigned)by_mat[k]);
+                dumpf("  %-9s %u\n", k < MAT_COUNT ? r_materials[k].name : "a run-time one", (unsigned)by_mat[k]);
     }
     free(tab);
     free(spans);
@@ -1026,18 +844,214 @@ int mesh_check(const RMesh *m, int verbose)
 
 void mesh_free(RMesh *m)
 {
-    free(m->tri_comp);
-    free(m->tri_comp_old);
-    free(m->land);
-    free(m->bucket);
-    free(m->wbucket);
-    free(m->snap);
-    free(m->water);
-    free(m->net.pts);
-    free(m->net.segs);
-    free(m->threadnet.pts);
-    free(m->threadnet.segs);
-    free(m->meets);
-    free(m->rsigs);
+    mesh_lists_free(m->rl, m->n_rl);
+    mesh_lists_free(m->wl, m->n_wl);
+    mesh_lists_free(m->rl_old, m->n_rl ? m->n_rl : MESH_RANGES * MESH_CHUNKS);
+    mesh_lists_free(m->wl_old, m->n_wl ? m->n_wl : MESH_CHUNKS);
     memset(m, 0, sizeof *m);
+}
+
+/*  What the mesh holds and what it costs.  That is its triangles by
+ *  kind, the bytes of every list it keeps, and how many of its vertices
+ *  differ.  An index buffer cannot share a vertex that differs from
+ *  every other.  It could share one whose place alone differs, were the
+ *  rest computed rather than stored. */
+static uint64_t vert_hash(const float *f, int n)
+{
+    uint64_t h = 1469598103934665603ull;
+    int      i;
+    for (i = 0; i < n; ++i)
+    {
+        uint32_t u;
+        memcpy(&u, &f[i], 4);
+        h = (h ^ u) * 1099511628211ull;
+    }
+    return h ? h : 1;
+}
+
+static uint32_t distinct(const RMeshVert *v, uint32_t n, int floats)
+{
+    uint32_t  cap = 1, i, k = 0;
+    uint64_t *set;
+    while (cap < 2 * n + 2)
+        cap <<= 1;
+    set = (uint64_t *)calloc(cap, sizeof *set);
+    if (!set)
+        return 0;
+    for (i = 0; i < n; ++i)
+    {
+        uint64_t h = vert_hash(&v[i].pos[0], floats);
+        uint32_t s = (uint32_t)h & (cap - 1);
+        while (set[s] && set[s] != h)
+            s = (s + 1) & (cap - 1);
+        if (!set[s])
+        {
+            set[s] = h;
+            ++k;
+        }
+    }
+    free(set);
+    return k;
+}
+
+static void mesh_size_report(const RMesh *m)
+{
+    uint32_t ground = 0, lines = 0, trees = 0, room = 0, wroom = 0, tags = 0, all = 0, whole = 0, place = 0, corners = 0;
+    double   mb = 1024.0 * 1024.0;
+    int      k;
+    for (k = 0; k < m->n_rl; ++k)
+    {
+        if (k % MESH_RANGES == MESH_RANGE_GROUND)
+            ground += m->rl[k].n / 3u;
+        else if (k % MESH_RANGES == MESH_RANGE_STANDS)
+            lines += m->rl[k].n / 3u;
+        else
+            trees += m->rl[k].n / 3u;
+        room += m->rl[k].cap;
+        corners += m->rl[k].idx ? m->rl[k].n : 0u;
+        tags += 3u * m->rl[k].tcap;
+        all += m->rl[k].n;
+        whole += m->rl[k].idx ? m->rl[k].nv : m->rl[k].n;
+        place += distinct(m->rl[k].v, m->rl[k].idx ? m->rl[k].nv : m->rl[k].n, 3);
+    }
+    for (k = 0; k < m->n_wl; ++k)
+    {
+        wroom += m->wl[k].cap;
+        corners += m->wl[k].idx ? m->wl[k].n : 0u;
+        tags += 3u * m->wl[k].tcap;
+    }
+    dumpf("mesh    %u ground, %u line, %u tree, %u water triangles\n", ground, lines, trees, m->n_water / 3u);
+    {
+        int big = 0, i;
+        for (i = 1; i < m->n_rl; ++i)
+            if (m->rl[i].n > m->rl[big].n)
+                big = i;
+        if (m->n_rl)
+        {
+            static const char *const what[MESH_RANGES] = {"terrain", "networks", "trees", "crowns"};
+            dumpf("mesh    the largest range is %d, chunk %d's %s, %u triangles\n", big, big / MESH_RANGES, what[big % MESH_RANGES], m->rl[big].n / 3u);
+        }
+    }
+    dumpf("mesh    land %.1f MB, water %.1f MB, corners %.1f MB, tags %.1f MB, at %u bytes a vertex\n", (double)room * sizeof(RMeshVert) / mb, (double)wroom * sizeof(RMeshVert) / mb, 4.0 * (double)corners / mb, 4.0 * (double)tags / mb, (unsigned)sizeof(RMeshVert));
+    dumpf("mesh    %u land corners: %u distinct vertices, %u distinct places, within their chunk ranges\n", all, whole, place);
+    {
+        uint32_t lv[MESH_LOD_LEVELS];
+        int      L;
+        memset(lv, 0, sizeof lv);
+        for (k = 0; k < m->n_rl; ++k)
+            for (L = 0; L < MESH_LOD_LEVELS; ++L)
+                lv[L] += (L == 0 || !m->rl[k].lod[L] ? m->rl[k].n : m->rl[k].lod_n[L]) / 3u;
+        for (L = 0; L < MESH_LOD_LEVELS; ++L)
+            dumpf("mesh    level of detail %d, a pixel hiding %.4f tiles: %u land triangles\n", L, L ? (double)(MESH_LOD_ERR0 * (float)(1u << (L - 1))) : 0.0, lv[L]);
+    }
+    /*  The line triangles by the shape that laid them, the most first. */
+    {
+        enum
+        {
+            NAMES = 48
+        };
+        static char name[NAMES][48];
+        uint32_t    cnt[NAMES], t, other = 0;
+        int         nn = 0, i, j;
+        memset(cnt, 0, sizeof cnt);
+        for (k = MESH_RANGE_STANDS; k < m->n_rl; k += MESH_RANGES)
+            for (t = 0; t < m->rl[k].n / 3u; ++t)
+            {
+                const char *s = shape_name(m->rl[k].comp[t]);
+                char        nm[48];
+                size_t      n = 0;
+                if (!s)
+                    s = "(none)";
+                while (s[n] && n < sizeof nm - 1 && !(s[n] >= '0' && s[n] <= '9') && s[n] != ' ')
+                {
+                    nm[n] = s[n];
+                    ++n;
+                }
+                nm[n] = 0;
+                for (i = 0; i < nn && strcmp(name[i], nm); ++i)
+                    ;
+                if (i == nn)
+                {
+                    if (nn == NAMES)
+                    {
+                        ++other;
+                        continue;
+                    }
+                    memcpy(name[nn++], nm, n + 1);
+                }
+                ++cnt[i];
+            }
+        for (i = 0; i < nn; ++i)
+            for (j = i + 1; j < nn; ++j)
+                if (cnt[j] > cnt[i])
+                {
+                    uint32_t c = cnt[i];
+                    char     s[48];
+                    cnt[i] = cnt[j], cnt[j] = c;
+                    memcpy(s, name[i], 48), memcpy(name[i], name[j], 48), memcpy(name[j], s, 48);
+                }
+        for (i = 0; i < nn && i < 12; ++i)
+            dumpf("mesh      %-28s %u line triangles\n", name[i], cnt[i]);
+        if (other)
+            dumpf("mesh      %-28s %u line triangles\n", "(other shapes)", other);
+    }
+}
+
+/*  Every triangle in a range keys to that range's chunk, the ranges tile
+ *  the list: what a meet must keep true. */
+static int mesh_ranges_check(const RMesh *m, int verbose)
+{
+    uint32_t bad = 0, pos = 0, i;
+    int      k;
+    if (!m->ranged)
+    {
+        if (verbose)
+            dumpf("chunks  the mesh is not partitioned\n");
+        return m->n_land ? 1 : 0;
+    }
+    for (k = 0; k < MESH_RANGES * MESH_CHUNKS; ++k)
+    {
+        if (m->range_start[k] != pos)
+            ++bad;
+        pos += m->range_count[k];
+        if (k >= m->n_rl || m->range_count[k] != m->rl[k].n)
+        {
+            ++bad;
+            continue;
+        }
+        for (i = 0; i < m->range_count[k]; i += 3)
+        {
+            const RMeshVert *v = mesh_list_corner(&m->rl[k], i);
+            if (mesh_chunk_of((int32_t)floorf(v->pos[0]), (int32_t)floorf(v->pos[1])) != k / MESH_RANGES)
+                ++bad;
+        }
+    }
+    if (pos != m->n_land)
+        ++bad;
+    pos = 0;
+    for (k = 0; k < MESH_CHUNKS; ++k)
+    {
+        if (m->wrange_start[k] != pos)
+            ++bad;
+        pos += m->wrange_count[k];
+        if (k >= m->n_wl || m->wrange_count[k] != m->wl[k].n)
+        {
+            ++bad;
+            continue;
+        }
+        for (i = 0; i < m->wrange_count[k]; i += 3)
+        {
+            const RMeshVert *v = mesh_list_corner(&m->wl[k], i);
+            if (mesh_chunk_of((int32_t)floorf(v->pos[0]), (int32_t)floorf(v->pos[1])) != k)
+                ++bad;
+        }
+    }
+    if (pos != m->n_water)
+        ++bad;
+    if (verbose)
+    {
+        dumpf("chunks  %d land and %d water ranges, %u triangles out of place\n", MESH_RANGES * MESH_CHUNKS, MESH_CHUNKS, (unsigned)bad);
+        mesh_size_report(m);
+    }
+    return bad != 0;
 }

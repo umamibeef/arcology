@@ -1,13 +1,12 @@
 /*  testcity.c: a city built to exercise the network renderer. arcology
- *  --testcity <template city> <out.sc2> The shipped cities are places,
+ *  --testcity <template city> <out.arco> The shipped cities are places,
  *  not test cases: they have thousands of ordinary straights and a
  *  handful of the corners that actually break the fit, and finding those
  *  means hunting.  This lays out every case the road and rail fitter has
  *  to handle, once each, in labeled blocks on flat ground, and prints
  *  where each one is.  A template city is loaded and its tile layers
- *  replaced, so the file that comes out has the chunk order, the scalars
- *  and the MISC block of a real save.  Nothing here has to know the
- *  container.  It lives on the simulation's side of the fence because it
+ *  replaced, so the world that comes out has the scalars and the MISC
+ *  block of a real save.  Nothing here has to know the container.  It lives on the simulation's side of the fence because it
  *  AUTHORS a City.  The renderer may only read one, through adapt.c,
  *  "the one file that includes both sides" (adapt.h), so a generator
  *  that builds a save cannot live in src/render, however much it is used
@@ -18,6 +17,7 @@
  *  north-west corner +2..+5 straights on a slope +10 north-south-west
  *  tee +6 south-west corner +11 east-south-west tee +7 east-south corner
  *  +12 north-east-south tee +13 north-east-west tee +14 crossroads */
+#include "arco.h"
 #include "sim.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -278,11 +278,11 @@ int testcity_main(int argc, char **argv)
 
     if (argc < 3)
     {
-        printf("usage: arcology --testcity <template city> <out.sc2>\n"
+        printf("usage: arcology --testcity <template city> <out.arco>\n"
                "\n"
                "  Lays out every network case the fit has to handle on flat\n"
-               "  ground and writes it as a save.  The template supplies the\n"
-               "  chunk order and the scalars; its tiles are replaced.\n");
+               "  ground and writes it as a world.  The template supplies the\n"
+               "  scalars; its tiles are replaced.\n");
         return 2;
     }
     c = (City *)calloc(1, sizeof *c);
@@ -301,13 +301,13 @@ int testcity_main(int argc, char **argv)
     for (row = 0; row < TH; ++row)
         for (col = 0; col < TW; ++col)
         {
-            c->altm[row][col] = (uint16_t)((alt << 5) | 0);
-            c->xter[row][col] = 0;
-            c->xbld[row][col] = 0;
-            c->xzon[row][col] = 0;
-            c->xund[row][col] = 0;
-            c->xtxt[row][col] = 0;
-            c->xbit[row][col] = 0;
+            T_ALTM(c, row, col) = (uint16_t)((alt << 5) | 0);
+            T_XTER(c, row, col) = 0;
+            T_XBLD(c, row, col) = 0;
+            T_XZON(c, row, col) = 0;
+            T_XUND(c, row, col) = 0;
+            T_XTXT(c, row, col) = 0;
+            T_XBIT(c, row, col) = 0;
         }
     memset(fam, 0, sizeof fam);
     memset(fam2, 0, sizeof fam2);
@@ -345,14 +345,14 @@ int testcity_main(int argc, char **argv)
                 uint8_t x = meet_id(f, g, mask);
                 if (x)
                 {
-                    c->xbld[row][col] = x;
+                    T_XBLD(c, row, col) = x;
                     continue;
                 }
             }
-            c->xbld[row][col] = (uint8_t)(base_of(f) + piece_for(mask));
+            T_XBLD(c, row, col) = (uint8_t)(base_of(f) + piece_for(mask));
         }
 
-    if (!city_save(argv[2], c))
+    if (arco_save(argv[2], c) != 0)
     {
         fprintf(stderr, "testcity: cannot write %s\n", argv[2]);
         free(c);

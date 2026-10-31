@@ -3,8 +3,8 @@
 
 Two thousand tiles are put back in order on both sides, then ALTM,
 XTER, XBIT, XZON, XBLD and XUND are compared.  $5FAA is stubbed on the
-original's side because the demolition half is not reconstructed yet;
-everything else is checked exactly.
+original's side because the demolition half has no C; everything else is
+checked exactly.
 """
 import subprocess, sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

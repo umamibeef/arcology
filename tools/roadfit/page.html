@@ -1,0 +1,49 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Road Fit Prototype</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Grids of plans, then profiles one to a row, each a drawing and a caption. */
+:root { --bg:#f3f3ef; --surface:#fff; --fg:#20251f; --muted:#5f6a62; --line:#d5d9d0; --cell:#e4e1d6; --raw:#b0563a; --fit:#2f5d8a; color-scheme: light; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#151816; --surface:#1d211e; --fg:#e3e7e3; --muted:#9aa59d; --line:#2f3732; --cell:#2c312d; --raw:#e08a6c; --fit:#7fb2e0; color-scheme: dark; } }
+:root[data-theme="dark"] { --bg:#151816; --surface:#1d211e; --fg:#e3e7e3; --muted:#9aa59d; --line:#2f3732; --cell:#2c312d; --raw:#e08a6c; --fit:#7fb2e0; color-scheme: dark; }
+body { background:var(--bg); color:var(--fg); font:15px/1.55 system-ui,-apple-system,sans-serif; }
+.wrap { max-width:1200px; margin:0 auto; padding-block:28px 56px; padding-left:max(16px,env(safe-area-inset-left,0px)); padding-right:max(16px,env(safe-area-inset-right,0px)); display:grid; gap:28px; }
+h1 { font-size:28px; margin:0; } h2 { font-size:19px; margin:0; } p { margin:0; max-width:70ch; }
+.muted { color:var(--muted); } section { display:grid; gap:12px; }
+.grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(340px,1fr)); gap:12px; align-items:start; }
+.grid .pic svg { max-height:420px; }
+figure { margin:0; background:var(--surface); border:1px solid var(--line); border-radius:6px; padding:10px; display:grid; gap:6px; min-width:0; }
+.pic svg { width:100%; height:auto; display:block; }
+figcaption { font-size:13px; } figcaption span { color:var(--muted); }
+.cell { fill:var(--cell); stroke:var(--line); stroke-width:1; }
+.junc { fill:#8a6d2f; fill-opacity:0.55; stroke:#8a6d2f; stroke-width:1.5; }
+.ground { fill:#c9bfa8; }
+.col { stroke:var(--muted); stroke-width:2; }
+.deckline { fill:none; stroke:#6b3fa0; stroke-width:3.5; }
+.stack { display:grid; gap:12px; }
+.stack .pic { overflow-x:auto; }
+.stack .pic svg { width:auto; max-width:none; }
+.mark { stroke:#2f8a5d; stroke-width:6; opacity:0.6; }
+.ramp { stroke:#2f8a5d; stroke-width:4; }
+.pin { fill:#2f8a5d; }
+.tileline { stroke:var(--line); stroke-width:0.5; opacity:0.6; }
+.unitline { stroke:var(--line); stroke-width:1; }
+.road { fill:var(--fit); fill-opacity:0.55; stroke:var(--fit); stroke-width:1.5; }
+.raw { fill:none; stroke:var(--raw); stroke-width:1.5; stroke-dasharray:3 3; }
+.fit { fill:none; stroke:var(--fit); stroke-width:3; stroke-linecap:round; stroke-linejoin:round; }
+.grid line, line.grid { stroke:var(--line); stroke-width:1; } .lab { fill:var(--muted); font-size:10px; }
+.key { display:flex; gap:16px; flex-wrap:wrap; font-size:13px; color:var(--muted); }
+.key i { display:inline-block; width:22px; height:0; vertical-align:middle; margin-right:6px; border-top:3px solid var(--fit); }
+.key i.r { border-top:2px dashed var(--raw); }
+.key i.d { border-top-color:#6b3fa0; }
+.key i.g { border-top-color:#2f8a5d; }
+code { font-size:13px; }
+</style>
+<div class="wrap">
+<header style="display:grid;gap:10px"><h1>Road Fit Prototype</h1>
+<p>Roads in the test world and on made strips of land, fitted outside the renderer by <code>tools/roadfit</code>. Every drawing is at true proportions: a tile is square, and a level is half a tile tall.</p>
+<div class="key"><span><i class="r"></i>the cells, centre to centre (in a profile, the deck's floor)</span><span><i></i>the road</span><span><i class="d"></i>the highway's deck</span><span><i class="g"></i>a ramp</span></div></header>
+<!-- sections -->
+</div>

@@ -1,8 +1,11 @@
 /*  prefs.c: what the game remembers between runs, and the themes it
- *  remembers a choice from.  A small JSON file beside the assets,
- *  written by hand rather than with a library.  It holds a dozen flat
- *  string pairs and the game already carries a parser for reading them
- *  back. */
+ *  remembers a choice from.  It is settings.json, in the per-user place
+ *  SDL knows for the platform: Application Support on macOS, AppData on
+ *  Windows, ~/.local/share on Linux.  The file is one flat object of
+ *  strings and numbers, read whole and written whole, by hand rather than
+ *  with a library.  A missing file is no preference.  A nested value is
+ *  left alone.  A quote or a backslash in a value is escaped on the way
+ *  out and not unescaped on the way in. */
 #include <SDL3/SDL.h>
 
 #include "internal.h"
@@ -15,6 +18,7 @@
 
 #define JSMN_STATIC
 #include "jsmn.h"
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,12 +30,6 @@ typedef struct
     int  is_str; /* written quoted.  A number or true/false goes bare */
 } Pref;
 
-/*  ==================================================================
- *  Preferences and themes
- *
- *  A small JSON file beside the assets, and the Kaleidoscope schemes it
- *  remembers a choice from.
- *  ================================================================== */
 int prefs_path(char *out, size_t n)
 {
     char *p = SDL_GetPrefPath("", "arcology");
@@ -159,6 +157,97 @@ int prefs_set(const char *key, const char *value)
     fputs("}\n", f);
     fclose(f);
     return 1;
+}
+
+/*  THE SWITCHES REMEMBERED between runs: a view the player turns on stays
+ *  on.  Each is a field of the interface's state, saved as "on" or "off"
+ *  under its name.  A knob is a switch that --outline or --tune can name
+ *  for one run instead. */
+static const struct
+{
+    const char *name;
+    size_t      field;
+    int         knob;
+} SWITCH[PREFS_SWITCHES] = {
+    {"grid",          offsetof(RUiState, grid),        0},
+    {"curves",        offsetof(RUiState, outline),     1},
+    {"cells",         offsetof(RUiState, show_cells),  0},
+    {"triangles",     offsetof(RUiState, tris),        0},
+    {"no_depth",      offsetof(RUiState, plain_sweep), 0},
+    {"fps",           offsetof(RUiState, show_fps),    0},
+    {"free_rotation", offsetof(RUiState, free_turn),   0},
+    {"no_clouds",     offsetof(RUiState, no_clouds),   0},
+    {"no_air",        offsetof(RUiState, no_air),      0},
+};
+
+static int *switch_field(RUiState *s, int k)
+{
+    return (int *)(void *)((char *)s + SWITCH[k].field);
+}
+
+void prefs_switches_load(RUiState *s, int knobs)
+{
+    int  k;
+    char hv[32];
+    s->biome = -1;
+    if (prefs_get("biome", hv, sizeof hv) && strcmp(hv, "city") != 0)
+    {
+        for (k = 0; k < s->n_biomes; ++k)
+            if (strcmp(hv, s->biome_names[k]) == 0)
+                s->biome = k;
+    }
+    if (prefs_get("hour", hv, sizeof hv))
+    {
+        float h = strtof(hv, NULL);
+        if (h >= 0.0f && h <= 24.0f)
+            s->hour = h;
+    }
+    for (k = 0; k < PREFS_SWITCHES; ++k)
+    {
+        char v[16];
+        if ((knobs || !SWITCH[k].knob) && prefs_get(SWITCH[k].name, v, sizeof v) && strcmp(v, "on") == 0)
+            *switch_field(s, k) = 1;
+    }
+}
+
+void prefs_switches_seen(App *a)
+{
+    int k;
+    a->hour_saved  = a->us.hour;
+    a->biome_saved = a->us.biome;
+    for (k = 0; k < PREFS_SWITCHES; ++k)
+        a->remembered[k] = *switch_field(&a->us, k) != 0;
+}
+
+void prefs_switches_save(App *a)
+{
+    int k;
+    if (a->us.biome != a->biome_saved)
+    {
+        if (a->prefs_ok)
+            prefs_set("biome", a->us.biome >= 0 ? a->us.biome_names[a->us.biome] : "city");
+        a->biome_saved = a->us.biome;
+    }
+    /*  The time of day, kept as a number.  A drag changes it every frame,
+     *  so it is written at most once a second. */
+    if (a->us.hour != a->hour_saved && SDL_GetTicks() - a->hour_saved_at >= 1000u)
+    {
+        char hv[32];
+        snprintf(hv, sizeof hv, "%.3f", (double)a->us.hour);
+        if (a->prefs_ok)
+            prefs_set("hour", hv);
+        a->hour_saved    = a->us.hour;
+        a->hour_saved_at = SDL_GetTicks();
+    }
+    for (k = 0; k < PREFS_SWITCHES; ++k)
+    {
+        int now = *switch_field(&a->us, k) != 0;
+        if (now == a->remembered[k])
+            continue;
+        if (a->prefs_ok)
+            prefs_set(SWITCH[k].name, now ? "on" : "off");
+        a->remembered[k] = now;
+    }
 }
 
 static int name_cmp(const void *a, const void *b)

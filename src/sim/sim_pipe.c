@@ -36,13 +36,13 @@ static int carries_pipe(int u)
  * ================================================================== */
 void sim_fit_pipe(City *c, int y, int x)
 {
-    const int u = c->xund[y][x];
+    const int u = T_XUND(c, y, x);
     int       slope, mask = 0;
 
     if (u < PIPE_FIRST || u >= PIPE_END)
         return; /* $1FFE8 */
 
-    slope = c->xter[y][x];
+    slope = T_XTER(c, y, x);
     slope = slope > 0x30 ? 0 : slope & 0x0F; /* $20000 */
     if (NET_SLOPED[slope])                   /* $20018 */
     {
@@ -50,13 +50,13 @@ void sim_fit_pipe(City *c, int y, int x)
         return;
     }
 
-    if (y > 0 && carries_pipe(c->xund[y - 1][x]) && NET_JOIN_Y[c->xter[y - 1][x]])
+    if (y > 0 && carries_pipe(T_XUND(c, y - 1, x)) && NET_JOIN_Y[T_XTER(c, y - 1, x)])
         mask += 8; /* $200A6 */
-    if (y < MAP_H - 1 && carries_pipe(c->xund[y + 1][x]) && NET_JOIN_Y[c->xter[y + 1][x]])
+    if (y < c->h - 1 && carries_pipe(T_XUND(c, y + 1, x)) && NET_JOIN_Y[T_XTER(c, y + 1, x)])
         mask += 2; /* $20120 */
-    if (x > 0 && carries_pipe(c->xund[y][x - 1]) && NET_JOIN_X[c->xter[y][x - 1]])
+    if (x > 0 && carries_pipe(T_XUND(c, y, x - 1)) && NET_JOIN_X[T_XTER(c, y, x - 1)])
         mask += 1; /* $2019C */
-    if (x < MAP_W - 1 && carries_pipe(c->xund[y][x + 1]) && NET_JOIN_X[c->xter[y][x + 1]])
+    if (x < c->w - 1 && carries_pipe(T_XUND(c, y, x + 1)) && NET_JOIN_X[T_XTER(c, y, x + 1)])
         mask += 4; /* $2021C */
     if (mask == 0)
         mask = 15;                                    /* $20222 */

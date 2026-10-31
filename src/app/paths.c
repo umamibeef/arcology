@@ -70,49 +70,6 @@ int find_assets(char *out, size_t n, const char *argv0)
     return 0;
 }
 
-/*  Where the scripts are: `scripts/` beside the build, walking up as the
- *  assets are found.  It holds the models the props are drawn from, so a
- *  run that cannot find it draws no street furniture. */
-int find_scripts(char *out, size_t n, const char *argv0)
-{
-    char        base[1024], probe[1024];
-    const char *slash = argv0 ? strrchr(argv0, '/') : NULL;
-    int         up;
-    if (slash)
-    {
-        size_t len = (size_t)(slash - argv0);
-        if (len >= sizeof base)
-            len = sizeof base - 1;
-        memcpy(base, argv0, len);
-        base[len] = 0;
-    }
-    else
-        snprintf(base, sizeof base, ".");
-    for (up = 0; up < 6; ++up)
-    {
-        char walk[1024];
-        int  k;
-        snprintf(walk, sizeof walk, "%s", base);
-        for (k = 0; k < up; ++k)
-        {
-            size_t l = strlen(walk);
-            snprintf(walk + l, sizeof walk - l, "/..");
-        }
-        snprintf(probe, sizeof probe, "%s/scripts", walk);
-        if (is_dir(probe))
-        {
-            snprintf(out, n, "%s", probe);
-            return 1;
-        }
-    }
-    if (is_dir("scripts"))
-    {
-        snprintf(out, n, "%s", "scripts");
-        return 1;
-    }
-    return 0;
-}
-
 /*  Where the cities are, most specific first.  `--cities` wins, for a
  *  folder of your own.  Then `cities/` beside the build, which is the
  *  answer that needs no setup: the repository carries the collection.  A

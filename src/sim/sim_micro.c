@@ -16,19 +16,21 @@
 /*  The record, in place in the loaded chunk.  XMIC is stored big-endian
  *  like every other chunk, so the words are read and written through
  *  helpers rather than cast. */
-uint8_t *micro_rec(const City *c, int i)
+static uint8_t *micro_rec(const City *c, int i)
 {
     if (!c->xmic || (size_t)(i * 8 + 8) > c->xmic_len)
         return NULL;
     return c->xmic + i * 8;
 }
 
-int micro_w(const uint8_t *r, int k)
+/*  sim_micro.c: one XMIC record, and the words inside it.  The budget
+ *  reads a plant's remaining life straight out of the table. */
+static int micro_w(const uint8_t *r, int k)
 {
     return (int)(int16_t)((uint16_t)r[2 + k * 2] << 8 | r[3 + k * 2]);
 }
 
-void micro_set_w(uint8_t *r, int k, int v)
+static void micro_set_w(uint8_t *r, int k, int v)
 {
     r[2 + k * 2] = (uint8_t)((v >> 8) & 0xFF);
     r[3 + k * 2] = (uint8_t)(v & 0xFF);
@@ -43,10 +45,10 @@ void micro_set_w(uint8_t *r, int k, int v)
 static int micro_find_tile(const City *c, int rec)
 {
     int y, x;
-    for (y = 0; y < MAP_H; y++)
-        for (x = 0; x < MAP_W; x++)
+    for (y = 0; y < c->h; y++)
+        for (x = 0; x < c->w; x++)
         {
-            int v = c->xtxt[y][x];
+            int v = T_XTXT(c, y, x);
             if (v == 0 || v < 0x33 || v >= 0xC9) /* $112A6 */
                 continue;
             if (rec == v - 51)
@@ -67,7 +69,7 @@ static int32_t micro_rebuild_cost(int type)
     return (n >= 0 && n < 24) ? TOOL_COST[TOOL_POWER * N_SUBTOOL + n] : 0; /* $103A4 */
 }
 
-int micro_cap(const City *c, int want, int per)
+static int micro_cap(const City *c, int want, int per)
 {
     /*  Everything here is a WORD. $1124E and $11252 read both arguments
      *  as words. $1126A cuts the quotient to one. $1126C compares them
@@ -270,10 +272,10 @@ int sim_alloc_micro(City *c, int y, int x, int bld)
          *  a tile would point at a record that is now somebody else's. */
         {
             int yy, xx;
-            for (yy = 0; yy < MAP_H; yy++)
-                for (xx = 0; xx < MAP_W; xx++)
-                    if (c->xtxt[yy][xx] == (uint8_t)(slot + 0x33))
-                        c->xtxt[yy][xx] = 0;
+            for (yy = 0; yy < c->h; yy++)
+                for (xx = 0; xx < c->w; xx++)
+                    if (T_XTXT(c, yy, xx) == (uint8_t)(slot + 0x33))
+                        T_XTXT(c, yy, xx) = 0;
         }
     }
 
@@ -864,9 +866,9 @@ void sim_microsim(City *c)
         c->misc[MISC_ARCO_POP] > 0x5B8D80)
     {
         int y, x;
-        for (y = 0; y < MAP_H; y++)
-            for (x = 0; x < MAP_W; x++)
-                if (c->xbld[y][x] == 0xFE)
+        for (y = 0; y < c->h; y++)
+            for (x = 0; x < c->w; x++)
+                if (T_XBLD(c, y, x) == 0xFE)
                     sim_demolish_and_place(c, y, x, 0xFF); /* $11200 */
         c->funds += (int32_t)launch_arco * 100000;         /* $11222 */
     }

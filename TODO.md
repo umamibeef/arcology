@@ -1,131 +1,170 @@
 # Arcology — what is open
 
 Everything here is open.  Finished work is not repeated: the rules are in `CLAUDE.md`, the facts in
-`docs/`, and the refactor in progress in `REFACTOR.md`, phase by phase.  The proofs are
-`python3 tools/battery.py` against `tools/battery_ref.json` and `ctest -L gate`.
-
-## What the battery refuses
-
-`python3 tools/battery.py` fails on this tree, and the faults are the interchange work in flight:
-
-- `hi-loh20`, `london` and `simcity` build, where the reference has them crashing: the three carry a band's
-  head-on END TILE, which used to leave the spur in hand stale and send `spur_route` at a null band record.
-  `tools/battery_ref.json` still records the crash, so the battery reports the three as differing until somebody
-  accepts them.
-- `keith` builds in 4.5 seconds, and no node lays a crossing under the least gap.  Two guards in
-  `compose/links/census.lua` hold an end to the node it is filed at.  It must REACH the node
-  (`arc.geo.interchange_catchment`, 4 tiles to the nearest cell of the glob), and the grading pass must have
-  settled a height for it (`arc.arm_z`).  An end that fails either is filed nowhere and the band ends there.
-
-  Both guards read a store that is WRONG, and neither repairs it.  `arc.poses.band_end` names a node an end
-  is nowhere near, and `arc.arm_z` has no height at all for 30 of keith's lane ends while every other city in
-  `cities/` has none missing.  `scripts/compose/poses.lua` and `compose/interchange/arms.lua` fill those two.
-  The suspect they share is `(which == 1) == (off > 0.0)`, the test for WHICH END OF A BAND an open lane end
-  is, written out three times: `census.lua`, `node.lua` and `anneal.lua`.  Where that test is wrong all three
-  read the far end of the band.  A city where a store is wrong now loses the movement instead of misplacing
-  it, so the guards hide the fault they work around.
-
-  Four nodes report an arm with nothing to join (86,80 / 42,88 / 60,90 / 88,102), which does not stop the
-  build.
-
-- `flint` has an on-spur lane under the terrain on three tiles.
-- `tokyo`, `babar` and `manhattan` carry more colliding face pairs than the commit before.
+`docs/`, and the plans in progress in `plans/` (`plans/README.md`).  What proves a change today is
+`CLAUDE.md`'s "The constraint on all of it".
 
 ## Editing a city: the player's tools
 
 The action layer is `src/sim/sim_tool.c`: a gesture is begun, stepped from tile to tile and ended, and the app
-drives it from the mouse (`src/app/uiglue.c`) or from `--gesture`.  `tools/tool_check.py` runs the original's
-own tool loop under the interpreter with a scripted mouse and compares every layer, the funds, the census, the
-military tallies and the transit count.  The bulldozer's Demolish and Raise, and the five network fitters and
-the water edge fitter they share, are exact on every city in `cities/`.
+drives it from the mouse (`src/app/uiglue.c`) or from `--gesture`.  Only the simulation has to match the
+original, so the tools still missing are written as plain interface code, not reconstructed from the listing.
+What they write must be what the simulation reads.  The bulldozer's Demolish and Raise and the network fitters
+are reconstructions, and `tools/tool_check.py` holds them to the original.  The zones, the ports and De-zone
+are plain code: a rectangle dragged and paid for whole, offered only inside the city's limits.
 
-Not yet reconstructed, from the decoding of `$2512` (the cost table is `TOOL_COST`, A5+0x616):
+Still to write:
 
-- **The bulldozer's other sub-tools:** Level `$8008`, Lower `$8B04`, De-zone `$1E782`.
-- **Zones** `$1E782` with its rectangle drag `$1DAB2`, and Ports through the same routine.
-- **Buildings** `$3212`: one routine for every power plant, pump, school, park and reward, with the NIMBY roll,
-  the department counts and the power and water reflood after it.
-- **The line tools:** the drag `$1DDFE`, the walks `$1E046` and `$1E2EC`, and the per-tile placers road `$1F4AC`,
-  rail `$1F9DA`, power `$1F196`, pipe `$1FEB0` and subway `$20252`.  Bridges `$1A820`, and the map-edge links
-  that write XTXT `$FA`.
-- **Highway** `$1BF18`, **tunnel** `$20622`, **onramp** `$3B98`, **sub to rail** `$3E9C`, hydro `$3972`.
-- **Landscape** trees `$2C86` and water `$2EF0`, the terrain editor's tools under `$78F6`, dispatch
-  `$11466`..`$11736`, and signs `$F8A0`.
-- **The interface:** the drag preview for lines and rectangles, the thirty tool cursors (`CURS` 1000..1029), the
-  sub-tool availability masks at A5+0x5CE, and a repeating bulldozer sound.
+- **The bulldozer's** Level and Lower.
+- **Buildings**: power plants, pumps, schools, parks and rewards, with the power and water reflood after them.
+- **The line tools**: the drag and the placers for road, rail, power, pipe and subway, bridges, highway,
+  tunnel, onramp, and the map-edge links.  Each road tool lays its own class into the street layer.
+- **Landscape**: trees, water, the terrain editor, signs.
+- **The interface**: the drag preview for lines, the tool cursors, and which sub-tools are offered.  The
+  menus, the sub-tool popup and the tooltips draw in the Kaleidoscope theme; scrollbars and the other window
+  controls do not yet.
 
-What an edit shows (`src/render/show.c`, `scripts/compose/edit_show.lua`): the pieces near the edit sink and
+What an edit shows (`src/render/show.c`, `src/render/compose.c`): the pieces near the edit sink and
 dissolve while the world is rebuilt, and the pieces the build changed rise back, both as a wave out from the
-edited tiles.  The look is the `arc.geo.edit_show_*` knobs and the rule; it is unjudged in a window.  Open:
+edited tiles.  The look is the `edit_show_*` numbers (`src/render/geo.c`); it is unjudged in a window.  Open:
 
 - The build itself (about 280 ms) still freezes input and the clock; only the pieces move.  The going wave's tail
   after the build, and the coming wave, run in ordinary frames.  `--show-edits --show-at S --shot` draws the
   pieces as they stand S seconds into the going wave, which is how the look is checked without a window.
-- A one-tile bulldoze changes the line class of strips 30 to 50 tiles away (seen as `nrm.w` 1 before, 0 after on
-  `line strip 60,88 to 65,88` in Atlanta).  Either the class reads something the edit moves, or the first build
-  read it stale.
-- The family-word checker reads `.glsl` but not `.vert`/`.frag`, and the terrain shaders' text carries the words.
+- A road an edit lays has no street-layer edges, so it carries class 0, two-way.  The import fills the layer
+  once, and the street tools that are to set it are open (above).
 
 ## Performance
 
 - The live window builds on a thread of its own (`src/app/world.c`, `remesh_begin`), so frames, the
-  simulation and the edit show go on during a build.  The cars stand still while it runs and are
-  respawned after it (`traffic_init`), which shows as a jump.
-- Cars, trains and signals are rebuilt as triangles on the CPU every frame (`traffic_build`), about
-  1 ms a frame.  GPU instancing would draw them from models uploaded once; it changes what the
-  battery's traffic digest hashes, so the reference moves with it.
+  simulation and the edit show go on during a build.
 - The simulation is polled once a frame (`step_clock`): at most one phase a frame at speeds 2 to 4,
   and speed 5 spends 4 ms of every frame.  It has no file-scope state and could run on a thread.
 - `static_analysis` wants the build configured with `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`.
 
-## The highway interchange
+## The network
 
-- The pad over a 2x2 block is a slab with no filleted turn geometry.  Two turns a block, and "straightest
-  first" is a weak rule for which lanes turn; a four-arm block wants more than two.
-- A band end that finds neither a line nor another band's lane is left open.
-- The annealer in `scripts/compose/links/anneal.lua` and the weave planner in `scripts/compose/interchange/weave.lua` are
-  the two largest rules in the tree; the refactor plan's phase 5 splits them by concept.
+`plans/network.md` is the design, and `plans/network-status.md` where the build stands and what is left.
+No ctest builds a city: `net_check` holds the lane check on the records alone.  The mesh draws streets and
+railways (`src/render/draw/roads.c`, `rails.c`).  A highway, a bridge and a meet where one family turns have no
+drawing, and the geometry view hides their art, so each is a gap.  Nothing moves on any road.  Open on it, besides that list:
 
-## Network geometry
+- **The street import's thresholds are first values.**  `STREET_POP_AVENUE`, `STREET_POP_BOULEVARD` and
+  the two traffic thresholds (`src/network/street.c`) were set by hand, not measured.
+- **Two streets side by side (a proposal, not settled).**  The original's fitter joins neighbouring road
+  cells sideways, so two parallel streets and a grid of junctions are the same cells, and the topology makes
+  touching node cells one junction.  Keeping two streets apart needs the player's own data: a bit per edge
+  of the street layer saying the two cells do not join, set by a road tool that lays a street beside
+  another.  An import keeps the original's joins.
+- The interchange's movements are connecting roads of one lane each, on two levels and a third for a left turn.
+  Which movements a node carries is to be judged on the diagram (`--net-svg`).
+- A junction's signals and stop signs are filed on the network (`network_controls`), and nothing reads them.
+- Open questions on lanes: the turning radius a single lane may take, against its road's, and how a car
+  picks at a diverge once there is a trip model (a fair random pick until then).
+- **A railway junction's gravel leaves free edges** where it meets the railways it joins (`--mesh-check`):
+  15 on Atlanta at five junctions, and 3 more at 63,50 and on `test.arco` at 152,3.  The gravel's foot lies
+  at the outer border of a railway's `border` lanes (layer 2), and the three more appear with it there
+  rather than 0.01 tiles nearer the line.
+- **Most goals have no witness.**  `net_check` holds "The network is derived from the cells, in C", and the
+  oracle checks hold the simulation under "A superset of SimCity 2000".  "City limits, not a square",
+  "Independent cities that meet", "Road networks drawn better than their cells" and "A much larger region"
+  have no check that fails when they break.
 
-- Broken segments to zero: the battery's `corners` section counts the hard corners and the segments
-  without geometry in every city, and the corpus is not at zero.
-- Head-on spurs across the corpus.
-- The profile and the grade ceiling: what a corridor is allowed to do to the ground it crosses.
-- Roundabouts where a junction suits one.
-- On-spur sprites must take the right art in every rotation, in sprite mode.
-- Line and band build tools on the test city.
+## The geometry libraries
+
+Clipper2 (polygon union, difference, intersection and offsetting) and earcut (triangulation) are vendored
+(`src/vendor`) and reached through `src/render/mesh/poly.cpp`.  Today they triangulate a junction's fill
+and join a railway junction's gravel.  Hand-written geometry that they answer better, each a candidate to
+replace:
+
+- **A junction's sidewalk ring** (`fill_rings`, `roads.c`) is the boundary inset by the sidewalk's width,
+  worked out by winding and a mitre at each reflex corner.  Clipper2's offset with a negative delta is that
+  inset, joins included.
+- **A street giving way to a railway** (`gives_way`, `foot_hit`, `roads.c`) casts a ray from each point of
+  the street's end onto the gravel's foot.  The street's top less the gravel's footprint is one polygon
+  difference, whatever the railway's curve.
+- **The tiles a surface covers** (`cover_quad`, `roads.c`) walks each strip in steps.  Clipping each
+  strip's polygon to the tile grid answers it exactly.
+- **A railway junction's gravel seams** (`weld`, `rails.c`) put one ring's points into another's edges by
+  hand.  One union of every piece of gravel meeting there leaves no seam to weld.
+- **A polygon that crosses itself** (`poly_simple`, `mesh/poly.c`, read by `fill_fault`) is tested pair by
+  pair.  A union of the polygon with itself that changes it says the same.
+- **The corridor a road is fitted in** (`outside`, `corner_out`, `path_clear`, `shape.c`) tests a point
+  against each unit's square in turn.  The corridor as one union, tested once, says the same.  Layer 3
+  is in `src/network`, under `src/render`, so it can reach `poly.cpp` only once the polygon calls move
+  to a level both may include.
+- **Overlap in the mesh check** (`mesh_check_overlap`, `check.c`) measures shared area pair by pair.  An
+  intersection of the two faces' polygons is the shared area.
 
 ## The mesh inspector
 
-Built and unproven: it can only be judged by pointing at things with the app up (`--inspect` or ⌘I).  The
-outline is a welded silhouette that carries its own height; the pick walks the projection ray; one spur
-highlights per hover; furniture is pointable; the `generated by` row names the function that built the
-component.
+Built and unproven: it can only be judged by pointing at things with the app up (`--inspect` or ⇧⌘I).  The
+inspector is `src/app/inspect.c` (the pick, the components to outline, the remark, the keys and clicks) and
+`src/ui/inspect.cpp` (its window and the outlines), with `src/app/net_pick.c` for the records; the UI reads
+it from `RUiState.insp`.  The `part of` row names the shape that holds the component.
 
-## Scale
+Over the road network it shows the RECORD the mesh was drawn for (`src/app/net_pick.c`).  Every shape the
+drawing lays names its record (`shape_ref`): a road, a junction, or, for a strip of a deck's top, its lane
+(`NREF_LANE`, under the road's shape).  The pick is the triangle under the pointer, read through its shape.  The
+road under the pointer is outlined as its components, each the triangles of one shape group: every lane, the
+structure drawn beside them (sides, columns, caps), and the junction at each end; in a junction, the junction and
+its connecting roads the same way.  Each is outlined whole from a mask in window points, in the color of its lane's
+type, steel blue for structure and orange for a junction.  The record the window describes, the lane under the
+pointer until Shift-Enter steps to its section, road or junction, is bright.  A click selects the object, and
+Escape or a click on nothing clears it.  A second click in the same place selects the next road under the point,
+Enter selects the child and Shift-Enter the parent, as a design tool's layers do, and a click on a level in the
+window shows it.  A remark typed in the window goes to `debug/remarks.md` and the clipboard, with the records and
+the camera.  `--pick X,Y --inspect` dumps the same rows.  Open: a street is drawn as five strips, not a strip a
+lane (`roads.c`, `street_stretch`), so its lanes are not shapes of their own and the street is one component.
 
-The hundred-times-larger world.  Chunked builds, the rebuild after an edit and the station cache in the
-segment table are done.  Next: bands through the cache, and tighter band closure.  The ground is never
-cached.
+## Placing a city in any orientation
 
-## What the battery costs
+A city can be placed in the world in any of four orientations.  Its placement is a map from the city's
+cells onto the map's cells, chosen when it is placed.  Nothing turns: the simulation, the city's data and
+the network have no orientation, and only the rendering turns (`CLAUDE.md`, "Only the rendering turns").
+`world_add_city` (`src/sim/world.c`) places a city as it is.  Open:
 
-A whole `python3 tools/battery.py` is about forty seconds on eighteen cores, and the corner sweep is most
-of it: a full mesh build and watertightness check on all 102 cities in `cities/`.  The rule watchdog
-(`api_rule_watch`, `src/script/script.c`) traps on a Lua CALL rather than counting instructions, so the VM
-keeps its fast path.
+- **The orientation is an argument** of `world_add_city` and of `--compose`.
+- **The bytes that name a direction** (a piece's id, a ramp's `XBIT` bit `0x02`, a zone's corner bit) are
+  written for the map's cells as the city is placed, through the original's own tables.
+- **The street layer's edges go with their cells.**  An edge is stored on the cell with the lower column or
+  row, so a placement files each edge on whichever of its two cells then has it.  A one-way still runs
+  from the same cell to the same cell.
+- **A save's `rotation` is decoded once, on import.**  `misc[2]` is how a `.sc2` encodes the zone corner
+  bits.  `city_load` rewrites them into the grid's own terms.  A `.sc2` is only ever loaded, never saved.
+  The simulation and the renderer read no rotation.  The oracle checks
+  give the original the same decoded city, and agree on every layer.  Against the shipped saves, `--verify`
+  agrees less: a city saved at a turn other than 0 was scanned by the original at that turn, and some of
+  its reads test a fixed corner bit (the station coverage stamp, ``$23DEE``).
 
-Still open: the gate builds the world once per shot.  A multi-shot gate that builds once and moves the
-camera is worth about eleven seconds of the twenty a `--gate` run takes.
+## A much larger region
+
+The plan and where it stands are `plans/limits.md`.  A window build and a world built block by block are
+each meant to lay what a whole build lays.  No check holds it (`CLAUDE.md`, invariant 2).  Open:
+
+- **The city's limits.**  The clock keeps to them with `--limits-glow N` (`plans/limits.md`).  Pollution and
+  the service coverage spread past them.  Zoning is offered only inside them once the city holds anything.
+  An empty city zones anywhere, and each zoning grows them.  Open: a thing arriving at the limits' edge
+  rather than the map's, and the renderer reading them.
 
 ## Loose ends
+
+- **A saved world forgets its date, funds and population.**  The `.arco` writer folds the census, the
+  budget, the year-end values, transit and demand back into `MISC` (`city_scalars_to_misc`), but not the
+  date, funds, population, bonds or the other named scalars.  A world saved after play reloads with the
+  values it was loaded with.  The fix is the MISC builder (``$2A186``) ported whole, with an audit of which
+  copy of each value is the live one.
+- **The checkers need fixing.**  An audit (static, nothing run) found:
+  - stale docstrings: `tools/frame.py` and `tools/highway_map.py`;
+  - `blit_check.py` passes a failed emulator run as a skip;
+- **The house rules could be shorter.**  Much of `CLAUDE.md` restates rules a checker enforces; once the
+  checkers are trusted, those rules can shrink to a pointer each.
 
 - **The city's name carries its Pascal length byte.**  CNAM is copied raw into the view's `name`, so the
   title shows a control character before the name (`adapt.c`, `uiglue.c`, `soft/main.c`).
 - **Three-finger drag** on macOS does not pan the map.  Needs a session with `--input-log` to see what the
   trackpad sends.
-- **`src/dev/dev.c`** carries the developer modes' `printf` calls outside the ban's fence; the refactor
-  plan's phase 6 moves the modes out of the reconstruction.
+- **`src/dev/dev.c`** carries the developer modes' `printf` calls outside the ban's fence.  The modes belong
+  outside the reconstruction, with their own output rules.
 - **The docs' preview pages** need the game folder to render their pictures (`tools/gen_previews.py`); a
   build without them stands a note in for each picture.

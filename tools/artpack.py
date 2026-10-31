@@ -2,6 +2,7 @@
 """artpack -- turn SimCity 2000's tile art into standard, editable files.
 
     python3 tools/artpack.py extract  [--rsrc R] [--out DIR] [--split]
+    python3 tools/artpack.py split    [--rsrc R] [--out DIR]
     python3 tools/artpack.py verify   [--rsrc R] [--assets DIR]
     python3 tools/artpack.py miff     --atlas DIR --zoom 32 --out FILE [--ids ...]
     python3 tools/artpack.py scurk    PACK... [--out DIR]
@@ -9,7 +10,8 @@
 The game keeps 500 logical tiles at three sizes, stored interleaved as SHAP
 ids N, N+500 and N+1000 inside a MIFF/SC2K container.  `extract` writes each
 size out as one palette-indexed PNG atlas plus a JSON sidecar, which any
-image editor can open and any tool can read.
+image editor can open and any tool can read.  `split` writes every sprite to
+a file of its own instead, one directory per size, for editing one at a time.
 
 Transparency is a run type in MIFF, not a colour, so it has nowhere to go in
 an indexed PNG -- except that palette index 0 is used by exactly zero tiles
@@ -541,8 +543,21 @@ def split_tiles(dirpath, shapes, base, palette, stem):
         tsx.append('  <image source="%s" width="%d" height="%d"/>' % (fn, w, h))
         tsx.append(" </tile>")
     tsx.append("</tileset>")
-    (dirpath / (stem + ".tsx")).write_text("\n".join(tsx) + "\n", encoding="utf-8", newline="\n")
+    with open(str(dirpath / (stem + ".tsx")), "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(tsx) + "\n")
     print("    split: %d files + %s.tsx in %s" % (len(entries), stem, dirpath.name))
+
+
+def cmd_split(args):
+    """Every sprite as its own PNG, without building the atlases."""
+    rsrc = Path(args.rsrc)
+    palette = load_palette(rsrc)
+    shapes = {sid: (w, h, rows) for sid, w, h, rows in iter_shapes(load_miff(rsrc))}
+    print("decoded %d shapes from %s" % (len(shapes), rsrc.name))
+    for name, base, _tw, _th, _alt, _width in ZOOMS:
+        split_tiles(Path(args.out) / ("split%s" % name), shapes, base, palette,
+                    "tiles%s" % name)
+    return 0
 
 
 def write_json(path, obj):
@@ -695,6 +710,11 @@ def main(argv=None):
                    help="decode the art by running the game's own blitter")
     e.add_argument("--rgba", action="store_true", help="RGBA atlases instead of indexed")
     e.set_defaults(fn=cmd_extract)
+
+    p = sub.add_parser("split", help="art -> one PNG per sprite + Tiled .tsx")
+    p.add_argument("--rsrc", default=str(here / "rsrc" / "sc2k.rsrc"))
+    p.add_argument("--out", default=str(here / "assets"))
+    p.set_defaults(fn=cmd_split)
 
     v = sub.add_parser("verify", help="atlases -> shapes, compared with the original")
     v.add_argument("--rsrc", default=str(here / "rsrc" / "sc2k.rsrc"))

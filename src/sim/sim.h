@@ -9,6 +9,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "tiles.h"
+
 /*  An optional log of every draw a city makes, in order.  Its dice can
  *  then be compared with the original's under the interpreter.  rng.c
  *  keeps it, and only while a run asks for one. */
@@ -52,9 +54,10 @@ enum
  *
  *  Low nibble: the zone type.  High nibble: a corner mask for multi-tile
  *  buildings: one bit per corner, so a building is simulated exactly
- *  once per pass, at whichever corner is nearest the viewer for the
- *  current rotation ($3173A picks the bit out of ROT_CORNER_MASK).
- *  Single-tile buildings carry all four bits (0xF0).
+ *  once per pass, at the corner that carries ROT_CORNER_MASK[0] ($3173A).
+ *  The bits are in the grid's own terms: city_load decodes the turn a
+ *  1995 file saved them at.  Single-tile buildings carry all four bits
+ *  (0xF0).
  * ------------------------------------------------------------------ */
 #define XZON_TYPE(z)    ((z) & 0x0F)
 #define XZON_CORNERS(z) ((z) & 0xF0)
@@ -75,6 +78,36 @@ enum
 
 /* Zone type 1..6 -> 0=Residential, 1=Commercial, 2=Industrial. $31D9A */
 #define ZONE_TO_RCI(z) (((z) - 1) / 2)
+
+/* ------------------------------------------------------------------ *
+ *  The street layer (TileChunk.street): the player's data about the
+ *  streets, which the original does not hold.  A tile keeps the edge
+ *  to the tile in the next column in the low four bits, and the edge to
+ *  the tile in the next row in the high four.  So every edge between
+ *  two tiles is kept once.  In an edge, two bits are its CLASS and two
+ *  its DIRECTION.  An edge counts only while the two tiles join across
+ *  it.  The layer has no orientation: an edge is between two tiles, and
+ *  a one-way runs from one of them to the other.  The simulation never
+ *  reads the layer.
+ * ------------------------------------------------------------------ */
+enum
+{
+    STREET_LOCAL  = 0, /* a street: one lane each way */
+    STREET_AVENUE = 1, /* two lanes each way */
+    STREET_BLVD   = 2  /* two lanes each way, a median between */
+};
+enum
+{
+    STREET_TWO_WAY = 0,
+    STREET_OUT     = 1, /* one way: from the tile that keeps the edge to the next tile */
+    STREET_IN      = 2  /* one way: from the next tile to the tile that keeps the edge */
+};
+#define STREET_NEXT_COL(b)    ((b) & 0x0F)
+#define STREET_NEXT_ROW(b)    (((b) >> 4) & 0x0F)
+#define STREET_CLASS(e)       ((e) & 0x03)
+#define STREET_DIR(e)         (((e) >> 2) & 0x03)
+#define STREET_EDGE(cls, dir) ((uint8_t)(((cls) & 0x03) | (((dir) & 0x03) << 2)))
+#define STREET_BYTE(col, row) ((uint8_t)(((col) & 0x0F) | (((row) & 0x0F) << 4)))
 
 enum
 {
@@ -347,32 +380,36 @@ enum
 
 typedef struct City
 {
-    /* --- full-resolution tile layers ----------------------------- */
-    uint16_t altm[MAP_H][MAP_W]; /* A5+0x1FC2  altitude, low 5 bits   */
-    uint8_t  xbld[MAP_H][MAP_W]; /* A5+0x21C2  building id            */
-    uint8_t  xzon[MAP_H][MAP_W]; /* A5+0x23C2  zone + corner mask     */
-    uint8_t  xter[MAP_H][MAP_W]; /* A5+0x25C2  terrain / slope        */
-    uint8_t  xund[MAP_H][MAP_W]; /* A5+0x27C2  pipes, subway, tunnels */
-    uint8_t  xtxt[MAP_H][MAP_W]; /* A5+0x29C2  sign / label index     */
-    uint8_t  xbit[MAP_H][MAP_W]; /* A5+0x1BBA  flag bits              */
-
-    /* --- half-resolution data layers ----------------------------- */
-    uint8_t xtrf[HALF_H][HALF_W]; /* A5+0x15BA  traffic     */
-    uint8_t xplt[HALF_H][HALF_W]; /* A5+0x16BA  pollution   */
-    uint8_t xval[HALF_H][HALF_W]; /* A5+0x17BA  land value  */
-    uint8_t xcrm[HALF_H][HALF_W]; /* A5+0x18BA  crime       */
-
-    /* --- quarter-resolution data layers -------------------------- */
-    uint8_t xplc[QTR_H][QTR_W]; /* A5+0x19BA  police coverage    */
-    uint8_t xfir[QTR_H][QTR_W]; /* A5+0x1A3A  fire coverage      */
-    uint8_t xpop[QTR_H][QTR_W]; /* A5+0x1ABA  population density */
-    uint8_t xrog[QTR_H][QTR_W]; /* A5+0x1B3A  rate of growth     */
+    /* --- where its tiles live ------------------------------------- */
+    /*  The layers of the A5 world, $1BBA to $29C2, are not here.  They
+     *  are the world's (tiles.h).  `map` is the store the city's tiles
+     *  live in.  (ox, oy) is the world's tile at the corner of the
+     *  city's window.  A city read alone has a store of its own, and
+     *  `own_map` says so.  Reach a tile through T_XBLD and its kind. */
+    TileMap *map;
+    int32_t  ox, oy;
+    int      own_map;
+    /*  The directory slot of the window's corner chunk, and the
+     *  directory's width: a tile's chunk is one load from here
+     *  (city_bind).  The window's corner lies on a chunk's, so the
+     *  city's own row and column split straight into chunk and tile. */
+    TileChunk **cdir;
+    int32_t     cw;
+    /*  The window's extent, w by h tiles, each a multiple of TILE_CHUNK:
+     *  128 by 128 for a city from a 1995 save.  Every pass walks this
+     *  much and no more.  `flat` is set while the window is the
+     *  original's own map.  A column off its side then wraps to the next
+     *  row, as the original's layers do. */
+    int32_t w, h;
+    int     flat;
+    /*  The extent the city's limits ask for (sim_limits): more than (w, h)
+     *  when they reach within a chunk of the window's edge. */
+    int32_t want_w, want_h;
 
     /* --- scalars, named where the disassembly named them --------- */
     int32_t date;         /* A5+0x1E1E  days since founding   */
     int32_t funds;        /* A5+0x1E26                        */
     int32_t bonds;        /* A5+0x1E2A                        */
-    int16_t rotation;     /* A5+0x2C24  0..3                  */
     int16_t year_founded; /* A5+0x0BF2                        */
     int16_t difficulty;   /* A5+0x139E                        */
 
@@ -520,16 +557,19 @@ typedef struct City
      *  cent and at 100.  Stage 4 seeds its accumulators from stage 1's
      *  raw pollution.  It also seeds them from stage 3's building marks.
      *  Two stages with separate arrays lose exactly that. */
-    int16_t pad[MAP_H][MAP_W];
+    int16_t *pad; /* h rows of w words: PAD(c, y, x) */
 
-    /*  $13B2: the RING those passes walk the map with.  512 entries,
-     *  shared by the two floods, the bulldozer's run and the trip
-     *  walk. */
-    struct
+    /*  $13B2: the RING those passes walk the map with, shared by the two
+     *  floods, the bulldozer's run and the trip walk.  The original's
+     *  holds 512 entries and drops the oldest when it is full, and a
+     *  city on the original's own map keeps exactly that.  Any other
+     *  city's ring holds a cell for every tile of its window, so a flood
+     *  over it drops nothing.  `qmask` is the entries less one. */
+    struct CityRing
     {
         int16_t y, x;
-    } q[512];
-    int qw, qr; /* $13B6 write, $13B8 read */
+    }  *q;
+    int qw, qr, qmask; /* $13B6 write, $13B8 read */
 
     /*  THE DICE: the three generators the game draws from, and the
      *  optional log of every draw.  A city comes up seeded at one, which
@@ -547,14 +587,14 @@ typedef struct City
     void (*trace)(void *at, const char *fmt, ...);
     void *trace_at;
 
-    /*  HOW MUCH OF THE GROWTH SCAN IS NOT RECONSTRUCTED YET: the
-     *  structural-change routines it wanted and did not find.  They are
+    /*  HOW MUCH OF THE GROWTH SCAN HAS NO C: the structural-change
+     *  routines it wanted and did not find.  They are
      *  counted rather than ignored, so the coverage figure in the
      *  report is measured and not asserted. */
     int32_t growth_todo;
     int32_t growth_stub[8];
 
-    /* --- chunks we do not model yet, kept verbatim --------------- */
+    /* --- chunks the simulation does not model, kept verbatim ----- */
     uint8_t *xlab;
     size_t   xlab_len; /* 6400  */
     uint8_t *xmic;
@@ -569,17 +609,186 @@ typedef struct City
     /* original chunk order, so a re-save matches the source file */
     char order[24][5];
     int  n_chunks;
+
+    /* --- THE CITY'S LIMITS (enhanced mode) ------------------------ */
+    /*  The limits bound what the clock may write.  They are derived and
+     *  never saved: every tile within `limits_glow` tiles of a zoned tile
+     *  or of anything built (sim_limits).  So they grow as the city
+     *  does.  A glow of 0 is the original's own map, every tile inside,
+     *  and the clock runs exactly as the original's. */
+    int      limits_glow;
+    uint8_t *limits;   /* w by h, a byte a tile */
+    int      limits_n; /* how many tiles are inside: 0 for a city with nothing in it yet */
+    /*  With limits, which half-resolution cells carry something developed
+     *  or zoned (stage 4 of the city scan).  The original keeps that mask
+     *  in XBIT's scratch bit at half-resolution coordinates, which lie
+     *  anywhere in the map's top-left quarter.  It leans on other passes
+     *  to have cleared it.  This layer is cleared at every scan. */
+    uint8_t *developed_cells; /* w / 2 by h / 2 */
+    /*  Two working planes of the city scan, cleared before each use: the
+     *  crime stage's half-resolution mask and the coverage stage's
+     *  quarter-resolution sums. */
+    uint8_t *scan_mask; /* w / 2 by h / 2 */
+    int16_t *scan_acc;  /* w / 4 by h / 4 */
 } City;
 
-/* ---- city.c ------------------------------------------------------ */
-size_t sc2_rle_decode(const uint8_t *in, size_t in_len, uint8_t *out, size_t out_cap);
-size_t sc2_rle_encode(const uint8_t *src, size_t size, uint8_t *dst); /* writeChunkRLE $293EC */
+/*  THE TILE ACCESSORS.  Every read and write of a layer goes through one of these.  So where a tile is stored is decided in one place.  Each
+ *  takes the city's own (row, column), counts its window from nought,
+ *  and evaluates each argument once.  The half and quarter layers take
+ *  the half and quarter cell. */
+/*  The chunk of the city's own tile (x, y). */
+static inline TileChunk *city_chunk(const City *c, int32_t x, int32_t y)
+{
+    return c->cdir[(y >> TILE_SHIFT) * c->cw + (x >> TILE_SHIFT)];
+}
+
+/*  A column off the window's side is the next or the last row's, as it
+ *  is in the original's layers.  There the rows lie end to end, so the
+ *  column one past a row's end is the first of the row below.  A row off
+ *  the window lands in the margin every window keeps (CITY_MARGIN). */
+#define CITY_MARGIN TILE_CHUNK
+/*  The widest a window grows.  A moving thing's record (XTHG) holds its
+ *  tile in a byte each way, so a city stays within 256 tiles a side. */
+#define CITY_MAX_SIDE 256
+
+static inline uint8_t *t_u8(const City *c, int32_t y, int32_t x, size_t off)
+{
+    if (c->flat)
+    {
+        y += x >> 7;
+        x &= MAP_W - 1;
+    }
+    return (uint8_t *)city_chunk(c, x, y) + off + tile_index(x, y);
+}
+
+static inline uint16_t *t_altm(const City *c, int32_t y, int32_t x)
+{
+    if (c->flat)
+    {
+        y += x >> 7;
+        x &= MAP_W - 1;
+    }
+    return &city_chunk(c, x, y)->altm[tile_index(x, y)];
+}
+
+static inline uint8_t *t_half(const City *c, int32_t y, int32_t x, size_t off)
+{
+    if (c->flat)
+    {
+        y += x >> 6;
+        x &= HALF_W - 1;
+    }
+    return (uint8_t *)c->cdir[(y >> (TILE_SHIFT - 1)) * c->cw + (x >> (TILE_SHIFT - 1))] + off + tile_half_index(x, y);
+}
+
+static inline uint8_t *t_qtr(const City *c, int32_t y, int32_t x, size_t off)
+{
+    if (c->flat)
+    {
+        y += x >> 5;
+        x &= QTR_W - 1;
+    }
+    return (uint8_t *)c->cdir[(y >> (TILE_SHIFT - 2)) * c->cw + (x >> (TILE_SHIFT - 2))] + off + tile_qtr_index(x, y);
+}
+
+#define T_ALTM(c, y, x)            (*t_altm((c), (y), (x)))
+#define T_XBLD(c, y, x)            (*t_u8((c), (y), (x), offsetof(TileChunk, xbld)))
+#define T_XZON(c, y, x)            (*t_u8((c), (y), (x), offsetof(TileChunk, xzon)))
+#define T_XTER(c, y, x)            (*t_u8((c), (y), (x), offsetof(TileChunk, xter)))
+#define T_XUND(c, y, x)            (*t_u8((c), (y), (x), offsetof(TileChunk, xund)))
+#define T_XTXT(c, y, x)            (*t_u8((c), (y), (x), offsetof(TileChunk, xtxt)))
+#define T_STREET(c, y, x)          (*t_u8((c), (y), (x), offsetof(TileChunk, street)))
+#define T_XBIT(c, y, x)            (*t_u8((c), (y), (x), offsetof(TileChunk, xbit)))
+#define T_XTRF(c, y, x)            (*t_half((c), (y), (x), offsetof(TileChunk, xtrf)))
+#define T_XPLT(c, y, x)            (*t_half((c), (y), (x), offsetof(TileChunk, xplt)))
+#define T_XVAL(c, y, x)            (*t_half((c), (y), (x), offsetof(TileChunk, xval)))
+#define T_XCRM(c, y, x)            (*t_half((c), (y), (x), offsetof(TileChunk, xcrm)))
+#define T_XPLC(c, y, x)            (*t_qtr((c), (y), (x), offsetof(TileChunk, xplc)))
+#define T_XFIR(c, y, x)            (*t_qtr((c), (y), (x), offsetof(TileChunk, xfir)))
+#define T_XPOP(c, y, x)            (*t_qtr((c), (y), (x), offsetof(TileChunk, xpop)))
+#define T_XROG(c, y, x)            (*t_qtr((c), (y), (x), offsetof(TileChunk, xrog)))
+#define T_LIMITS(c, y, x)          ((c)->limits[(y) * (c)->w + (x)])
+#define T_DEVELOPED_CELLS(c, y, x) ((c)->developed_cells[(y) * ((c)->w >> 1) + (x)])
+/*  The scratch plane, A5+0x13BA, a word a cell, w wide. */
+#define PAD(c, y, x) ((c)->pad[(y) * (c)->w + (x)])
+
+/*  A whole layer of the city's window, row by row, to a buffer and back.
+ *  A full layer is MAP_W by MAP_H, the others a half or a quarter of
+ *  that a side, and ALTM is two bytes a tile. */
+enum
+{
+    CL_ALTM,
+    CL_XBLD,
+    CL_XZON,
+    CL_XTER,
+    CL_XUND,
+    CL_XTXT,
+    CL_XBIT,
+    CL_XTRF,
+    CL_XPLT,
+    CL_XVAL,
+    CL_XCRM,
+    CL_XPLC,
+    CL_XFIR,
+    CL_XPOP,
+    CL_XROG,
+    CL_N
+};
+size_t city_layer_bytes(const City *c, int layer);
+/*  A layer's tag, the name of its chunk in a 1995 save. */
+const char *city_layer_tag(int layer);
+void        city_layer_get(const City *c, int layer, void *out);
+void        city_layer_set(City *c, int layer, const void *in);
+/*  Widen a city's window to w by h tiles from the same corner, each a
+ *  multiple of TILE_CHUNK and no less than it is.  The tiles it gains
+ *  are made in its store, and its scratch plane and limits keep what
+ *  they hold.  A window other than the original's 128 by 128 does not
+ *  wrap its columns.  A city in a world is widened through
+ *  world_city_grow, which binds every city on the map again. 0 on
+ *  success. */
+int city_grow(City *c, int32_t w, int32_t h);
+/*  Point the city's cached directory at its store as it stands now.
+ *  Whatever widens a store a city works in calls it for that city. */
+void city_bind(City *c);
+/*  Give a city its window's extent, w by h tiles, and the working planes
+ *  of that size.  These are the scratch plane, the limits, the developed
+ *  mask, the scan's planes and the ring, all zero. 0 on success. */
+int city_extent(City *c, int32_t w, int32_t h);
+/*  Give a city read alone a store of its own, its window made and every
+ *  tile bare land.  0 on success. */
+int city_own_map(City *c);
+/*  Make `dst` a copy of `src` with tiles of its own: the scalars, the
+ *  records, and every tile of the window.  `dst` keeps its store when it
+ *  has one.  0 on success. */
+int city_copy(City *dst, const City *src);
+
+/*  Whether a tile lies inside the city's limits.  Every tile does in the
+ *  original's mode. */
+static inline int sim_inside(const City *c, int y, int x)
+{
+    return c->limits_glow <= 0 || T_LIMITS(c, y, x) != 0;
+}
+
+/*  The limits worked out again from what the city holds now.  The clock
+ *  does it once a month, and a caller that sets the glow does it once. */
+void sim_limits(City *c);
+
 /*  Scatter the raw MISC block into the named scalars.  city_load calls
  *  it, and so does the .arco reader.  So a world loaded either way goes
  *  through the same code and the two cannot drift apart. */
 void city_misc_to_scalars(City *c);
-int  city_load(const char *path, City *c);
-int  city_save(const char *path, const City *c);
+/*  The other way, for the world writer: the named scalars the clock
+ *  changes, written into a copy of the MISC block.  A saved world then
+ *  carries what the clock changed. */
+void city_scalars_to_misc(const City *c, int32_t *misc);
+/*  A city from a file of either format (load.c).  1 on success. */
+int city_load(const char *path, City *c);
+/*  A city from a 1995 .sc2 alone (city.c).  1 on success. */
+int city_load_sc2(const char *path, City *c);
+/*  Decode one cell of a 1995 file saved at the map turn `turn` into the
+ *  grid's own terms.  It changes the corner bits of XZON and the mirror
+ *  bit of XBIT. */
+void city_cell_unturn(uint8_t *xzon, uint8_t *xbit, uint8_t xbld, int turn);
 void city_free(City *c);
 
 /* ---- sim.c ------------------------------------------------------- */
@@ -605,32 +814,39 @@ enum
     SIM_EV_BANKRUPT, /* phase 22, funds below -100000, $230E6(2)     */
     SIM_EV_APPROVAL  /* phase 0, the poll crossed 80%, $3152A        */
 };
-int  sim_tick(City *c);
-int  sim_start_fire_near(City *c);                        /* $38002 */
-int  sim_disaster_riot(City *c);                          /* $37D34 */
-int  sim_burn_tile(City *c, int y, int x, int even_bare); /* $39B70 */
-int  sim_disaster_firestorm(City *c);                     /* $37C66 */
-int  sim_flood_spread(City *c);                           /* $379FC */
-int  sim_disaster_flood(City *c);                         /* $37940 */
-int  sim_disaster_chemical(City *c);                      /* $37888 */
-int  sim_disaster_pollution(City *c);                     /* $37FB6 */
-int  sim_disaster_air_crash(City *c);                     /* $38186 */
-int  sim_disaster_fire(City *c);                          /* $38290 */
-int  sim_disaster_tornado(City *c);                       /* $38766 */
-int  sim_disaster_monster(City *c);                       /* $38574 */
-int  sim_disaster_microwave(City *c);                     /* $38B6C */
+int sim_tick(City *c);
+/*  The disasters a player or a mode can start, and one started by its
+ *  number.  Answers what the routine answers, 0 for no such disaster. */
+enum
+{
+    SIM_DISASTER_NONE = 0,
+    SIM_DISASTER_FIRE,
+    SIM_DISASTER_FLOOD,
+    SIM_DISASTER_RIOT,
+    SIM_DISASTER_TORNADO,
+    SIM_DISASTER_MONSTER,
+    SIM_DISASTER_EARTHQUAKE,
+    SIM_DISASTER_HURRICANE,
+    SIM_DISASTER_CHEMICAL,
+    SIM_DISASTER_AIR_CRASH,
+    SIM_DISASTER_MICROWAVE,
+    SIM_DISASTER_MELTDOWN,
+    SIM_DISASTER_VOLCANO,
+    SIM_DISASTER_FIRESTORM,
+    SIM_DISASTER_POLLUTION,
+    SIM_N_DISASTERS
+};
+int  sim_disaster_start(City *c, int kind);
 void sim_demolish_tile(City *c, int y, int x, int flag_c, int scorch);
 /* $3A000 */
-void sim_demolish_and_place(City *c, int y, int x, int even_bare);
+/*  Returns 1 when the collapse is shown: the original then plays the
+ *  explosion, sound $1F8, through $3F636. */
+int sim_demolish_and_place(City *c, int y, int x, int even_bare);
 /* $5FAA */
 void sim_step_things(City *c);                     /* $09E0A */
 void sim_fix_terrain(City *c, int y, int x);       /* $128DE */
 void sim_fix_neighbourhood(City *c, int y, int x); /* $12C04 */
 int  sim_can_raise(City *c, int y, int x);         /* $8758 */
-int  sim_disaster_hurricane(City *c);              /* $3755A */
-int  sim_disaster_meltdown(City *c);               /* $38916 */
-int  sim_disaster_earthquake(City *c);             /* $383D4 */
-int  sim_disaster_volcano(City *c);                /* $37DD6 */
 void sim_raise_tile(City *c, int y, int x);        /* $896C */
 int  sim_footprint_origin(const City *c, int *py, int *px, int bld);
 /* $763A */
@@ -694,8 +910,20 @@ enum
     TOOL_EV_SOUND_STOP,     /* $30EE: stop sound `arg`                          */
     TOOL_EV_SOUND,          /* $3F636: play sound `arg` once                    */
     TOOL_EV_PICTURE,        /* $154A: open a window that shows PICT `arg`       */
-    TOOL_EV_NEWS            /* $2EDE4: print newspaper story `arg`              */
+    TOOL_EV_NEWS,           /* $2EDE4: print newspaper story `arg`              */
+    /*  $71A4: show a footprint collapsing, as $5FAA does when it is asked
+     *  to.  It is n frames of debris over the footprint, with the
+     *  explosion, sound $1F8, at each.  `arg` packs the footprint as
+     *  TOOL_COLLAPSE_ARG does. */
+    TOOL_EV_COLLAPSE
 };
+/*  The footprint of a collapse in one argument.  It holds the edge n,
+ *  from 1 to 4, and the tile that $763A gives: the least row and the
+ *  greatest column. */
+#define TOOL_COLLAPSE_ARG(y, x, n) ((int32_t)(((uint32_t)(y) << 14) | ((uint32_t)(x) << 3) | (uint32_t)((n) & 7)))
+#define TOOL_COLLAPSE_N(a)         ((int)((uint32_t)(a) & 7u))
+#define TOOL_COLLAPSE_X(a)         ((int)(((uint32_t)(a) >> 3) & 0x7FFu))
+#define TOOL_COLLAPSE_Y(a)         ((int)(((uint32_t)(a) >> 14) & 0x7FFu))
 typedef struct
 {
     int16_t kind;
@@ -711,8 +939,11 @@ typedef struct SimGesture
     int16_t   tool, sub; /* sub is the word at A5+0x1F88 + 2 * tool     */
     int16_t   y, x;      /* the tile it worked at last, $7D44's d6, d7  */
     int16_t   start_alt; /* $7D6C, the altitude Level works toward      */
+    int16_t   y0, x0;    /* the tile the gesture began at: a zone's first corner */
     uint8_t   flags;     /* GESTURE_                                    */
     int32_t   spent;     /* what the gesture took from the funds        */
+    int8_t    street;    /* a street tool's class for the drag, -1 until its first step */
+    uint8_t   stepped;   /* the gesture came onto another tile          */
     int       n_ev;      /* the caller reads ev and sets n_ev to 0      */
     ToolEvent ev[GESTURE_EVENTS];
 } SimGesture;
@@ -738,7 +969,12 @@ typedef struct
     int32_t price;
     int     ok;
 } ToolPreview;
-int  sim_tool_preview(const City *c, int tool, int sub, int flags, int y, int x, ToolPreview *p);
+int sim_tool_preview(const City *c, int tool, int sub, int flags, int y, int x, ToolPreview *p);
+/*  A gesture that drags a rectangle, as a zone does, takes the
+ *  rectangle from where it began to (y,x).  It is r = least row, least
+ *  column, greatest row, greatest column.  The price is the whole rectangle's,
+ *  and ok says the tool would take it.  Returns 0 for any other tool. */
+int  sim_tool_area(const City *c, const SimGesture *g, int y, int x, ToolPreview *p, int16_t r[4]);
 int  sim_bulldoze_tile(City *c, SimGesture *g, int y, int x); /* $8064 */
 void sim_refit_surface(City *c, int y, int x);                /* $20BAA */
 void sim_refit_under(City *c, int y, int x);                  /* $20D6E */
@@ -747,41 +983,33 @@ void sim_refit_under(City *c, int y, int x);                  /* $20D6E */
  *  rail and power lines are on the surface.  The pipes and the subway
  *  are underground.  The water is the canal the bulldozer leaves. */
 void sim_fit_road(City *c, int y, int x);   /* $1F632 */
+int  sim_road_joins(int b);                 /* $1F6D2: the XBLD bytes a road fitter joins */
+int  sim_rail_joins(int b);                 /* $1FC2E: the XBLD bytes a rail fitter joins */
 void sim_fit_rail(City *c, int y, int x);   /* $1FB60 */
 void sim_fit_power(City *c, int y, int x);  /* $1F2FE */
 void sim_fit_pipe(City *c, int y, int x);   /* $1FFB8 */
 void sim_fit_subway(City *c, int y, int x); /* $20352 */
 void sim_fit_water(City *c, int y, int x);  /* $122E0 */
 
-void           sim_rebuild_census(City *c);
-void           sim_power_grid(City *c);                                       /* powerGridReset $20FC4 */
-void           sim_water_grid(City *c);                                       /* waterGrid $2156E */
-void           sim_traffic_total(City *c);                                    /* trafficTotal $2530E */
-void           sim_pollution(City *c);                                        /* $2317E stages 1-2 */
-void           sim_population(City *c);                                       /* populationPass $33FAE */
-void           sim_demand(City *c);                                           /* $34068, the rest of $33FAE */
-void           sim_forest(City *c);                                           /* $34792, trees creeping back */
-void           sim_news_rolls(City *c);                                       /* $348F0, dice the paper eats */
-void           sim_weather(City *c);                                          /* $34C58, the weather walk    */
-void           sim_city_centre(City *c, int *cy, int *cx);                    /* $23432 */
-void           sim_land_value(City *c);                                       /* $2317E stages 4-5 */
-void           sim_crime(City *c);                                            /* $2317E stage 9   */
-void           sim_density(City *c);                                          /* $2317E stage 7   */
-void           sim_coverage(City *c);                                         /* $2317E stages 6-7*/
-void           sim_place(City *c, int y, int x, int tier, int kind);          /* placeBuilding $3258A */
-void           sim_grow_footprint(City *c, int y, int x, int tier, int zone); /* growFootprint $32998 */
-void           sim_upgrade(City *c, int y, int x, int tier, int coin);        /* upgradeBuilding $33028 */
-void           sim_build_church(City *c, int y, int x);
-void           sim_rotate(City *c, int turns);
-const uint8_t *sim_rot_table(int layer);                                                                                                                                                       /* the art remap for one turn: 0 XBLD, 1 XTER, 2 XUND: rotate.c */
-void           sim_rotate_thing(uint8_t *rec); /* one XTHG record, 12 bytes, turned a quarter in place: rotate.c */ /* the map turned a quarter clockwise, `turns` times ($3AECA): rotate.c */ /* buildChurch $32830 */
-int            sim_trip(City *c, int y, int x, int zone, int tier, int budget);                                                                                                                /* tripGenerate $245E8 */
-void           sim_growth_scan(City *c, int y0, int x0);                                                                                                                                       /* growthScan $3170E, phases 3-18 */
-int32_t        sim_growth_unimplemented(const City *c);
-int32_t        sim_growth_stub(const City *c, int i);
-void           sim_overlay_averages(City *c); /* $224BA, inside $22330 */
-void           sim_graph_pass(City *c);       /* $22330 one month      */
-void           sim_economy(City *c);          /* economyPass $34D04, phase 21 */
+void    sim_rebuild_census(City *c);
+void    sim_power_grid(City *c);                                /* powerGridReset $20FC4 */
+void    sim_water_grid(City *c);                                /* waterGrid $2156E */
+void    sim_traffic_total(City *c);                             /* trafficTotal $2530E */
+void    sim_pollution(City *c);                                 /* $2317E stages 1-2 */
+void    sim_population(City *c);                                /* populationPass $33FAE */
+void    sim_land_value(City *c);                                /* $2317E stages 4-5 */
+void    sim_crime(City *c);                                     /* $2317E stage 9   */
+void    sim_density(City *c);                                   /* $2317E stage 7   */
+void    sim_coverage(City *c);                                  /* $2317E stages 6-7*/
+void    sim_place(City *c, int y, int x, int tier, int kind);   /* placeBuilding $3258A */
+void    sim_upgrade(City *c, int y, int x, int tier, int coin); /* upgradeBuilding $33028 */
+void    sim_build_church(City *c, int y, int x);                /* buildChurch $32830 */
+void    sim_growth_scan(City *c, int y0, int x0);               /* growthScan $3170E, phases 3-18 */
+int32_t sim_growth_unimplemented(const City *c);
+int32_t sim_growth_stub(const City *c, int i);
+void    sim_overlay_averages(City *c); /* $224BA, inside $22330 */
+void    sim_graph_pass(City *c);       /* $22330 one month      */
+void    sim_economy(City *c);          /* economyPass $34D04, phase 21 */
 /*  $EEAE.  Give a newly placed special building its XMIC record and
  *  answer the marker XTXT carries for it (the slot plus 0x33).  0 if the
  *  building keeps no record.  Exposed so tools/micro_alloc_check.py can
@@ -793,7 +1021,6 @@ int sim_alloc_micro(City *c, int y, int x, int bld);
  *  right after the departments are reconciled. */
 void    sim_microsim(City *c);
 void    sim_budget(City *c);               /* budgetPass $263C8, phase 0  */
-int     sim_opinion_poll(City *c);         /* $3152A February poll  */
 int32_t sim_map_population(const City *c); /* $31DDA rule */
 
 /* ---- rng.c ------------------------------------------------------- */
@@ -808,17 +1035,31 @@ uint16_t lib_rand(City *c, uint16_t n);  /* $20EE6 THINK C rand()      */
  *  behavior. */
 uint16_t game_rand1(City *c);   /* $20F4C  & 1   */
 uint16_t game_rand3(City *c);   /* $20F64  & 3   */
-uint16_t game_rand15(City *c);  /* $20F7C  & 15  */
 uint16_t game_rand63(City *c);  /* $20F94  & 63  */
 uint16_t game_rand127(City *c); /* $20FAC  & 127 */
 
-void     rng_log_start(City *c);
-void     rng_log_free(City *c);
-void     rng_log_mark(City *c, int32_t v);
-int      rng_log_count(const City *c);
-int      rng_log_entry(const City *c, int i, int32_t *v);
-uint16_t rng_lfsr(const City *c); /* current $11DC, for the oracle */
-int32_t  rng_toolbox_seed(const City *c);
+/*  THE COORDINATE DICE.  The original draws a tile across its map with
+ *  one draw of 0 to 127.  For the middle half it draws 0 to 63.  A city
+ *  of another extent n makes the same draw and scales it to its own.  So
+ *  at 128 the tile is the original's, and the dice are drawn as often
+ *  whatever the size. */
+static inline int coord_rand127(City *c, int n)
+{
+    int r = (int)game_rand127(c);
+    return n == MAP_W ? r : r * n / MAP_W;
+}
+
+static inline int coord_rand_middle(City *c, int n)
+{
+    int r = (int)game_rand63(c);
+    return n == MAP_W ? r + 0x20 : r * n / MAP_W + n / 4;
+}
+
+void rng_log_start(City *c);
+void rng_log_free(City *c);
+void rng_log_mark(City *c, int32_t v);
+int  rng_log_count(const City *c);
+int  rng_log_entry(const City *c, int i, int32_t *v);
 
 /* ---- tables.c (generated) ---------------------------------------- */
 extern const uint8_t WEATHER_CLOUD[12];     /* A5+0x0A4E             */
@@ -907,6 +1148,5 @@ typedef struct
     int8_t source, num, den;
 } OrdinanceCost;
 extern const OrdinanceCost ORDINANCE_COST[20];
-int32_t                    sim_ordinance_cost(const City *c, int which); /* ordinanceCost $41368 */
 
 #endif /* ARC_SIM_H */

@@ -103,6 +103,38 @@ def decode_cicn(data):
     return w, h, rows
 
 
+def decode_ppat(data):
+    """A colour pattern as RGBA rows: its pixel map's bits through its
+    colour table.  Only the 1-, 2-, 4- and 8-bit indexed maps a scheme
+    uses."""
+    _, pmap, pdata = struct.unpack(">HII", data[:10])
+    rb = struct.unpack(">H", data[pmap + 4:pmap + 6])[0] & 0x3FFF
+    top, left, bot, right = struct.unpack(">hhhh", data[pmap + 6:pmap + 14])
+    psize = struct.unpack(">H", data[pmap + 32:pmap + 34])[0]
+    ctab = struct.unpack(">I", data[pmap + 42:pmap + 46])[0]
+    n = struct.unpack(">H", data[ctab + 6:ctab + 8])[0] + 1
+    colours = {}
+    for k in range(n):
+        v, r, g, b = struct.unpack(">HHHH", data[ctab + 8 + 8 * k:ctab + 16 + 8 * k])
+        colours[v] = (r >> 8, g >> 8, b >> 8, 255)
+    w, h = right - left, bot - top
+    rows = []
+    for y in range(h):
+        line = data[pdata + y * rb:pdata + (y + 1) * rb]
+        row = []
+        for x in range(w):
+            bit = x * psize
+            v = (line[bit // 8] >> (8 - psize - bit % 8)) & ((1 << psize) - 1)
+            row.append(colours.get(v, (0, 0, 0, 255)))
+        rows.append(row)
+    return w, h, rows
+
+
+#  The patterns a scheme fills its scroll bar tracks with, by their ids.
+PATTERNS = {-8278: "vscroll_pattern", -8277: "vscroll_pattern_pressed",
+            -8286: "hscroll_pattern", -8285: "hscroll_pattern_pressed"}
+
+
 def decode_cinf(data):
     f = struct.unpack(">bbbbhhhhhhh", data[:18])
     return {"corner": f[0], "side": f[1], "tile_sides": f[2], "anchor": f[3],
@@ -150,6 +182,14 @@ ELEMENTS = {
     -12235: "menu_divider", -12228: "menu_border", -12227: "menu_shadow",
     -8287: "hscroll_empty", -8286: "hscroll", -8279: "vscroll_empty",
     -8278: "vscroll", -10208: "vthumb", -10206: "hthumb",
+    -8285: "hscroll_pressed", -8277: "vscroll_pressed", -8288: "hscroll_disabled",
+    -8280: "vscroll_disabled", -10207: "vthumb_pressed", -10205: "hthumb_pressed",
+    -10131: "slider_track", -10130: "slider_track_pressed", -10132: "slider_track_inactive",
+    -10129: "slider_thumb", -10224: "progress_track", -10223: "progress_fill",
+    -10047: "little_arrows", -10046: "little_arrow_up_pressed", -10045: "little_arrow_down_pressed",
+    -9791: "placard", -9790: "placard_pressed", -9550: "list_color", -9549: "list_sort_color",
+    -9977: "tab_pane", -9980: "tab_front", -9983: "tab_rear", -9982: "tab_rear_pressed",
+    -8206: "popup_pressed", -8203: "popup_arrow_pressed",
     -8207: "popup", -8204: "popup_arrow", 0: "stop_icon", 1: "note_icon",
     2: "alert_icon", 3000: "triangle_right", 3001: "triangle_down",
 }
@@ -174,6 +214,12 @@ def main():
             continue
         w, h, rows = decode_cicn(cicn[cid].data)
         imgs.append((name, cid, w, h, rows))
+    ppat = {p.id: p for p in res.get("ppat", [])}
+    for pid, name in PATTERNS.items():
+        if pid in ppat:
+            w, h, rows = decode_ppat(ppat[pid].data)
+            imgs.append((name, pid, w, h, rows))
+            cicn.setdefault(pid, type("Pat", (), {"name": name})())
     imgs.sort(key=lambda e: -e[3])
     W = 512
     x = y = shelf = 0

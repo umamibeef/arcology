@@ -18,14 +18,15 @@
 
 typedef struct
 {
-    const char    *name;    /* "sprite.vert"                          */
-    int            stage;   /* 0 vertex, 1 fragment                   */
+    const char    *name;  /* "sprite.vert"                          */
+    int            stage; /* 0 vertex, 1 fragment                   */
     const uint8_t *spv;
     size_t         spv_len;
     const uint8_t *msl;     /* NUL-terminated source text             */
     size_t         msl_len; /* without the NUL                        */
     int            num_samplers;
     int            num_uniform_buffers;
+    int            num_storage_buffers;
 } RShaderSrc;
 
 extern const RShaderSrc shaders_all[];

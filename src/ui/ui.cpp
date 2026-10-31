@@ -1,27 +1,23 @@
-/*  ui.cpp: the canon interface, hosted by Dear ImGui.  The original's
- *  interface, from its own resources: the tool palette is PICT 500 with
- *  the thirty-four buttons the help texts enumerate, in a floating
- *  windoid.  The menus are the MENU resources, title by title and item
- *  by item.  The windows wear System 7 chrome, a striped title bar with
- *  a close box, drawn here.  ImGui is the engine under it: layout,
- *  hit-testing, text and the draw lists.  The widgets see an RUiState
- *  and nothing else.  The app fills it, they edit it, and the app
- *  applies it.  apply_theme is the one place the look is set.  A
- *  Kaleidoscope scheme drives it later.  Not the original's yet: the
- *  text is ImGui's bitmap font, not Chicago (the game uses the system's
- *  fonts, which are not in its resources).  The windows the palette
- *  opens are the game's stand-ins in the original's chrome, not the
- *  original's windows. */
-extern "C" {
+/*  ui.cpp: the canon interface, hosted by Dear ImGui, and what its parts
+ *  share.  This file holds the art, the System 7 chrome, the menus' look,
+ *  the themed controls and the frame.  The palette is in palette.cpp, the
+ *  menu bar in menubar.cpp, the windows in windows.cpp and the inspector
+ *  in inspect.cpp.  ImGui is the engine under it: layout, hit-testing,
+ *  text and the draw lists.  The widgets see an RUiState and nothing
+ *  else.  The app fills it, they edit it, and the app applies it.  The
+ *  System 7 look is apply_theme's, and ui_set_theme lays a Kaleidoscope
+ *  scheme over it.  The text is in ChicagoKare, the game's system font
+ *  redrawn, because the game's own fonts are not in its resources. */
 #include "ui.h"
+#include "log.h"
 /* lodepng is compiled as C in the vendor library.  Only this call is used */
-unsigned lodepng_decode32_file(unsigned char **out, unsigned *w, unsigned *h, const char *filename);
-}
+extern "C" unsigned lodepng_decode32_file(unsigned char **out, unsigned *w, unsigned *h, const char *filename);
 
 #include <SDL3/SDL.h>
 
 #include <cfloat>
 #include <cstdarg>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -31,128 +27,14 @@ unsigned lodepng_decode32_file(unsigned char **out, unsigned *w, unsigned *h, co
 #include "imgui_impl_sdl3.h"
 #include "imgui_impl_sdlgpu3.h"
 #include "imgui_internal.h" /* the Selectable flags MenuItem itself is built on */
+#include "internal.hpp"
 #ifdef IMGUI_ENABLE_FREETYPE
     #include "imgui_freetype.h"
 #endif
 
-static const ImU32 BLACK = IM_COL32(0, 0, 0, 255);
-static const ImU32 WHITE = IM_COL32(255, 255, 255, 255);
-
-/*  Where each picture sits in assets/ui.png. */
-struct Pict
-{
-    int id, x, y, w, h;
-};
-
-/*  A Kaleidoscope scheme, as tools/scheme.py packs it.  It holds
- *  elements cut from the scheme's color icons, with the corner size that
- *  stretches them.  It also holds the colors their info table names, and
- *  the parts of the window frames. */
-struct ThemeEl
-{
-    char name[32];
-    int  x, y, w, h, corner, side;
-    int  bg[3], text[3];
-};
-struct ThemePart
-{
-    char window[24];
-    int  part, x, y, w, h;
-};
-struct Theme
-{
-    bool            loaded;
-    SDL_GPUTexture *tex;
-    int             tw, th;
-    ThemeEl         els[48];
-    int             n_els;
-    ThemePart       parts[48];
-    int             n_parts;
-};
-
-struct RUi
-{
-    SDL_Window     *win;
-    SDL_GPUDevice  *dev;
-    SDL_GPUTexture *atlas;
-    int             atlas_w, atlas_h;
-    Pict            picts[80];
-    int             n_picts;
-    bool            frame_open;
-    bool            save_popup;
-    float           dpi;
-    bool            help_mode;
-    int             sub_for; /* the tool whose sub-tool menu is open */
-    Theme           theme;
-};
-
-static const char *SPEED_NAME[6]  = {"Pause", "Pause", "Turtle", "Llama", "Cheetah", "African Swallow"};
-static const char *STAGE_NAME[10] = {"Village", "Town", "City", "Capital", "Metropolis", "Megalopolis", "Stage 6", "Stage 7", "Stage 8", "Stage 9"};
-static const char *VIEW_NAME[12]  = {"Normal", "Traffic", "Density", "Growth and value", "Crime", "Police", "Pollution", "Land value", "Fire", "Power", "Water", "Growth"};
-static const char *ZONE_NAME[16]  = {
-    "none", "light residential", "dense residential", "light commercial", "dense commercial", "light industrial", "dense industrial", "military", "airport", "seaport", "zone 10", "zone 11", "zone 12", "zone 13", "zone 14", "zone 15"};
-
-/*  The palette's buttons.
- *
- *      Rectangles in PICT 500.
- *      Measured from its bevels (the light top and left edges.
- *      The dark bottom and right).
- *      The tool each is.
- *
- *  The RCI column is the demand button. */
-struct PalButton
-{
-    int x0, y0, x1, y1, tool;
-};
-static const PalButton PALETTE[] = {
-    {1,  1,   22, 22,  RUI_TOOL_BULLDOZER        },
-    {24, 1,   45, 22,  RUI_TOOL_LANDSCAPE        },
-    {47, 1,   68, 22,  RUI_TOOL_DISPATCH         },
-    {1,  25,  22, 46,  RUI_TOOL_POWER            },
-    {24, 25,  45, 46,  RUI_TOOL_WATER            },
-    {47, 25,  68, 46,  RUI_TOOL_BONUS            },
-    {1,  49,  22, 70,  RUI_TOOL_ROADS            },
-    {24, 49,  45, 70,  RUI_TOOL_RAIL             },
-    {47, 49,  68, 70,  RUI_TOOL_PORTS            },
-    {1,  73,  22, 94,  RUI_TOOL_RESIDENTIAL      },
-    {24, 73,  45, 94,  RUI_TOOL_COMMERCIAL       },
-    {47, 73,  68, 94,  RUI_TOOL_INDUSTRIAL       },
-    {1,  97,  22, 118, RUI_TOOL_EDUCATION        },
-    {24, 97,  45, 118, RUI_TOOL_HEALTH           },
-    {47, 97,  68, 118, RUI_TOOL_RECREATION       },
-    {6,  125, 33, 145, RUI_TOOL_SIGN             },
-    {36, 125, 63, 145, RUI_TOOL_QUERY            },
-    {6,  152, 33, 172, RUI_TOOL_ROTATE_CCW       },
-    {36, 152, 63, 172, RUI_TOOL_ROTATE_CW        },
-    {2,  174, 23, 195, RUI_TOOL_ZOOM_OUT         },
-    {25, 174, 46, 195, RUI_TOOL_ZOOM_IN          },
-    {48, 174, 69, 195, RUI_TOOL_CENTER           },
-    {2,  202, 23, 219, RUI_TOOL_MAP              },
-    {26, 202, 46, 219, RUI_TOOL_GRAPHS           },
-    {2,  222, 23, 239, RUI_TOOL_POPULATION       },
-    {26, 222, 46, 239, RUI_TOOL_INDUSTRY         },
-    {2,  242, 23, 259, RUI_TOOL_NEIGHBORS        },
-    {26, 242, 46, 259, RUI_TOOL_BUDGET           },
-    {49, 202, 69, 259, RUI_TOOL_DEMAND           },
-    {2,  266, 33, 279, RUI_TOOL_LAYER_BUILDINGS  },
-    {37, 266, 67, 279, RUI_TOOL_LAYER_SIGNS      },
-    {2,  281, 33, 294, RUI_TOOL_LAYER_ROADS      },
-    {37, 281, 67, 294, RUI_TOOL_LAYER_ZONES      },
-    {2,  296, 43, 309, RUI_TOOL_LAYER_UNDERGROUND},
-    {47, 296, 67, 309, -1 /* help */             },
-};
-static const int N_PALETTE = (int)(sizeof PALETTE / sizeof PALETTE[0]);
-
-/*  Tools that stay selected for clicks on the map, as against buttons
- *  that act at once. */
-static bool is_map_tool(int tool)
-{
-    return tool >= 0 && tool <= RUI_TOOL_CENTER;
-}
-
 /* ---- the atlas -------------------------------------------------------- */
 
-static const Pict *find_pict(const RUi *u, int id)
+const Pict *find_pict(const RUi *u, int id)
 {
     for (int k = 0; k < u->n_picts; ++k)
         if (u->picts[k].id == id)
@@ -208,7 +90,7 @@ static SDL_GPUTexture *upload_rgba(SDL_GPUDevice *dev, const unsigned char *rgba
     return tex;
 }
 
-static const ThemeEl *theme_el(const RUi *u, const char *name)
+const ThemeEl *theme_el(const RUi *u, const char *name)
 {
     if (!u->theme.loaded)
         return nullptr;
@@ -228,7 +110,7 @@ static const ThemePart *theme_part(const RUi *u, const char *window, int part)
     return nullptr;
 }
 
-static ImU32 theme_col(const int rgb[3], ImU32 fallback)
+ImU32 theme_col(const int rgb[3], ImU32 fallback)
 {
     if (rgb[0] < 0)
         return fallback;
@@ -247,7 +129,17 @@ static void theme_blit(const RUi *u, ImDrawList *dl, int sx, int sy, int sw, int
 
 /*  An element stretched over a rectangle: the corners fixed, the edges
  *  and the middle stretched, by the scheme's corner size. */
-static void theme_nine(const RUi *u, ImDrawList *dl, const ThemeEl *e, ImVec2 a, ImVec2 b)
+static void theme_nine_at(const RUi *u, ImDrawList *dl, const ThemeEl *e, ImVec2 a, ImVec2 b, int c);
+
+void theme_nine(const RUi *u, ImDrawList *dl, const ThemeEl *e, ImVec2 a, ImVec2 b)
+{
+    theme_nine_at(u, dl, e, a, b, e->corner);
+}
+
+/*  The same, with the fixed edge `c` pixels thick.  A frame the scheme
+ *  stretches by its side thickness rather than its corner is drawn with
+ *  this. */
+static void theme_nine_at(const RUi *u, ImDrawList *dl, const ThemeEl *e, ImVec2 a, ImVec2 b, int c)
 {
     ImGuiPlatformIO &pio = ImGui::GetPlatformIO();
     if (pio.DrawCallback_SetSamplerNearest)
@@ -257,7 +149,6 @@ static void theme_nine(const RUi *u, ImDrawList *dl, const ThemeEl *e, ImVec2 a,
      *  So the center is never stretched: it is filled with the
      *  background color.  Each edge is the one-pixel strip next to its
      *  corners, stretched along the edge. */
-    int   c = e->corner;
     float W = b.x - a.x, H = b.y - a.y;
     if (c <= 0 || 2 * c >= e->w || 2 * c >= e->h || W < (float)(2 * c) || H < (float)(2 * c))
         theme_blit(u, dl, e->x, e->y, e->w, e->h, a, b);
@@ -342,13 +233,13 @@ extern "C" int ui_set_theme(RUi *u, const char *dir)
     char line[512];
     while (fgets(line, sizeof line, fp))
     {
-        if (strncmp(line, "element ", 8) == 0 && t.n_els < 48)
+        if (strncmp(line, "element ", 8) == 0 && t.n_els < 96)
         {
             ThemeEl &e = t.els[t.n_els];
             if (sscanf(line + 8, "%31s %d %d %d %d %d %d %d %d %d %d %d %d", e.name, &e.x, &e.y, &e.w, &e.h, &e.corner, &e.side, &e.bg[0], &e.bg[1], &e.bg[2], &e.text[0], &e.text[1], &e.text[2]) == 13)
                 t.n_els++;
         }
-        else if (strncmp(line, "part ", 5) == 0 && t.n_parts < 48)
+        else if (strncmp(line, "part ", 5) == 0 && t.n_parts < 64)
         {
             ThemePart &p = t.parts[t.n_parts];
             if (sscanf(line + 5, "%23s %d %d %d %d %d", p.window, &p.part, &p.x, &p.y, &p.w, &p.h) == 6)
@@ -361,6 +252,24 @@ extern "C" int ui_set_theme(RUi *u, const char *dir)
     unsigned       w = 0, h = 0;
     if (lodepng_decode32_file(&rgba, &w, &h, path) != 0 || !rgba)
         return -1;
+    /*  The menu's shadow is a ramp of grays that darkens what lies under
+     *  it: white leaves it, black blacks it out.  Black at the alpha of
+     *  one less the gray does the same under the usual blend. */
+    for (int k = 0; k < t.n_els; ++k)
+        if (strcmp(t.els[k].name, "menu_shadow") == 0)
+        {
+            const ThemeEl &e = t.els[k];
+            for (int y = e.y; y < e.y + e.h && y < (int)h; ++y)
+                for (int x = e.x; x < e.x + e.w && x < (int)w; ++x)
+                {
+                    unsigned char *q = rgba + ((size_t)y * w + (size_t)x) * 4u;
+                    if (q[3] == 0)
+                        continue;
+                    const int gray = (q[0] + q[1] + q[2]) / 3;
+                    q[0] = q[1] = q[2] = 0;
+                    q[3]               = (unsigned char)(255 - gray);
+                }
+        }
     if (t.tex)
         SDL_ReleaseGPUTexture(u->dev, t.tex);
     t.tex = upload_rgba(u->dev, rgba, w, h);
@@ -390,6 +299,30 @@ extern "C" int ui_set_theme(RUi *u, const char *dir)
     }
     if (item && item->text[0] >= 0)
         st.Colors[ImGuiCol_Text] = ImGui::ColorConvertU32ToFloat4(theme_col(item->text, BLACK));
+    /*  What the scheme carries no art for takes its colors.  A table's
+     *  header is a placard's, and its rows alternate the list's two.  Its
+     *  lines and the separators are the frame's gray.  The scroll bars
+     *  are the scheme's own, drawn over ImGui's (themed_scrollbars),
+     *  whose own are left with no color. */
+    {
+        const ThemeEl *pl = theme_el(u, "placard"), *li = theme_el(u, "list_color");
+        ImVec4         clear(0, 0, 0, 0), gray(0.4f, 0.4f, 0.4f, 1.0f), black(0, 0, 0, 1), white(1, 1, 1, 1);
+        if (pl && pl->bg[0] >= 0)
+            st.Colors[ImGuiCol_TableHeaderBg] = ImGui::ColorConvertU32ToFloat4(theme_col(pl->bg, WHITE));
+        st.Colors[ImGuiCol_TableRowBg]        = white;
+        st.Colors[ImGuiCol_TableRowBgAlt]     = li && li->bg[0] >= 0 ? ImGui::ColorConvertU32ToFloat4(theme_col(li->bg, WHITE)) : white;
+        st.Colors[ImGuiCol_TableBorderStrong] = black;
+        st.Colors[ImGuiCol_TableBorderLight]  = gray;
+        st.Colors[ImGuiCol_Separator]         = gray;
+        st.Colors[ImGuiCol_WindowBg]          = white;
+        st.Colors[ImGuiCol_ChildBg]           = white;
+        st.Colors[ImGuiCol_FrameBg]           = white;
+        st.Colors[ImGuiCol_ScrollbarBg] = st.Colors[ImGuiCol_ScrollbarGrab] = clear;
+        st.Colors[ImGuiCol_ScrollbarGrabHovered] = st.Colors[ImGuiCol_ScrollbarGrabActive] = clear;
+        const ThemeEl *vs                                                                  = theme_el(u, "vscroll");
+        if (vs)
+            st.ScrollbarSize = (float)vs->w;
+    }
     return 0;
 }
 
@@ -410,7 +343,7 @@ extern "C" void ui_clear_theme(RUi *u)
 
 /*  Draw a picture, or a part of it, at a screen position, one texel per
  *  point, sampled nearest so the pixels stay pixels. */
-static void draw_pict(const RUi *u, ImDrawList *dl, int id, ImVec2 at, int sx = 0, int sy = 0, int sw = -1, int sh = -1)
+void draw_pict(const RUi *u, ImDrawList *dl, int id, ImVec2 at, int sx, int sy, int sw, int sh)
 {
     const Pict *p = find_pict(u, id);
     if (!p || !u->atlas)
@@ -435,8 +368,7 @@ static void draw_pict(const RUi *u, ImDrawList *dl, int id, ImVec2 at, int sx = 
 
 /*  System 7: white windows with a black line round them, square, and
  *  black text.  Menus are white with black text.  A menu drops down as a
- *  white box with a shadow.  Fonts are the bitmap default until Chicago
- *  is at hand. */
+ *  white box with a shadow. */
 static void apply_theme(float dpi)
 {
     ImGuiStyle &st = ImGui::GetStyle();
@@ -481,6 +413,109 @@ static void apply_theme(float dpi)
         st.ScaleAllSizes(dpi);
 }
 
+/*  A WINDOW'S FRAME as the scheme draws it, round the rectangle `a` to
+ *  `b`.  Each kind of window is an icon whose part 0 is where the content
+ *  goes: everything outside it is the frame.
+ *
+ *      The top band: the icon's left end, its title tile (part 4)
+ *      repeated across, and its right end anchored right.
+ *      The sides: the column of the frame either side of the content,
+ *      stretched down.
+ *      The bottom: its corners, and the column under the content
+ *      stretched across.
+ *      The title, centered on the band over the scheme's bar color.
+ *
+ *  A kind with no title tile is a frame alone.  The close box is part 1
+ *  where the kind has one.  Answers whether it was clicked, and sets
+ *  `*drawn` where there is a scheme to draw from.  The cursor is left
+ *  inside the frame, under the band. */
+static const char *frame_icon(const char *window)
+{
+    return strcmp(window, "utility") == 0          ? "utility_active"
+           : strcmp(window, "movable_dialog") == 0 ? "movable_modal_active"
+           : strcmp(window, "dialog") == 0         ? "modal_active"
+                                                   : "window_active";
+}
+
+bool theme_frame(RUi *u, const char *window, const char *title, bool *drawn, float *top)
+{
+    *drawn                 = false;
+    const ThemeEl   *fr    = theme_el(u, frame_icon(window));
+    const ThemePart *body  = theme_part(u, window, 0);
+    const ThemePart *tile  = theme_part(u, window, 4);
+    const ThemePart *close = theme_part(u, window, 1);
+    if (!fr || !body)
+        return false;
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    ImVec2      p  = ImGui::GetWindowPos();
+    ImVec2      s  = ImGui::GetWindowSize();
+    const int   cx = body->x, cy = body->y, R = fr->w - body->x - body->w, B = fr->h - body->y - body->h;
+    const float x0 = p.x, y0 = p.y, x1 = p.x + s.x, y1 = p.y + s.y;
+    if (s.x < (float)(cx + R + 2) || s.y < (float)(cy + B + 2))
+        return false;
+    ImGuiPlatformIO &pio = ImGui::GetPlatformIO();
+    if (pio.DrawCallback_SetSamplerNearest)
+        dl->AddCallback(pio.DrawCallback_SetSamplerNearest, nullptr);
+    /* the top band */
+    if (tile)
+    {
+        const int lw = tile->x, rw = fr->w - tile->x - tile->w;
+        theme_blit(u, dl, fr->x, fr->y, lw, cy, ImVec2(x0, y0), ImVec2(x0 + (float)lw, y0 + (float)cy));
+        for (float x = x0 + (float)lw; x < x1 - (float)rw; x += (float)tile->w)
+        {
+            float w = x + (float)tile->w > x1 - (float)rw ? x1 - (float)rw - x : (float)tile->w;
+            theme_blit(u, dl, fr->x + tile->x, fr->y, (int)w, cy, ImVec2(x, y0), ImVec2(x + w, y0 + (float)cy));
+        }
+        theme_blit(u, dl, fr->x + fr->w - rw, fr->y, rw, cy, ImVec2(x1 - (float)rw, y0), ImVec2(x1, y0 + (float)cy));
+    }
+    else
+    {
+        theme_blit(u, dl, fr->x, fr->y, cx, cy, ImVec2(x0, y0), ImVec2(x0 + (float)cx, y0 + (float)cy));
+        theme_blit(u, dl, fr->x + cx, fr->y, 1, cy, ImVec2(x0 + (float)cx, y0), ImVec2(x1 - (float)R, y0 + (float)cy));
+        theme_blit(u, dl, fr->x + fr->w - R, fr->y, R, cy, ImVec2(x1 - (float)R, y0), ImVec2(x1, y0 + (float)cy));
+    }
+    /* the sides */
+    theme_blit(u, dl, fr->x, fr->y + cy, cx, 1, ImVec2(x0, y0 + (float)cy), ImVec2(x0 + (float)cx, y1 - (float)B));
+    theme_blit(u, dl, fr->x + fr->w - R, fr->y + cy, R, 1, ImVec2(x1 - (float)R, y0 + (float)cy), ImVec2(x1, y1 - (float)B));
+    /* the bottom */
+    theme_blit(u, dl, fr->x, fr->y + fr->h - B, cx, B, ImVec2(x0, y1 - (float)B), ImVec2(x0 + (float)cx, y1));
+    theme_blit(u, dl, fr->x + cx, fr->y + fr->h - B, 1, B, ImVec2(x0 + (float)cx, y1 - (float)B), ImVec2(x1 - (float)R, y1));
+    theme_blit(u, dl, fr->x + fr->w - R, fr->y + fr->h - B, R, B, ImVec2(x1 - (float)R, y1 - (float)B), ImVec2(x1, y1));
+    if (pio.DrawCallback_SetSamplerLinear)
+        dl->AddCallback(pio.DrawCallback_SetSamplerLinear, nullptr);
+    if (tile && title && title[0])
+    {
+        ImVec2         ts  = ImGui::CalcTextSize(title);
+        float          tx  = x0 + (s.x - ts.x) * 0.5f;
+        float          ty  = y0 + (float)tile->y + ((float)tile->h - ts.y) * 0.5f;
+        const ThemeEl *bar = theme_el(u, "menu_bar");
+        dl->AddRectFilled(ImVec2(tx - 6.0f, y0 + (float)tile->y), ImVec2(tx + ts.x + 6.0f, y0 + (float)(tile->y + tile->h)), bar ? theme_col(bar->bg, WHITE) : WHITE);
+        dl->AddText(ImVec2(tx, ty), BLACK, title);
+    }
+    *drawn = true;
+    if (top)
+        *top = (float)cy;
+    bool closed = false;
+    if (close && strcmp(window, "movable_dialog") != 0)
+    {
+        ImVec2 c0(x0 + (float)close->x, y0 + (float)close->y);
+        ImGui::SetCursorScreenPos(c0);
+        closed = ImGui::InvisibleButton("##close", ImVec2((float)close->w, (float)close->h));
+        if (ImGui::IsItemActive())
+            dl->AddRectFilled(c0, ImVec2(c0.x + (float)close->w, c0.y + (float)close->h), IM_COL32(0, 0, 0, 110));
+    }
+    ImGui::SetCursorScreenPos(ImVec2(x0 + ImGui::GetCurrentWindow()->WindowPadding.x, y0 + (float)cy + 6.0f));
+    return closed;
+}
+
+/*  The title band alone, for the kinds that are drawn as windows. */
+bool theme_title(RUi *u, const char *window, const char *title, bool *drawn)
+{
+    return theme_frame(u, window, title, drawn, nullptr);
+}
+
+RUi *g_ui_for_title = nullptr; /* the interface whose theme mac_title draws */
+
 /*  A System 7 title bar over the top of the current window.
  *
  *      The striped bar.
@@ -489,72 +524,7 @@ static void apply_theme(float dpi)
  *
  *  Returns true if the close box was clicked.  Windows are begun without
  *  ImGui's own title bar and reserve TITLE_H at the top for this. */
-static const float TITLE_H = 14.0f;
-
-/*  The scheme's title bar, when one is loaded.
- *
- *      The frame's left part up to its one-pixel title tile.
- *      The tile stretched across.
- *      The right part anchored right.
- *      The title in the middle.
- *
- *  The close box is where the scheme's window definition puts it.
- *  Returns true if the close box was clicked, false if there is no
- *  scheme. */
-static bool theme_title(RUi *u, const char *window, const char *title, bool *drawn)
-{
-    *drawn            = false;
-    const ThemeEl *fr = theme_el(u, strcmp(window, "utility") == 0 ? "utility_active" : "window_active");
-    if (!fr)
-        return false;
-    /* the tile column: the part one pixel wide.  The close box: part 1 */
-    const ThemePart *tile = nullptr, *close = theme_part(u, window, 1);
-    for (int k = 0; k < u->theme.n_parts; ++k)
-        if (u->theme.parts[k].w == 1 && strcmp(u->theme.parts[k].window, window) == 0)
-            tile = &u->theme.parts[k];
-    if (!tile)
-        return false;
-    ImDrawList *dl    = ImGui::GetWindowDrawList();
-    ImVec2      p     = ImGui::GetWindowPos();
-    ImVec2      s     = ImGui::GetWindowSize();
-    float       bar_h = (float)(tile->y + tile->h + 2);
-    if (bar_h > (float)fr->h)
-        bar_h = (float)fr->h;
-    ImGuiPlatformIO &pio = ImGui::GetPlatformIO();
-    if (pio.DrawCallback_SetSamplerNearest)
-        dl->AddCallback(pio.DrawCallback_SetSamplerNearest, nullptr);
-    int lw = tile->x, rw = fr->w - tile->x - 1;
-    theme_blit(u, dl, fr->x, fr->y, lw, (int)bar_h, ImVec2(p.x, p.y), ImVec2(p.x + (float)lw, p.y + bar_h));
-    theme_blit(u, dl, fr->x + tile->x, fr->y, 1, (int)bar_h, ImVec2(p.x + (float)lw, p.y), ImVec2(p.x + s.x - (float)rw, p.y + bar_h));
-    theme_blit(u, dl, fr->x + tile->x + 1, fr->y, rw, (int)bar_h, ImVec2(p.x + s.x - (float)rw, p.y), ImVec2(p.x + s.x, p.y + bar_h));
-    if (pio.DrawCallback_SetSamplerLinear)
-        dl->AddCallback(pio.DrawCallback_SetSamplerLinear, nullptr);
-    if (title && title[0])
-    {
-        ImVec2         ts  = ImGui::CalcTextSize(title);
-        float          tx  = p.x + (s.x - ts.x) * 0.5f;
-        float          ty  = p.y + (float)tile->y + ((float)tile->h - ts.y) * 0.5f;
-        const ThemeEl *bar = theme_el(u, "menu_bar");
-        dl->AddRectFilled(ImVec2(tx - 6.0f, p.y + (float)tile->y), ImVec2(tx + ts.x + 6.0f, p.y + (float)(tile->y + tile->h)), bar ? theme_col(bar->bg, WHITE) : WHITE);
-        dl->AddText(ImVec2(tx, ty), BLACK, title);
-    }
-    *drawn      = true;
-    bool closed = false;
-    if (close)
-    {
-        ImVec2 c0(p.x + (float)close->x, p.y + (float)close->y);
-        ImGui::SetCursorScreenPos(c0);
-        closed = ImGui::InvisibleButton("##close", ImVec2((float)close->w, (float)close->h));
-        if (ImGui::IsItemActive())
-            dl->AddRectFilled(c0, ImVec2(c0.x + (float)close->w, c0.y + (float)close->h), IM_COL32(0, 0, 0, 110));
-    }
-    ImGui::SetCursorScreenPos(ImVec2(p.x + ImGui::GetStyle().WindowPadding.x, p.y + bar_h + 6.0f));
-    return closed;
-}
-
-static RUi *g_ui_for_title = nullptr; /* the interface whose theme mac_title draws */
-
-static bool mac_title(const char *title)
+bool mac_title(const char *title)
 {
     if (g_ui_for_title)
     {
@@ -586,946 +556,447 @@ static bool mac_title(const char *title)
     bool closed = ImGui::InvisibleButton("##close", ImVec2(c1.x - c0.x, c1.y - c0.y));
     if (ImGui::IsItemActive())
         dl->AddRectFilled(ImVec2(c0.x + 1.0f, c0.y + 1.0f), ImVec2(c1.x - 1.0f, c1.y - 1.0f), BLACK);
-    ImGui::SetCursorScreenPos(ImVec2(x0 + ImGui::GetStyle().WindowPadding.x, y0 + TITLE_H + 6.0f));
+    ImGui::SetCursorScreenPos(ImVec2(x0 + ImGui::GetCurrentWindow()->WindowPadding.x, y0 + TITLE_H + 6.0f));
     return closed;
 }
 
-static bool mac_begin(const char *title, int *show, float w, ImVec2 first_pos, ImGuiWindowFlags extra = 0)
+/*  The narrowest a frame can be and still show its title between the
+ *  boxes at its two ends.  That is the title, and on each side the
+ *  wider end and a margin. */
+static float frame_min_width(RUi *u, const char *window, const char *title)
 {
-    bool open = *show != 0;
+    const ThemeEl   *fr   = u ? theme_el(u, frame_icon(window)) : nullptr;
+    const ThemePart *tile = u ? theme_part(u, window, 4) : nullptr;
+    float            ends = 24.0f;
+    if (fr && tile)
+    {
+        const int rw = fr->w - tile->x - tile->w;
+        ends         = (float)(tile->x > rw ? tile->x : rw);
+    }
+    return ImGui::CalcTextSize(title).x + 2.0f * (ends + 8.0f);
+}
+
+/*  The padding inside a frame: the margin, beyond the frame's own
+ *  border on each side. */
+ImVec2 frame_pad(RUi *u, const char *window, ImVec2 margin)
+{
+    const ThemeEl   *fr   = u ? theme_el(u, frame_icon(window)) : nullptr;
+    const ThemePart *body = u ? theme_part(u, window, 0) : nullptr;
+    if (!fr || !body)
+        return margin;
+    const int side = body->x > fr->w - body->x - body->w ? body->x : fr->w - body->x - body->w;
+    return ImVec2(margin.x + (float)side, margin.y + (float)(fr->h - body->y - body->h));
+}
+
+/*  `most` is the largest the window may grow, and a window held at one
+ *  width names it there as well. */
+bool mac_begin(const char *title, int *show, float w, ImVec2 first_pos, ImGuiWindowFlags extra, ImVec2 most)
+{
+    bool  open  = *show != 0;
+    float least = frame_min_width(g_ui_for_title, "document", title);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(most.x < least ? most.x : (most.x < FLT_MAX ? most.x : least), 0.0f), most);
     ImGui::SetNextWindowSize(ImVec2(w, 0.0f), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowPos(first_pos, ImGuiCond_FirstUseEver);
     char id[128];
     snprintf(id, sizeof id, "##%s", title);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, frame_pad(g_ui_for_title, "document", ImGui::GetStyle().WindowPadding));
     bool vis = ImGui::Begin(id, nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize | extra);
+    ImGui::PopStyleVar();
     if (mac_title(title))
         open = false;
     *show = open ? 1 : 0;
     return vis;
 }
 
-/* ---- the palette ------------------------------------------------------- */
+/* ---- the menus' look ---------------------------------------------------- */
 
-static void palette(RUi *u, RUiState *s)
+/*  The menus as the scheme draws them.  A menu window is begun with no
+ *  background and no border of ImGui's own.  Over it go the scheme's
+ *  shadow, its border and its background, and then the items.  An item
+ *  under the pointer, and a title whose menu is open, take the scheme's
+ *  selected element and its text color.  With no scheme loaded, ImGui's
+ *  own look stands. */
+const RUi *s_look; /* the interface the menus are drawn for, set each frame */
+
+const ThemeEl *look_el(const char *name)
 {
-    if (!s->show_palette)
+    return s_look ? theme_el(s_look, name) : nullptr;
+}
+
+/*  Before a menu window begins: no background and no border of ImGui's,
+ *  and no highlight of its own on the items.  Returns how many colors
+ *  were pushed.  Pop them, and one style variable when any were, once
+ *  the window has begun. */
+int menu_look_push(void)
+{
+    if (!look_el("menu_border") || !look_el("menu_background"))
+        return 0;
+    ImGui::PushStyleColor(ImGuiCol_PopupBg, IM_COL32(0, 0, 0, 0));
+    ImGui::PushStyleColor(ImGuiCol_Header, IM_COL32(0, 0, 0, 0));
+    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, IM_COL32(0, 0, 0, 0));
+    ImGui::PushStyleColor(ImGuiCol_HeaderActive, IM_COL32(0, 0, 0, 0));
+    ImGui::PushStyleVar(ImGuiStyleVar_PopupBorderSize, 0.0f);
+    return 4;
+}
+
+void menu_look_pop(int n)
+{
+    if (!n)
         return;
-    const Pict *pal = find_pict(u, 500);
-    if (!pal)
-        return;
-    const float W = (float)pal->w + 2.0f, H = (float)pal->h + TITLE_H + 2.0f;
-    ImGui::SetNextWindowPos(ImVec2(10.0f, 28.0f), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(W, H));
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-    ImGui::Begin("##palette", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse);
-    ImDrawList *dl = ImGui::GetWindowDrawList();
-    ImVec2      p  = ImGui::GetWindowPos();
-    /* the windoid's title bar: the scheme's utility frame, else stripes */
-    float x0 = p.x, y0 = p.y, x1 = p.x + W;
-    bool  themed = false;
-    if (theme_title(u, "utility", "", &themed) && themed)
-        s->show_palette = 0;
-    if (!themed)
-    {
-        dl->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, y0 + TITLE_H), WHITE);
-        for (int k = 0; k < 6; ++k)
-        {
-            float y = y0 + 2.0f + (float)k * 2.0f;
-            dl->AddLine(ImVec2(x0 + 2.0f, y), ImVec2(x1 - 2.0f, y), BLACK);
-        }
-        dl->AddLine(ImVec2(x0, y0 + TITLE_H), ImVec2(x1, y0 + TITLE_H), BLACK);
-        ImVec2 c0(x0 + 7.0f, y0 + 2.0f), c1(x0 + 18.0f, y0 + 13.0f);
-        dl->AddRectFilled(ImVec2(c0.x - 1.0f, c0.y - 1.0f), ImVec2(c1.x + 1.0f, c1.y + 1.0f), WHITE);
-        dl->AddRect(c0, c1, BLACK);
-        ImGui::SetCursorScreenPos(c0);
-        if (ImGui::InvisibleButton("##pclose", ImVec2(11.0f, 11.0f)))
-            s->show_palette = 0;
-    }
-    ImVec2 at(x0 + 1.0f, y0 + TITLE_H + 1.0f);
-    draw_pict(u, dl, 500, at);
-    /* the buttons */
-    for (int k = 0; k < N_PALETTE; ++k)
-    {
-        const PalButton &b = PALETTE[k];
-        ImVec2           b0(at.x + (float)b.x0, at.y + (float)b.y0);
-        ImVec2           sz((float)(b.x1 - b.x0 + 1), (float)(b.y1 - b.y0 + 1));
-        char             id[16];
-        snprintf(id, sizeof id, "##pb%d", k);
-        ImGui::SetCursorScreenPos(b0);
-        bool clicked = ImGui::InvisibleButton(id, sz);
-        bool down    = ImGui::IsItemActive();
-        bool pressed = down || (b.tool >= 0 && b.tool == s->tool && is_map_tool(b.tool)) ||
-                       (b.tool == RUI_TOOL_DEMAND && s->show_demand) ||
-                       (b.tool == RUI_TOOL_LAYER_UNDERGROUND && s->underground) ||
-                       (b.tool < 0 && u->help_mode);
-        if (pressed)
-            draw_pict(u, dl, 100500, b0, b.x0, b.y0, b.x1 - b.x0 + 1, b.y1 - b.y0 + 1);
-        if (ImGui::IsItemHovered() && b.tool >= 0)
-        {
-            if (b.tool < RUI_N_MAP_TOOLS && RUI_SUB_NAME[b.tool][1])
-                ImGui::SetTooltip("%s: %s", RUI_TOOL_NAME[b.tool], RUI_SUB_NAME[b.tool][s->sub[b.tool]]);
-            else
-                ImGui::SetTooltip("%s", RUI_TOOL_NAME[b.tool]);
-        }
-        if (!clicked)
-            continue;
-        s->want_sound = 505; /* Click */
-        if (b.tool < 0)
-        {
-            u->help_mode = !u->help_mode;
-            ui_log(s, "Shift-click help: not yet ported");
-            continue;
-        }
-        if (u->help_mode)
-        {
-            ui_log(s, "%s", RUI_TOOL_NAME[b.tool]);
-            u->help_mode = false;
-            continue;
-        }
-        switch (b.tool)
-        {
-            case RUI_TOOL_ZOOM_OUT:
-                s->want_zoom_step = -1;
-                break;
-            case RUI_TOOL_ZOOM_IN:
-                s->want_zoom_step = 1;
-                break;
-            case RUI_TOOL_DEMAND:
-                s->show_demand = !s->show_demand;
-                break;
-            case RUI_TOOL_ROTATE_CCW:
-                s->want_rotate = -1;
-                break;
-            case RUI_TOOL_ROTATE_CW:
-                s->want_rotate = 1;
-                break;
-            case RUI_TOOL_MAP:
-                ui_log(s, "Map window: not yet ported");
-                break;
-            case RUI_TOOL_POPULATION:
-                s->show_city = 1;
-                break;
-            case RUI_TOOL_NEIGHBORS:
-                ui_log(s, "Neighbors window: not yet ported");
-                break;
-            case RUI_TOOL_GRAPHS:
-                s->show_graphs = 1;
-                break;
-            case RUI_TOOL_INDUSTRY:
-                ui_log(s, "Industry window: not yet ported");
-                break;
-            case RUI_TOOL_BUDGET:
-                s->show_budget = 1;
-                break;
-            case RUI_TOOL_LAYER_UNDERGROUND:
-                s->underground = !s->underground;
-                break;
-            case RUI_TOOL_LAYER_BUILDINGS:
-            case RUI_TOOL_LAYER_SIGNS:
-            case RUI_TOOL_LAYER_ROADS:
-            case RUI_TOOL_LAYER_ZONES:
-                ui_log(s, "%s layer toggle: not yet ported", RUI_TOOL_NAME[b.tool]);
-                break;
-            default:
-                if (b.tool < RUI_N_MAP_TOOLS && RUI_SUB_NAME[b.tool][1])
-                {
-                    /*  A tool with sub-tools stays selected, and its
-                     *  menu opens under the button as in the original. */
-                    s->tool    = b.tool;
-                    u->sub_for = b.tool;
-                    ImGui::SetNextWindowPos(ImVec2(b0.x + sz.x, b0.y));
-                    ImGui::OpenPopup("##subtool");
-                    break;
-                }
-                s->tool = (s->tool == b.tool) ? -1 : b.tool;
-                if (s->tool == RUI_TOOL_QUERY)
-                    s->show_query = 1;
-                break;
-        }
-    }
-    if (ImGui::BeginPopup("##subtool"))
-    {
-        /*  A sub-tool the simulation cannot do yet is shown and greyed
-         *  out.  Its price is the original's all the same. */
-        const int t = u->sub_for;
-        for (int k = 0; k < RUI_N_SUB && RUI_SUB_NAME[t][k]; ++k)
-        {
-            char price[24] = "";
-            if (s->sub_cost[t][k] > 0)
-                snprintf(price, sizeof price, "$%d", (int)s->sub_cost[t][k]);
-            const bool ready = (s->sub_ready[t] >> k) & 1;
-            if (ImGui::MenuItem(RUI_SUB_NAME[t][k], price, s->sub[t] == k, ready))
-            {
-                s->sub[t]     = k;
-                s->want_sound = 505; /* Click */
-            }
-        }
-        ImGui::EndPopup();
-    }
-    ImGui::End();
+    ImGui::PopStyleColor(n);
     ImGui::PopStyleVar();
 }
 
-/*  The zone demand indicator.
- *
- *      Three bars from a center line.
- *      Up for demand and down for surplus.
- *      Residential green.
- *      Commercial blue.
- *      Industrial yellow.
- *      As the original's popup draws them. */
-static void demand(RUi *u, RUiState *s)
+/*  The current window, a menu, framed as the scheme frames one.  The
+ *  border and the shadow share one picture size.  Their top two rows
+ *  and left three columns are clear, and the shadow takes the two
+ *  columns and rows past the right and bottom edges.  The border is 4
+ *  pixels thick on every side, which is the scheme's side thickness.
+ *  The background fills the border's inside. */
+void menu_frame(void)
 {
-    (void)u;
-    if (!s->show_demand)
+    const ThemeEl *bd = look_el("menu_border"), *sh = look_el("menu_shadow"), *bg = look_el("menu_background");
+    if (!bd || !bg)
         return;
-    ImGui::SetNextWindowPos(ImVec2(96.0f, 240.0f), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(92.0f, 96.0f + TITLE_H));
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-    ImGui::Begin("##demand", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings);
-    if (mac_title("RCI"))
-        s->show_demand = 0;
-    ImDrawList *dl  = ImGui::GetWindowDrawList();
-    ImVec2      p   = ImGui::GetWindowPos();
-    float       top = p.y + TITLE_H + 8.0f, mid = top + 40.0f, bottom = mid + 40.0f;
-    dl->AddLine(ImVec2(p.x + 8.0f, mid), ImVec2(p.x + 84.0f, mid), BLACK);
-    const ImU32 cols[3] = {IM_COL32(0, 160, 0, 255), IM_COL32(0, 0, 220, 255), IM_COL32(230, 200, 0, 255)};
-    const char *lab[3]  = {"R", "C", "I"};
-    for (int k = 0; k < 3; ++k)
-    {
-        float x = p.x + 16.0f + (float)k * 26.0f;
-        float v = (float)s->demand[k] / 2000.0f;
-        if (v > 1.0f)
-            v = 1.0f;
-        if (v < -1.0f)
-            v = -1.0f;
-        float y = mid - v * 38.0f;
-        dl->AddRectFilled(ImVec2(x, y < mid ? y : mid), ImVec2(x + 14.0f, y < mid ? mid : y), cols[k]);
-        dl->AddRect(ImVec2(x, y < mid ? y : mid), ImVec2(x + 14.0f, y < mid ? mid : y), BLACK);
-        dl->AddText(ImVec2(x + 3.0f, bottom + 2.0f), BLACK, lab[k]);
-    }
-    (void)top;
-    /*  Everything above went straight into the draw list, so this window
-     *  submits no item at all: and mac_title left the cursor below the
-     *  title bar.  This imGui reads as a boundary extension nobody
-     *  closed ("Code uses SetCursorPos()... please submit an item e.g.
-     *  Dummy() afterwards").  One Dummy the size of the content says
-     *  what we actually covered. */
-    {
-        ImVec2 ws = ImGui::GetWindowSize();
-        ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + TITLE_H));
-        ImGui::Dummy(ImVec2(ws.x, ws.y - TITLE_H));
-    }
-    ImGui::End();
-    ImGui::PopStyleVar();
-}
-
-/* ---- the menu bar ------------------------------------------------------ */
-
-/* ---- menus: the shortcut at the right, the check at the left ------------- */
-
-/*  The Mac's menus put a check mark at the left of an item.  They put
- *  its key at the far right, with the command mark that every one of
- *  them needs.  ImGui's MenuItem puts the key in a column just past the
- *  widest label and the mark to the right of that.  So an item is a
- *  Selectable that spans the row.  The highlight covers it, the layout
- *  width is the label's and the key's.  With the three pieces drawn on
- *  it by hand.  Every shortcut here takes the platform's command key: ⌘
- *  on the Mac, Ctrl elsewhere, and the labels say which. */
-#ifdef __APPLE__
-    #define SC_MOD   "\xE2\x8C\x98" /* ⌘ U+2318 */
-    #define SC_SHIFT "\xE2\x87\xA7" /* ⇧ U+21E7 */
-#else
-    #define SC_MOD   "Ctrl+"
-    #define SC_SHIFT "Shift+"
-#endif
-#define CHECK_MARK "\xE2\x9C\x93" /* ✓ U+2713, in Chicago */
-
-/*  "⌘L", or "⇧⌘T" with shift: the Mac writes the shift first.  Windows
- *  writes Ctrl+Shift+T.  A ring of buffers so several can be live in one
- *  menu. */
-static const char *sc(char key, bool shift = false)
-{
-    static char buf[16][24];
-    static int  n;
-    char       *b = buf[n++ & 15];
-#ifdef __APPLE__
-    snprintf(b, sizeof buf[0], "%s%s%c", shift ? SC_SHIFT : "", SC_MOD, key);
-#else
-    snprintf(b, sizeof buf[0], "%s%s%c", SC_MOD, shift ? SC_SHIFT : "", key);
-#endif
-    return b;
-}
-
-static bool menu_item(const char *label, const char *shortcut = nullptr, bool selected = false, bool enabled = true)
-{
-    const ImGuiStyle &st      = ImGui::GetStyle();
-    const float       check_w = ImGui::CalcTextSize(CHECK_MARK).x + st.ItemInnerSpacing.x;
-    const float       lw      = ImGui::CalcTextSize(label).x;
-    const float       sw      = shortcut ? ImGui::CalcTextSize(shortcut).x : 0.0f;
-    /*  the layout width: the check column, the label, and room for the
-     *  key.  SpanAvailWidth then stretches the highlight to the row */
-    const float need = check_w + lw + (shortcut ? 4.0f * st.ItemSpacing.x + sw : 0.0f);
-    ImGui::PushID(label);
-    if (!enabled)
-        ImGui::BeginDisabled();
-    const bool pressed = ImGui::Selectable("##item", false, ImGuiSelectableFlags_SelectOnRelease | ImGuiSelectableFlags_SetNavIdOnHover | ImGuiSelectableFlags_SpanAvailWidth, ImVec2(need, 0.0f));
-    if (!enabled)
-        ImGui::EndDisabled();
-    ImGui::PopID();
+    const ImVec2 p = ImGui::GetWindowPos(), z = ImGui::GetWindowSize();
     ImDrawList  *dl = ImGui::GetWindowDrawList();
-    const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
-    const ImU32  col = ImGui::GetColorU32(enabled ? ImGuiCol_Text : ImGuiCol_TextDisabled);
-    const float  ty  = a.y + (b.y - a.y - ImGui::GetTextLineHeight()) * 0.5f;
-    if (selected)
-        dl->AddText(ImVec2(a.x, ty), col, CHECK_MARK);
-    dl->AddText(ImVec2(a.x + check_w, ty), col, label);
-    if (shortcut)
-        dl->AddText(ImVec2(b.x - sw, ty), col, shortcut);
-    return pressed;
+    const ImVec2 a(p.x - 2.0f, p.y - 3.0f), b(p.x + z.x + 2.0f, p.y + z.y + 2.0f);
+    dl->PushClipRectFullScreen();
+    if (sh)
+        theme_nine_at(s_look, dl, sh, a, b, sh->side);
+    theme_nine_at(s_look, dl, bd, a, b, bd->side);
+    theme_nine(s_look, dl, bg, ImVec2(p.x + 2.0f, p.y + 1.0f), ImVec2(p.x + z.x - 2.0f, p.y + z.y - 2.0f));
+    dl->PopClipRect();
 }
 
-/*  The toggle form, as ImGui's: flips *p_selected on a pick. */
-static bool menu_item(const char *label, const char *shortcut, bool *p_selected, bool enabled = true)
+/*  The selected element over a row of the current menu, from its top
+ *  `y0` to its bottom `y1`, across the inside of the border. */
+void menu_row_lit(float y0, float y1)
 {
-    const bool pressed = menu_item(label, shortcut, p_selected && *p_selected, enabled);
-    if (pressed && p_selected)
-        *p_selected = !*p_selected;
-    return pressed;
+    const ThemeEl *sel = look_el("menu_item_selected");
+    if (!sel)
+        return;
+    const ImVec2 p = ImGui::GetWindowPos(), z = ImGui::GetWindowSize();
+    ImDrawList  *dl = ImGui::GetWindowDrawList();
+    dl->PushClipRectFullScreen();
+    theme_nine(s_look, dl, sel, ImVec2(p.x + 3.0f, y0), ImVec2(p.x + z.x - 3.0f, y1));
+    dl->PopClipRect();
 }
 
-static void menu_bar(RUi *u, RUiState *s)
+/*  A line between groups of items: the scheme's divider across the
+ *  menu, else ImGui's separator. */
+void menu_divider(void)
 {
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8.0f, 3.0f));
-    if (!ImGui::BeginMainMenuBar())
+    const ThemeEl *dv = look_el("menu_divider");
+    if (!dv)
     {
-        ImGui::PopStyleVar();
+        ImGui::Separator();
         return;
     }
-    /* the bar: the scheme's menu bar element stretched over it, else
-     * white with a black underline */
+    const ImVec2 p = ImGui::GetWindowPos(), z = ImGui::GetWindowSize(), at = ImGui::GetCursorScreenPos();
+    /*  A strip at its own height: the end columns, as many as the
+     *  corner, fixed, and the column next to them stretched between.
+     *  Its ends carry the background's outline and bevel, so it spans
+     *  the background (menu_frame) and they lie over them. */
+    ImDrawList      *dl  = ImGui::GetWindowDrawList();
+    ImGuiPlatformIO &pio = ImGui::GetPlatformIO();
+    const float      c = (float)dv->corner, x0 = p.x + 2.0f, x1 = p.x + z.x - 2.0f, y1 = at.y + (float)dv->h;
+    if (pio.DrawCallback_SetSamplerNearest)
+        dl->AddCallback(pio.DrawCallback_SetSamplerNearest, nullptr);
+    theme_blit(s_look, dl, dv->x, dv->y, dv->corner, dv->h, ImVec2(x0, at.y), ImVec2(x0 + c, y1));
+    theme_blit(s_look, dl, dv->x + dv->corner, dv->y, 1, dv->h, ImVec2(x0 + c, at.y), ImVec2(x1 - c, y1));
+    theme_blit(s_look, dl, dv->x + dv->w - dv->corner, dv->y, dv->corner, dv->h, ImVec2(x1 - c, at.y), ImVec2(x1, y1));
+    if (pio.DrawCallback_SetSamplerLinear)
+        dl->AddCallback(pio.DrawCallback_SetSamplerLinear, nullptr);
+    ImGui::Dummy(ImVec2(1.0f, (float)dv->h - ImGui::GetStyle().ItemSpacing.y));
+}
+
+/*  A menu inside a menu, framed as the menu it hangs from.  Its row is
+ *  lit while it is open. */
+bool begin_submenu(const char *label)
+{
+    const bool     open = ImGui::IsPopupOpen(label);
+    const ImVec2   at   = ImGui::GetCursorScreenPos();
+    const float    h    = ImGui::GetTextLineHeight();
+    const float    sp   = ImGui::GetStyle().ItemSpacing.y;
+    const ThemeEl *sel  = look_el("menu_item_selected");
+    if (open && sel)
+        menu_row_lit(at.y - sp * 0.5f, at.y + h + sp * 0.5f);
+    const int n = menu_look_push();
+    if (open && sel && n)
+        ImGui::PushStyleColor(ImGuiCol_Text, theme_col(sel->text, WHITE));
+    const bool r = ImGui::BeginMenu(label);
+    if (open && sel && n)
+        ImGui::PopStyleColor();
+    menu_look_pop(n);
+    if (r)
+        menu_frame();
+    return r;
+}
+
+/* ---- the controls -------------------------------------------------------- */
+
+/*  The scheme draws its windows, menus, scroll bars, sliders, progress
+ *  bars and placards.  It carries no push button, check box or text
+ *  field.  Those are the system's own, and this file draws them as
+ *  System 7 does, in black on the scheme's colors. */
+
+/*  A piece of an element drawn at its own size, nearest. */
+static void el_blit(ImDrawList *dl, const ThemeEl *e, int sx, int sy, int sw, int sh, ImVec2 at)
+{
+    ImGuiPlatformIO &pio = ImGui::GetPlatformIO();
+    if (pio.DrawCallback_SetSamplerNearest)
+        dl->AddCallback(pio.DrawCallback_SetSamplerNearest, nullptr);
+    theme_blit(s_look, dl, e->x + sx, e->y + sy, sw, sh, at, ImVec2(at.x + (float)sw, at.y + (float)sh));
+    if (pio.DrawCallback_SetSamplerLinear)
+        dl->AddCallback(pio.DrawCallback_SetSamplerLinear, nullptr);
+}
+
+/*  An element stretched along one axis.  Its two ends `c` long keep
+ *  their own size, and the column (or row) after the first end is
+ *  stretched between them.  The other axis is the element's own. */
+static void el_three(ImDrawList *dl, const ThemeEl *e, ImVec2 a, float len, bool across, int c)
+{
+    ImGuiPlatformIO &pio = ImGui::GetPlatformIO();
+    if (pio.DrawCallback_SetSamplerNearest)
+        dl->AddCallback(pio.DrawCallback_SetSamplerNearest, nullptr);
+    const float fc = (float)c;
+    if (across)
     {
-        ImDrawList    *dl  = ImGui::GetWindowDrawList();
-        ImVec2         p   = ImGui::GetWindowPos();
-        ImVec2         sz  = ImGui::GetWindowSize();
-        const ThemeEl *bar = theme_el(u, "menu_bar");
-        if (bar)
-            theme_nine(u, dl, bar, p, ImVec2(p.x + sz.x, p.y + sz.y));
+        theme_blit(s_look, dl, e->x, e->y, c, e->h, a, ImVec2(a.x + fc, a.y + (float)e->h));
+        theme_blit(s_look, dl, e->x + c, e->y, 1, e->h, ImVec2(a.x + fc, a.y), ImVec2(a.x + len - fc, a.y + (float)e->h));
+        theme_blit(s_look, dl, e->x + e->w - c, e->y, c, e->h, ImVec2(a.x + len - fc, a.y), ImVec2(a.x + len, a.y + (float)e->h));
+    }
+    else
+    {
+        theme_blit(s_look, dl, e->x, e->y, e->w, c, a, ImVec2(a.x + (float)e->w, a.y + fc));
+        theme_blit(s_look, dl, e->x, e->y + c, e->w, 1, ImVec2(a.x, a.y + fc), ImVec2(a.x + (float)e->w, a.y + len - fc));
+        theme_blit(s_look, dl, e->x, e->y + e->h - c, e->w, c, ImVec2(a.x, a.y + len - fc), ImVec2(a.x + (float)e->w, a.y + len));
+    }
+    if (pio.DrawCallback_SetSamplerLinear)
+        dl->AddCallback(pio.DrawCallback_SetSamplerLinear, nullptr);
+}
+
+/*  A PUSH BUTTON: a round-cornered box with a black line round it, the
+ *  label in the middle, and drawn inverted while it is held.  The
+ *  default button of a dialog carries the heavy ring round it. */
+bool ui_button(const char *label, ImVec2 size, bool def)
+{
+    const ImVec2 ts = ImGui::CalcTextSize(label, nullptr, true);
+    if (size.x <= 0.0f)
+        size.x = ts.x + 24.0f;
+    if (size.y <= 0.0f)
+        size.y = ts.y + 8.0f;
+    /*  The default button's ring lies round it, inside the item.  Every
+     *  button keeps the room for one, so a row of them lines up. */
+    const float ring = 4.0f;
+    ImVec2      o    = ImGui::GetCursorScreenPos();
+    ImGui::PushID(label);
+    const bool pressed = ImGui::InvisibleButton("##button", ImVec2(size.x + 2.0f * ring, size.y + 2.0f * ring));
+    const bool held    = ImGui::IsItemActive() && ImGui::IsItemHovered();
+    ImGui::PopID();
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    ImVec2      at(o.x + ring, o.y + ring), b(at.x + size.x, at.y + size.y);
+    dl->AddRectFilled(at, b, held ? BLACK : WHITE, 4.0f);
+    dl->AddRect(at, b, BLACK, 4.0f);
+    if (def)
+        dl->AddRect(ImVec2(o.x + 1.0f, o.y + 1.0f), ImVec2(b.x + ring - 1.0f, b.y + ring - 1.0f), BLACK, 7.0f, 0, 3.0f);
+    const char *end = ImGui::FindRenderedTextEnd(label);
+    dl->AddText(ImVec2(at.x + (size.x - ts.x) * 0.5f, at.y + (size.y - ts.y) * 0.5f), held ? WHITE : BLACK, label, end);
+    return pressed;
+}
+
+/*  A CHECK BOX: a square with a black line round it and a cross in it
+ *  when it is on, the label beside it. */
+bool ui_check(const char *label, bool *v)
+{
+    const float  side = 12.0f;
+    const ImVec2 at   = ImGui::GetCursorScreenPos();
+    const ImVec2 ts   = ImGui::CalcTextSize(label, nullptr, true);
+    ImGui::PushID(label);
+    const bool pressed = ImGui::InvisibleButton("##check", ImVec2(side + 6.0f + ts.x, side > ts.y ? side : ts.y));
+    const bool held    = ImGui::IsItemActive() && ImGui::IsItemHovered();
+    ImGui::PopID();
+    if (pressed)
+        *v = !*v;
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    const float y  = at.y + ((ts.y > side ? ts.y : side) - side) * 0.5f;
+    ImVec2      a(at.x, y), b(at.x + side, y + side);
+    dl->AddRectFilled(a, b, WHITE);
+    dl->AddRect(a, b, BLACK, 0.0f, 0, held ? 2.0f : 1.0f);
+    if (*v)
+    {
+        dl->AddLine(ImVec2(a.x + 1.0f, a.y + 1.0f), ImVec2(b.x - 1.0f, b.y - 1.0f), BLACK);
+        dl->AddLine(ImVec2(b.x - 2.0f, a.y + 1.0f), ImVec2(a.x, b.y - 1.0f), BLACK);
+    }
+    dl->AddText(ImVec2(b.x + 6.0f, at.y), ImGui::GetColorU32(ImGuiCol_Text), label, ImGui::FindRenderedTextEnd(label));
+    return pressed;
+}
+
+/*  A SLIDER: the scheme's track, its thumb at the value, and the value
+ *  and the label beside it.  Dragged anywhere on the track. */
+bool ui_slider(const char *label, float *v, float lo, float hi, const char *fmt, float w)
+{
+    const ThemeEl *tr = look_el("slider_track"), *th = look_el("slider_thumb");
+    const ImVec2   at = ImGui::GetCursorScreenPos();
+    const float    h = tr ? (float)tr->h : 16.0f, tw = th ? (float)th->w : 11.0f;
+    ImGui::PushID(label);
+    ImGui::InvisibleButton("##slider", ImVec2(w, h));
+    const bool active = ImGui::IsItemActive();
+    bool       moved  = false;
+    ImGui::PopID();
+    if (active && hi > lo)
+    {
+        float t  = (ImGui::GetIO().MousePos.x - at.x - tw * 0.5f) / (w - tw);
+        t        = t < 0.0f ? 0.0f : t > 1.0f ? 1.0f
+                                              : t;
+        float nv = lo + (hi - lo) * t;
+        if (nv != *v)
+            *v = nv, moved = true;
+    }
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    if (tr)
+        el_three(dl, tr, at, w, true, tr->corner > 0 ? tr->corner : 5);
+    else
+        dl->AddRect(ImVec2(at.x, at.y + h * 0.5f - 2.0f), ImVec2(at.x + w, at.y + h * 0.5f + 2.0f), BLACK);
+    {
+        float t = hi > lo ? (*v - lo) / (hi - lo) : 0.0f;
+        t       = t < 0.0f ? 0.0f : t > 1.0f ? 1.0f
+                                             : t;
+        ImVec2 p(at.x + t * (w - tw), at.y);
+        if (th)
+            el_blit(dl, th, 0, active ? 32 : 16, th->w, 16, p);
         else
-            dl->AddLine(ImVec2(p.x, p.y + sz.y - 1.0f), ImVec2(p.x + sz.x, p.y + sz.y - 1.0f), BLACK);
+            dl->AddRectFilled(p, ImVec2(p.x + tw, p.y + h), BLACK);
     }
-    /*  MENU 1000 is the Apple menu: the Mac's, not the game's, so it is
-     *  not drawn.  Its one item, About SimCity 2000, waits for a home.
-     *  MENU 1001 is the first that is. */
-    if (ImGui::BeginMenu("File"))
-    {
-        menu_item("Load Tile Set", nullptr, false, false);
-        ImGui::Separator();
-        if (menu_item("Load City", sc('L')))
-            s->open_load = 1;
-        menu_item("New City", sc('N'), false, false);
-        menu_item("Edit New Map", sc('E'), false, false);
-        menu_item("Load Scenario", sc('Z'), false, false);
-        ImGui::Separator();
-        if (menu_item("Save City", sc('S')))
-            s->want_save = 1;
-        if (menu_item("Save City As...", nullptr))
-            u->save_popup = true;
-        ImGui::Separator();
-        if (menu_item("Quit", sc('Q')))
-            s->want_quit = 1;
-        ImGui::EndMenu();
-    }
-    /* MENU 1002 */
-    if (ImGui::BeginMenu("Speed"))
-    {
-        const char *keys[6] = {"", "1", "2", "3", "4", "5"}; /* bare digits, as the keys are */
-        for (int k = 1; k <= 5; ++k)
-            if (menu_item(SPEED_NAME[k], keys[k], s->speed == k))
-                s->speed = k;
-        ImGui::EndMenu();
-    }
-    /* MENU 1003 */
-    if (ImGui::BeginMenu("Options"))
-    {
-        menu_item("Auto-Budget", nullptr, false, false);
-        menu_item("Auto-Goto", nullptr, true, false);
-        menu_item("Sound Effects", nullptr, true, false);
-        if (menu_item("Music", nullptr, s->music_on != 0))
-            s->want_music = 1;
-        ImGui::Separator();
-        /*  The Kaleidoscope schemes: None, then every pack found under
-         *  assets/themes.  A pick is a request.  App puts the scheme on
-         *  and writes the preference. */
-        if (ImGui::BeginMenu("Theme"))
-        {
-            const bool none = s->theme_name[0] == 0 || strcmp(s->theme_name, "none") == 0;
-            if (menu_item("None", nullptr, none) && !none)
-            {
-                snprintf(s->theme_name, sizeof s->theme_name, "none");
-                s->want_theme = 1;
-            }
-            if (s->n_themes)
-                ImGui::Separator();
-            for (int k = 0; k < s->n_themes; ++k)
-            {
-                const bool cur = strcmp(s->theme_list[k], s->theme_name) == 0;
-                if (menu_item(s->theme_list[k], nullptr, cur) && !cur)
-                {
-                    snprintf(s->theme_name, sizeof s->theme_name, "%s", s->theme_list[k]);
-                    s->want_theme = 1;
-                }
-            }
-            ImGui::EndMenu();
-        }
-        ImGui::EndMenu();
-    }
-    /* MENU 1004 */
-    if (ImGui::BeginMenu("Disasters"))
-    {
-        struct
-        {
-            const char *name;
-            int         id;
-        } items[8] = {
-            {"Fire",       RUI_DISASTER_FIRE      },
-            {"Flood",      RUI_DISASTER_FLOOD     },
-            {"Air Crash",  RUI_DISASTER_AIR_CRASH },
-            {"Tornado",    RUI_DISASTER_TORNADO   },
-            {"Earthquake", RUI_DISASTER_EARTHQUAKE},
-            {"Monster",    RUI_DISASTER_MONSTER   },
-            {"Hurricane",  RUI_DISASTER_HURRICANE },
-            {"Rioters",    RUI_DISASTER_RIOT      }
-        };
-        for (int k = 0; k < 8; ++k)
-            if (menu_item(items[k].name))
-                s->want_disaster = items[k].id;
-        ImGui::Separator();
-        menu_item("No Disasters", nullptr, false, false);
-        ImGui::EndMenu();
-    }
-    /* MENU 1005 */
-    if (ImGui::BeginMenu("Windows"))
-    {
-        if (menu_item("Map", sc('M')))
-            ui_log(s, "Map window: not yet ported");
-        if (menu_item("Budget", sc('B')))
-            s->show_budget = 1;
-        menu_item("Ordinances", sc('O'), false, false);
-        if (menu_item("Population", sc('C')))
-            s->show_city = 1;
-        menu_item("Industry", sc('I'), false, false);
-        if (menu_item("Graphs", sc('G')))
-            s->show_graphs = 1;
-        menu_item("Neighbors", sc('H'), false, false);
-        ImGui::Separator();
-        if (menu_item("Road tuning", nullptr, s->show_tuning != 0))
-            s->show_tuning = !s->show_tuning;
-        if (menu_item("Script", nullptr, s->show_script != 0))
-            s->show_script = !s->show_script;
-        if (menu_item("Tools", nullptr, s->show_palette != 0))
-            s->show_palette = !s->show_palette;
-        if (menu_item("Query", nullptr, s->show_query != 0))
-            s->show_query = !s->show_query;
-        if (menu_item("Inspect", sc('I', true), s->show_inspect != 0))
-            s->want_inspect = 1; /* a toggle request.  The app owns the switch */
-        if (menu_item("Messages", nullptr, s->show_log != 0))
-            s->show_log = !s->show_log;
-        if (menu_item("Renderer", nullptr, s->show_renderer != 0))
-            s->show_renderer = !s->show_renderer;
-        ImGui::EndMenu();
-    }
-    /* MENU 1006 */
-    if (ImGui::BeginMenu("Newspaper"))
-    {
-        menu_item("Subscription", nullptr, false, false);
-        menu_item("Extra!!!", nullptr, false, false);
-        ImGui::EndMenu();
-    }
-    /* the view switches, ours, at the right */
-    if (ImGui::BeginMenu("View"))
-    {
-        /*  No art set and no pixel scale here: the zoom is continuous
-         *  and picks the set that is closest to native by itself.  The
-         *  pixel scale is a developer's knob, not a view.  The keys and
-         *  the command line still reach both. */
-        bool b;
-        b = s->geometry != 0;
-        if (menu_item("Geometry", sc('T', true), &b))
-            s->geometry = b;
-        b = s->plan != 0;
-        if (menu_item("Map view", sc('N', true), &b))
-            s->plan = b;
-        b = s->grid != 0;
-        if (menu_item("Grid", sc('G', true), &b))
-            s->grid = b;
-        b = s->markings != 0;
-        if (menu_item("Road markings", nullptr, &b))
-            s->markings = b;
-        b = s->furniture != 0;
-        if (menu_item("Street furniture", nullptr, &b))
-            s->furniture = b;
-        b = s->margins != 0;
-        if (menu_item("Margins", nullptr, &b))
-            s->margins = b;
-        b = s->outline != 0;
-        if (menu_item("Outline", sc('O', true), &b))
-            s->outline = b;
-        b = s->show_cells != 0;
-        if (menu_item("Cell coordinates", nullptr, &b))
-            s->show_cells = b;
-        ImGui::Separator();
-        if (ImGui::BeginMenu("Data view"))
-        {
-            for (int k = 0; k < 12; ++k)
-                if (menu_item(VIEW_NAME[k], nullptr, s->view == k))
-                    s->view = k;
-            ImGui::EndMenu();
-        }
-        ImGui::Separator();
-        if (menu_item("Screenshot", sc('P', true)))
-            s->want_screenshot = 1;
-        ImGui::EndMenu();
-    }
-    /* the status, at the right of the bar, as the window title carries it */
-    {
-        char right[128];
-        snprintf(right, sizeof right, "%s   $%d   %d", s->city_name[0] ? s->city_name : "", (int)s->funds, (int)s->population);
-        float w = ImGui::CalcTextSize(right).x;
-        ImGui::SameLine(ImGui::GetWindowWidth() - w - 12.0f);
-        ImGui::TextUnformatted(right);
-    }
-    ImGui::EndMainMenuBar();
-    ImGui::PopStyleVar();
+    char val[48];
+    snprintf(val, sizeof val, fmt, (double)*v);
+    ImGui::SameLine();
+    ImGui::Text("%s  %s", val, label);
+    return moved;
 }
 
-/*  The inspector's window: what the mesh under the pointer is, and who
- *  drew it.  Its own window, drawn from ui_frame: it lived inside the
- *  query window's function and so appeared only when that window was
- *  open. */
-static void inspect_window(RUiState *s)
+/*  A PROGRESS BAR: the scheme's track, filled to the fraction with its
+ *  fill, and the words over it. */
+void ui_progress(float f, float w, const char *over)
 {
-    /*  What the mesh under the pointer is, in a table.
-     *
-     *      The thing.
-     *      The function that drew it.
-     *      What asked for it.
-     *      Its material.
-     *      Its triangles.
-     *      The box it occupies.
-     *      The generating call's note of the thing.
-     *      A row a line.
-     *
-     *  The width is held: the values wrap, and a window fitted to its
-     *  content would never widen for them.  The height follows the rows
-     *  to the bottom of the screen and scrolls past it.  It opens at the
-     *  top right, clear of the palette and of the middle, where what is
-     *  being inspected usually is. */
-    const ImGuiViewport *vp = ImGui::GetMainViewport();
-    const float          w = 600.0f, margin = 24.0f;
-    ImGui::SetNextWindowSizeConstraints(ImVec2(w, 0.0f), ImVec2(w, vp->WorkSize.y - 2.0f * margin));
-    int open = 1;
-    if (mac_begin("Inspect", &open, w, ImVec2(vp->WorkPos.x + vp->WorkSize.x - w - margin, vp->WorkPos.y + margin)))
+    const ThemeEl *tr = look_el("progress_track"), *fl = look_el("progress_fill");
+    if (w < 0.0f)
+        w = ImGui::GetContentRegionAvail().x;
+    const float  h  = tr ? (float)tr->h : 14.0f;
+    const ImVec2 at = ImGui::GetCursorScreenPos();
+    ImGui::Dummy(ImVec2(w, h));
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    f              = f < 0.0f ? 0.0f : f > 1.0f ? 1.0f
+                                                : f;
+    if (tr && fl)
     {
-        if (!s->comp_ok && !s->comp_who[0])
-            ImGui::TextUnformatted("Point at something.");
-        else if (ImGui::BeginTable("mesh", 2, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV))
-        {
-            char buf[160];
-            ImGui::TableSetupColumn("what", ImGuiTableColumnFlags_WidthFixed, 110.0f);
-            ImGui::TableSetupColumn("value");
-            const auto row = [&](const char *k, const char *v) {
-                ImGui::TableNextRow();
-                ImGui::TableSetColumnIndex(0);
-                ImGui::TextUnformatted(k);
-                ImGui::TableSetColumnIndex(1);
-                ImGui::TextWrapped("%s", v);
-            };
-            row("component", s->comp_label[0] ? s->comp_label : "-");
-            row("rendered by", s->comp_who[0] ? s->comp_who : "-");
-            row("written at", s->comp_where[0] ? s->comp_where : "-");
-            if (s->comp_gen[0])
-            {
-                row("part of", s->comp_gen);
-                row("written at", s->comp_gen_where[0] ? s->comp_gen_where : "-");
-            }
-            snprintf(buf, sizeof buf, "%g", (double)s->comp_mat);
-            row("material", buf);
-            if (s->comp_gen_tris > s->comp_tris)
-                snprintf(buf, sizeof buf, "%u of the thing's %u", s->comp_tris, s->comp_gen_tris);
-            else
-                snprintf(buf, sizeof buf, "%u", s->comp_tris);
-            row("triangles", buf);
-            snprintf(buf, sizeof buf, "%d,%d", (int)s->q_col, (int)s->q_row);
-            row("tile", buf);
-            if (s->comp_box_ok)
-            {
-                snprintf(buf, sizeof buf, "%.2f,%.2f to %.2f,%.2f", (double)s->comp_box[0], (double)s->comp_box[1], (double)s->comp_box[3], (double)s->comp_box[4]);
-                row("extent", buf);
-                snprintf(buf, sizeof buf, "%.2f to %.2f", (double)s->comp_box[2], (double)s->comp_box[5]);
-                row("height", buf);
-            }
-            /*  The generating call's note, a row a line: the key before
-             *  the tab, the value after it. */
-            for (const char *p = s->comp_note; *p;)
-            {
-                const char *e   = strchr(p, '\n');
-                size_t      len = e ? (size_t)(e - p) : strlen(p);
-                const char *t   = (const char *)memchr(p, '\t', len);
-                char        key[64], val[512];
-                if (t)
-                {
-                    snprintf(key, sizeof key, "%.*s", (int)(t - p), p);
-                    snprintf(val, sizeof val, "%.*s", (int)(len - (size_t)(t - p) - 1u), t + 1);
-                }
-                else
-                {
-                    key[0] = 0;
-                    snprintf(val, sizeof val, "%.*s", (int)len, p);
-                }
-                row(key, val);
-                p = e ? e + 1 : p + len;
-            }
-            /*  What the thing is drawn over.  An entry at the same height
-             *  as the thing in front shares the ground with it. */
-            for (int k = 0; k < s->comp_n_also; ++k)
-                row(k ? "" : "drawn over", s->comp_also[k]);
-            ImGui::EndTable();
-        }
+        el_three(dl, tr, at, w, true, 2);
+        if (f * w >= 4.0f)
+            el_three(dl, fl, at, f * w, true, 2);
     }
-    ImGui::End();
-    if (!open)
-        s->want_inspect = 1; /* the close box asks for the same toggle */
+    else
+    {
+        dl->AddRect(at, ImVec2(at.x + w, at.y + h), BLACK);
+        dl->AddRectFilled(at, ImVec2(at.x + f * w, at.y + h), BLACK);
+    }
+    if (over)
+    {
+        ImVec2 ts = ImGui::CalcTextSize(over);
+        ImVec2 tp(at.x + (w - ts.x) * 0.5f, at.y + (h - ts.y) * 0.5f);
+        dl->AddText(ImVec2(tp.x + 1.0f, tp.y), WHITE, over);
+        dl->AddText(tp, BLACK, over);
+    }
 }
 
-/* ---- the windows -------------------------------------------------------- */
-
-static void city_window(RUiState *s)
+/*  A ROW of a list: the label, lit as the menus light a row while the
+ *  pointer is on it.  Answers whether it was clicked. */
+bool ui_row(const char *label)
 {
-    if (!mac_begin("Population", &s->show_city, 300.0f, ImVec2(110.0f, 40.0f)))
-    {
-        ImGui::End();
+    const ImVec2 at = ImGui::GetCursorScreenPos();
+    const float  w = ImGui::GetContentRegionAvail().x, h = ImGui::GetTextLineHeight() + 2.0f;
+    ImGui::PushID(label);
+    const bool clicked = ImGui::InvisibleButton("##row", ImVec2(w, h));
+    const bool lit     = ImGui::IsItemHovered();
+    ImGui::PopID();
+    ImDrawList    *dl  = ImGui::GetWindowDrawList();
+    const ThemeEl *sel = look_el("menu_item_selected");
+    if (lit)
+        dl->AddRectFilled(at, ImVec2(at.x + w, at.y + h), sel ? theme_col(sel->bg, BLACK) : BLACK);
+    dl->AddText(ImVec2(at.x + 4.0f, at.y + 1.0f), lit ? (sel ? theme_col(sel->text, WHITE) : WHITE) : BLACK, label);
+    return clicked;
+}
+
+/*  THE SCROLL BARS of every window, drawn over ImGui's own once the
+ *  windows are laid out.  Each is the scheme's track, with its thumb
+ *  where the window is scrolled to.  ImGui's own bar still takes the pointer and
+ *  is drawn in no color at all. */
+void themed_scrollbars(void)
+{
+    const ThemeEl *vt = look_el("vscroll"), *ht = look_el("hscroll");
+    const ThemeEl *vh = look_el("vthumb"), *hh = look_el("hthumb");
+    ImGuiContext  &g = *GImGui;
+    if (!vt || !ht || !vh || !hh)
         return;
-    }
-    int stage = s->stage >= 0 && s->stage < 10 ? (int)s->stage : 0;
-    ImGui::Text("%s", s->city_name[0] ? s->city_name : "(unnamed)");
-    ImGui::Text("%s of %d", STAGE_NAME[stage], (int)s->population);
-    ImGui::Text("Funds $%d", (int)s->funds);
-    ImGui::Separator();
-    const char *rci[3] = {"Residential", "Commercial", "Industrial"};
-    for (int k = 0; k < 3; ++k)
+    for (ImGuiWindow *w : g.Windows)
     {
-        char  ov[32];
-        float f = ((float)s->demand[k] + 2000.0f) / 4000.0f;
-        snprintf(ov, sizeof ov, "%+d", (int)s->demand[k]);
-        ImGui::TextUnformatted(rci[k]);
-        ImGui::SameLine(110.0f);
-        ImGui::ProgressBar(f < 0.0f ? 0.0f : (f > 1.0f ? 1.0f : f), ImVec2(-FLT_MIN, 0.0f), ov);
-    }
-    ImGui::Separator();
-    ImGui::Text("Power %d%%   Water %d%%", (int)s->power_pct, (int)s->water_pct);
-    ImGui::Text("Unemployment %d", (int)s->unemployment);
-    ImGui::Text("Land value %d   Crime %d", (int)s->land_value_tot, (int)s->crime_tot);
-    ImGui::Text("Traffic %d   Pollution %d", (int)s->traffic_tot, (int)s->pollution_tot);
-    ImGui::End();
-}
-
-static void budget_window(RUiState *s)
-{
-    if (!mac_begin("Budget", &s->show_budget, 440.0f, ImVec2(120.0f, 80.0f)))
-    {
-        ImGui::End();
-        return;
-    }
-    if (ImGui::BeginTable("depts", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg))
-    {
-        ImGui::TableSetupColumn("Department");
-        ImGui::TableSetupColumn("Amount");
-        ImGui::TableSetupColumn("Funding");
-        ImGui::TableSetupColumn("Accrued");
-        ImGui::TableHeadersRow();
-        for (int k = 0; k < RUI_N_DEPT; ++k)
-        {
-            ImGui::TableNextRow();
-            ImGui::TableSetColumnIndex(0);
-            if (s->dept_name[k])
-                ImGui::TextUnformatted(s->dept_name[k]);
-            else
-                ImGui::Text("(slot %d)", k);
-            ImGui::TableSetColumnIndex(1);
-            ImGui::Text("%d", (int)s->dept_amount[k]);
-            ImGui::TableSetColumnIndex(2);
-            ImGui::Text("%d", (int)s->dept_funding[k]);
-            ImGui::TableSetColumnIndex(3);
-            ImGui::Text("%d", (int)s->dept_accrued[k]);
-        }
-        ImGui::EndTable();
-    }
-    ImGui::End();
-}
-
-static void graphs_window(RUiState *s)
-{
-    if (!mac_begin("Graphs", &s->show_graphs, 340.0f, ImVec2(140.0f, 60.0f)))
-    {
-        ImGui::End();
-        return;
-    }
-    ImGui::TextUnformatted("The last twelve months");
-    for (int k = 0; k < RUI_N_GRAPH; ++k)
-    {
-        float vals[12];
-        char  ov[48];
-        if (!s->graph[k])
+        if (!w->Active || w->Hidden)
             continue;
-        for (int i = 0; i < 12; ++i)
-            vals[i] = (float)s->graph[k][11 - i];
-        snprintf(ov, sizeof ov, "%d", (int)s->graph[k][0]);
-        ImGui::PlotLines(s->graph_name[k] ? s->graph_name[k] : "?", vals, 12, 0, ov, FLT_MAX, FLT_MAX, ImVec2(0.0f, 36.0f));
-    }
-    ImGui::End();
-}
-
-/*  A picture in a window of its own, as $154A opens one.  The window
- *  closes when its close box is clicked. */
-static void picture_window(RUi *u, RUiState *s)
-{
-    const Pict *p = find_pict(u, (int)s->show_picture);
-    int         open = 1;
-    if (!p)
-    {
-        s->show_picture = 0;
-        return;
-    }
-    if (mac_begin("", &open, (float)p->w + 16.0f, ImVec2(200.0f, 160.0f)))
-    {
-        draw_pict(u, ImGui::GetWindowDrawList(), (int)s->show_picture, ImGui::GetCursorScreenPos());
-        ImGui::Dummy(ImVec2((float)p->w, (float)p->h));
-    }
-    ImGui::End();
-    if (!open)
-        s->show_picture = 0;
-}
-
-static void query_window(RUiState *s)
-{
-    if (!mac_begin("Query", &s->show_query, 280.0f, ImVec2(110.0f, 300.0f)))
-    {
-        ImGui::End();
-        return;
-    }
-    if (!s->q_ok)
-        ImGui::TextUnformatted("Point at a tile.");
-    else
-    {
-        int water = s->q_xter >= 0x10;
-        ImGui::Text("Tile column %d, row %d", (int)s->q_col, (int)s->q_row);
-        if (water)
-            ImGui::Text("Water, table at level %d over a bed at %d", (int)s->q_alt, (int)(s->q_altm & 0x1F));
-        else
-            ImGui::Text("Land at level %d", (int)s->q_alt);
-        if (s->q_building)
-            ImGui::Text("%s", s->q_building);
-        else if (s->q_xbld)
-            ImGui::Text("Building %02X", (unsigned)s->q_xbld);
-        else
-            ImGui::TextUnformatted("Nothing built");
-        if (s->q_size > 1)
-            ImGui::Text("Footprint %d x %d, north-east tile column %d, row %d",
-                        (int)s->q_size,
-                        (int)s->q_size,
-                        (int)s->q_ocol,
-                        (int)s->q_orow);
-        ImGui::Text("Zone: %s", ZONE_NAME[s->q_xzon & 0x0F]);
-        ImGui::Text("Power %s, water %s", (s->q_xbit & 0x40) ? "supplied" : "none", (s->q_xbit & 0x10) ? "supplied" : "none");
-        ImGui::Text("Terrain %02X   XBLD %02X   XZON %02X", (unsigned)s->q_xter, (unsigned)s->q_xbld, (unsigned)s->q_xzon);
-        if (s->q_mesh[0])
-            ImGui::TextWrapped("%s", s->q_mesh);
-    }
-    ImGui::End();
-}
-
-/*  The script console: what the running program answers when asked in
- *  Lua.  A line is typed, the app runs it against the live state and
- *  puts the answer back.  The status line says which script is loaded,
- *  how many rules it sets and what went wrong if anything did. */
-static void script_window(RUiState *s)
-{
-    if (!mac_begin("Script", &s->show_script, 520.0f, ImVec2(140.0f, 160.0f)))
-    {
-        ImGui::End();
-        return;
-    }
-    ImGui::TextUnformatted(s->script_status);
-    ImGui::SameLine();
-    if (ImGui::SmallButton("Reload"))
-        s->script_reload = 1;
-    ImGui::Separator();
-    ImGui::BeginChild("out", ImVec2(0.0f, 180.0f), ImGuiChildFlags_Borders,
-                      ImGuiWindowFlags_HorizontalScrollbar);
-    ImGui::TextUnformatted(s->script_out);
-    if (s->script_run == 0 && ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 1.0f)
-        ImGui::SetScrollHereY(1.0f);
-    ImGui::EndChild();
-    ImGui::PushItemWidth(-1.0f);
-    if (ImGui::InputText("##line", s->script_line, sizeof s->script_line,
-                         ImGuiInputTextFlags_EnterReturnsTrue))
-    {
-        s->script_run = 1;
-        ImGui::SetKeyboardFocusHere(-1);
-    }
-    ImGui::PopItemWidth();
-    ImGui::End();
-}
-
-/*  Road tuning: the geometry's knobs, live.  Every slider rebuilds the
- *  mesh, which takes about a fifth of a second, so a change is seen as it
- *  is made rather than described.
- *
- *  The window holds no list of them.  The app hands over what the
- *  scripts declared: the label, the range and the value each starts at.
- *  So a knob a script invents gets a slider with no change here.  The
- *  window is the game's own, through mac_begin, so it wears whatever
- *  theme is on. */
-static void tuning_window(RUiState *s)
-{
-    const char *group = NULL;
-    int         k, shown = 0;
-    if (!mac_begin("Road tuning", &s->show_tuning, 340.0f, ImVec2(110.0f, 300.0f)))
-    {
-        ImGui::End();
-        return;
-    }
-    ImGui::PushItemWidth(150.0f);
-    for (k = 0; k < s->n_knob; ++k)
-    {
-        RUiKnob *n = &s->knob[k];
-        if (!n->label)
-            continue; /* a view or a switch some other control owns */
-        if (shown && n->group && (!group || strcmp(group, n->group) != 0))
-            ImGui::Separator();
-        group = n->group;
-        ++shown;
-        if (ImGui::SliderFloat(n->label, &n->v, n->lo, n->hi, "%.3f"))
-            s->tune_changed = 1;
-    }
-    ImGui::PopItemWidth();
-    ImGui::Separator();
-    if (ImGui::Button("Defaults"))
-    {
-        for (k = 0; k < s->n_knob; ++k)
-            if (s->knob[k].label)
-                s->knob[k].v = s->knob[k].def;
-        s->tune_changed = 1;
-    }
-    ImGui::TextUnformatted("in tiles; each change rebuilds the mesh");
-    ImGui::End();
-}
-
-static void renderer_window(RUiState *s)
-{
-    if (!mac_begin("Renderer", &s->show_renderer, 260.0f, ImVec2(110.0f, 420.0f)))
-    {
-        ImGui::End();
-        return;
-    }
-    ImGui::Text("Driver %s", s->driver ? s->driver : "?");
-    ImGui::Text("%.1f fps, %.2f ms", (double)s->fps, (double)s->frame_ms);
-    ImGui::Text("%u sprites drawn, %u culled", (unsigned)s->instances, (unsigned)s->culled);
-    ImGui::Text("%u mesh vertices", (unsigned)s->mesh_verts);
-    ImGui::Separator();
-    bool b = s->plain_sweep != 0;
-    if (ImGui::Checkbox("Plain sweep (debug: painter's order, no depth)", &b))
-        s->plain_sweep = b;
-    ImGui::End();
-}
-
-static void log_window(RUiState *s)
-{
-    if (!mac_begin("Messages", &s->show_log, 420.0f, ImVec2(110.0f, ImGui::GetIO().DisplaySize.y - 150.0f)))
-    {
-        ImGui::End();
-        return;
-    }
-    for (int k = 0; k < s->n_log; ++k)
-        ImGui::TextUnformatted(s->log[k]);
-    ImGui::End();
-}
-
-/*  The load menu.  The app has already filled city_list by scanning
- *  city_dir, so this only has to show it.  A path can be typed for a
- *  city that lives somewhere else. */
-static void load_popup(RUi *u, RUiState *s)
-{
-    (void)u;
-    if (s->open_load)
-    {
-        ImGui::OpenPopup("Load City");
-        s->open_load = 0;
-    }
-    if (!ImGui::BeginPopupModal("Load City", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
-        return;
-
-    if (s->n_cities > 0)
-    {
-        ImGui::TextUnformatted(s->city_dir);
-        ImGui::Separator();
-        ImGui::BeginChild("##cities", ImVec2(360.0f, 320.0f), true);
-        for (int k = 0; k < s->n_cities; ++k)
+        for (int axis = 0; axis < 2; ++axis)
         {
-            if (ImGui::Selectable(s->city_list[k]))
+            const bool on = axis ? w->ScrollbarX : w->ScrollbarY;
+            if (!on)
+                continue;
+            const ImRect   r  = ImGui::GetWindowScrollbarRect(w, axis ? ImGuiAxis_X : ImGuiAxis_Y);
+            const ThemeEl *tk = axis ? ht : vt, *tb = axis ? hh : vh;
+            const float    len = axis ? r.GetWidth() : r.GetHeight();
+            ImDrawList    *dl  = w->DrawList;
+            /*  The track: the scheme's pattern tiled along the bar, and the
+             *  bar's own frame round it.  A scheme with no pattern shows
+             *  the bar's empty face. */
             {
-                snprintf(s->load_path, sizeof s->load_path, "%s/%s", s->city_dir, s->city_list[k]);
-                s->want_load = 1;
-                ImGui::CloseCurrentPopup();
+                const ThemeEl   *pat = look_el(axis ? "hscroll_pattern" : "vscroll_pattern");
+                const ThemeEl   *emp = look_el(axis ? "hscroll_empty" : "vscroll_empty");
+                ImGuiPlatformIO &pio = ImGui::GetPlatformIO();
+                if (pio.DrawCallback_SetSamplerNearest)
+                    dl->AddCallback(pio.DrawCallback_SetSamplerNearest, nullptr);
+                if (pat)
+                {
+                    dl->PushClipRect(r.Min, r.Max, true);
+                    for (float y = r.Min.y; y < r.Max.y; y += (float)pat->h)
+                        for (float x = r.Min.x; x < r.Max.x; x += (float)pat->w)
+                            theme_blit(s_look, dl, pat->x, pat->y, pat->w, pat->h, ImVec2(x, y), ImVec2(x + (float)pat->w, y + (float)pat->h));
+                    dl->PopClipRect();
+                    theme_nine_at(s_look, dl, tk, r.Min, r.Max, 1);
+                }
+                else if (emp)
+                    theme_nine_at(s_look, dl, emp, r.Min, r.Max, 2);
+                if (pio.DrawCallback_SetSamplerLinear)
+                    dl->AddCallback(pio.DrawCallback_SetSamplerLinear, nullptr);
             }
+            /*  The thumb, sized and placed as ImGui places its grab. */
+            const float avail    = axis ? w->InnerRect.GetWidth() : w->InnerRect.GetHeight();
+            const float contents = (axis ? w->ContentSize.x : w->ContentSize.y) + (axis ? w->WindowPadding.x : w->WindowPadding.y) * 2.0f;
+            const float smax     = axis ? w->ScrollMax.x : w->ScrollMax.y;
+            const float sc       = axis ? w->Scroll.x : w->Scroll.y;
+            float       grab     = len * (avail / (contents > avail ? contents : avail));
+            const float least    = (float)(axis ? tb->w : tb->h);
+            if (grab < least)
+                grab = least;
+            if (grab > len)
+                grab = len;
+            const float t   = smax > 0.0f ? sc / smax : 0.0f;
+            const float off = t * (len - grab);
+            if (axis)
+                el_three(dl, tb, ImVec2(r.Min.x + off, r.Min.y), grab, true, 3);
+            else
+                el_three(dl, tb, ImVec2(r.Min.x, r.Min.y + off), grab, false, 3);
+            /*  And the grip, at its own size in the thumb's middle. */
+            if (axis && grab >= (float)tb->w)
+                el_blit(dl, tb, 3, 0, tb->w - 6, tb->h, ImVec2(r.Min.x + off + (grab - (float)(tb->w - 6)) * 0.5f, r.Min.y));
+            else if (!axis && grab >= (float)tb->h)
+                el_blit(dl, tb, 0, 3, tb->w, tb->h - 6, ImVec2(r.Min.x, r.Min.y + off + (grab - (float)(tb->h - 6)) * 0.5f));
         }
-        ImGui::EndChild();
-    }
-    else
-    {
-        ImGui::TextUnformatted("No cities directory found.");
-        ImGui::TextUnformatted("Set --cities, or type a path below.");
-    }
-
-    ImGui::Separator();
-    ImGui::SetNextItemWidth(360.0f);
-    if (ImGui::InputText("##path", s->load_path, sizeof s->load_path, ImGuiInputTextFlags_EnterReturnsTrue))
-    {
-        s->want_load = 1;
-        ImGui::CloseCurrentPopup();
-    }
-    if (ImGui::Button("Open", ImVec2(100.0f, 0.0f)) && s->load_path[0])
-    {
-        s->want_load = 1;
-        ImGui::CloseCurrentPopup();
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Cancel", ImVec2(100.0f, 0.0f)))
-        ImGui::CloseCurrentPopup();
-    ImGui::EndPopup();
-}
-
-static void save_popup(RUi *u, RUiState *s)
-{
-    if (u->save_popup)
-    {
-        ImGui::OpenPopup("Save City As");
-        u->save_popup = false;
-    }
-    if (ImGui::BeginPopupModal("Save City As", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
-    {
-        ImGui::SetNextItemWidth(420.0f);
-        ImGui::InputText("Save city as", s->save_path, sizeof s->save_path);
-        if (ImGui::Button("Save", ImVec2(100.0f, 0.0f)))
-        {
-            s->want_save = 1;
-            ImGui::CloseCurrentPopup();
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(100.0f, 0.0f)))
-            ImGui::CloseCurrentPopup();
-        ImGui::EndPopup();
     }
 }
 
@@ -1535,7 +1006,6 @@ extern "C" RUi *ui_create(SDL_Window *win, SDL_GPUDevice *dev, int swap_fmt, flo
 {
     RUi *u = new RUi();
     memset(u, 0, sizeof *u);
-    u->win = win;
     u->dev = dev;
     u->dpi = dpi;
 
@@ -1623,10 +1093,20 @@ extern "C" RUi *ui_create(SDL_Window *win, SDL_GPUDevice *dev, int swap_fmt, flo
         return nullptr;
     }
     if (!load_atlas(u, assets_dir))
-        fprintf(stderr, "ui: no %s/ui.png -- the palette is not drawn "
-                        "(python3 tools/pict.py --atlas rsrc/sc2k.rsrc assets)\n",
-                assets_dir);
+        R_WARN("ui", "no %s/ui.png: the palette is not drawn (python3 tools/pict.py --atlas rsrc/sc2k.rsrc assets)", assets_dir);
     return u;
+}
+
+SDL_GPUTexture *ui_art_texture(RUi *u, const uint8_t *rgba, int w, int h)
+{
+    if (rgba != u->art_from || !u->art)
+    {
+        if (u->art)
+            SDL_ReleaseGPUTexture(u->dev, u->art);
+        u->art      = rgba && w > 0 && h > 0 ? upload_rgba(u->dev, rgba, (unsigned)w, (unsigned)h) : nullptr;
+        u->art_from = rgba;
+    }
+    return u->art;
 }
 
 extern "C" void ui_destroy(RUi *u)
@@ -1641,6 +1121,8 @@ extern "C" void ui_destroy(RUi *u)
         SDL_ReleaseGPUTexture(u->dev, u->atlas);
     if (u->theme.tex)
         SDL_ReleaseGPUTexture(u->dev, u->theme.tex);
+    if (u->art)
+        SDL_ReleaseGPUTexture(u->dev, u->art);
     delete u;
 }
 
@@ -1678,287 +1160,6 @@ extern "C" int ui_wants_keyboard(const RUi *u)
     return u && ImGui::GetIO().WantTextInput ? 1 : 0;
 }
 
-/*  LOADING.  The scripts are read in a few milliseconds and the world
- *  they describe takes about a second and a half to build.  So what this
- *  announces is the BUILD.
- *
- *  The build BLOCKS, and the window stops repainting for as long as it
- *  runs.  This is the frame drawn just before it, so what the panel says
- *  is what the window shows the whole time.  That is the point of it.
- *  The panel sits in the middle of the screen and takes no input.
- *  There is nothing to press, and the frame after it is the build.
- *
- *  The bar carries the words.  A caption beside it would leave the bar
- *  itself saying nothing, and the bar is the part the eye goes to.
- *
- *  The words are drawn TWICE, clipped either side of the fill: white
- *  over the black that is done, black over the white that is not.  That
- *  is how the machine this interface comes from drew one.  It is also
- *  the only way to read a label on a bar whose fill and text are both
- *  black.
- *
- *  The PERCENTAGE goes in those same words.  An empty overlay stops the
- *  bar from putting its own figure at the edge of the fill.  The
- *  centered label crosses that spot, and the two are unreadable
- *  together. */
-static void loading_window(RUiState *s)
-{
-    const ImGuiViewport *vp = ImGui::GetMainViewport();
-    const float          w  = 340.0f;
-    const float          f  = s->loading_steps > 0
-                                  ? (float)s->loading_step / (float)s->loading_steps
-                                  : 0.0f;
-    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + (vp->WorkSize.x - w) * 0.5f,
-                                   vp->WorkPos.y + vp->WorkSize.y * 0.4f));
-    ImGui::SetNextWindowSize(ImVec2(w, 0.0f));
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 2.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(14.0f, 12.0f));
-    if (ImGui::Begin("Loading", NULL,
-                     ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
-                         ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
-                         ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoInputs))
-    {
-        ImGui::ProgressBar(f, ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() + 8.0f), "");
-        {
-            char said[96];
-            if (s->loading_steps > 0)
-                snprintf(said, sizeof said, "%s  %d%%", s->loading, (int)(f * 100.0f + 0.5f));
-            else
-                snprintf(said, sizeof said, "%s", s->loading);
-            ImVec2      mn = ImGui::GetItemRectMin(), mx = ImGui::GetItemRectMax();
-            ImVec2      ts = ImGui::CalcTextSize(said);
-            ImVec2      at = ImVec2(mn.x + (mx.x - mn.x - ts.x) * 0.5f,
-                                    mn.y + (mx.y - mn.y - ts.y) * 0.5f);
-            float       cut = mn.x + (mx.x - mn.x) * f;
-            ImDrawList *dl  = ImGui::GetWindowDrawList();
-            dl->PushClipRect(mn, ImVec2(cut, mx.y), true);
-            dl->AddText(at, ImGui::GetColorU32(ImGuiCol_FrameBg), said);
-            dl->PopClipRect();
-            dl->PushClipRect(ImVec2(cut, mn.y), mx, true);
-            dl->AddText(at, ImGui::GetColorU32(ImGuiCol_Text), said);
-            dl->PopClipRect();
-        }
-        if (s->loading_note[0])
-        {
-            ImGui::Spacing();
-            ImGui::TextUnformatted(s->loading_note);
-        }
-    }
-    ImGui::End();
-    ImGui::PopStyleVar(2);
-}
-
-extern "C" void ui_frame(RUi *u, RUiState *s)
-{
-    if (!u)
-        return;
-    ImGui_ImplSDLGPU3_NewFrame();
-    ImGui_ImplSDL3_NewFrame();
-    ImGui::NewFrame();
-
-    g_ui_for_title = u;
-    menu_bar(u, s);
-    if (s->loading[0])
-        loading_window(s);
-    palette(u, s);
-    demand(u, s);
-    if (s->show_city)
-        city_window(s);
-    if (s->show_budget)
-        budget_window(s);
-    if (s->show_graphs)
-        graphs_window(s);
-    if (s->show_query)
-        query_window(s);
-    if (s->show_picture)
-        picture_window(u, s);
-    if (s->show_inspect)
-        inspect_window(s);
-    if (s->show_tuning)
-        tuning_window(s);
-    if (s->show_script)
-        script_window(s);
-    if (s->show_query && s->q_poly_ok)
-    {
-        /*  The footprint under the query, outlined on the map: a white
-         *  line over a dark one.  So it reads on any ground as the
-         *  original's inverting outline did. */
-        ImVec2 pts[4];
-        for (int k = 0; k < 4; ++k)
-            pts[k] = ImVec2(s->q_poly[k][0], s->q_poly[k][1]);
-        /*  On the background list: the outline belongs to the map, so every
-         *  window sits above it. */
-        ImDrawList *dl = ImGui::GetBackgroundDrawList();
-        dl->AddPolyline(pts, 4, IM_COL32(0, 0, 0, 220), ImDrawFlags_Closed, 3.0f);
-        dl->AddPolyline(pts, 4, IM_COL32(255, 255, 255, 255), ImDrawFlags_Closed, 1.0f);
-    }
-    if (s->tool_poly_ok)
-    {
-        /*  What the selected tool would work on: white over dark as the
-         *  query's outline, and red where the tool would refuse it.  The
-         *  price sits beside the outline's top corner. */
-        ImVec2 pts[4];
-        int    top = 0;
-        for (int k = 0; k < 4; ++k)
-        {
-            pts[k] = ImVec2(s->tool_poly[k][0], s->tool_poly[k][1]);
-            if (pts[k].y < pts[top].y)
-                top = k;
-        }
-        ImDrawList *dl   = ImGui::GetBackgroundDrawList();
-        const ImU32 line = s->tool_refused ? IM_COL32(255, 72, 72, 255) : IM_COL32(255, 255, 255, 255);
-        dl->AddPolyline(pts, 4, IM_COL32(0, 0, 0, 220), ImDrawFlags_Closed, 3.0f);
-        dl->AddPolyline(pts, 4, line, ImDrawFlags_Closed, 1.5f);
-        if (s->tool_price > 0)
-        {
-            char price[24];
-            snprintf(price, sizeof price, "$%d", (int)s->tool_price);
-            ImVec2 at(pts[top].x + 6.0f, pts[top].y - ImGui::GetFontSize() - 2.0f);
-            dl->AddText(ImVec2(at.x + 1.0f, at.y + 1.0f), IM_COL32(0, 0, 0, 220), price);
-            dl->AddText(at, line, price);
-        }
-    }
-    if (s->comp_ok && s->comp_n >= 2)
-    {
-        /*  The component under the pointer, outlined where the thing
-         *  itself is.  The points come in PAIRS, one edge of the
-         *  silhouette each, in no order round it: so each pair is its
-         *  own line.  Nothing joins one edge's end to the next edge's
-         *  start. */
-        ImDrawList *dl = ImGui::GetBackgroundDrawList();
-        for (int k = 0; k + 1 < s->comp_n; k += 2)
-        {
-            const ImVec2 a0(s->comp_poly[k][0], s->comp_poly[k][1]);
-            const ImVec2 b0(s->comp_poly[k + 1][0], s->comp_poly[k + 1][1]);
-            dl->AddLine(a0, b0, IM_COL32(0, 0, 0, 220), 4.0f);
-            dl->AddLine(a0, b0, IM_COL32(120, 230, 255, 255), 2.0f);
-        }
-        if (s->comp_label[0])
-        {
-            /*  The name sits over the pointer, not over the thing's highest
-             *  point: a band runs off the screen. */
-            const ImVec2 at(s->comp_at[0], s->comp_at[1]);
-            const float  tsz = 18.0f;
-            const ImVec2 sz  = ImGui::GetFont()->CalcTextSizeA(tsz, FLT_MAX, 0.0f, s->comp_label);
-            ImVec2       tp(at.x - sz.x * 0.5f, at.y - sz.y - 24.0f);
-            if (tp.y < 30.0f)
-                tp.y = at.y + 24.0f;
-            dl->AddRectFilled(ImVec2(tp.x - 4.0f, tp.y - 2.0f), ImVec2(tp.x + sz.x + 4.0f, tp.y + sz.y + 2.0f), IM_COL32(18, 22, 24, 220), 3.0f);
-            dl->AddText(ImGui::GetFont(), tsz, tp, IM_COL32(160, 240, 255, 255), s->comp_label);
-        }
-    }
-    if (s->sel_ok)
-    {
-        /*  The area being selected for a debug report, a tinted
-         *  rectangle with its outline and its size in a caption.  After
-         *  the release it blinks and goes, and the log says what was
-         *  written. */
-        ImVec2 pts[4];
-        ImVec2 at(1e9f, 1e9f);
-        for (int k = 0; k < 4; ++k)
-        {
-            pts[k] = ImVec2(s->sel_poly[k][0], s->sel_poly[k][1]);
-            if (pts[k].y < at.y || (pts[k].y == at.y && pts[k].x < at.x))
-                at = pts[k];
-        }
-        ImDrawList *dl = ImGui::GetBackgroundDrawList();
-        dl->AddConvexPolyFilled(pts, 4, IM_COL32(255, 200, 60, 70));
-        dl->AddPolyline(pts, 4, IM_COL32(0, 0, 0, 220), ImDrawFlags_Closed, 3.0f);
-        dl->AddPolyline(pts, 4, IM_COL32(255, 220, 90, 255), ImDrawFlags_Closed, 1.5f);
-        if (s->sel_text[0])
-        {
-            const float  tsz = 18.0f;
-            const ImVec2 sz  = ImGui::GetFont()->CalcTextSizeA(tsz, FLT_MAX, 0.0f, s->sel_text);
-            ImVec2       tp(at.x, at.y - sz.y - 6.0f);
-            if (tp.y < 30.0f)
-                tp.y = at.y + 6.0f;
-            dl->AddRectFilled(ImVec2(tp.x - 4.0f, tp.y - 2.0f), ImVec2(tp.x + sz.x + 4.0f, tp.y + sz.y + 2.0f), IM_COL32(18, 22, 24, 210), 3.0f);
-            dl->AddText(ImGui::GetFont(), tsz, tp, IM_COL32(255, 240, 120, 255), s->sel_text);
-        }
-    }
-    if (s->show_renderer)
-        renderer_window(s);
-    if (s->show_log)
-        log_window(s);
-    load_popup(u, s);
-    save_popup(u, s);
-
-    if (s->plan && s->show_cells && s->cell_ok)
-    {
-        /*  Every cell's own number, "col,row", tucked into its
-         *  bottom-right corner on screen, in the map view only.  There
-         *  the cells are squares and the frame below is exact.  Drawn
-         *  the way the ruler is, through a transparent click-through
-         *  window. */
-        const ImVec2 disp = ImGui::GetIO().DisplaySize;
-        const float  cw   = sqrtf(s->cell_c[0] * s->cell_c[0] + s->cell_c[1] * s->cell_c[1]);
-        const float  det  = s->cell_c[0] * s->cell_r[1] - s->cell_c[1] * s->cell_r[0];
-        if (cw >= 30.0f && fabsf(det) > 1e-6f)
-        {
-            /*  The cells in view: the screen's corners back into col,row
-             *  through the frame's inverse, then every cell between. */
-            float cmin = 1e9f, cmax = -1e9f, rmin = 1e9f, rmax = -1e9f;
-            for (int k = 0; k < 4; ++k)
-            {
-                float sx = (k & 1) ? disp.x : 0.0f, sy = (k & 2) ? disp.y : 0.0f;
-                float dx = sx - s->cell_o[0], dy = sy - s->cell_o[1];
-                float col = (dx * s->cell_r[1] - dy * s->cell_r[0]) / det;
-                float row = (s->cell_c[0] * dy - s->cell_c[1] * dx) / det;
-                cmin      = col < cmin ? col : cmin;
-                cmax      = col > cmax ? col : cmax;
-                rmin      = row < rmin ? row : rmin;
-                rmax      = row > rmax ? row : rmax;
-            }
-            const float tsz = cw >= 90.0f ? 15.0f : cw >= 50.0f ? 12.0f
-                                                                : 10.0f;
-            ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
-            ImGui::SetNextWindowSize(disp);
-            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-            ImGui::PushStyleColor(ImGuiCol_WindowBg, IM_COL32(0, 0, 0, 0));
-            ImGui::Begin("##cells", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoFocusOnAppearing);
-            ImDrawList *dl = ImGui::GetWindowDrawList();
-            int         c0 = (int)floorf(cmin) - 1, c1 = (int)ceilf(cmax) + 1, r0 = (int)floorf(rmin) - 1, r1 = (int)ceilf(rmax) + 1;
-            c0 = c0 < 0 ? 0 : c0;
-            r0 = r0 < 0 ? 0 : r0;
-            c1 = c1 > 127 ? 127 : c1;
-            r1 = r1 > 127 ? 127 : r1;
-            for (int r = r0; r <= r1; ++r)
-                for (int c = c0; c <= c1; ++c)
-                {
-                    /*  The cell's four corners on screen.  The label
-                     *  goes by the one lowest and rightmost, whichever
-                     *  way the map is turned. */
-                    float bx = -1e9f, by = -1e9f, best = -1e9f;
-                    for (int k = 0; k < 4; ++k)
-                    {
-                        float cc = (float)c + ((k & 1) ? 1.0f : 0.0f), rr = (float)r + ((k & 2) ? 1.0f : 0.0f);
-                        float sx = s->cell_o[0] + cc * s->cell_c[0] + rr * s->cell_r[0];
-                        float sy = s->cell_o[1] + cc * s->cell_c[1] + rr * s->cell_r[1];
-                        if (sx + sy > best)
-                        {
-                            best = sx + sy;
-                            bx   = sx;
-                            by   = sy;
-                        }
-                    }
-                    char txt[24];
-                    snprintf(txt, sizeof txt, "%d,%d", c, r);
-                    ImVec2 ts = ImGui::GetFont()->CalcTextSizeA(tsz, FLT_MAX, 0.0f, txt);
-                    ImVec2 at(bx - ts.x - 3.0f, by - ts.y - 2.0f);
-                    if (at.x < -ts.x || at.y < -ts.y || at.x > disp.x || at.y > disp.y)
-                        continue;
-                    dl->AddText(ImGui::GetFont(), tsz, ImVec2(at.x + 1.0f, at.y + 1.0f), IM_COL32(0, 0, 0, 200), txt);
-                    dl->AddText(ImGui::GetFont(), tsz, at, IM_COL32(255, 240, 120, 255), txt);
-                }
-            ImGui::End();
-            ImGui::PopStyleColor();
-            ImGui::PopStyleVar();
-        }
-    }
-    ImGui::Render();
-    u->frame_open = true;
-}
-
 extern "C" void ui_render(void *ud, SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *target, uint32_t w, uint32_t h)
 {
     RUi *u = (RUi *)ud;
@@ -1982,17 +1183,4 @@ extern "C" void ui_render(void *ud, SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *t
         SDL_EndGPURenderPass(rp);
     }
     u->frame_open = false;
-}
-
-extern "C" void ui_log(RUiState *s, const char *fmt, ...)
-{
-    va_list ap;
-    if (s->n_log == RUI_LOG_LINES)
-    {
-        memmove(s->log[0], s->log[1], sizeof s->log - sizeof s->log[0]);
-        s->n_log--;
-    }
-    va_start(ap, fmt);
-    vsnprintf(s->log[s->n_log++], RUI_LOG_LEN, fmt, ap);
-    va_end(ap);
 }

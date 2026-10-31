@@ -45,17 +45,23 @@ add_library(arc_core STATIC
     sim_pipe.c
     sim_subway.c
     sim_micro.c     # the XMIC records, aged a year at a time
-    rotate.c        # the map turned a quarter, as the original rewrites it
+    net_cell.c      # what one cell carries for the networks: layer 0 of the road network
     sim_queue.c     # the 512-entry ring those passes walk the map with
 
     rng.c           # the Toolbox LCG and the $20F30 LFSR
     ext80.c         # soft 80-bit extended, the SANE subset the game uses
-    sane.c          # the _FP68K trap, reduced to the 21 opwords that occur
     economy.c       # economyPass $34D04, the national economy
     generated/tables.c  # GENERATED - do not edit
     arco.c          # .arco, the native world format
+    load.c          # a city from a file of either format
+    world.c         # the world: chunks of any extent, and the cities on them
+    tiles.c         # the chunk store every tile lives in
 )
-target_include_directories(arc_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(arc_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/..)
+#  One layout of the extended type for every target that includes ext80.h.
+if(ARC_NATIVE_FLOAT)
+    target_compile_definitions(arc_core PUBLIC ARC_NATIVE_FLOAT=1)
+endif()
 
 # arco.c needs deflate and a CRC.  lodepng already carries both for the
 # renderer's PNGs, so the save format borrows them rather than vendoring
@@ -74,11 +80,6 @@ if(NOT TARGET arc_vendor)
 endif()
 target_link_libraries(arc_core PUBLIC arc_vendor)
 
-# dev.c holds the developer modes -- --verify, --clock, --growth and the
-# The developer modes that drive it are TOOLING, not reconstruction, and
-# are built in src/dev.
-add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../dev" "${CMAKE_CURRENT_BINARY_DIR}/../dev")
-
 # The reconstruction is held to a strict standard on purpose: a silent
 # integer conversion here is a behavioural difference from the original.
 target_compile_options(arc_core PRIVATE
@@ -91,39 +92,8 @@ if(M_LIB)
     target_link_libraries(arc_core PUBLIC ${M_LIB})
 endif()
 
-# ---- house style ----------------------------------------------------
-# .clang-format at the repository root is the style.  `format` rewrites the
-# sources in place; `format-check` fails if any of them is not already
-# formatted, and runs as part of ctest so the style cannot drift.
-find_program(CLANG_FORMAT NAMES clang-format
-             HINTS /opt/homebrew/bin /usr/local/bin)
-#  The hand-written sources only.  generated/tables.c is machine output --
-#  its layout is gen_tables.py's business, and holding it to a style meant
-#  for people just made the generator and the checker argue.
-set(ARC_SOURCES city.c sim.c sim_thing.c sim_disaster.c sim_queue.c sim_scan.c sim_map.c sim_place.c
-                sim_growth.c sim_micro.c rng.c ext80.c sane.c arco.c economy.c rotate.c
-                sim.h sim_int.h ext80.h arco.h
-                ../dev/dev.c ../dev/testcity.c ../dev/advisor.c ../dev/advisor.h)
-if(CLANG_FORMAT)
-    add_custom_target(format
-        COMMAND ${CLANG_FORMAT} -i ${ARC_SOURCES}
-        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-        COMMENT "Formatting the C sources"
-        VERBATIM)
-    add_custom_target(format-check
-        COMMAND ${CLANG_FORMAT} --dry-run --Werror ${ARC_SOURCES}
-        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-        COMMENT "Checking the C sources against .clang-format"
-        VERBATIM)
-endif()
-
 # ---- verification ---------------------------------------------------
 # Testing is enabled once, at the root, and ARC_CITIES is declared there.
-if(CLANG_FORMAT)
-    add_test(NAME format
-             COMMAND ${CLANG_FORMAT} --dry-run --Werror ${ARC_SOURCES}
-             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
-    set_tests_properties(format PROPERTIES LABELS "lint;gate;full")
-endif()
+# The house style is checked there too, over every source under src/.
 #  The `verify` test needs the executable, which lives one level up, so
 #  it is registered in the root CMakeLists.txt instead of here.

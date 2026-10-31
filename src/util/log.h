@@ -28,18 +28,11 @@ typedef enum
     R_LOG_DEBUG /* --verbose only: driver names, paths, counts */
 } RLogLevel;
 
-/*  Safe to call more than once, and called for you on the first
- *  message if you forget. */
-void log_init(void);
-
 /*  Nothing quieter than this is printed.  R_LOG_NOTE by default. */
 void log_set_level(RLogLevel max);
 
 /*  Force color on or off, whatever the environment said. */
 void log_set_colour(int on);
-
-/*  Whether color ended up on, for code that draws its own output. */
-int log_colour(void);
 
 void log_msg(RLogLevel lvl, const char *source, const char *fmt, ...);
 

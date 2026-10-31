@@ -13,12 +13,14 @@
 layout(location = 0) in ivec4 a_dst;   /* canvas x, y, w, h                   */
 layout(location = 1) in ivec4 a_src;   /* atlas x, y, flip, stencil (-1 none) */
 layout(location = 2) in ivec4 a_under; /* road: atlas x, y, canvas x, y       */
-layout(location = 3) in vec4  a_misc;  /* order*256 + alt*4 + standing, road w, road flip, road h */
+layout(location = 3) in vec4  a_misc;  /* unused, road w, road flip, road h   */
+layout(location = 4) in ivec4 a_rank;  /* painter's slot, altitude in levels, standing, unused */
 
 layout(location = 0) out vec2  v_tex;
 layout(location = 1) out vec2  v_pos;
 layout(location = 2) flat out ivec4 v_under;
 layout(location = 3) flat out ivec4 v_flags; /* stencil, road w, road flip, road h */
+layout(location = 4) out vec4 v_grid;        /* the grid point, 1 for art that stands, the footprint's edge */
 
 layout(set = 1, binding = 0) uniform Cam
 {
@@ -43,10 +45,19 @@ void main()
      *  camera; the position needs them only off the original's own. */
     float n   = max(1.0, floor(float(a_dst.z) / (2.0 * cam.proj.z) + 0.5));
     vec2  fc  = vec2(a_under.zw) + vec2(0.5, 0.5) + (n - 1.0) * vec2(-0.5, 0.5);
-    float order = floor(a_misc.x / 256.0);       /* the op's place in the sweep: its painter's slot */
-    float rem   = a_misc.x - order * 256.0;
-    float alt   = floor(rem / 4.0);               /* the tile's altitude in levels; misc.y is a stencilled car's road width */
-    float standing = rem - 4.0 * alt;             /* 1: art that stands; 0: art that lies flat */
+    float order = float(a_rank.x);    /* the op's place in the sweep: its painter's slot */
+    float alt   = float(a_rank.y);    /* the tile's altitude in levels; misc.y is a stencilled car's road width */
+    float standing = float(a_rank.z); /* 1: art that stands; 0: art that lies flat */
+    /*  The grid point under this corner of the quad, in the sweep's own
+     *  quarter, on the plane at the tile's level: the canvas place taken
+     *  back through the original's projection.  The marks' rim reads it
+     *  (sprite_mark.frag).  It is an affine map of the quad, so it is
+     *  exact at every pixel the plane holds. */
+    {
+        vec2 d = pos - cam.proj.xy + vec2(0.0, alt * cam.alt.x);
+        float a = d.x / cam.proj.z, b = d.y / cam.proj.w;
+        v_grid  = vec4(0.5 * (b - a), 0.5 * (a + b), standing, n);
+    }
     float sp  = sin(cam.rot.w), cp = cos(cam.rot.w);
     vec2  t0  = fc - cam.rot.yz;
     vec2  t1  = vec2(t0.x * cam.alt.z - t0.y * cam.alt.w,
@@ -133,7 +144,7 @@ void main()
         float ahead = mix(1.15, 1.05, standing);
         float near  = (t1.x + t1.y + front + ahead) * cp + alt * 0.8660254 * sp + rise +
                       (t1.y - t1.x) * 0.0015;
-        depth = 1.0 - (near + 300.0) / cam.alt.y;
+        depth = 1.0 - (near + 0.375 * cam.alt.y) / cam.alt.y;
     }
     /*  A mirrored sprite reads its row backwards: the pixel at i takes
      *  texel w-1-i, which is what the interpolated coordinate floors to. */

@@ -6,18 +6,11 @@
 
 #include "dump.h"
 
+static void dump_close(void);
+
 static FILE         *s_sink;
 static char         *s_cap;
 static unsigned long s_cap_max, s_cap_n;
-
-void dump_capture(char *buf, unsigned long cap)
-{
-    s_cap     = cap > 1 ? buf : NULL;
-    s_cap_max = cap;
-    s_cap_n   = 0;
-    if (s_cap)
-        s_cap[0] = 0;
-}
 
 void dump_open(const char *path)
 {
@@ -48,7 +41,7 @@ void dumpf(const char *fmt, ...)
     va_end(ap);
 }
 
-void dump_close(void)
+static void dump_close(void)
 {
     if (s_sink)
         fclose(s_sink);

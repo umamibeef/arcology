@@ -6,8 +6,8 @@
 #      ./build/arcology
 #
 #  One executable comes out: `arcology`.  It is the game, and it is also
-#  the verification driver, the atlas dumper and the software rasteriser
-#  -- see src/render/a_main.c for how it decides which.
+#  the verification driver, the atlas dumper and the software rasteriser.
+#  src/app/main.c and src/app/modes.cpp decide which.
 #
 #  To run the verification suite, point the build at your own copy of the
 #  game (nothing in this repository can stand in for it):
@@ -55,6 +55,14 @@ set(ARC_CITIES "" CACHE PATH "Folder holding the shipped city files")
 #  cities and are slow.  Nothing in the renderer can move a simulation
 #  layer, so they are off unless asked for.
 option(ARC_SIM_TESTS "Run the simulation's checks against the original" OFF)
+#  The economy's 80-bit arithmetic on the machine's own doubles instead of
+#  the faithful software extended type.  It can differ from the original in
+#  the last places, so the simulation's checks against the original want it
+#  OFF.
+option(ARC_NATIVE_FLOAT "The economy's extended arithmetic on native doubles" ON)
+if(ARC_NATIVE_FLOAT AND ARC_SIM_TESTS)
+    message(WARNING "ARC_SIM_TESTS checks against the original's 80-bit arithmetic: configure with -DARC_NATIVE_FLOAT=OFF")
+endif()
 find_package(Python3 COMPONENTS Interpreter QUIET)
 
 #  ONE enable_testing(), before the directories below register anything:
@@ -72,7 +80,7 @@ add_subdirectory(src/render)
 #  git on EVERY build, through cmake/version.cmake, into a generated
 #  header: build/generated/arc_version.h.  The script rewrites the file
 #  only when its content changes, so nothing recompiles for nothing.
-#  The banner and --version read it; a_main.c and r_app.c include it.
+#  The banner and --version read it, through src/app/internal.h.
 set(ARC_VERSION_H "${CMAKE_BINARY_DIR}/generated/arc_version.h")
 add_custom_target(arc_version ALL
     COMMAND ${CMAKE_COMMAND}
@@ -104,15 +112,47 @@ if(Python3_FOUND AND ARC_CITIES)
                 ${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_showcase.py
                 --frames 12 --compare
                 --out ${CMAKE_CURRENT_SOURCE_DIR}/media/bayview-renderers.gif
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_showcase.py
+                --cities-dir ${CMAKE_CURRENT_SOURCE_DIR}/cities --city oakland.sc2
+                --record zoom:120 --every 3 --delay 5 --centre 64,64
+                --out ${CMAKE_CURRENT_SOURCE_DIR}/media/oakland-clouds.gif
         DEPENDS arcology
         COMMENT "Rendering the README's animations from this build"
         VERBATIM)
 endif()
 
+# ---- house style ----------------------------------------------------
+#  .clang-format at the repository root is the style, over every
+#  hand-written source under src/.  `format` rewrites them in place, and
+#  `format-check` and the `format` test fail if any is not already
+#  formatted.  A generated file is its generator's business, and a vendor's
+#  file is the vendor's.
+find_program(CLANG_FORMAT NAMES clang-format
+             HINTS /opt/homebrew/bin /usr/local/bin)
+file(GLOB_RECURSE ARC_SOURCES CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.c" "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp")
+list(FILTER ARC_SOURCES EXCLUDE REGEX "/src/vendor/|/generated/")
+if(CLANG_FORMAT)
+    add_custom_target(format
+        COMMAND ${CLANG_FORMAT} -i ${ARC_SOURCES}
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        COMMENT "Formatting the sources"
+        VERBATIM)
+    add_custom_target(format-check
+        COMMAND ${CLANG_FORMAT} --dry-run --Werror ${ARC_SOURCES}
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        COMMENT "Checking the sources against .clang-format"
+        VERBATIM)
+    add_test(NAME format
+             COMMAND ${CLANG_FORMAT} --dry-run --Werror ${ARC_SOURCES}
+             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+endif()
+
 # ---- verification ---------------------------------------------------
-#  The format check lives in src/CMakeLists.txt because it is about the
-#  sources; `verify` lives here because it needs the executable.
-#  No printf in the renderer or the app: a message goes through the log
+#  `verify` lives here because it needs the executable.
+#  No printf in the renderer, the network, the interface or the app: a message goes through the log
 #  (R_ERR/R_WARN/R_NOTE/R_DBG) and a dump or a report line through dumpf,
 #  which writes where --dump-to says.  This test needs nothing but the
 #  sources, so it always runs.
@@ -120,7 +160,7 @@ add_test(NAME no_printf COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tools/no_printf.s
 #  A comment states current fact: no history, no conversation, no
 #  per-city example.  The same checker is the write hook.
 add_test(NAME comment_lint COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tools/comment_lint.py
-         src tools tests scripts CMakeLists.txt cmake docs README.md TODO.md CLAUDE.md .claude/CLAUDE.md
+         src tools tests CMakeLists.txt cmake docs README.md TODO.md CLAUDE.md
          WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 #  The documentation builds, and builds with no warning: a Sphinx warning
 #  here is malformed markup that renders as visible garbage.  It needs
@@ -132,27 +172,20 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/docs/.venv/bin/sphinx-build")
                      "${CMAKE_CURRENT_SOURCE_DIR}/docs" "${CMAKE_BINARY_DIR}/docs_check")
     set_tests_properties(docs_build PROPERTIES LABELS "gate;full" TIMEOUT 600)
 endif()
-#  The pipeline names no family: no road, railway, highway, ramp,
-#  sidewalk or crossing in a filename, an identifier or a comment.
-add_test(NAME family_words COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tools/family_words.py)
-#  Goal 6: no routing in C.  The chain of points between two poses is a
-#  script's, so no piece is filled in by hand outside the primitives.
-add_test(NAME no_routing COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tools/no_routing.py)
+#  THE ARCHITECTURE's mechanical witnesses: one build path, and a fault
+#  never accepted by a proof (THE ARCHITECTURE, in the house rules at the root).
+add_test(NAME architecture COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tools/architecture.py)
 #  The comments are Simplified Technical English: short sentences, the
 #  active voice, no em dash, no semicolon, and one name for one thing.
 add_test(NAME ste_comments COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tools/ste_lint.py)
-add_test(NAME script_api COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tools/script_api.py)
 #  The renderer's four levels: an include runs down them, or it is on
 #  the list of exceptions with its reason.
 add_test(NAME layering COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tools/layering.py)
+#  The shapes of code the tree may not have: calls up a level, copied
+#  bodies, names typed twice, dead code, private exports, files that call
+#  round a loop, functions in the wrong file (tools/code_smells.py).
+add_test(NAME code_smells COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/code_smells.py)
 add_test(NAME materials_fresh COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_materials.py --check)
-#  The script API's reference page is generated from src/script, so it
-#  cannot cite a method the program does not have.
-add_test(NAME script_api_fresh COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_script_api.py --check)
-#  The lint's world handle is generated from the pipeline's own WORLD[],
-#  so it cannot answer a method the pipeline has not, and it cannot miss
-#  one the pipeline has.
-add_test(NAME lint_stub_fresh COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_lint_stub.py --check)
 #  The shaders the GPU runs are compiled from the GLSL beside them and
 #  checked in, so a plain build needs no shader tools.  One edited
 #  without regenerating draws the last build's frame.
@@ -174,19 +207,21 @@ if(ARC_CITIES)
 endif()
 
 #  The simulation against the original, where the game folder is and the
-#  simulation's checks were asked for (both are declared at the top).
+#  simulation's checks were asked for (both are declared at the top).  The
+#  report measures much more than it holds.  The test holds the four totals
+#  each shipped file records beside its map, recomputed from the map it
+#  decodes: every file read must agree on all four.
 if(ARC_CITIES AND ARC_SIM_TESTS)
     add_test(NAME verify
              COMMAND arcology --verify "${ARC_CITIES}" "${ARC_CITIES}/Cities")
     set_tests_properties(verify PROPERTIES
-        PASS_REGULAR_EXPRESSION "codec round-trip, lossless[^\n]*100\\.00%")
+        PASS_REGULAR_EXPRESSION "pollution[^\n]*100\\.00%[^\n]*\n[^\n]*land value[^\n]*100\\.00%[^\n]*\n[^\n]*crime[^\n]*100\\.00%[^\n]*\n[^\n]*traffic[^\n]*100\\.00%")
 endif()
 
-#  .arco has to carry a city without losing anything.  This needs no game
-#  folder -- the repository's own cities are the corpus.
+#  The oracle checks, where the game folder is and the simulation's checks
+#  were asked for.
 if(Python3_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/cities" AND ARC_SIM_TESTS)
-    #  The year-end microsim pass, against $101AC.  Needs the oracle, so
-    #  it only runs where the game folder is.
+    #  The year-end microsim pass, against $101AC.
     if(ARC_CITIES)
         add_test(NAME microsim
                  COMMAND ${Python3_EXECUTABLE}
@@ -233,13 +268,10 @@ if(Python3_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/cities" AND ARC_SIM_TES
             set_tests_properties(${t} PROPERTIES LABELS "oracle" TIMEOUT 3600)
         endforeach()
     endif()
-    add_test(NAME arco_roundtrip
-             COMMAND ${Python3_EXECUTABLE}
-                     ${CMAKE_CURRENT_SOURCE_DIR}/tools/arco_check.py)
 endif()
 
 #  The tiers (see src/render/CMakeLists.txt): these need no build.
-foreach(t no_printf comment_lint family_words no_routing ste_comments script_api materials_fresh script_api_fresh lint_stub_fresh shaders_fresh format layering)
+foreach(t no_printf comment_lint architecture ste_comments materials_fresh shaders_fresh format layering code_smells)
     if(TEST ${t})
         set_tests_properties(${t} PROPERTIES LABELS "lint;gate;full")
     endif()
@@ -249,6 +281,3 @@ foreach(t verify microsim allocmicro)
         set_tests_properties(${t} PROPERTIES LABELS "oracle")
     endif()
 endforeach()
-if(TEST arco_roundtrip)
-    set_tests_properties(arco_roundtrip PROPERTIES LABELS "full")
-endif()

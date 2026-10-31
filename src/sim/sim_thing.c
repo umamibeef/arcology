@@ -85,15 +85,15 @@ int alloc_thing(City *c)
 uint8_t *thing(City *c, int slot) { return c->xthg + slot * THING_SZ; }
 
 /*  $9D7E  freeThing: give a record back and clear the tile it held. */
-void free_thing(City *c, int slot)
+static void free_thing(City *c, int slot)
 {
     uint8_t *r = thing(c, slot);
     int      y, x;
     r[0] = 0; /* $9D90 */
     y    = r[3];
     x    = r[4];
-    if (y >= 0 && y < MAP_H && x >= 0 && x < MAP_W)
-        c->xtxt[y][x] = 0; /* $9DD0 */
+    if (y >= 0 && y < c->h && x >= 0 && x < c->w)
+        T_XTXT(c, y, x) = 0; /* $9DD0 */
 }
 
 /* ================================================================== *
@@ -120,12 +120,12 @@ int spawn_disaster_thing(City *c, int kind)
         y = 0; /* $38796 */
     if (x < 0)
         x = 0;
-    if (y > 0x7F)
-        y = 0x7F;
-    if (x > 0x7F)
-        x = 0x7F;
+    if (y > c->h - 1)
+        y = c->h - 1;
+    if (x > c->w - 1)
+        x = c->w - 1;
 
-    t = c->xtxt[y][x]; /* $387C6 */
+    t = T_XTXT(c, y, x); /* $387C6 */
     if (t >= 0xC9 && t < 0xF1)
         free_thing(c, t - 0xC9); /* $387E2 */
 
@@ -138,20 +138,20 @@ int spawn_disaster_thing(City *c, int kind)
 
     if (kind == 0x0F) /* the tornado */
     {
-        r[1] = (uint8_t)(Random(c) & 7);             /* $387FA */
-        r[8] = (uint8_t)((uint16_t)Random(c) % 128); /* $38844 */
-        r[9] = (uint8_t)((uint16_t)Random(c) % 128);
-        r[5] = (uint8_t)(c->altm[y][x] & 0x1F); /* $3889E */
+        r[1] = (uint8_t)(Random(c) & 7);              /* $387FA */
+        r[8] = (uint8_t)((uint16_t)Random(c) % c->h); /* $38844 */
+        r[9] = (uint8_t)((uint16_t)Random(c) % c->w);
+        r[5] = (uint8_t)(T_ALTM(c, y, x) & 0x1F); /* $3889E */
     }
     else /* the monster */
     {
-        r[1] = 2;                                    /* $3860E */
-        r[8] = (uint8_t)((uint16_t)Random(c) % 128); /* $3864A */
-        r[9] = (uint8_t)((uint16_t)Random(c) % 128);
+        r[1] = 2;                                     /* $3860E */
+        r[8] = (uint8_t)((uint16_t)Random(c) % c->h); /* $3864A */
+        r[9] = (uint8_t)((uint16_t)Random(c) % c->w);
         r[5] = 0x0F; /* $38698 */
     }
 
-    r[0x0A] = c->xtxt[y][x]; /* $388C4, after the record above went away */
+    r[0x0A] = T_XTXT(c, y, x); /* $388C4, after the record above went away */
     r[2]    = 0;
 
     if (kind == 0x05) /* $386C6: in a scenario the monster is fixed */
@@ -167,8 +167,8 @@ int spawn_disaster_thing(City *c, int kind)
     else
         c->tornado_count++;
 
-    c->xtxt[y][x]  = (uint8_t)(slot + 0xC9); /* $38726 */
-    c->thing_focus = (int16_t)slot;          /* $3872A */
+    T_XTXT(c, y, x) = (uint8_t)(slot + 0xC9); /* $38726 */
+    c->thing_focus  = (int16_t)slot;          /* $3872A */
     return 1;
 }
 
@@ -181,12 +181,12 @@ int spawn_disaster_thing(City *c, int kind)
 static int can_travel(const City *c, int y, int x, int kind)
 {
     int b;
-    if (y < 0 || y >= MAP_H || x < 0 || x >= MAP_W)
+    if (y < 0 || y >= c->h || x < 0 || x >= c->w)
         return 0; /* $DDA4 */
-    if (c->xtxt[y][x] >= 0xC9)
+    if (T_XTXT(c, y, x) >= 0xC9)
         return 0; /* $DDC0 */
 
-    b = c->xbld[y][x];
+    b = T_XBLD(c, y, x);
     if (kind == 0x0A) /* $DDE2: rail */
     {
         if ((b >= 0x2C && b < 0x3F) || (b >= 0x45 && b < 0x49) ||
@@ -197,7 +197,7 @@ static int can_travel(const City *c, int y, int x, int kind)
         return 0; /* $DE9E */
     }
     {
-        int u = c->xund[y][x]; /* $DE44 */
+        int u = T_XUND(c, y, x); /* $DE44 */
         if ((u >= 1 && u < 0x10) || u == 0x1F || u == 0x20 || u == 0x22 ||
             u == 0x23)
             return 1; /* $DE76 */
@@ -221,11 +221,11 @@ int pick_direction(City *c, int y, int x, int turn, int kind)
         int dir = (d + turn) & 3;               /* $E1CA */
         int ty  = y + STEP_DY[dir];             /* $E1D8 */
         int tx  = x + STEP_DX[dir];             /* $E1E6 */
-        if (ty < 0 || ty >= MAP_H || tx < 0 || tx >= MAP_W)
+        if (ty < 0 || ty >= c->h || tx < 0 || tx >= c->w)
             continue;
         if (!can_travel(c, ty, tx, kind))
             continue; /* $E222 */
-        if (c->xtxt[ty][tx] >= 0xC9)
+        if (T_XTXT(c, ty, tx) >= 0xC9)
             continue; /* $E242 */
         return dir;   /* $E24A */
     }
@@ -239,22 +239,22 @@ static int derails(const City *c, int y, int x)
 {
     int b, u;
 
-    if (y < 0 || y >= MAP_H || x < 0 || x >= MAP_W)
+    if (y < 0 || y >= c->h || x < 0 || x >= c->w)
         return 0; /* $DECA */
 
-    b = c->xbld[y][x];
+    b = T_XBLD(c, y, x);
     if ((b >= 0x2C && b < 0x3F) || (b >= 0x45 && b < 0x49) ||
         (b >= 0x6C && b < 0x70))
         return 0; /* $DF08, rail of some kind */
     if (b == 0x4D || b == 0x4E || b == 0x5A || b == 0x5B)
         return 0; /* $DF0E, the crossings */
 
-    u = c->xund[y][x];
+    u = T_XUND(c, y, x);
     if ((u >= 1 && u < 0x10) || u == 0x1F || u == 0x20 || u == 0x22 ||
         u == 0x23)
         return 0; /* $DF70, a subway underneath */
 
-    b = c->xbld[y][x];
+    b = T_XBLD(c, y, x);
     if (b >= 0x6C && b <= 0x70)
         return 0; /* $DF94: note <= here, unlike the < above */
     return 1;     /* $DF98 */
@@ -316,21 +316,21 @@ static void spawn_wreck(City *c, int y, int x)
 
     if (slot == 0)
         return;
-    if (c->xtxt[y][x] >= 0xC9)
+    if (T_XTXT(c, y, x) >= 0xC9)
         return; /* $BFC8 */
 
-    t             = thing(c, slot);
-    t[0]          = 6; /* $BFD8 */
-    t[1]          = 0;
-    t[3]          = (uint8_t)y;
-    t[4]          = (uint8_t)x;
-    t[6]          = 8;
-    t[7]          = 8;
-    t[5]          = 0;
-    t[0x0A]       = c->xtxt[y][x]; /* $C036 */
-    t[0x0B]       = 0;
-    t[2]          = 0;
-    c->xtxt[y][x] = (uint8_t)(slot + 0xC9); /* $C064 */
+    t               = thing(c, slot);
+    t[0]            = 6; /* $BFD8 */
+    t[1]            = 0;
+    t[3]            = (uint8_t)y;
+    t[4]            = (uint8_t)x;
+    t[6]            = 8;
+    t[7]            = 8;
+    t[5]            = 0;
+    t[0x0A]         = T_XTXT(c, y, x); /* $C036 */
+    t[0x0B]         = 0;
+    t[2]            = 0;
+    T_XTXT(c, y, x) = (uint8_t)(slot + 0xC9); /* $C064 */
 }
 
 /* ================================================================== *
@@ -354,13 +354,13 @@ static void step_train(City *c, int slot)
     if (type == 0x0A && game_rand1(c))
     {
         const int k = (t[1] & 1) ? (int)lib_rand(c, 2) + 2 : (int)lib_rand(c, 2);
-        if (k == 0 && y > 0 && c->xbld[y - 1][x] == 0xED)
+        if (k == 0 && y > 0 && T_XBLD(c, y - 1, x) == 0xED)
             return;
-        if (k == 1 && y < 0x7F && c->xbld[y + 1][x] == 0xED)
+        if (k == 1 && y < c->h - 1 && T_XBLD(c, y + 1, x) == 0xED)
             return;
-        if (k == 2 && x > 0 && c->xbld[y][x - 1] == 0xED)
+        if (k == 2 && x > 0 && T_XBLD(c, y, x - 1) == 0xED)
             return;
-        if (k == 3 && x < 0x7F && c->xbld[y][x + 1] == 0xED)
+        if (k == 3 && x < c->w - 1 && T_XBLD(c, y, x + 1) == 0xED)
             return;
     }
 
@@ -371,32 +371,32 @@ static void step_train(City *c, int slot)
     {
         uint8_t *b2 = thing(c, car2), *b3 = thing(c, car3);
         t[0] = b2[0] = b3[0] = 0; /* $D944 */
-        if (c->xtxt[y][x] == slot + 0xC9)
-            c->xtxt[y][x] = 0;
-        if (c->xtxt[b2[3]][b2[4]] == car2 + 0xC9)
-            c->xtxt[b2[3]][b2[4]] = 0;
-        if (c->xtxt[b3[3]][b3[4]] == car3 + 0xC9)
-            c->xtxt[b3[3]][b3[4]] = 0;
+        if (T_XTXT(c, y, x) == slot + 0xC9)
+            T_XTXT(c, y, x) = 0;
+        if (T_XTXT(c, b2[3], b2[4]) == car2 + 0xC9)
+            T_XTXT(c, b2[3], b2[4]) = 0;
+        if (T_XTXT(c, b3[3], b3[4]) == car3 + 0xC9)
+            T_XTXT(c, b3[3], b3[4]) = 0;
         spawn_wreck(c, y, x); /* $DA12 */
         return;
     }
 
     /*  $DA1E: is the tile ahead free?  Our own tail car does not count,
      *  because it is about to move out of the way. */
-    v = c->xtxt[ay][ax];
+    v = T_XTXT(c, ay, ax);
     if (v >= 0xC9 && (v - 0xC9) != car3)
         return; /* $DA52 */
 
     if (!(y == ay && x == ax)) /* $DA56 */
     {
         uint8_t *b2 = thing(c, car2), *b3 = thing(c, car3);
-        c->xtxt[y][x]         = (uint8_t)(car2 + 0xC9); /* $DA7C */
-        c->xtxt[b2[3]][b2[4]] = (uint8_t)(car3 + 0xC9); /* $DAB2 */
-        c->xtxt[b3[3]][b3[4]] = b3[0x0A];               /* $DAD2 */
-        copy_car(c, car2, car3);                        /* $DADC */
-        copy_car(c, slot, car2);                        /* $DAE6 */
-        t[0x0A]         = c->xtxt[ay][ax];              /* $DB0C */
-        c->xtxt[ay][ax] = (uint8_t)(slot + 0xC9);       /* $DB26 */
+        T_XTXT(c, y, x)         = (uint8_t)(car2 + 0xC9); /* $DA7C */
+        T_XTXT(c, b2[3], b2[4]) = (uint8_t)(car3 + 0xC9); /* $DAB2 */
+        T_XTXT(c, b3[3], b3[4]) = b3[0x0A];               /* $DAD2 */
+        copy_car(c, car2, car3);                          /* $DADC */
+        copy_car(c, slot, car2);                          /* $DAE6 */
+        t[0x0A]           = T_XTXT(c, ay, ax);            /* $DB0C */
+        T_XTXT(c, ay, ax) = (uint8_t)(slot + 0xC9);       /* $DB26 */
     }
 
     t[3] = t[6]; /* $DB3C: the locomotive is now where it was pointing */
@@ -406,7 +406,7 @@ static void step_train(City *c, int slot)
     x    = t[4];
 
     /*  $DB92: a tunnel mouth flips the train between the two forms. */
-    b = c->xbld[y][x];
+    b = T_XBLD(c, y, x);
     if (b >= 0x6C && b <= 0x70)
     {
         t[0] = (uint8_t)((type == 0x0A) ? 0x0C : 0x0A);
@@ -508,21 +508,21 @@ static int advance_subtile(City *c, int slot)
     if (!carry)
         return 1; /* $E426 */
 
-    ny                  = t[3] + cy;
-    nx                  = t[4] + cx;
-    c->xtxt[t[3]][t[4]] = 0; /* $E474, leave the old tile first */
+    ny                    = t[3] + cy;
+    nx                    = t[4] + cx;
+    T_XTXT(c, t[3], t[4]) = 0; /* $E474, leave the old tile first */
 
     /*  $E482 guards with $7F, not $80.  The last row and column of the
      *  map are out of bounds here even though they are real tiles, so a
      *  thing that reaches the far edge is released rather than parked. */
-    if (ny < 0 || nx < 0 || ny >= 0x7F || nx >= 0x7F)
+    if (ny < 0 || nx < 0 || ny >= c->h - 1 || nx >= c->w - 1)
     {
         free_thing(c, slot); /* $E492 */
         return 0;
     }
-    t[3]            = (uint8_t)ny; /* $E4A4 */
-    t[4]            = (uint8_t)nx;
-    c->xtxt[ny][nx] = (uint8_t)(slot + 0xC9); /* $E4CC */
+    t[3]              = (uint8_t)ny; /* $E4A4 */
+    t[4]              = (uint8_t)nx;
+    T_XTXT(c, ny, nx) = (uint8_t)(slot + 0xC9); /* $E4CC */
     return 1;
 }
 
@@ -540,23 +540,23 @@ static int boat_can_enter(City *c, int slot, int dir)
     const int x = t[4] + STEP_DX[dir]; /* $E510 */
     int       b;
 
-    if (y < 0 || y >= MAP_H || x < 0 || x >= MAP_W)
+    if (y < 0 || y >= c->h || x < 0 || x >= c->w)
         return 1; /* $E52C */
 
-    b = c->xbld[y][x];
+    b = T_XBLD(c, y, x);
     if (b == 0xF8) /* $E546, a marina: the boat has arrived */
     {
         /*  Released by hand rather than through $9D7E, and note it
          *  clears the boat's OWN tile, not the marina it entered. */
-        t[0]                = 0; /* $E554 */
-        c->xtxt[t[3]][t[4]] = 0; /* $E578 */
+        t[0]                  = 0; /* $E554 */
+        T_XTXT(c, t[3], t[4]) = 0; /* $E578 */
         return 0;
     }
     if (b == 0xDF) /* $E580, the near half of a bridge */
         return 0;
-    if (c->xtxt[y][x]) /* $E598, something is already there */
+    if (T_XTXT(c, y, x)) /* $E598, something is already there */
         return 0;
-    return (c->xbit[y][x] & XBIT_WATER) ? 1 : 0; /* $E5B4 */
+    return (T_XBIT(c, y, x) & XBIT_WATER) ? 1 : 0; /* $E5B4 */
 }
 
 /* ================================================================== *
@@ -594,7 +594,7 @@ static void step_boat(City *c, int slot)
     }
 
     /*  The fourth step is the one where it looks around. */
-    if (!(c->xbit[t[3]][t[4]] & XBIT_WATER))
+    if (!(T_XBIT(c, t[3], t[4]) & XBIT_WATER))
     {
         free_thing(c, slot); /* $E316, aground */
         return;
@@ -614,14 +614,14 @@ static void step_boat(City *c, int slot)
 /*  $EA0E  shipWater: is this tile navigable? */
 static int ship_water(City *c, int y, int x)
 {
-    const int b = c->xbld[y][x];
+    const int b = T_XBLD(c, y, x);
     int       i;
 
-    if (!(c->xbit[y][x] & XBIT_WATER))
+    if (!(T_XBIT(c, y, x) & XBIT_WATER))
         return 0; /* $EA2E */
-    if (c->xter[y][x] < 0x10)
+    if (T_XTER(c, y, x) < 0x10)
         return 0; /* $EA4E, too shallow */
-    if (c->xter[y][x] >= 0x20)
+    if (T_XTER(c, y, x) >= 0x20)
         return 0; /* $EA6C */
     if (b == 0xF8)
         return 0; /* $EA8A, a marina */
@@ -642,11 +642,11 @@ static int ship_can_enter(City *c, int slot, int dir)
     const int      y = t[3] + SHIP_DY[dir]; /* $E99E */
     const int      x = t[4] + SHIP_DX[dir]; /* $E9AE */
 
-    if (y < 0 || y >= MAP_H || x < 0 || x >= MAP_W)
+    if (y < 0 || y >= c->h || x < 0 || x >= c->w)
         return 1; /* $E9CA */
     if (!ship_water(c, y, x))
-        return 0;                         /* $E9DE */
-    return c->xtxt[y][x] >= 0xC9 ? 0 : 1; /* $E9F8 */
+        return 0;                           /* $E9DE */
+    return T_XTXT(c, y, x) >= 0xC9 ? 0 : 1; /* $E9F8 */
 }
 
 /*  $EAC2  shipAdvance: the ship's version of $E388.  Two differences
@@ -691,23 +691,23 @@ static int ship_advance(City *c, int slot)
     if (!carry)
         return 1; /* $EB60 */
 
-    oy              = t[3];
-    ox              = t[4];
-    ny              = oy + cy;
-    nx              = ox + cx;
-    c->xtxt[oy][ox] = t[0x0A]; /* $EBBA, put back what was underneath */
+    oy                = t[3];
+    ox                = t[4];
+    ny                = oy + cy;
+    nx                = ox + cx;
+    T_XTXT(c, oy, ox) = t[0x0A]; /* $EBBA, put back what was underneath */
 
-    if (ny < 0 || nx < 0 || ny >= MAP_H || nx >= MAP_W)
+    if (ny < 0 || nx < 0 || ny >= c->h || nx >= c->w)
     {
         /*  $EBD8: and note $9D7E then zeroes the tile that was just
          *  restored, because the record still holds the old position. */
         free_thing(c, slot);
         return 0;
     }
-    t[3]            = (uint8_t)ny; /* $EBEA */
-    t[4]            = (uint8_t)nx;
-    t[0x0A]         = c->xtxt[ny][nx];        /* $EC0E, pick the new one up */
-    c->xtxt[ny][nx] = (uint8_t)(slot + 0xC9); /* $EC20 */
+    t[3]              = (uint8_t)ny; /* $EBEA */
+    t[4]              = (uint8_t)nx;
+    t[0x0A]           = T_XTXT(c, ny, nx);      /* $EC0E, pick the new one up */
+    T_XTXT(c, ny, nx) = (uint8_t)(slot + 0xC9); /* $EC20 */
     return 1;
 }
 
@@ -764,7 +764,7 @@ static void step_ship(City *c, int slot)
     if ((Random(c) & 0xFF) == 0)
         ; /* $E5E8 sounds the horn, $205 */
 
-    if (!(c->xbit[y][x] & XBIT_WATER)) /* $E630 */
+    if (!(T_XBIT(c, y, x) & XBIT_WATER)) /* $E630 */
     {
         /*  Aground.  The record is not released: it turns into a type 6
          *  where it stands. */
@@ -799,9 +799,9 @@ static void step_ship(City *c, int slot)
             {
                 const int ny = y + DOCK_DY[i]; /* $E72C */
                 const int nx = x + DOCK_DX[i]; /* $E738 */
-                if (ny < 0 || ny >= MAP_H || nx < 0 || nx >= MAP_W)
-                    continue;                /* $E73C */
-                if (c->xbld[ny][nx] == 0xDF) /* $E768 */
+                if (ny < 0 || ny >= c->h || nx < 0 || nx >= c->w)
+                    continue;                  /* $E73C */
+                if (T_XBLD(c, ny, nx) == 0xDF) /* $E768 */
                     t[2] = 3;
             }
             break;
@@ -900,9 +900,9 @@ static int heli_blocked(City *c, int slot, int dir)
     const int      y = t[3] + HELI_DY[dir]; /* $CC24 */
     const int      x = t[4] + HELI_DX[dir]; /* $CC34 */
 
-    if (y < 0 || y >= MAP_H || x < 0 || x >= MAP_W)
-        return 0;                         /* $CC50 */
-    return c->xbld[y][x] >= 0xFB ? 1 : 0; /* $CC68 */
+    if (y < 0 || y >= c->h || x < 0 || x >= c->w)
+        return 0;                           /* $CC50 */
+    return T_XBLD(c, y, x) >= 0xFB ? 1 : 0; /* $CC68 */
 }
 
 /*  $CB86: hold the heading while it is clear, otherwise take the first
@@ -968,9 +968,9 @@ static void advance_speed(City *c, int speed_idx, int slot, int dir)
     if (!carry)
         return; /* $B628 */
 
-    ny                  = t[3] + cy;
-    nx                  = t[4] + cx;
-    c->xtxt[t[3]][t[4]] = t[0x0A]; /* $B686, put back what was underneath */
+    ny                    = t[3] + cy;
+    nx                    = t[4] + cx;
+    T_XTXT(c, t[3], t[4]) = t[0x0A]; /* $B686, put back what was underneath */
 
     for (;;)
     {
@@ -978,8 +978,8 @@ static void advance_speed(City *c, int speed_idx, int slot, int dir)
          *  can read one row past the table here.  The reconstruction
          *  cannot reproduce that read, and treats off-map as unoccupied,
          *  which takes the same branch the read almost always would. */
-        const int occupied = (ny >= 0 && ny < MAP_H && nx >= 0 && nx < MAP_W)
-                                 ? c->xtxt[ny][nx] >= 0xC9
+        const int occupied = (ny >= 0 && ny < c->h && nx >= 0 && nx < c->w)
+                                 ? T_XTXT(c, ny, nx) >= 0xC9
                                  : 0;
         if (!occupied)
             break;
@@ -989,21 +989,21 @@ static void advance_speed(City *c, int speed_idx, int slot, int dir)
         t[4] = (uint8_t)nx;
         ny   = t[3] + cy;
         nx   = t[4] + cx;
-        if (ny < 0 || ny >= MAP_H || nx < 0 || nx >= MAP_W) /* $B6BE */
+        if (ny < 0 || ny >= c->h || nx < 0 || nx >= c->w) /* $B6BE */
         {
             free_thing(c, slot); /* $B6D8 */
             return;
         }
     }
-    if (ny < 0 || ny >= MAP_H || nx < 0 || nx >= MAP_W) /* $B704 */
+    if (ny < 0 || ny >= c->h || nx < 0 || nx >= c->w) /* $B704 */
     {
         free_thing(c, slot); /* $B71E */
         return;
     }
-    t[3]            = (uint8_t)ny; /* $B72E */
-    t[4]            = (uint8_t)nx;
-    t[0x0A]         = c->xtxt[ny][nx];        /* $B74C */
-    c->xtxt[ny][nx] = (uint8_t)(slot + 0xC9); /* $B762 */
+    t[3]              = (uint8_t)ny; /* $B72E */
+    t[4]              = (uint8_t)nx;
+    t[0x0A]           = T_XTXT(c, ny, nx);      /* $B74C */
+    T_XTXT(c, ny, nx) = (uint8_t)(slot + 0xC9); /* $B762 */
 }
 
 /* ================================================================== *
@@ -1016,7 +1016,7 @@ static void step_heli(City *c, int slot)
 
     c->heli_count++; /* $C7B0 */
 
-    if (c->xbld[t[3]][t[4]] >= 0xFB) /* $C7EA */
+    if (T_XBLD(c, t[3], t[4]) >= 0xFB) /* $C7EA */
     {
         /*  Over something it cannot be over.  Like the ship running
          *  aground, it becomes a type 6 where it stands. */
@@ -1054,7 +1054,7 @@ static void step_heli(City *c, int slot)
                  *  resolution, and the report is rate-limited by the
                  *  clock rather than by the simulation: five thousand
                  *  ticks. */
-                if (c->xtrf[t[3] / 2][t[4] / 2] >= 0xAA &&
+                if (T_XTRF(c, t[3] / 2, t[4] / 2) >= 0xAA &&
                     tick_count(c) > c->heli_timer)
                 {
                     /*  $C936 plays it. */
@@ -1070,18 +1070,18 @@ static void step_heli(City *c, int slot)
                 {
                     int ny = c->view_y + (int)((uint16_t)Random(c) % 0x40) - 0x20;
                     int nx = c->view_x + (int)((uint16_t)Random(c) % 0x40) - 0x20;
-                    if (ny < 0 || ny >= MAP_H)
+                    if (ny < 0 || ny >= c->h)
                         ny = (int)((uint16_t)Random(c) % 0x40) + 0x20; /* $C9E2 */
-                    if (nx < 0 || nx >= MAP_W)
+                    if (nx < 0 || nx >= c->w)
                         nx = (int)((uint16_t)Random(c) % 0x40) + 0x20; /* $CA08 */
                     t[8] = (uint8_t)ny;                                /* $CA28 */
                     t[9] = (uint8_t)nx;
                 }
                 if (!(Random(c) & 1))
                     break; /* $CA42 */
-                if (c->xbld[t[3]][t[4]] != 0)
+                if (T_XBLD(c, t[3], t[4]) != 0)
                     break; /* $CA6E */
-                if (c->xter[t[3]][t[4]] != 0)
+                if (T_XTER(c, t[3], t[4]) != 0)
                     break; /* $CA88 */
                 t[2] = 3;  /* $CA8E, bare ground: go down */
                 break;
@@ -1149,7 +1149,7 @@ static void step_plane(City *c, int slot)
 {
     uint8_t  *t     = thing(c, slot);
     const int state = t[2] & 0x0F; /* $C208 */
-    const int b     = c->xbld[t[3]][t[4]];
+    const int b     = T_XBLD(c, t[3], t[4]);
     int       runway;
 
     c->plane_count++; /* $C1F2 */
@@ -1157,7 +1157,7 @@ static void step_plane(City *c, int slot)
     /*  $C23C: anything over $70 is a real building, and an aeroplane low
      *  enough is going to hit it.  A zone nibble of exactly 8 is the
      *  airport, which it is allowed to be over. */
-    if (b > 0x70 && (c->xzon[t[3]][t[4]] & 0x0F) != 8)
+    if (b > 0x70 && (T_XZON(c, t[3], t[4]) & 0x0F) != 8)
     {
         if (b >= 0xFB) /* $C262 */
         {
@@ -1204,8 +1204,8 @@ static void step_plane(City *c, int slot)
             if (t[5] >= 1)
                 break; /* $C41E */
             /*  $C426 sounds it, then the record goes back. */
-            c->xtxt[t[3]][t[4]] = t[0x0A]; /* $C458 */
-            free_thing(c, slot);           /* $C45E */
+            T_XTXT(c, t[3], t[4]) = t[0x0A]; /* $C458 */
+            free_thing(c, slot);             /* $C45E */
             break;
 
         case 2:                                 /* $C468: cruising */
@@ -1357,9 +1357,9 @@ void sim_step_things(City *c)
                 step_plane(c, slot); /* $9F40 */
                 break;
             default:
-                /*  types 5, 6, 15 and 16 have steppers that are not
-                 *  reconstructed yet: none of them occurs in any shipped
-                 *  city.  7 and 8 reach empty ones. */
+                /*  types 5, 6, 15 and 16 have steppers with no C: none of
+                 *  them occurs in any shipped city.  7 and 8 reach empty
+                 *  ones. */
                 break;
         }
     }
@@ -1381,7 +1381,7 @@ void spawn_helicopter(City *c, int y, int x)
     uint8_t *t;
     int      slot;
 
-    if (c->xtxt[y][x] >= 0xC9)
+    if (T_XTXT(c, y, x) >= 0xC9)
         return; /* $BA96 */
     if (c->monster_count != 0)
         return; /* $BAAA */
@@ -1399,15 +1399,15 @@ void spawn_helicopter(City *c, int y, int x)
     t[4]    = (uint8_t)x;
     t[6]    = 8;
     t[7]    = 8;
-    t[8]    = (uint8_t)((uint16_t)Random(c) % 128); /* $BB2A */
-    t[9]    = (uint8_t)((uint16_t)Random(c) % 128);
+    t[8]    = (uint8_t)((uint16_t)Random(c) % c->h); /* $BB2A */
+    t[9]    = (uint8_t)((uint16_t)Random(c) % c->w);
     t[5]    = 0;
-    t[0x0A] = c->xtxt[y][x];
+    t[0x0A] = T_XTXT(c, y, x);
     t[2]    = 0;
 
-    c->heli_count++;                        /* $BB86 */
-    c->heli_timer = 0;                      /* $BB8A, clears A5+0x12F0 */
-    c->xtxt[y][x] = (uint8_t)(slot + 0xC9); /* $BB9C */
+    c->heli_count++;                          /* $BB86 */
+    c->heli_timer   = 0;                      /* $BB8A, clears A5+0x12F0 */
+    T_XTXT(c, y, x) = (uint8_t)(slot + 0xC9); /* $BB9C */
 }
 
 void spawn_plane(City *c, int y, int x, int kind)
@@ -1415,7 +1415,7 @@ void spawn_plane(City *c, int y, int x, int kind)
     uint8_t *t;
     int      slot, ty, tx;
 
-    if (c->xtxt[y][x] >= 0xC9)
+    if (T_XTXT(c, y, x) >= 0xC9)
         return; /* $B78E */
     if (c->monster_count != 0)
         return; /* $B7A2 */
@@ -1458,12 +1458,12 @@ void spawn_plane(City *c, int y, int x, int kind)
                 t[1] = 5;
                 break; /* $B860 */
             case 2:
-                ty   = 0x7F;
+                ty   = c->h - 1;
                 tx   = along;
                 t[1] = 7;
                 break; /* $B89C */
             default:
-                tx   = 0x7F;
+                tx   = c->w - 1;
                 ty   = along;
                 t[1] = 1;
                 break; /* $B8DA */
@@ -1484,8 +1484,8 @@ void spawn_plane(City *c, int y, int x, int kind)
     t[3] = (uint8_t)ty;
     t[4] = (uint8_t)tx;
 
-    t[0x0A]         = c->xtxt[ty][tx]; /* $B97C */
-    c->xtxt[ty][tx] = (uint8_t)(slot + 0xC9);
+    t[0x0A]           = T_XTXT(c, ty, tx); /* $B97C */
+    T_XTXT(c, ty, tx) = (uint8_t)(slot + 0xC9);
     c->plane_count++; /* $BA5E */
 }
 
@@ -1531,13 +1531,13 @@ void seaport_ship(City *c, int y, int x)
         return; /* $BBB6, one ship at a time */
 
     edge = (int)(Random(c) & 3); /* $BBC6 */
-    for (i = 0; i < MAP_W; i++)
+    for (i = 0; i < c->w; i++)
     {
         int ty = (edge == 0) ? 2 : (edge == 1) ? 0x7E
                                                : i;
         int tx = (edge == 2) ? 2 : (edge == 3) ? 0x7E
                                                : i;
-        if (c->xter[ty][tx] == 0x10) /* $BBEE, open water */
+        if (T_XTER(c, ty, tx) == 0x10) /* $BBEE, open water */
         {
             sy    = ty;
             sx    = tx;
@@ -1546,7 +1546,7 @@ void seaport_ship(City *c, int y, int x)
     }
     if (!found)
         return; /* $BC9A */
-    if (c->xtxt[sy][sx] >= 0xC9)
+    if (T_XTXT(c, sy, sx) >= 0xC9)
         return; /* $BCAE */
 
     slot = alloc_thing(c);
@@ -1561,7 +1561,7 @@ void seaport_ship(City *c, int y, int x)
     t[6]    = 8;
     t[7]    = 8;
     t[5]    = 1;
-    t[0x0A] = c->xtxt[sy][sx];
+    t[0x0A] = T_XTXT(c, sy, sx);
     t[2]    = 0;
 
     c->ship_y = (int16_t)sy; /* $BD46 */
@@ -1569,6 +1569,6 @@ void seaport_ship(City *c, int y, int x)
     /*  $BD52 calls $3F636, which does nothing unless the machine
      *  reports more than $9C40 bytes free.  The reconstruction models
      *  no memory pressure, so that gate stays shut on both sides. */
-    c->ship_count++;                          /* $BD62 */
-    c->xtxt[sy][sx] = (uint8_t)(slot + 0xC9); /* $BD6E */
+    c->ship_count++;                            /* $BD62 */
+    T_XTXT(c, sy, sx) = (uint8_t)(slot + 0xC9); /* $BD6E */
 }

@@ -20,7 +20,7 @@ void soft_defaults(RSoftOpts *o)
 {
     memset(o, 0, sizeof *o);
     o->zoom           = 32;
-    o->n              = R_MAP;
+    o->n              = r_map;
     o->sky[0]         = 16;
     o->sky[1]         = 20;
     o->sky[2]         = 22;
@@ -83,7 +83,7 @@ static int32_t traffic_car(const RCity *c, int32_t idx, int32_t row, int32_t col
         lo = 0x55;
         hi = 0xAA;
     }
-    t = c->xtrf[(row >> 1) * R_HALF + (col >> 1)];
+    t = c->xtrf[(row >> 1) * r_half + (col >> 1)];
     if (t <= lo)
         return 0;
     *flip = (c->xbit[idx] & 0x02u) != 0;
@@ -110,7 +110,7 @@ static int32_t traffic_car(const RCity *c, int32_t idx, int32_t row, int32_t col
 
 /*  Is this the tile the building is drawn at?  The game's own test is a
  *  single AND ($1732C): andi.w #$f0, d0   .  The corner nibble and.w
- *  $122a(a5), d0  .  G_rotTable[rotation], set at $1545E beq  skip but
+ *  $122a(a5), d0  .  G_rotTable[turn], set at $1545E beq  skip but
  *  it is only reached for some XBLD ranges.  Roads, rail, power lines
  *  and trees (XBLD < 0x61) are drawn through paths that never test it
  *  ($17528, $1775E).  This is why they carry no corner bits at all.
@@ -123,7 +123,7 @@ static int draws_here(uint8_t xzon, uint8_t xbld, uint8_t mask)
 {
     uint8_t corners = (uint8_t)(xzon & 0xF0u);
     if (corners & mask)
-        return 1;                         /* the anchor for this rotation, and 0xF0 single tiles */
+        return 1;                         /* the anchor for this quarter, and 0xF0 single tiles */
     return corners == 0u && xbld < 0x70u; /* unzoned 1x1: always */
 }
 
@@ -272,42 +272,42 @@ static int32_t overlay_tile(const RCity *c, int32_t row, int32_t col, int32_t vi
     switch (view)
     {
         case R_VIEW_TRAFFIC:
-            v = c->xtrf[(row >> 1) * R_HALF + (col >> 1)];
+            v = c->xtrf[(row >> 1) * r_half + (col >> 1)];
             break;
         case R_VIEW_DENSITY:
-            v = c->xpop[(row >> 2) * R_QTR + (col >> 2)];
+            v = c->xpop[(row >> 2) * r_qtr + (col >> 2)];
             break;
         case R_VIEW_GROWTH_VALUE:
-            v = c->xrog[(row >> 2) * R_QTR + (col >> 2)];
+            v = c->xrog[(row >> 2) * r_qtr + (col >> 2)];
             break;
         case R_VIEW_CRIME:
-            v = c->xcrm[(row >> 1) * R_HALF + (col >> 1)];
+            v = c->xcrm[(row >> 1) * r_half + (col >> 1)];
             break;
         case R_VIEW_POLICE:
-            v = c->xplc[(row >> 2) * R_QTR + (col >> 2)];
+            v = c->xplc[(row >> 2) * r_qtr + (col >> 2)];
             break;
         case R_VIEW_POLLUTION:
-            v = c->xplt[(row >> 1) * R_HALF + (col >> 1)];
+            v = c->xplt[(row >> 1) * r_half + (col >> 1)];
             break;
         case R_VIEW_LANDVALUE:
-            v = c->xval[(row >> 1) * R_HALF + (col >> 1)];
+            v = c->xval[(row >> 1) * r_half + (col >> 1)];
             break;
         case R_VIEW_FIRE:
-            v = c->xfir[(row >> 2) * R_QTR + (col >> 2)];
+            v = c->xfir[(row >> 2) * r_qtr + (col >> 2)];
             break;
 
         /*  $169E0 / $16A1C: conducting and supplied reads as 300,
          *  conducting only as 303.  Off the network, no tint. */
         case R_VIEW_POWER:
-            b = c->xbit[row * R_MAP + col];
+            b = c->xbit[row * r_map + col];
             return (b & 0x80u) ? ((b & 0x40u) ? 300 : 303) : 0;
         case R_VIEW_WATER:
-            b = c->xbit[row * R_MAP + col];
+            b = c->xbit[row * r_map + col];
             return (b & 0x20u) ? ((b & 0x10u) ? 300 : 303) : 0;
 
         /*  $16A52: growth arrows, thresholded rather than ramped. */
         case R_VIEW_GROWTH:
-            v = c->xrog[(row >> 2) * R_QTR + (col >> 2)];
+            v = c->xrog[(row >> 2) * r_qtr + (col >> 2)];
             if (v >= 0x83)
                 return 476;
             if (v <= 0x7C)
@@ -351,8 +351,8 @@ static int underground_tiles(const RCity *c, int32_t idx, uint8_t mask, int32_t 
     int32_t  v   = c->xund[idx];
     uint8_t  b   = c->xbit[idx];
     int32_t  bld = c->xbld[idx];
-    uint16_t am  = c->altm[idx];
-    int32_t  ter = c->xter[idx] & 0x7F;
+    uint16_t am  = c->map.altm[idx];
+    int32_t  ter = c->map.xter[idx] & 0x7F;
     int32_t  gnd = R_UGND_GROUND[ter];
     int32_t  tun = (am >> 10) & 0x1F;
     int32_t  d;
@@ -465,7 +465,7 @@ static int32_t veh_slot(const RCity *c, int32_t idx, const uint8_t *rec, int *ra
         slot = R_VEH_SLOT8[rec[8] & 7u]; /* an intersection: use thing[+8] */
     if (slot >= 20)
         return -1;
-    if (c->xter[idx] == 0x0Du)
+    if (c->map.xter[idx] == 0x0Du)
         *raise = 1; /* $A90E */
     return slot;
 }
@@ -622,12 +622,68 @@ static void draw_thing(Emitter *e, const RCity *c, int32_t idx, const uint8_t *r
     emit_blit(e, l->id_base + shape, sx + dx, sy + dy, flip, -1, 0);
 }
 
+R_MAP_BUF(static, int16_t, s_thing_at, 1) /*  The moving thing on each tile, or -1. */
+
+/*  $71A4, the loop $5FAA runs when its caller asks to see the collapse.
+ *  For each frame f, every tile of the footprint gets a debris shape:
+ *  $188 plus a roll of 0 to 3, mirrored on a second roll.  The shape
+ *  stands on the tile and f half-tile heights above it ($71DC), so the
+ *  cloud climbs a frame at a time.  Nothing is erased between frames.
+ *  The original waits 12 ticks between them ($727C) and plays the
+ *  explosion at each ($726C).  The caller keeps that time.  The rolls
+ *  here are not the city's: the simulation has drawn those already. */
+int soft_debris(const RAtlas *a, const RCity *c, const RSoftOpts *o, const int32_t *tile, int nt, int frames, uint32_t seed, ROpList *ops)
+{
+    const RAtlasLevel *l = NULL;
+    Emitter            E;
+    int32_t            i, tw, th, alt, ox, oy, n = o->n, base_alt;
+    int                f, k;
+    uint32_t           r = seed * 2654435761u + 1u;
+    for (i = 0; i < a->n_levels; ++i)
+        if (a->level[i].zoom == o->zoom)
+            l = &a->level[i];
+    if (!l || nt < 1)
+        return -1;
+    tw  = l->tile_w;
+    th  = l->tile_h;
+    alt = l->alt_step;
+    ox  = n * arc_half_wi(tw); /* the sweep's own origin (soft_sweep) */
+    oy  = 200 * th / 16;
+    {
+        const int32_t idx = tile[1] * r_map + tile[0];
+        if (tile[0] < 0 || tile[1] < 0 || tile[0] >= r_map || tile[1] >= r_map)
+            return -1;
+        base_alt = o->underground ? rcity_alt_ground(c->map.altm[idx]) : tile_alt(c->map.altm[idx], c->map.xter[idx]);
+    }
+    memset(&E, 0, sizeof E);
+    E.ops   = ops;
+    E.l     = l;
+    E.order = (uint32_t)(2 * n * n) + 1u; /* after every tile of the sweep */
+    E.alt   = base_alt;
+    for (f = 0; f < frames; ++f)
+        for (k = 0; k < nt; ++k)
+        {
+            const int32_t dx = tile[2 * k] - o->x0, dy = tile[2 * k + 1] - o->y0;
+            int32_t       shape, sx, sy, flip;
+            r     = r * 1664525u + 1013904223u;
+            shape = 0x188 + (int32_t)((r >> 16) & 3u); /* $71CE */
+            r     = r * 1664525u + 1013904223u;
+            flip  = (int32_t)((r >> 16) & 1u); /* $71FE */
+            E.row = tile[2 * k + 1];
+            E.col = tile[2 * k];
+            sx    = ox + (dy - dx) * arc_half_wi(tw);
+            sy    = oy + (dx + dy) * arc_half_hi(th) - base_alt * alt - f * arc_half_hi(th);
+            emit_blit(&E, l->id_base + shape, sx, sy, flip, -1, 0);
+        }
+    return E.oom ? -1 : 0;
+}
+
 int soft_sweep(const RAtlas *a, const RCity *c, const RSoftOpts *o, ROpList *ops, RSweep *info)
 {
     const RAtlasLevel *l = NULL;
     int32_t            i, tw, th, alt, W, H, ox, oy, s, n = o->n;
     uint8_t            mask;
-    static int16_t     thing_at[R_MAP * R_MAP];
+    int16_t           *thing_at = s_thing_at;
     int                elevated, ground_here;
     int32_t            zoom_level;
     Emitter            E;
@@ -656,7 +712,7 @@ int soft_sweep(const RAtlas *a, const RCity *c, const RSoftOpts *o, ROpList *ops
     oy = 200 * th / 16;
 
     zoom_level = (l->zoom == 8) ? 0 : (l->zoom == 16 ? 1 : 2);
-    mask       = city_corner_mask(c->rotation);
+    mask       = city_corner_mask(c->view_quarter);
     g_focus_ok = 0;
 
     E.ops   = ops;
@@ -684,7 +740,7 @@ int soft_sweep(const RAtlas *a, const RCity *c, const RSoftOpts *o, ROpList *ops
      *  model. */
     {
         int32_t k;
-        for (k = 0; k < R_MAP * R_MAP; ++k)
+        for (k = 0; k < r_map * r_map; ++k)
         {
             int32_t v   = c->xtxt[k];
             thing_at[k] = (v >= 0xC9 && v <= 0xF0 && v - 0xC9 < R_MAX_THINGS)
@@ -707,8 +763,8 @@ int soft_sweep(const RAtlas *a, const RCity *c, const RSoftOpts *o, ROpList *ops
             int32_t idx, sx, sy, b;
             if (dx < 0 || dx >= n)
                 continue;
-            idx = (o->y0 + dy) * R_MAP + (o->x0 + dx);
-            if (idx < 0 || idx >= R_MAP * R_MAP)
+            idx = (o->y0 + dy) * r_map + (o->x0 + dx);
+            if (idx < 0 || idx >= r_map * r_map)
                 continue;
             /*  The painter's index: 1-based so that 0 in the depth plane
              *  means "no terrain here". */
@@ -728,8 +784,8 @@ int soft_sweep(const RAtlas *a, const RCity *c, const RSoftOpts *o, ROpList *ops
              *  water table.  Using the surface rule there shifts every
              *  tile that has water above it, which is what threw the
              *  subway joins out of line. */
-            E.alt = o->underground ? rcity_alt_ground(c->altm[idx])
-                                   : tile_alt(c->altm[idx], c->xter[idx]);
+            E.alt = o->underground ? rcity_alt_ground(c->map.altm[idx])
+                                   : tile_alt(c->map.altm[idx], c->map.xter[idx]);
             sy    = oy + (dx + dy) * arc_half_hi(th) - E.alt * alt;
 
             if (o->focus_row >= 0 && o->y0 + dy == o->focus_row &&
@@ -758,11 +814,11 @@ int soft_sweep(const RAtlas *a, const RCity *c, const RSoftOpts *o, ROpList *ops
              *  $161DC references neither shape, so the underground view
              *  draws no skirt at all. */
             if (o->draw_terrain && !o->underground &&
-                (o->y0 + dy == R_MAP - 1 || o->x0 + dx == R_MAP - 1))
+                (o->y0 + dy == r_map - 1 || o->x0 + dx == r_map - 1))
             {
-                int32_t ga = rcity_alt_ground(c->altm[idx]);
-                int32_t wa = rcity_alt_table(c->altm[idx]);
-                int32_t k, y = sy + tile_alt(c->altm[idx], c->xter[idx]) * alt;
+                int32_t ga = rcity_alt_ground(c->map.altm[idx]);
+                int32_t wa = rcity_alt_table(c->map.altm[idx]);
+                int32_t k, y = sy + tile_alt(c->map.altm[idx], c->map.xter[idx]) * alt;
                 /*  One d3, walked UPWARD through both loops.  $17062 and
                  *  $170D4 are the same `subi.w #$c, d3`, and $170B2
                  *  picks d3 up exactly where the dirt loop left it: so
@@ -815,7 +871,7 @@ int soft_sweep(const RAtlas *a, const RCity *c, const RSoftOpts *o, ROpList *ops
                                       *  carries its own ground in the
                                       *  sprite. */
                                      ? (b < 0x1D ||
-                                        (b < 0x61 && c->xter[idx] == 13))
+                                        (b < 0x61 && c->map.xter[idx] == 13))
                                      : (b < 0x70 && !elevated));
             if (o->draw_terrain && ground_here)
             {
@@ -823,7 +879,7 @@ int soft_sweep(const RAtlas *a, const RCity *c, const RSoftOpts *o, ROpList *ops
                 int32_t zone = c->xzon[idx] & 0x0F;
                 if (o->view != R_VIEW_NORMAL)
                 {
-                    t = terrain_tile(c->xter[idx]);
+                    t = terrain_tile(c->map.xter[idx]);
                     if (t == 256)
                     {
                         int32_t tint =
@@ -832,7 +888,7 @@ int soft_sweep(const RAtlas *a, const RCity *c, const RSoftOpts *o, ROpList *ops
                             t = tint;
                     }
                 }
-                else if (b < 0x1D && !c->xter[idx] && zone)
+                else if (b < 0x1D && !c->map.xter[idx] && zone)
                     /*  The zoned lot's own ground, 290 + zone.  Two paths
                      *  reach it with identical tests: $17172 for a bare
                      *  tile and $171EC for one carrying a small network
@@ -840,7 +896,7 @@ int soft_sweep(const RAtlas *a, const RCity *c, const RSoftOpts *o, ROpList *ops
                      *  plain terrain under every road meet a zone. */
                     t = 290 + zone;
                 else
-                    t = terrain_tile(c->xter[idx]);
+                    t = terrain_tile(c->map.xter[idx]);
                 if (t)
                     emit_blit(&E, l->id_base + t, sx, sy, 0, -1, 1);
             }
@@ -854,7 +910,7 @@ int soft_sweep(const RAtlas *a, const RCity *c, const RSoftOpts *o, ROpList *ops
                 int32_t      u[6], udy[6];
                 int          uf[6], ug[6];
                 const RTile *gt = atlas_tile(
-                    l, l->id_base + R_UGND_GROUND[c->xter[idx] & 0x7Fu]);
+                    l, l->id_base + R_UGND_GROUND[c->map.xter[idx] & 0x7Fu]);
                 int32_t gh = gt ? (int32_t)gt->h : l->tile_h;
                 int     k, nu = underground_tiles(c, idx, mask, alt, u, udy, uf, ug);
                 for (k = 0; k < nu; ++k)
@@ -866,7 +922,7 @@ int soft_sweep(const RAtlas *a, const RCity *c, const RSoftOpts *o, ROpList *ops
                 draws_here(c->xzon[idx], (uint8_t)b, mask))
             {
                 /*  A multi-tile building is anchored at the tile
-                 *  carrying the rotation's corner bit.  This for an FxF
+                 *  carrying the view's corner bit.  This for an FxF
                  *  footprint is the leftmost tile on screen: NOT the
                  *  lowest.  Its art has to reach the bottom vertex of
                  *  the whole footprint diamond, which is (F-1)*tile_h/2
@@ -899,9 +955,9 @@ int soft_sweep(const RAtlas *a, const RCity *c, const RSoftOpts *o, ROpList *ops
                         int32_t r  = o->y0 + dy + fp[k][0];
                         int32_t cc = o->x0 + dx + fp[k][1];
                         int32_t gt;
-                        if (r < 0 || r >= R_MAP || cc < 0 || cc >= R_MAP)
+                        if (r < 0 || r >= r_map || cc < 0 || cc >= r_map)
                             continue;
-                        gt = terrain_tile(c->xter[r * R_MAP + cc]);
+                        gt = terrain_tile(c->map.xter[r * r_map + cc]);
                         if (gt)
                             emit_blit(&E, l->id_base + gt, sx + fp[k][2] * (l->tile_w / 2), sy + fp[k][3] * (l->tile_h / 2), 0, -1, 1);
                     }
@@ -914,13 +970,14 @@ int soft_sweep(const RAtlas *a, const RCity *c, const RSoftOpts *o, ROpList *ops
                  *  $175FE for network tiles, $178BC for zone buildings.
                  *  Without it a power line or an spur running south-east
                  *  is drawn running south-west.  On the zone path $178C8
-                 *  inverts it when the rotation is odd. */
+                 *  inverts it when the map turn is odd: here, the view's
+                 *  quarter. */
                 flip = (c->xbit[idx] & 0x02u) != 0;
-                if (b >= 0x70 && (c->rotation & 1))
+                if (b >= 0x70 && (c->view_quarter & 1))
                     flip = !flip;
                 /*  An on-spur's art is which of 0x5D..0x60, flipped or
                  *  not, by the side its slab is on and the side its road
-                 *  is on.  The rotation's remap leaves these four ids
+                 *  is on.  The turn's remap leaves these four ids
                  *  alone.  XBIT's flip bit moves as a plain byte, so a
                  *  turned city drew every spur as it stood before the
                  *  turn.  The pairs are what all the shipped cities
@@ -933,9 +990,9 @@ int soft_sweep(const RAtlas *a, const RCity *c, const RSoftOpts *o, ROpList *ops
                     {
                         int32_t nc = o->x0 + dx + DC4[k], nr = o->y0 + dy + DR4[k];
                         uint8_t nb;
-                        if (nc < 0 || nr < 0 || nc >= R_MAP || nr >= R_MAP)
+                        if (nc < 0 || nr < 0 || nc >= r_map || nr >= r_map)
                             continue;
-                        nb = c->xbld[nr * R_MAP + nc];
+                        nb = c->xbld[nr * r_map + nc];
                         if (slab < 0 && nb >= 0x49 && nb <= 0x50)
                             slab = k;
                     }
@@ -943,9 +1000,9 @@ int soft_sweep(const RAtlas *a, const RCity *c, const RSoftOpts *o, ROpList *ops
                     {
                         int32_t nc = o->x0 + dx + DC4[k], nr = o->y0 + dy + DR4[k];
                         uint8_t nb;
-                        if (k == slab || k == ((slab + 2) & 3) || nc < 0 || nr < 0 || nc >= R_MAP || nr >= R_MAP)
+                        if (k == slab || k == ((slab + 2) & 3) || nc < 0 || nr < 0 || nc >= r_map || nr >= r_map)
                             continue;
-                        nb = c->xbld[nr * R_MAP + nc];
+                        nb = c->xbld[nr * r_map + nc];
                         if ((nb >= 0x1D && nb <= 0x2B) || (nb >= 0x43 && nb <= 0x48))
                         {
                             road = k;
@@ -991,8 +1048,8 @@ int soft_sweep(const RAtlas *a, const RCity *c, const RSoftOpts *o, ROpList *ops
                  *  13 one altitude step too high: invisible until a city
                  *  put the two together. */
                 road_y = sy + drop -
-                         ((!elevated && c->xter[idx] == 13) ? l->alt_step
-                                                            : 0);
+                         ((!elevated && c->map.xter[idx] == 13) ? l->alt_step
+                                                                : 0);
 
                 /*  $01756A: the lift span draws raised with a ship about. */
                 if (b == 0x58u && bridge_is_raised(c, o->x0 + dx, o->y0 + dy))

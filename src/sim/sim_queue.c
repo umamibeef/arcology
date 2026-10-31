@@ -1,5 +1,5 @@
-/*  sim_queue.c: the 512-entry ring the original walks the map with.
- *  Three quite different passes share it.
+/*  sim_queue.c: the ring the original walks the map with, 512 entries on
+ *  the original's own map.  Three quite different passes share it.
  *
  *      The power and water floods.  The bulldozer's run along a line.
  *      The trip walk that decides whether a zone can grow.
@@ -20,8 +20,10 @@
  *  than a complete one.  That is not an artefact to tidy away: both
  *  floods hand out capacity in queue order, so the dropped entries
  *  change which tiles end up powered and watered.  Giving this queue a
- *  comfortable size makes the reconstruction wrong. */
-#define QMASK 0x1FF
+ *  comfortable size makes the reconstruction wrong.  So a city on the
+ *  original's own map keeps 512 entries.  A city of any other extent
+ *  has a ring as large as its window (city_extent), and drops nothing,
+ *  because the reconstruction has no original to match there. */
 
 void q_reset(City *c) { c->qw = c->qr = 0; } /* queueReset $21DD4 */
 
@@ -29,16 +31,16 @@ void q_push(City *c, int y, int x) /* queuePush $21DF2 */
 {
     c->q[c->qw].y = (int16_t)y;
     c->q[c->qw].x = (int16_t)x;
-    c->qw         = (c->qw + 1) & QMASK;
+    c->qw         = (c->qw + 1) & c->qmask;
     if (c->qw == c->qr)
-        c->qr = (c->qw + 1) & QMASK; /* $21E26 */
+        c->qr = (c->qw + 1) & c->qmask; /* $21E26 */
 }
 
 void q_pop(City *c, int *y, int *x) /* queuePop $21E3A */
 {
     *y    = c->q[c->qr].y;
     *x    = c->q[c->qr].x;
-    c->qr = (c->qr + 1) & QMASK;
+    c->qr = (c->qr + 1) & c->qmask;
 }
 
 int q_empty(const City *c) { return c->qw == c->qr; }
@@ -48,14 +50,14 @@ int q_empty(const City *c) { return c->qw == c->qr; }
  *  without removing it. */
 void q_pop_back(City *c, int *y, int *x) /* queuePopBack $21E66 */
 {
-    c->qw = (c->qw + QMASK) & QMASK;
+    c->qw = (c->qw + c->qmask) & c->qmask;
     *y    = c->q[c->qw].y;
     *x    = c->q[c->qw].x;
 }
 
 void q_peek_back(const City *c, int *y, int *x) /* queuePeekBack $21E96 */
 {
-    int i = (c->qw + QMASK) & QMASK;
+    int i = (c->qw + c->qmask) & c->qmask;
     *y    = c->q[i].y;
     *x    = c->q[i].x;
 }

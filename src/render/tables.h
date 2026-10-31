@@ -39,7 +39,16 @@ extern const uint8_t  R_DIR_FRAME4[4];
 extern const uint8_t  R_DIR_FLIP4[4];
 extern const uint8_t  R_ANIM_PERM_A[49];
 extern const uint8_t  R_ANIM_PERM_B[15];
-extern const uint8_t R_TRAFFIC_CAR[80];
-extern const uint8_t R_TRAFFIC_HEAVY[28];
+extern const uint8_t  R_TRAFFIC_CAR[80];
+extern const uint8_t  R_TRAFFIC_HEAVY[28];
+
+/*  The view turned a quarter clockwise ($3AECA).  The first three give
+ *  the XBLD, XTER and XUND byte a cell shows.  The last two give the id
+ *  and XBIT bit 0x02 of XBLD 0x5D..0x60. */
+extern const uint8_t R_TURN_XBLD[256];
+extern const uint8_t R_TURN_XTER[256];
+extern const uint8_t R_TURN_XUND[256];
+extern const uint8_t R_TURN_5D_ID[8];
+extern const uint8_t R_TURN_5D_BIT[8];
 
 #endif /* R_TABLES_H */

@@ -17,10 +17,10 @@ extern "C" {
 
 typedef struct
 {
-    const char *name; /* the spelling, which tools/ pass and cannot change */
-    const char *args; /* the sketch of its line, for --modes              */
-    const char *help; /* one line, and the mode's own code is the reference */
-    int         min_argc; /* how many words its line needs, this one included */
+    const char *name;                  /* the spelling, which tools/ pass and cannot change */
+    const char *args;                  /* the sketch of its line, for --modes              */
+    const char *help;                  /* one line, and the mode's own code is the reference */
+    int         min_argc;              /* how many words its line needs, this one included */
     int (*run)(int argc, char **argv); /* the whole line: argv[1] is the name */
 } ArcDevMode;
 

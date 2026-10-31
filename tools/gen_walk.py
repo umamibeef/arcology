@@ -10,7 +10,7 @@
 
    Run tools/walk_deps.py after any change here.  It sweeps each layer
    per mode and reports any mode whose outcome responds to more than
-   one; as of this writing mode 13 is the only one.
+   one.
 
 $245E8 walks the transport network as a state machine.  It holds a
 transport mode in d6, steps onto a tile, and a fourteen-case switch at

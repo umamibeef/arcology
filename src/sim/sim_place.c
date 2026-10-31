@@ -12,6 +12,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+static void clear_footprint(City *c, int y, int x);
+static void clear_tile(City *c, int y, int x);
+static int  stamp_footprint(City *c, int y, int x, int bld, int size);
+
 static const int SCAN_DY[4] = {0, 2, 0, -1}; /* A5-0x623E */
 static const int SCAN_DX[4] = {-1, 0, 2, 0}; /* A5-0x6236 */
 /*  The ring, anchored at the top-right corner.  Used twice: once to
@@ -54,7 +58,7 @@ static int auto_rail_station_try(City *c, int y, int x)
         return 0; /* $B0E8 */
 
     /*  the tile itself has to be rail of some kind */
-    b = c->xbld[y][x];
+    b = T_XBLD(c, y, x);
     if (!((b >= 0x2C && b < 0x3F) || (b >= 0x45 && b < 0x49) ||
           (b >= 0x6C && b < 0x70) || b == 0x4D || b == 0x4E))
         return 0; /* $B180 */
@@ -64,9 +68,9 @@ static int auto_rail_station_try(City *c, int y, int x)
      *  through, and everything the four range tests above admitted. $4D,
      *  $4E, the $45 and $6C runs.  Is rejected here.  Computing the sum
      *  in int, without the wrap, rejects everything. */
-    if ((int16_t)(uint16_t)(c->xbld[y][x] + 0xFFD4) > 9)
+    if ((int16_t)(uint16_t)(T_XBLD(c, y, x) + 0xFFD4) > 9)
         return 0; /* $B19E */
-    if (c->xtxt[y][x] != 0)
+    if (T_XTXT(c, y, x) != 0)
         return 0; /* $B1BC */
 
     dir = pick_direction(c, y, x, (int)game_rand(c, 4), 0x0A); /* $B1CC/$B1DA */
@@ -103,21 +107,21 @@ static int auto_rail_station_try(City *c, int y, int x)
     thing(c, car1)[5] = 0;
     thing(c, car2)[5] = 0;
 
-    thing(c, loco)[0x0A] = c->xtxt[y][x]; /* $B340 */
+    thing(c, loco)[0x0A] = T_XTXT(c, y, x); /* $B340 */
     thing(c, car1)[0x0A] = 0;
     thing(c, car2)[0x0A] = 0;
 
     thing(c, loco)[2] = (uint8_t)car1; /* $B366 */
     thing(c, car1)[2] = (uint8_t)car2; /* $B372 */
 
-    c->xtxt[y][x] = (uint8_t)(loco + 0xC9); /* $B382 */
-    c->road_count++;                        /* $B386 */
+    T_XTXT(c, y, x) = (uint8_t)(loco + 0xC9); /* $B382 */
+    c->road_count++;                          /* $B386 */
     return 1;
 }
 
 void grow_to_3x3(City *c, int y, int x, int zone)
 {
-    int alt = c->altm[y][x] & 0x1F; /* $32C14 */
+    int alt = T_ALTM(c, y, x) & 0x1F; /* $32C14 */
     int idx;
 
     for (idx = 0; idx < 4; idx++) /* $33016 */
@@ -137,27 +141,27 @@ void grow_to_3x3(City *c, int y, int x, int zone)
         /*  $32D58: road access.  Four diagonals just outside the block,
          *  each accepting the road pieces that actually point into it.
          *  Any one of them is enough. */
-        if (ay > 0 && ay < 127)
+        if (ay > 0 && ay < c->h - 1)
         {
-            int b = c->xbld[ay - 1][ax + 1];
+            int b = T_XBLD(c, ay - 1, ax + 1);
             if (b == 0x23 || b == 0x27 || b == 0x28 || b == 0x2B)
                 road = 1;
         }
         if (!road && ay > 0 && ax > 2) /* $32DA6 */
         {
-            int b = c->xbld[ay - 1][ax - 3];
+            int b = T_XBLD(c, ay - 1, ax - 3);
             if (b == 0x24 || b == 0x28 || b == 0x29 || b == 0x2B)
                 road = 1;
         }
         if (!road && ay < 125 && ax > 2) /* $32DEE */
         {
-            int b = c->xbld[ay + 3][ax - 3];
+            int b = T_XBLD(c, ay + 3, ax - 3);
             if (b == 0x25 || b == 0x29 || b == 0x2A || b == 0x2B)
                 road = 1;
         }
-        if (!road && ay < 125 && ax < 127) /* $32E36 */
+        if (!road && ay < c->h - 3 && ax < c->w - 1) /* $32E36 */
         {
-            int b = c->xbld[ay + 3][ax + 1];
+            int b = T_XBLD(c, ay + 3, ax + 1);
             if (b == 0x26 || b == 0x2A || b == 0x27 || b == 0x2B)
                 road = 1;
         }
@@ -167,7 +171,7 @@ void grow_to_3x3(City *c, int y, int x, int zone)
         /*  $32E90: anything substantial already standing on the ring is
          *  demolished first, in the same order it was tested. */
         for (i = 0; i < 8; i++)
-            if (c->xbld[ay + RING_DY[i]][ax + RING_DX[i]] >= 0x8C)
+            if (T_XBLD(c, ay + RING_DY[i], ax + RING_DX[i]) >= 0x8C)
                 clear_footprint(c, ay + RING_DY[i], ax + RING_DX[i]);
 
         sim_place(c, ay, ax, 4, 3); /* $3300A */
@@ -188,9 +192,9 @@ static int auto_marina_try(City *c, int y, int x)
 
     if (slot == 0)
         return 0; /* $C11C, the table is full */
-    if (c->xbld[y][x] != 0)
+    if (T_XBLD(c, y, x) != 0)
         return 0; /* $C132 */
-    if (c->xtxt[y][x] != 0)
+    if (T_XTXT(c, y, x) != 0)
         return 0; /* $C148 */
 
     t       = thing(c, slot);
@@ -204,8 +208,8 @@ static int auto_marina_try(City *c, int y, int x)
     t[0x0A] = 0;                        /* $C1B8 */
     t[2]    = 0;                        /* $C1C4 */
 
-    c->xtxt[y][x] = (uint8_t)(slot + 0xC9); /* $C1D4 */
-    c->boat_count++;                        /* $C1D8 */
+    T_XTXT(c, y, x) = (uint8_t)(slot + 0xC9); /* $C1D4 */
+    c->boat_count++;                          /* $C1D8 */
     return 1;
 }
 
@@ -228,11 +232,11 @@ void auto_marina(City *c, int y, int x)
     {
         int ty = y + MDY[i]; /* $C096 */
         int tx = x + MDX[i]; /* $C0A2 */
-        if (ty < 0 || ty >= MAP_H || tx < 0 || tx >= MAP_W)
+        if (ty < 0 || ty >= c->h || tx < 0 || tx >= c->w)
             continue;
-        if (!(c->xbit[ty][tx] & XBIT_WATER))
+        if (!(T_XBIT(c, ty, tx) & XBIT_WATER))
             continue; /* $C0CE */
-        if (c->xtxt[ty][tx] != 0)
+        if (T_XTXT(c, ty, tx) != 0)
             continue;               /* $C0E2 */
         auto_marina_try(c, ty, tx); /* $C0EC */
     }
@@ -248,7 +252,7 @@ int sim_auto_rail_station(City *c, int y, int x)
     {
         int ty = y + SCAN_DY[i]; /* $B076 */
         int tx = x + SCAN_DX[i]; /* $B082 */
-        if (ty < 0 || ty >= MAP_H || tx < 0 || tx >= MAP_W)
+        if (ty < 0 || ty >= c->h || tx < 0 || tx >= c->w)
             continue;
         if (auto_rail_station_try(c, ty, tx))
             return 1; /* $B0A6 */
@@ -305,43 +309,44 @@ static int place_runway(City *c, int y, int x, int zone)
     xx = x;
     for (n = 0; n < 5;)
     {
-        if (yy < 0 || yy >= MAP_H || xx < 0 || xx >= MAP_W)
+        if (yy < 0 || yy >= c->h || xx < 0 || xx >= c->w)
             return 0; /* $338C0 */
-        if ((c->xzon[yy][xx] & 0x0F) != zone)
+        if ((T_XZON(c, yy, xx) & 0x0F) != zone)
             return 0; /* $338E2 */
         /*  $338FC: a tile that is already runway is stepped over without
          *  counting, so the strip runs past it */
-        if (c->xbld[yy][xx] != 0xDD && c->xbld[yy][xx] != 0xDE)
+        if (T_XBLD(c, yy, xx) != 0xDD && T_XBLD(c, yy, xx) != 0xDE)
             n++;
         yy += ystep;
         xx += xstep;
     }
 
     /*  $3391C: which of the two sprites this strip wants, from its
-     *  direction and the map rotation */
-    want = ((ystep != 0) != ((c->rotation & 1) != 0));
+     *  direction.  The original also reads the parity of the map turn,
+     *  which is 0 in the grid's own terms. */
+    want = ystep != 0;
 
     /*  $3393E: the laying pass */
     yy = y;
     xx = x;
     for (n = 0; n < 5;)
     {
-        int b = c->xbld[yy][xx];
+        int b = T_XBLD(c, yy, xx);
 
         if (b == 0xDD || b == 0xDE)
         {
             /*  $33970: already runway, so it does not count */
             if (b == 0xDD)
             {
-                int have = (c->xbit[yy][xx] & 0x02) ? 1 : 0; /* $3398E */
+                int have = (T_XBIT(c, yy, xx) & 0x02) ? 1 : 0; /* $3398E */
                 if (have != want)
                 {
                     /*  $339A8: laid the wrong way round */
                     sim_set_tile(c, yy, xx, 0xDE);
-                    c->xzon[yy][xx] = (uint8_t)((c->xzon[yy][xx] & 0x0F) | 0xF0);
+                    T_XZON(c, yy, xx) = (uint8_t)((T_XZON(c, yy, xx) & 0x0F) | 0xF0);
                     if (zone != 7)
-                        c->xbit[yy][xx] |= 0xC0;       /* $339E6 */
-                    c->xbit[yy][xx] &= (uint8_t)~0x02; /* $339FA */
+                        T_XBIT(c, yy, xx) |= 0xC0;       /* $339E6 */
+                    T_XBIT(c, yy, xx) &= (uint8_t)~0x02; /* $339FA */
                 }
             }
         }
@@ -350,11 +355,11 @@ static int place_runway(City *c, int y, int x, int zone)
             if (b >= 0x0D)
                 clear_tile(c, yy, xx); /* $33A0C */
             sim_set_tile(c, yy, xx, 0xDD);
-            c->xzon[yy][xx] = (uint8_t)((c->xzon[yy][xx] & 0x0F) | 0xF0);
+            T_XZON(c, yy, xx) = (uint8_t)((T_XZON(c, yy, xx) & 0x0F) | 0xF0);
             if (zone != 7)
-                c->xbit[yy][xx] |= 0xC0; /* $33A5A */
+                T_XBIT(c, yy, xx) |= 0xC0; /* $33A5A */
             if (want)
-                c->xbit[yy][xx] |= 0x02; /* $33A74 */
+                T_XBIT(c, yy, xx) |= 0x02; /* $33A74 */
             n++;
         }
         yy += ystep;
@@ -371,9 +376,9 @@ static int place_crane(City *c, int y, int x, int zone)
     for (d = 0; d < 4; d++)
     {
         int ny = y + CRANE_DY[d], nx = x + CRANE_DX[d];
-        if (ny < 0 || ny >= MAP_H || nx < 0 || nx >= MAP_W)
+        if (ny < 0 || ny >= c->h || nx < 0 || nx >= c->w)
             continue;
-        if (c->xbit[ny][nx] & XBIT_WATER)
+        if (T_XBIT(c, ny, nx) & XBIT_WATER)
             break;
     }
     if (d == 4)
@@ -393,11 +398,11 @@ static int place_crane(City *c, int y, int x, int zone)
     {
         yy += CRANE_DY[d];
         xx += CRANE_DX[d];
-        if (yy < 0 || yy >= MAP_H || xx < 0 || xx >= MAP_W)
+        if (yy < 0 || yy >= c->h || xx < 0 || xx >= c->w)
             return 0; /* $33B4C */
-        if (!(c->xbit[yy][xx] & XBIT_WATER))
+        if (!(T_XBIT(c, yy, xx) & XBIT_WATER))
             return 0; /* $33B6A */
-        if (c->xbld[yy][xx] != 0)
+        if (T_XBLD(c, yy, xx) != 0)
             return 0; /* $33B84 */
     }
 
@@ -405,7 +410,7 @@ static int place_crane(City *c, int y, int x, int zone)
      *  height in the low five bits and the water level in the next five.
      *  So this asks for two levels of clearance. */
     {
-        uint16_t a  = c->altm[yy][xx];
+        uint16_t a  = T_ALTM(c, yy, xx);
         int      hi = (a >> 5) & 0x1F;
         int      lo = (a & 0x1F) + 2;
         if (lo > hi)
@@ -413,17 +418,17 @@ static int place_crane(City *c, int y, int x, int zone)
     }
 
     /*  $33BEA: the crane goes on the anchor tile */
-    if (c->xbld[y][x] >= 0x0D)
+    if (T_XBLD(c, y, x) >= 0x0D)
         clear_tile(c, y, x);           /* $33BF8 */
     stamp_footprint(c, y, x, 0xE0, 1); /* $33C0E */
-    c->xzon[y][x] =
-        (uint8_t)((c->xzon[y][x] & 0xF0) | (zone & 0x0F)); /* $33C3C */
+    T_XZON(c, y, x) =
+        (uint8_t)((T_XZON(c, y, x) & 0xF0) | (zone & 0x0F)); /* $33C3C */
     if (zone == 7)
-        c->xbit[y][x] &= 0x0F; /* $33C60 */
+        T_XBIT(c, y, x) &= 0x0F; /* $33C60 */
 
-    /*  $33C64: which of the two pier sprites, from the direction and the
-     *  map rotation, exactly as the runway picks its own */
-    want = ((CRANE_DY[d] != 0) != ((c->rotation & 1) != 0));
+    /*  $33C64: which of the two pier sprites, from the direction, exactly
+     *  as the runway picks its own */
+    want = CRANE_DY[d] != 0;
 
     /*  $33C96: and the four pier tiles */
     yy = y;
@@ -433,9 +438,9 @@ static int place_crane(City *c, int y, int x, int zone)
         yy += CRANE_DY[d];
         xx += CRANE_DX[d];
         sim_set_tile(c, yy, xx, 0xDF); /* $33CC0 */
-        c->xzon[yy][xx] = (uint8_t)((c->xzon[yy][xx] & 0x0F) | 0xF0);
+        T_XZON(c, yy, xx) = (uint8_t)((T_XZON(c, yy, xx) & 0x0F) | 0xF0);
         if (want)
-            c->xbit[yy][xx] |= 0x02; /* $33CFC */
+            T_XBIT(c, yy, xx) |= 0x02; /* $33CFC */
     }
     return 0xFF; /* $33EB6 */
 }
@@ -450,12 +455,12 @@ int sim_place_special(City *c, int y, int x, int bld, int zone)
     /* ---- $3343C: one tile ---------------------------------------- */
     if ((bld >= 0xE1 && bld <= 0xE8) || bld == 0xEA)
     {
-        if (c->xbld[y][x] >= 0x0D)
-            return 0xFF;                                                   /* $3345A */
-        stamp_footprint(c, y, x, bld, 1);                                  /* $3346E */
-        c->xzon[y][x] = (uint8_t)((c->xzon[y][x] & 0xF0) | (zone & 0x0F)); /* $33498 */
+        if (T_XBLD(c, y, x) >= 0x0D)
+            return 0xFF;                                                       /* $3345A */
+        stamp_footprint(c, y, x, bld, 1);                                      /* $3346E */
+        T_XZON(c, y, x) = (uint8_t)((T_XZON(c, y, x) & 0xF0) | (zone & 0x0F)); /* $33498 */
         if (zone == 7)
-            c->xbit[y][x] &= 0x0F; /* $334BE */
+            T_XBIT(c, y, x) &= 0x0F; /* $334BE */
         return 0xFF;
     }
 
@@ -470,32 +475,32 @@ int sim_place_special(City *c, int y, int x, int bld, int zone)
         x &= ~1;
 
         /*  the first tile alone also rejects anything from $EB up */
-        if (c->xbld[y][x] >= 0xEB)
+        if (T_XBLD(c, y, x) >= 0xEB)
             return 0;           /* $334F6 */
         for (i = 0; i < 4; i++) /* $334FE, $3352E, $33562, $33586 */
         {
-            int b = c->xbld[y + dy[i]][x + dx[i]];
+            int b = T_XBLD(c, y + dy[i], x + dx[i]);
             if (b == 0xDD || b == 0xDE || b == 0xE0)
                 return 0;
         }
         /*  and every tile of the square has to already be this zone */
         for (i = 0; i < 4; i++) /* $335B6, $335DC, $33606, $3362E */
-            if ((c->xzon[y + dy[i]][x + dx[i]] & 0x0F) != zone)
+            if ((T_XZON(c, y + dy[i], x + dx[i]) & 0x0F) != zone)
                 return 0;
 
         for (i = 0; i < 4; i++) /* $33658, $3368A, $336C0, $336F8 */
-            if (c->xbld[y + dy[i]][x + dx[i]] >= 0x0D)
+            if (T_XBLD(c, y + dy[i], x + dx[i]) >= 0x0D)
                 clear_tile(c, y + dy[i], x + dx[i]);
         stamp_footprint(c, y, x, bld, 2); /* $33726 */
 
         for (i = 0; i < 4; i++) /* $33740, $33770, $3379E, $337C8 */
         {
-            uint8_t *z = &c->xzon[y + dy[i]][x + dx[i]];
+            uint8_t *z = &T_XZON(c, y + dy[i], x + dx[i]);
             *z         = (uint8_t)((*z & 0xF0) | (zone & 0x0F));
         }
         if (zone == 7) /* $337DA */
             for (i = 0; i < 4; i++)
-                c->xbit[y + dy[i]][x + dx[i]] &= 0x0F;
+                T_XBIT(c, y + dy[i], x + dx[i]) &= 0x0F;
         return 0xFF;
     }
 
@@ -514,13 +519,13 @@ int sim_place_special(City *c, int y, int x, int bld, int zone)
          *  neighbor is still the same zone.  So the 3x3 lands on the
          *  corner of the base rather than wherever the scan happened to
          *  be standing. */
-        if ((c->xzon[y - 1][x] & 0x0F) == zone)
+        if ((T_XZON(c, y - 1, x) & 0x0F) == zone)
             y--; /* $33D38 */
-        if ((c->xzon[y - 1][x] & 0x0F) == zone)
+        if ((T_XZON(c, y - 1, x) & 0x0F) == zone)
             y--; /* $33D58 */
-        if ((c->xzon[y][x - 1] & 0x0F) == zone)
+        if ((T_XZON(c, y, x - 1) & 0x0F) == zone)
             x--; /* $33D7A */
-        if ((c->xzon[y][x - 1] & 0x0F) == zone)
+        if ((T_XZON(c, y, x - 1) & 0x0F) == zone)
             x--; /* $33D9C */
 
         for (r = 0; r < 3; r++)        /* $33DE0 */
@@ -531,12 +536,12 @@ int sim_place_special(City *c, int y, int x, int bld, int zone)
             }
 
         {
-            const int16_t *rot = &ROT_CORNER_4[c->rotation * 4];
-            c->xzon[y][x]      = (uint8_t)((c->xzon[y][x] & 0x0F) | rot[0]); /* $33E0C */
-            c->xzon[y + 2][x]  = (uint8_t)((c->xzon[y + 2][x] & 0x0F) | rot[1]);
-            c->xzon[y + 2][x + 2] =
-                (uint8_t)((c->xzon[y + 2][x + 2] & 0x0F) | rot[2]);
-            c->xzon[y][x + 2] = (uint8_t)((c->xzon[y][x + 2] & 0x0F) | rot[3]);
+            const int16_t *rot  = ROT_CORNER_4;                                 /* turn 0 */
+            T_XZON(c, y, x)     = (uint8_t)((T_XZON(c, y, x) & 0x0F) | rot[0]); /* $33E0C */
+            T_XZON(c, y + 2, x) = (uint8_t)((T_XZON(c, y + 2, x) & 0x0F) | rot[1]);
+            T_XZON(c, y + 2, x + 2) =
+                (uint8_t)((T_XZON(c, y + 2, x + 2) & 0x0F) | rot[2]);
+            T_XZON(c, y, x + 2) = (uint8_t)((T_XZON(c, y, x + 2) & 0x0F) | rot[3]);
         }
         return 0xFF;
     }
@@ -559,13 +564,13 @@ int tile_fits(const City *c, int y, int x, int alt, int zone, int maxbld)
     uint8_t  b;
     uint16_t m;
 
-    if (y < 0 || y >= MAP_H || x < 0 || x >= MAP_W)
+    if (y < 0 || y >= c->h || x < 0 || x >= c->w)
         return 0;
-    if ((c->altm[y][x] & 0x1F) != alt)
+    if ((T_ALTM(c, y, x) & 0x1F) != alt)
         return 0; /* $3330A */
-    if (XZON_TYPE(c->xzon[y][x]) != zone)
+    if (XZON_TYPE(T_XZON(c, y, x)) != zone)
         return 0; /* $3332C */
-    b = c->xbld[y][x];
+    b = T_XBLD(c, y, x);
     if (b >= maxbld)
         return 0; /* $3334C */
     if (b >= 0x70)
@@ -594,7 +599,7 @@ void sim_place(City *c, int y, int x, int tier, int kind) /* placeBuilding $3258
     {
         /*  $325AA: three bands of four, so a cell worth 192 or more
          *  always draws from the top band. */
-        int band = c->xval[y / 2][x / 2] / 64;
+        int band = T_XVAL(c, y / 2, x / 2) / 64;
         if (band > 2)
             band = 2;
         id = BLD_CHOICE_BASE[0] + band * 4 + (Random(c) & 3);
@@ -610,8 +615,8 @@ void sim_place(City *c, int y, int x, int tier, int kind) /* placeBuilding $3258
     if (n == 1)
     { /* $3263C, a single tile keeps all four corner bits */
         sim_set_tile(c, y, x, (uint8_t)id);
-        c->xzon[y][x] = (uint8_t)((c->xzon[y][x] & 0x0F) | 0xF0);
-        c->xbit[y][x] |= 0xE0;
+        T_XZON(c, y, x) = (uint8_t)((T_XZON(c, y, x) & 0x0F) | 0xF0);
+        T_XBIT(c, y, x) |= 0xE0;
         return;
     }
 
@@ -632,20 +637,20 @@ void sim_place(City *c, int y, int x, int tier, int kind) /* placeBuilding $3258
         {
             int ty = y + i, tx = x - n + 1 + j;
             sim_set_tile(c, ty, tx, (uint8_t)id);
-            c->xzon[ty][tx] &= 0x0F;
-            c->xbit[ty][tx] |= 0xE0;
+            T_XZON(c, ty, tx) &= 0x0F;
+            T_XBIT(c, ty, tx) |= 0xE0;
         }
 
     /*  $3274C: only the four corners of the block carry a corner bit,
-     *  and which bit goes where turns with the map.  Order is top-left,
+     *  the bits of turn 0 in ROT_CORNER_4.  Order is top-left,
      *  bottom-left, bottom-right, top-right. */
     {
         static const int CY[4] = {0, 1, 1, 0};
         static const int CX[4] = {0, 0, 1, 1};
         for (i = 0; i < 4; i++)
         {
-            uint8_t *z = &c->xzon[y + CY[i] * (n - 1)][x - n + 1 + CX[i] * (n - 1)];
-            *z         = (uint8_t)((*z & 0x0F) | ROT_CORNER_4[(c->rotation & 3) * 4 + i]);
+            uint8_t *z = &T_XZON(c, y + CY[i] * (n - 1), x - n + 1 + CX[i] * (n - 1));
+            *z         = (uint8_t)((*z & 0x0F) | ROT_CORNER_4[i]);
         }
     }
 }
@@ -718,11 +723,11 @@ void sim_build_church(City *c, int y, int x)
         for (dx = -1; dx <= 0; dx++)
         {
             sim_set_tile(c, y + dy, x + dx, BLD_CHURCH); /* $32872 */
-            c->xzon[y + dy][x + dx] = 0;                 /* both nibbles */
-            c->xbit[y + dy][x + dx] |= 0xE0;
+            T_XZON(c, y + dy, x + dx) = 0;               /* both nibbles */
+            T_XBIT(c, y + dy, x + dx) |= 0xE0;
         }
-    /*  $328EC: then one corner bit per sub-tile, chosen by the current
-     *  rotation so the building is simulated exactly once.  The four
+    /*  $328EC: then one corner bit per sub-tile, the bits of turn 0 in
+     *  ROT_CORNER_4, so the building is simulated exactly once.  The four
      *  writes are unrolled in the original and they do NOT run in raster
      *  order: $328EC takes the top-left, $32916 the bottom-left, $32938
      *  the bottom-right and $3296E the top-right.  Every other footprint
@@ -734,8 +739,180 @@ void sim_build_church(City *c, int y, int x)
         static const int CX[4] = {-1, -1, 0, 0};
         for (i = 0; i < 4; i++)
         {
-            uint8_t *z = &c->xzon[y + CY[i]][x + CX[i]];
-            *z         = (uint8_t)((*z & 0x0F) | ROT_CORNER_4[(c->rotation & 3) * 4 + i]);
+            uint8_t *z = &T_XZON(c, y + CY[i], x + CX[i]);
+            *z         = (uint8_t)((*z & 0x0F) | ROT_CORNER_4[i]);
         }
     }
+}
+
+/* ================================================================== *
+ *  $33EC2  clearTile: take an existing special off the map before
+ *  something else is put there.  Only ids from $C6 up are cleared at
+ *  all.  $DB..$EA are one tile, everything else is a 2x2 snapped to even
+ *  coordinates.  Note it clears the top two XBIT bits (power) and the
+ *  high nibble of XZON (the corner markers), leaving the zone kind.
+ * ================================================================== */
+static void clear_tile(City *c, int y, int x)
+{
+    int b = T_XBLD(c, y, x);
+    int dy, dx;
+
+    if (b < 0xC6)
+        return;                 /* $33EEA */
+    if (b >= 0xDB && b <= 0xEA) /* $33EF2 / $33EF8 */
+    {
+        sim_set_tile(c, y, x, 0); /* $33F00 */
+        T_XBIT(c, y, x) &= 0x3F;  /* $33F14 */
+        T_XZON(c, y, x) &= 0x0F;  /* $33F30 */
+        return;
+    }
+    y &= ~1; /* $33F36 */
+    x &= ~1;
+    for (dy = 0; dy < 2; dy++)     /* $33FA0 */
+        for (dx = 0; dx < 2; dx++) /* $33F98 */
+        {
+            sim_set_tile(c, y + dy, x + dx, 0); /* $33F54 */
+            T_XBIT(c, y + dy, x + dx) &= 0x3F;  /* $33F72 */
+            T_XZON(c, y + dy, x + dx) &= 0x0F;  /* $33F92 */
+        }
+}
+
+/* ================================================================== *
+ *  $3590  stampFootprint: the routine that actually puts a
+ *  multi-tile building on the map.  Two passes: walk the whole
+ *  footprint checking every tile will take it, and only then walk it
+ *  again writing.  Nothing is written if any tile fails, so a building
+ *  never lands half-placed.
+ *
+ *  `size` is the footprint edge.  Note $35C6: for anything bigger than
+ *  2x2 the anchor is nudged one tile up and left first, so a 3x3 is
+ *  centered on the tile it was asked for rather than hanging off it.
+ * ================================================================== */
+static int stamp_footprint(City *c, int y, int x, int bld, int size)
+{
+    int span = size - 1; /* $35C6 */
+    int yy, xx;
+    int flag; /* -$6(a6), the XBIT bits this kind gets */
+    int slot; /* -$1(a6), the XMIC index from $EEAE    */
+
+    if (span > 1) /* $35CC: center anything bigger than 2x2 */
+    {
+        y--;
+        x--;
+    }
+
+    /* ---- pass one: will every tile take it? ---------------------- */
+    for (yy = y; yy <= y + span; yy++) /* $36E6 */
+    {
+        for (xx = x; xx <= x + span; xx++) /* $36DA */
+        {
+            /*  a footprint with any span keeps one tile clear of the map
+             *  edge.  A single tile only has to be on the map */
+            if (span > 0) /* $35E6 */
+            {
+                if (yy < 1 || xx < 1 || yy > 126 || xx > 126)
+                    return 0;
+            }
+            else if (yy < 0 || yy >= c->h || xx < 0 || xx >= c->w)
+                return 0; /* $3624 */
+
+            if (T_XBLD(c, yy, xx) >= 0x1D)
+                return 0; /* $3642 */
+            if (T_XBLD(c, yy, xx) == 0x05)
+                return 0; /* $365E */
+            if (T_XBLD(c, yy, xx) == 0x0D)
+                return 0; /* $367A */
+            if (T_XTER(c, yy, xx) != 0)
+                return 0; /* $36B6 */
+            if (T_XBIT(c, yy, xx) & XBIT_WATER)
+                return 0; /* $36D2 */
+        }
+    }
+
+    /*  $3726: roads and one other kind keep the low XBIT bits and take
+     *  $20.  Everything else takes $E0. */
+    flag = (bld == 0xD5 || bld == 0x0D) ? 0x20 : 0xE0;
+
+    if (bld == 0x0D && T_XBLD(c, y, x) >= 0x0D)
+        return 0; /* $3754 */
+
+    slot = sim_alloc_micro(c, y, x, bld); /* $3764 */
+
+    /* ---- pass two: write ----------------------------------------- */
+    for (yy = y; yy <= y + span; yy++) /* $37FC */
+    {
+        for (xx = x; xx <= x + span; xx++) /* $37F2 */
+        {
+            T_XBIT(c, yy, xx) = (uint8_t)((T_XBIT(c, yy, xx) & 0x1F) | flag); /* $3796 */
+            sim_set_tile(c, yy, xx, (uint8_t)bld);                            /* $37A0 */
+            /*  $37B8 then $37D0: the original masks the zone byte to its
+             *  high nibble and then masks THAT to its low nibble, which
+             *  leaves zero.  Written twice, through two different
+             *  address registers pointing at the same byte. */
+            T_XZON(c, yy, xx) = 0;
+            if (slot != 0)
+                T_XTXT(c, yy, xx) = (uint8_t)slot; /* $37EC */
+        }
+    }
+
+    /*  $380A: the corner markers.  A single tile just gets $F0 in its
+     *  high nibble.  A real footprint gets four different corner codes,
+     *  the turn 0 row of ROT_CORNER_4, so the renderer knows which way
+     *  round the building is drawn. */
+    if (span == 0)
+        T_XZON(c, y, x) = (uint8_t)((T_XZON(c, y, x) & 0x0F) | 0xF0); /* $382E */
+    else
+    {
+        const int16_t *r       = ROT_CORNER_4;                               /* turn 0 */
+        T_XZON(c, y, x)        = (uint8_t)((T_XZON(c, y, x) & 0x0F) | r[0]); /* $3866 */
+        T_XZON(c, y + span, x) = (uint8_t)((T_XZON(c, y + span, x) & 0x0F) | r[1]);
+        T_XZON(c, y + span, x + span) =
+            (uint8_t)((T_XZON(c, y + span, x + span) & 0x0F) | r[2]);
+        T_XZON(c, y, x + span) = (uint8_t)((T_XZON(c, y, x + span) & 0x0F) | r[3]);
+    }
+    return 0xFF; /* $3920 */
+}
+
+/* ================================================================== *
+ *  $331EA  clearFootprint: take an existing multi-tile building off
+ *  the map.  The XZON high nibble says which corner of the building
+ *  this tile is, and that gives the direction back to the building's own
+ *  corner.  The 2x2 there is cleared by placing tier 1 kind 4 over it.
+ * ================================================================== */
+static void clear_footprint(City *c, int y, int x)
+{
+    int n = T_XZON(c, y, x) & 0xF0; /* $33208 */
+    int d;
+
+    /*  $3320C: four corner markers.  The original subtracts the map
+     *  turn, which is 0 in the grid's own terms.  It falls through with
+     *  a STALE d5 for any other nibble
+     *  (notably $F0, which stampFootprint writes for a one-tile
+     *  special).  We use 0 there and note the divergence rather than
+     *  reproduce an uninitialised register. */
+    if (n == 0x10)
+        d = 0; /* $3322A, (4 - turn) & 3 */
+    else if (n == 0x20)
+        d = 1; /* $33236, (5 - turn) & 3 */
+    else if (n == 0x40)
+        d = 2; /* $33242, (6 - turn) & 3 */
+    else if (n == 0x80)
+        d = 3; /* $3324E, (7 - turn) & 3 */
+    else
+        d = 0;
+
+    if (d == 0)
+        x += 1; /* $33266 */
+    else if (d == 1)
+    {
+        x += 1;
+        y -= 1;
+    } /* $3326A */
+    else if (d == 2)
+        y -= 1; /* $33270 */
+
+    sim_place(c, y, x, 1, 4);         /* $3327C */
+    sim_place(c, y + 1, x, 1, 4);     /* $3328E */
+    sim_place(c, y + 1, x - 1, 1, 4); /* $332A4 */
+    sim_place(c, y, x - 1, 1, 4);     /* $332B6 */
 }

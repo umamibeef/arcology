@@ -25,6 +25,11 @@ static int rail_links_to(int b)
            b == 0x4D || b == 0x4E;
 }
 
+int sim_rail_joins(int b)
+{
+    return rail_links_to(b);
+}
+
 /* ================================================================== *
  *  $1FB60  fit the rail piece on (y,x) to its neighbors.  A tile that
  *  is not a piece from $2C to $3A keeps what it has.
@@ -45,12 +50,12 @@ static int rail_links_to(int b)
  * ================================================================== */
 void sim_fit_rail(City *c, int y, int x)
 {
-    int bld = c->xbld[y][x], ter, link = 0;
+    int bld = T_XBLD(c, y, x), ter, link = 0;
 
     if (bld < RAIL_FIRST || bld >= RAIL_END)
         return; /* $1FB90 */
 
-    ter = c->xter[y][x];
+    ter = T_XTER(c, y, x);
     if (ter >= 0x30)
         ter = 0; /* $1FBAE */
     if (NET_SLOPED[ter & 0x0F])
@@ -61,58 +66,58 @@ void sim_fit_rail(City *c, int y, int x)
 
     if (y > 0)
     {
-        bld = c->xbld[y - 1][x];
+        bld = T_XBLD(c, y - 1, x);
         if (bld == 0x2E) /* the slope piece for terrain 1 */
         {
             sim_set_tile(c, y, x, 0x3B); /* $1FC16 */
             return;
         }
-        if (rail_links_to(bld) && NET_JOIN_Y[c->xter[y - 1][x]])
+        if (rail_links_to(bld) && NET_JOIN_Y[T_XTER(c, y - 1, x)])
             link += 8; /* $1FC7E */
     }
-    if (y < MAP_H - 1)
+    if (y < c->h - 1)
     {
-        bld = c->xbld[y + 1][x];
+        bld = T_XBLD(c, y + 1, x);
         if (bld == 0x30) /* the slope piece for terrain 3 */
         {
             sim_set_tile(c, y, x, 0x3D); /* $1FCAE */
             return;
         }
-        if (rail_links_to(bld) && NET_JOIN_Y[c->xter[y + 1][x]])
+        if (rail_links_to(bld) && NET_JOIN_Y[T_XTER(c, y + 1, x)])
             link += 2; /* $1FD16 */
     }
     if (x > 0)
     {
-        bld = c->xbld[y][x - 1];
+        bld = T_XBLD(c, y, x - 1);
         if (bld == 0x2F) /* the slope piece for terrain 2 */
         {
             sim_set_tile(c, y, x, 0x3C); /* $1FD44 */
             return;
         }
-        if (rail_links_to(bld) && NET_JOIN_X[c->xter[y][x - 1]])
+        if (rail_links_to(bld) && NET_JOIN_X[T_XTER(c, y, x - 1)])
             link += 1; /* $1FDAE */
     }
-    if (x < MAP_W - 1)
+    if (x < c->w - 1)
     {
-        bld = c->xbld[y][x + 1];
+        bld = T_XBLD(c, y, x + 1);
         if (bld == 0x31) /* the slope piece for terrain 4 */
         {
             sim_set_tile(c, y, x, 0x3E); /* $1FDE0 */
             return;
         }
-        if (rail_links_to(bld) && NET_JOIN_X[c->xter[y][x + 1]])
+        if (rail_links_to(bld) && NET_JOIN_X[T_XTER(c, y, x + 1)])
             link += 4; /* $1FE4A */
     }
 
-    if (c->xtxt[y][x] == 0xFA) /* $1FE60 */
+    if (T_XTXT(c, y, x) == 0xFA) /* $1FE60 */
     {
         if (y == 0)
             link += 8;
-        if (y == MAP_H - 1)
+        if (y == c->h - 1)
             link += 2;
         if (x == 0)
             link += 1;
-        if (x == MAP_W - 1)
+        if (x == c->w - 1)
             link += 4;
     }
     sim_set_tile(c, y, x, RAIL_FIRST + NET_PIECE[link]); /* $1FE94 */

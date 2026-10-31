@@ -10,9 +10,13 @@ generated C file that is checked in, so a plain build needs neither tool.
 
 Binding conventions, which are SDL_GPU's for SPIR-V and reproduced for MSL
 by `--msl-decoration-binding`:
-    vertex   : uniform buffers in set 1, bindings from 0
+    vertex   : sampled textures then storage buffers in set 0, uniform
+               buffers in set 1, bindings from 0
     fragment : sampled textures in set 2, uniform buffers in set 3
-The counts SDL_CreateGPUShader wants are read off the GLSL text.
+Metal numbers a vertex shader's storage buffers after its uniform buffers,
+and Vulkan after its textures.  So the MSL is compiled from SPIR-V built
+with ARC_MSL defined, and a shader with storage buffers numbers them by
+that.  The counts SDL_CreateGPUShader wants are read off the GLSL text.
 
 A shader may splice another file in with a line `//#include "name"`.
 The materials use it, so the numbers a shader reads by range are the
@@ -27,11 +31,14 @@ SRC = ROOT / "src/render/gpu/shaders"
 OUT_C = ROOT / "src/render/generated/shaders.c"
 
 SHADERS = [
-    "sprite.vert", "sprite.frag", "shadow.frag",
-    "resolve.vert", "resolve.frag",
+    "sprite.vert", "sprite.frag", "sprite_mark.frag", "shadow.frag",
+    "resolve.vert", "resolve.frag", "air.frag", "air_clouds.frag", "air_ao.frag",
     "terrain.vert", "terrain.frag",
     "terrain_show.vert", "terrain_show.frag",
-    "sprite_water.frag",
+    "terrain_settle.vert", "terrain_sheet.vert", "terrain_tris.vert", "terrain_tris.frag",
+    "terrain_mark.vert", "terrain_mark.frag", "terrain_settle.frag",
+    "terrain_settle_mark.vert", "terrain_settle_mark.frag",
+    "sun_depth.vert", "sun_depth.frag",
 ]
 
 
@@ -47,9 +54,10 @@ def run(cmd):
 #  an extension for #include, and the text is the same either way, so the
 #  file is spliced in here instead, and again inside what it splices.
 #  The materials are one: the shader reads a material by range, and the
-#  ranges must be the ones the mesh writes.  The terrain's two bodies,
-#  terrain_body.vert and terrain_body.frag, are the others: each is one
-#  shader written once and built twice, plain and with EDIT_SHOW defined.
+#  ranges must be the ones the mesh writes.  The bodies are the others:
+#  terrain_body.vert, terrain_body.frag and sprite_body.frag.  Each is one
+#  shader written once and built plain and with EDIT_SHOW or TILE_MARKS
+#  defined.
 INCLUDE = re.compile(r'^//#include "([A-Za-z0-9_.]+)"\s*$', re.M)
 
 
@@ -66,9 +74,10 @@ def splice(glsl):
 #  or a block under a #ifdef that is off is not counted.
 def counts(glsl, path):
     pre = run(["glslang", "-E", str(path)]).stdout
-    samplers = len(re.findall(r"\buniform\s+u?sampler2D\b", pre))
+    samplers = len(re.findall(r"\buniform\s+u?sampler[23]D(?:Shadow)?\b", pre))
     ubos = len(re.findall(r"\buniform\s+\w+\s*\{", pre))
-    return samplers, ubos
+    sbos = len(re.findall(r"\bbuffer\s+\w+\s*\{", pre))
+    return samplers, ubos, sbos
 
 
 def c_bytes(name, data):
@@ -105,9 +114,11 @@ def main():
             msl = td / (name + ".metal")
             whole = td / name
             whole.write_text(glsl, encoding="utf-8")
+            spv_m = td / (name + ".msl.spv")
             run(["glslang", "-V", str(whole), "-o", str(spv)])
+            run(["glslang", "-V", "-DARC_MSL=1", str(whole), "-o", str(spv_m)])
             run(["spirv-cross", "--msl", "--msl-version", "20100",
-                 "--msl-decoration-binding", str(spv), "--output", str(msl)])
+                 "--msl-decoration-binding", str(spv_m), "--output", str(msl)])
             ident = name.replace(".", "_")
             spv_b = spv.read_bytes()
             msl_b = msl.read_bytes() + b"\0"
@@ -115,12 +126,12 @@ def main():
             w(c_bytes(ident + "_spv", spv_b))
             w(c_bytes(ident + "_msl", msl_b))
             w("")
-            ns, nu = counts(glsl, whole)
-            table.append((name, stage, ident, len(spv_b), len(msl_b) - 1, ns, nu))
+            ns, nu, nb = counts(glsl, whole)
+            table.append((name, stage, ident, len(spv_b), len(msl_b) - 1, ns, nu, nb))
     w("const RShaderSrc shaders_all[] = {")
-    for name, stage, ident, ls, lm, ns, nu in table:
-        w('    {"%s", %d, %s_spv, %d, %s_msl, %d, %d, %d},'
-          % (name, 0 if stage == "vertex" else 1, ident, ls, ident, lm, ns, nu))
+    for name, stage, ident, ls, lm, ns, nu, nb in table:
+        w('    {"%s", %d, %s_spv, %d, %s_msl, %d, %d, %d, %d},'
+          % (name, 0 if stage == "vertex" else 1, ident, ls, ident, lm, ns, nu, nb))
     w("};")
     w("const int n_shaders = %d;" % len(table))
     w("")
@@ -148,9 +159,9 @@ def main():
         return 0
     open(OUT_C, "w", encoding="utf-8", newline="\n").write(text)
     print("wrote %s: %d shaders" % (OUT_C.relative_to(ROOT), len(table)))
-    for name, stage, ident, ls, lm, ns, nu in table:
-        print("  %-14s %-8s spv %5d B  msl %5d B  samplers %d  uniforms %d"
-              % (name, stage, ls, lm, ns, nu))
+    for name, stage, ident, ls, lm, ns, nu, nb in table:
+        print("  %-14s %-8s spv %5d B  msl %5d B  samplers %d  uniforms %d  storage %d"
+              % (name, stage, ls, lm, ns, nu, nb))
 
 
 if __name__ == "__main__":

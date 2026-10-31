@@ -1,46 +1,45 @@
-/*  prof.h: where a build's time goes, stage by stage (--times).
- *
- *  Every stage of a pass adds the wall time it took under its own name.
- *  The build prints the table once its networks are all built.  Nothing
- *  here decides anything. */
+/*  prof.h: what a build's work is, unit by unit (--times), and the
+ *  clock it is timed by.  Nothing here decides anything. */
 #ifndef ARC_PROF_H
 #define ARC_PROF_H
 
-/*  The stages, one slot each: every stage adds to its own, and
- *  prof_print reads them all. */
+#include <stdint.h>
+
+/*  THE WORK an edit's build does, unit by unit.  A unit is one piece of
+ *  work that makes geometry: a sweep or a ground tile.  Each is counted
+ *  with the box of the map it covers.  While an edit is built, some units
+ *  have a box wholly further than the window from the edited tiles.
+ *  These are counted apart: work an edit did not have to do. */
 enum
 {
-    PROF_WALK_FIT,
-    PROF_TRIMS,
-    PROF_LANES,
-    PROF_OVERLAY,
-    PROF_CAPS,
-    PROF_SAMPLE,
-    PROF_PROFILE,
-    PROF_SLAB_WORKS,
-    PROF_RECORD,
-    PROF_SLAB,
-    PROF_SLAB_SLAB,
-    PROF_JUNC_LANES,
-    PROF_JUNC_BOX,
-    PROF_STATIONS,
-    PROF_CACHED,
-    PROF_SAMPLED,
-    PROF_GROUND,
-    PROF_BAND_AIR, /* build_bands (band.c): the free-air scan, the bands, the tints, the spurs, the transitions, the lane check */
-    PROF_BANDS,
-    PROF_BAND_TINT,
-    PROF_BAND_SPURS,
-    PROF_BAND_TRANS,
-    PROF_BAND_CHECK,
-    PROF_SPUR_LOFT, /* of the spurs: their lofts (the rest is finding, posing and routing them) */
-    PROF_N
+    WORK_SWEEP,
+    WORK_GROUND,
+    WORK_N
 };
+void prof_work(int unit, float x0, float y0, float x1, float y1);
+/*  The count begins again with a build: the edited tiles, first column,
+ *  first row, last column, last row, and the window round them.  A NULL
+ *  box is a whole build, with nothing counted apart. */
+void prof_work_window(const int32_t *box, int window);
+/*  The work of the whole build, under --times. */
+void prof_work_print(void);
 
 /*  The clock, in milliseconds. */
 double prof_now(void);
-void   prof_add(int stage, double amount);
-void   prof_reset(void);
-void   prof_print(void);
+
+/*  HOW FAR THE BUILD HAS GOT, for whatever is showing a bar.
+ *
+ *  The build holds the frame for as long as it takes, so nothing draws
+ *  while it runs unless something draws from inside it.  That is what
+ *  this is for: compose.c names each step it starts, and
+ *  whoever registered a watcher may paint.  The GPU still holds the
+ *  world the last build left, so a frame drawn here shows that world
+ *  under a moving bar.
+ *
+ *  No watcher is the ordinary case and costs a null test a step. */
+typedef void (*ProfWatcher)(void *ud, const char *step, int i, int n);
+void prof_watch(ProfWatcher fn, void *ud);
+/*  One step begun, as compose.c names it. */
+void prof_step(const char *step, int i, int n);
 
 #endif /* ARC_PROF_H */

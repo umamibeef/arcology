@@ -14,18 +14,17 @@
 
 #include "atlas/atlas.h"
 #include "city.h"
-#include "soft/soft.h"
 #include "dump.h"
 #include "log.h"
 #include "opt.h"
+#include "soft/soft.h"
 
 /*  Crop then magnify, in place, for the preview sheets: a 128x128 city
  *  at the 32 px art set is 4224x2468.  So a detail has to be cut out and
  *  blown up with nearest-neighbor before it is legible at all.  Integer
  *  scale only.  This is pixel art and any interpolation is a lie about
  *  what the renderer produced. */
-static int image_crop_scale(RImage *im, int cx, int cy, int cw, int chh,
-                            int scale)
+static int image_crop_scale(RImage *im, int cx, int cy, int cw, int chh, int scale)
 {
     uint8_t  *dst, *dsti;
     uint16_t *dstp;
@@ -34,24 +33,28 @@ static int image_crop_scale(RImage *im, int cx, int cy, int cw, int chh,
     if (cw <= 0 || chh <= 0)
     {
         cx = cy = 0;
-        cw = im->w;
-        chh = im->h;
+        cw      = im->w;
+        chh     = im->h;
     }
-    if (cx < 0) cx = 0;
-    if (cy < 0) cy = 0;
-    if (cx + cw > im->w) cw = im->w - cx;
-    if (cy + chh > im->h) chh = im->h - cy;
+    if (cx < 0)
+        cx = 0;
+    if (cy < 0)
+        cy = 0;
+    if (cx + cw > im->w)
+        cw = im->w - cx;
+    if (cy + chh > im->h)
+        chh = im->h - cy;
     if (cw <= 0 || chh <= 0 || scale < 1)
         return -1;
 
     {
-        size_t npx = (size_t) cw * (size_t) chh * (size_t) scale *
-                     (size_t) scale;
-        dst  = (uint8_t *) malloc(npx * 3u);
+        size_t npx = (size_t)cw * (size_t)chh * (size_t)scale *
+                     (size_t)scale;
+        dst        = (uint8_t *)malloc(npx * 3u);
         /*  The index plane travels with the color plane, or an indexed
          *  export after a crop writes whatever was there before. */
-        dsti = (uint8_t *) malloc(npx);
-        dstp = (uint16_t *) malloc(npx * sizeof(uint16_t));
+        dsti = (uint8_t *)malloc(npx);
+        dstp = (uint16_t *)malloc(npx * sizeof(uint16_t));
         if (!dst || !dsti || !dstp)
         {
             free(dst);
@@ -67,9 +70,9 @@ static int image_crop_scale(RImage *im, int cx, int cy, int cw, int chh,
         {
             sx = cx + x / scale;
             {
-                size_t d = (size_t) y * (size_t) cw * (size_t) scale +
-                           (size_t) x;
-                size_t s = (size_t) sy * (size_t) im->w + (size_t) sx;
+                size_t d = (size_t)y * (size_t)cw * (size_t)scale +
+                           (size_t)x;
+                size_t s = (size_t)sy * (size_t)im->w + (size_t)sx;
                 memcpy(dst + d * 3u, im->rgb + s * 3u, 3u);
                 dsti[d] = im->idx[s];
                 dstp[d] = im->prov[s];
@@ -82,17 +85,17 @@ static int image_crop_scale(RImage *im, int cx, int cy, int cw, int chh,
     im->rgb  = dst;
     im->idx  = dsti;
     im->prov = dstp;
-    im->w   = cw * scale;
-    im->h   = chh * scale;
+    im->w    = cw * scale;
+    im->h    = chh * scale;
     return 0;
 }
 
 int soft_main(int argc, char **argv)
 {
-    RAtlas    a;
-    RCity    *c;
-    RImage    im;
-    RSoftOpts o;
+    RAtlas      a;
+    RCity      *c;
+    RImage      im;
+    RSoftOpts   o;
     const char *out = NULL, *prov_out = NULL, *depth_out = NULL;
     int         i, rc = 0;
     int         cx = 0, cy = 0, cw = 0, ch = 0, scale = 1, indexed = 0;
@@ -102,13 +105,13 @@ int soft_main(int argc, char **argv)
     if (argc < 3)
     {
         R_ERR("soft",
-                "usage: %s <assets dir> <city file> [out.png] "
-                "[--zoom 8|16|32] [--n tiles] [--view 0..11] "
-                "[--underground]\n       [--crop x,y,w,h] "
-                "[--focus row,col,pad[,dx,dy]] "
-                "[--scale N] [--phase N] "
-                "[--indexed] [--provenance out16.png] [--mesh] [--mesh-reverse] [--depth out16.png]",
-                argv[0]);
+              "usage: %s <assets dir> <city file> [out.png] "
+              "[--zoom 8|16|32] [--n tiles] [--view 0..11] "
+              "[--underground]\n       [--crop x,y,w,h] "
+              "[--focus row,col,pad[,dx,dy]] "
+              "[--scale N] [--phase N] "
+              "[--indexed] [--provenance out16.png] [--mesh] [--mesh-reverse] [--depth out16.png]",
+              argv[0]);
         return 2;
     }
     soft_defaults(&o);
@@ -158,8 +161,7 @@ int soft_main(int argc, char **argv)
             /*  row,col,pad and, optionally, an offset from that tile: a
              *  sprite is not always drawn on its own tile (an aircraft
              *  goes 120 px up).  So the box has to be movable. */
-            int got = sscanf(argv[++i], "%d,%d,%d,%d,%d", &frow, &fcol,
-                             &fpad, &fdx, &fdy);
+            int got = sscanf(argv[++i], "%d,%d,%d,%d,%d", &frow, &fcol, &fpad, &fdx, &fdy);
             if (got != 3 && got != 5)
             {
                 R_ERR("soft", "--focus wants row,col,pad[,dx,dy]");
@@ -183,7 +185,7 @@ int soft_main(int argc, char **argv)
     if (phase)
         atlas_animate(&a, phase);
 
-    c = (RCity *) malloc(sizeof *c); /* ~156 KB: not a stack object */
+    c = (RCity *)calloc(1, sizeof *c); /* ~156 KB: not a stack object */
     if (!c)
     {
         atlas_free(&a);
@@ -193,13 +195,15 @@ int soft_main(int argc, char **argv)
     if (rcity_load(c, argv[2]) != 0)
     {
         R_ERR("soft", "%s", c->err);
+        rcity_free(c);
         free(c);
         atlas_free(&a);
         return 1;
     }
     if (soft_render(&im, &a, c, &o) != 0)
     {
-        R_ERR("soft", "no %d px art set in the atlas", (int) o.zoom);
+        R_ERR("soft", "no %d px art set in the atlas", (int)o.zoom);
+        rcity_free(c);
         free(c);
         atlas_free(&a);
         return 1;
@@ -208,19 +212,20 @@ int soft_main(int argc, char **argv)
     if (o.dump_blits)
     {
         image_free(&im);
+        rcity_free(c);
         free(c);
         atlas_free(&a);
         return 0;
     }
     dumpf("city      %s\n", c->name[0] ? c->name : "(unnamed)");
-    dumpf("rotation  %d\n", (int) c->rotation);
-    dumpf("zoom      %d px\n", (int) o.zoom);
+    dumpf("quarter   %d\n", (int)c->view_quarter);
+    dumpf("zoom      %d px\n", (int)o.zoom);
     if (o.mesh)
         dumpf("mode      2.5D: terrain pass with a depth plane, then the sprites%s\n"
-               "occluded  %u sprite pixels behind nearer terrain\n",
-               o.mesh_reverse ? " (terrain drawn back to front)" : "",
-               (unsigned) soft_depth_blocked());
-    dumpf("image     %dx%d\n", (int) im.w, (int) im.h);
+              "occluded  %u sprite pixels behind nearer terrain\n",
+              o.mesh_reverse ? " (terrain drawn back to front)" : "",
+              (unsigned)soft_depth_blocked());
+    dumpf("image     %dx%d\n", (int)im.w, (int)im.h);
     dumpf("crc       %#010x\n", image_crc(&im));
 
     if (depth_out)
@@ -241,31 +246,33 @@ int soft_main(int argc, char **argv)
         {
             R_ERR("soft", "--focus tile %d,%d never drawn", frow, fcol);
             image_free(&im);
+            rcity_free(c);
             free(c);
             atlas_free(&a);
             return 2;
         }
-        cx = (int) fx + fdx - fpad;
-        cy = (int) fy + fdy - fpad;
+        cx = (int)fx + fdx - fpad;
+        cy = (int)fy + fdy - fpad;
         cw = ch = fpad * 2;
-        if (cx < 0) cx = 0;
-        if (cy < 0) cy = 0;
-        dumpf("focus     tile %d,%d at %d,%d\n", frow, fcol, (int) fx,
-               (int) fy);
+        if (cx < 0)
+            cx = 0;
+        if (cy < 0)
+            cy = 0;
+        dumpf("focus     tile %d,%d at %d,%d\n", frow, fcol, (int)fx, (int)fy);
     }
 
     if ((cw > 0 && ch > 0) || scale > 1)
     {
         if (image_crop_scale(&im, cx, cy, cw, ch, scale) != 0)
         {
-            R_ERR("soft", "bad --crop/--scale for a %dx%d image",
-                    (int) im.w, (int) im.h);
+            R_ERR("soft", "bad --crop/--scale for a %dx%d image", (int)im.w, (int)im.h);
             image_free(&im);
+            rcity_free(c);
             free(c);
             atlas_free(&a);
             return 2;
         }
-        dumpf("cropped   %dx%d\n", (int) im.w, (int) im.h);
+        dumpf("cropped   %dx%d\n", (int)im.w, (int)im.h);
     }
 
     if (out && (indexed ? image_write_png_indices(&im, &a, out)
@@ -285,6 +292,7 @@ int soft_main(int argc, char **argv)
         dumpf("wrote     %s (provenance)\n", prov_out);
 
     image_free(&im);
+    rcity_free(c);
     free(c);
     atlas_free(&a);
     return rc;

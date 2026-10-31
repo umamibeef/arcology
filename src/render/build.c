@@ -1,39 +1,33 @@
 /*  build.c: THE BUILD, from the outside.
  *
- *  A build is two passes over one body.  The first GRADES.  It walks
- *  every network and records the surface each corridor wants.  It draws
- *  nothing, because every emitter is a no-op while it runs.  The second
- *  BUILDS the world on those shelves.  Where there are no lines, or the
- *  view is underground, there is one pass.
- *
- *  This file sits above mesh/, net/ and walk/ because it runs all three.
- *  It sets a pass up, hands it to the drive, and takes back what the
- *  drive left.  Composing a pass is the SCRIPT'S, so nothing here
- *  enters one: the door is net/drive.c's and the order is
- *  scripts/compose/world.lua's. */
+ *  A build composes the world once.  It derives the road network, sets
+ *  the world up, and hands it to compose.c, which composes it in its own
+ *  order.  It then takes back what the composition left.  This file is
+ *  the one door a build comes through. */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
-#include "geo.h"
-#include "pipeline.h"
 #include "build.h"
-#include "mesh/internal.h"
-#include "mesh/mesh.h"
-#include "net/net.h"
-#include "walk/walk.h"
-#include "dump.h"
-#include "log.h"
-#include "opt.h"
+#include "compose.h"
+#include "draw/net_overlay.h"
+#include "geo.h"
 #include "incr.h"
-#include "mesh/fit.h"
-#include "net/cell.h"
-#include "walk/cursor.h"
-#include "net/walkway.h"
-#include "script.h"
+#include "log.h"
+#include "mesh/emit.h"
+#include "mesh/mesh.h"
+#include "mesh/tile.h"
+#include "network/bank.h"
+#include "network/network.h"
+#include "network/shape.h"
+#include "network/store.h"
+#include "network/topology.h"
+#include "opt.h"
 #include "prof.h"
 #include "show.h"
 
-static int build_passes(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel *l, int underground, int rotated, int lines, int mode);
+static int build_run(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel *l, int underground, int rotated, int lines, int mode);
+static int build_world_begin(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel *l, int underground, int rotated, int lines);
 
 /*  What the build reads besides the tiles: a different key is a full
  *  build (incr.c diffs the tiles under the same key).  The sprite set
@@ -41,16 +35,13 @@ static int build_passes(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasL
  *  What it reads off the artwork.  A piece's links, a building's bulk,
  *  the ground's mean color.  Are properties of a tile id and are read
  *  from the finest level whatever level is on screen.  With the level in
- *  the key, every zoom across a set boundary was a full rebuild.
+ *  the key, every zoom across a set boundary would be a full rebuild.
  *
- *  The SCRIPTS are in it, as the stamp that changes each time they are
- *  read.  They decide every shape in the world, so a mesh built under
- *  another reading is not the mesh this one describes.  Without the
- *  stamp a city that has not changed answers "the mesh stands" and the
- *  saved rule is read and then drawn by nothing. */
+ *  The knobs are in it.  A mesh built under other knob values is not the
+ *  mesh this one describes. */
 typedef struct
 {
-    int   underground, rotated, lines, furniture, script;
+    int   underground, rotated, lines;
     int   n_tune;
     float tune[ARC_TUNE_MAX];
 } BuildKey;
@@ -59,19 +50,10 @@ typedef struct
  *  mesh of its own asks. */
 static RMesh *s_built;
 
-const RMesh *build_mesh(void)
-{
-    return s_built;
-}
-
 int build_world(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel *l, int underground, int rotated, int lines)
 {
     s_built = m;
     BuildKey key;
-    /*  The map the pass is about to read, offered to the scripts: a
-     *  script walks it through arc.city.  It stands after the build so
-     *  the console and --lua-eval read the same city. */
-    script_city_is(c);
     int      mode, rc, kept = 0;
     /*  Everything the build reads off the artwork comes from the finest
      *  level, so the mesh is the same whatever zoom is on screen. */
@@ -81,38 +63,24 @@ int build_world(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel *l,
     key.underground = underground;
     key.rotated     = rotated;
     key.lines       = lines;
-    key.furniture   = furniture_on();
-    key.script      = script_stamp();
     key.n_tune      = tune_values(key.tune, ARC_TUNE_MAX);
-    mode = incr_begin(m, c, &key, sizeof key);
-    if (mode < 0)
-        return 0; /* the same city under the same key: the mesh stands */
-    if (mode != 1)
+    mode            = incr_begin(m, c, &key, sizeof key);
+    if (mode == INCR_STANDS)
+        return 0;
+    if (mode != INCR_EDIT)
         show_reset();
-    rc = build_passes(m, c, a, l, underground, rotated, lines, mode);
-    /*  A rule that raised answered nothing, so whatever it was to draw
-     *  is missing from what the passes just built.  The mesh is
-     *  abandoned rather than shown: the one on the screen is the last
-     *  that was whole.  The fault says which rule to go and look at.  It
-     *  stands until the scripts are read again.  So saving the file is
-     *  what starts the next build.
-     *
-     *  What the passes DID make is kept, so a city whose FIRST build
-     *  faults has something on the screen to look at.  The build still
-     *  FAILS. */
-    if (rc == 0 && script_fault())
     {
-        int n = script_fault_count();
-        R_ERR("mesh", "build abandoned, %d script fault%s; the first: %s",
-              n, n == 1 ? "" : "s", script_fault());
-        rc = -1;
+        int32_t box[4];
+        prof_work_window(mode == INCR_EDIT && incr_dirty_box(box) == 0 ? box : NULL, g_dev.work_window ? atoi(g_dev.work_window) : 3);
     }
+    rc = build_run(m, c, a, l, underground, rotated, lines, mode);
+    prof_work_print();
     if (rc == 0)
         rc = incr_snapshot(m, c, &key, sizeof key);
-    if (mode != 1 || rc != 0)
+    if (mode != INCR_EDIT || rc != 0)
         show_reset();
-    /*  HOWEVER THE BUILD FAILED, WHAT IT MADE IS KEPT.  A rule that
-     *  raised and a pass that answered nothing both come here.  A
+    /*  HOWEVER THE BUILD FAILED, WHAT IT MADE IS KEPT.  A stage that
+     *  failed and a world that answered nothing both come here.  A
      *  person who cannot see how far the build got cannot tell which
      *  of them it was.  The build's own answer is untouched.  It still
      *  failed, and every check still fails with it. */
@@ -122,12 +90,13 @@ int build_world(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel *l,
          *  nothing to draw.  A faulted build never reaches the sort at
          *  the end of the cursor.  So the kept mesh is sorted and
          *  ranged here instead. */
-        if (mesh_partition(m) != 0)
+        if ((incr_window_building() ? incr_window_end(m) : mesh_partition(m)) != 0)
             R_ERR("mesh", "the mesh could not be sorted, so there is nothing "
                           "to show after all");
         R_ERR("mesh", "the mesh is INCOMPLETE and is shown as it stands, %d "
                       "triangles.  What the build did not reach is missing "
-                      "from it.", (int)(m->n_land + m->n_water));
+                      "from it.",
+              (int)(m->n_land + m->n_water));
         kept = 1;
     }
     if (rc != 0 && !kept)
@@ -135,11 +104,13 @@ int build_world(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel *l,
     return rc;
 }
 
-/*  THE BUILD AS A CURSOR.  The passes are set up here and handed out one
- *  at a time.  Composing each is the drive's, so this file never enters
- *  a script.  `step` is how far the cursor has come: 0 not begun, 1 and
- *  2 the pass of that number open, 3 nothing left. */
+/*  THE BUILD AS A CURSOR.  The world is set up here and handed out
+ *  once.  Composing it is the drive's, so this file never enters
+ *  compose.c.  `step` is how far the cursor has come: 0 not begun, 1 the
+ *  world handed out, 2 finished. */
 WorldFan s_world;
+/*  Whether the network the build derived could be shaped. */
+static int s_shaped;
 static struct
 {
     RMesh             *m;
@@ -147,89 +118,59 @@ static struct
     const RAtlas      *a;
     const RAtlasLevel *l;
     int                underground, rotated, lines, mode;
-    int                two;  /* the lines want a grading pass and a building pass */
     int                step;
     int                rc;
 } s_bld;
 
-/*  What has to happen before the first pass: who drew what, for the
- *  inspector, and the corridor's own tables where there are two passes. */
-static void mesh_passes_begin(void)
+/*  The world, set up and handed out, or nothing once it has been. */
+static void *build_world_next(void)
 {
-    if (s_bld.mode != 1)
-        mesh_origins_reset();
-    mesh_record(1);
-    if (!s_bld.two)
-        return;
-    {
-        int32_t g;
-        for (g = 0; g < GRID * GRID; ++g)
-        {
-            s_zcap[g]  = 1e9f;
-            s_zlow[g]  = 1e9f;
-            s_zdist[g] = 1e9f;
-            s_corr[g]  = 0;
-        }
-    }
-    {
-        /*  The shelves are one entry per tile CORNER, four times the map
-         *  and not the grid's own count.  Cleared on the grid's loop,
-         *  three quarters of the map holds a shelf of zero.  This drops
-         *  every tile it touches to the sea and stands a wall round it. */
-        int32_t t;
-        for (t = 0; t < R_MAP * R_MAP * 4; ++t)
-        {
-            s_tilez[t] = 1e9f;
-            s_tile_reset(t);
-        }
-    }
-}
-
-/*  The next pass, set up and handed out, or nothing when the build has
- *  none left. */
-void *build_pass_next(void)
-{
-    double t0;
     if (s_bld.step == 0)
     {
-        mesh_passes_begin();
-        if (!s_bld.two && s_bld.mode == 1)
+        /*  The window this build lays, handed to the mesh before anything
+         *  is laid, so the mesh asks the build nothing. */
         {
-            incr_closure(0);
-            mesh_origins_clear_wanted();
+            int32_t box[INCR_BOXES][4];
+            mesh_window_set(box, incr_window(box));
         }
-        s_pass    = s_bld.two ? 1 : 0;
-        s_bld.rc  = build_pass_begin(s_bld.m, s_bld.c, s_bld.a, s_bld.l, s_bld.underground, s_bld.rotated, s_bld.lines);
+        /*  Who drew what, for the inspector.  A window into the mesh
+         *  standing keeps the shapes and records the chunks outside it
+         *  were laid under. */
+        if (s_bld.mode == INCR_WHOLE)
+            mesh_origins_reset();
+        else
+            mesh_origins_clear_wanted();
+        mesh_record(1);
+        s_bld.rc   = build_world_begin(s_bld.m, s_bld.c, s_bld.a, s_bld.l, s_bld.underground, s_bld.rotated, s_bld.lines);
         s_bld.step = 1;
-        if (s_bld.rc != 0)
-            return NULL;
-        return &s_world;
+        return s_bld.rc != 0 ? NULL : &s_world;
     }
-    /*  What the pass just composed left behind, and then the next. */
-    s_bld.rc = s_world.rc;
-    if (s_bld.step == 1 && s_bld.two && s_bld.rc == 0)
-    {
-        if (s_bld.mode == 1)
-        {
-            incr_closure(1); /* an edit: which chunks the building pass emits into */
-            mesh_origins_clear_wanted();
-        }
-        t0        = tms();
-        s_pass    = 2;
-        s_bld.rc  = build_pass_begin(s_bld.m, s_bld.c, s_bld.a, s_bld.l, s_bld.underground, s_bld.rotated, s_bld.lines);
-        tnote("whole pass", t0);
-        s_bld.step = 2;
-        if (s_bld.rc != 0)
-            return NULL;
-        return &s_world;
-    }
-    if (s_bld.rc == 0) /* by chunk, for the frame's culling and per-chunk draws.  An edit's build spliced in */
-        s_bld.rc = s_bld.mode == 1 ? incr_end(s_bld.m) : mesh_partition(s_bld.m);
-
-    s_pass     = 0;
-    s_bld.step = 3;
-    mesh_record(0);
     return NULL;
+}
+
+/*  The world composed: what the build lays after compose.c, then the
+ *  mesh cut into its chunks.  Once a build, whoever asks first. */
+static void build_world_done(void)
+{
+    if (s_bld.step != 1)
+        return;
+    /*  What compose.c composed, and then what the build lays after it. */
+    s_bld.rc = s_world.rc;
+    /*  The lane graph over the bare ground, while the outline view is on.
+     *  It is a picture of what the road network holds, laid from its
+     *  records (draw/net_overlay.c). */
+    if (s_bld.rc == 0 && TUNE(show_curves) > 0.5f && !s_bld.underground)
+        s_bld.rc = net_overlay(s_bld.m, s_bld.c, s_world.mask_bit);
+    if (s_bld.rc == 0) /* by chunk, for the frame's culling and per-chunk draws.  A window's build laid into the mesh standing */
+        s_bld.rc = s_bld.mode == INCR_WHOLE ? mesh_partition(s_bld.m) : incr_window_end(s_bld.m);
+    /*  The shapes kept to what the mesh holds, unless an edit is being
+     *  shown.  The show reads the shapes by their ids until it ends, and
+     *  the table is kept to the mesh then. */
+    if (s_bld.rc == 0 && !show_active())
+        s_bld.rc = shape_compact(s_bld.m);
+
+    s_bld.step = 2;
+    mesh_record(0);
 }
 
 int build_rc(void)
@@ -237,208 +178,51 @@ int build_rc(void)
     return s_bld.rc;
 }
 
-/*  ONE PASS BEGUN: what the networks and the ground read before the script
- *  composes it.  The stores the pass writes start empty.  The corridor
- *  corners a script named are filled in from their tile's others.  Then the
- *  pass in hand is handed to the script as a `world`. */
-int build_pass_begin(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel *l, int underground, int rotated, int lines)
+/*  THE WORLD BEGUN: what the ground reads before compose.c composes it.
+ *  The stores the build writes start empty.  Then the world is handed to
+ *  the drive. */
+static int build_world_begin(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel *l, int underground, int rotated, int lines)
 {
-    const uint8_t      mask_bit = city_corner_mask(c->rotation);
-    int                dump_r = -1, dump_c = -1;
-    s_check_xbld                = lines ? c->xbld : NULL;
-    m->net.n_pts                  = 0;
-    m->net.n_segs                 = 0;
-    m->threadnet.n_pts              = 0;
-    m->threadnet.n_segs             = 0;
-    m->n_laps                    = 0;
-    m->n_rsigs                    = 0;
-    if (s_pass != 2)
-    {
-        /*  The junction controls are stage three's, worked out with the
-         *  trims and the meets that turn on them (walk/walk.c).  So they
-         *  are cleared where those are and the building pass reads what
-         *  the grading pass left. */
-        memset(s_junc_ctrl, 0, sizeof s_junc_ctrl);
-        fit_stats_reset(); /* the building pass fits nothing: keep the grading pass's count */
-    }
-    if (s_pass == 2)
-    {
-        /*  A corridor tile must be graded on all four corners or its
-         *  surface tilts through the line.  Where several segments meet,
-         *  one corner could keep the hillside's height while its
-         *  neighbors took the line's.  So a tile the script names as a
-         *  corridor's (`corridor_fill`), with any graded corner, has the
-         *  rest filled in.  They take the mean of those it has, twice
-         *  over so it carries across a junction. */
-        int32_t pass2, col2, row2;
-        for (pass2 = 0; pass2 < 2; ++pass2)
-            for (row2 = 0; row2 < R_MAP; ++row2)
-                for (col2 = 0; col2 < R_MAP; ++col2)
-                {
-                    int32_t gi[4] = {row2 * GRID + col2, row2 * GRID + col2 + 1, (row2 + 1) * GRID + col2, (row2 + 1) * GRID + col2 + 1};
-                    float   sum = 0.0f, low = 1e9f;
-                    int     k2, have        = 0;
-                    if (!script_bytes("corridor_fill")[c->xbld[row2 * R_MAP + col2]])
-                        continue; /* the script names no corridor here */
-                    for (k2 = 0; k2 < 4; ++k2)
-                        if (s_corr[gi[k2]] == 1 && s_zcap[gi[k2]] < 1e8f)
-                        {
-                            sum += s_zcap[gi[k2]];
-                            if (s_zlow[gi[k2]] < low)
-                                low = s_zlow[gi[k2]];
-                            ++have;
-                        }
-                    if (!have || have == 4)
-                        continue;
-                    for (k2 = 0; k2 < 4; ++k2)
-                        if (s_corr[gi[k2]] != 1)
-                        {
-                            /*  A corner filled in from its tile's others
-                             *  inherits their ceiling too, or the
-                             *  smoothing will lift it over the line. */
-                            s_zcap[gi[k2]] = sum / (float)have;
-                            if (low < s_zlow[gi[k2]])
-                                s_zlow[gi[k2]] = low;
-                            s_corr[gi[k2]] = 1;
-                        }
-                }
-    }
-
-    /*  THE ORDER the world is composed in is the SCRIPT'S
-     *  (scripts/compose/world.lua): which tiles, in what order, and
-     *  which of the network passes run at all.  There is no C loop
-     *  behind it: a build with no rule composes nothing, and says so
-     *  rather than drawing an empty city.
+    const uint8_t mask_bit = city_corner_mask(0);
+    int           dump_r = -1, dump_c = -1;
+    /*  THE ORDER the world is composed in is compose.c's: which tiles,
+     *  in what order, and what is drawn over them.
      *
-     *  The pass STOPS HERE, before the field.  The drive asks
-     *  arc.rules.terrain which of six places every tile's top comes
-     *  from, and then w:field builds the field from that answer.  A
-     *  water tile's bed is clamped under the surface drawn over it.  So
-     *  the terrain has to be settled first, and it is the DRIVE that
-     *  says so rather than this file. */
+     *  The build STOPS HERE, before the field.  Then compose.c calls
+     *  build_world_field.  It settles where every tile's top comes from
+     *  and then builds the field from that answer. */
     if (g_dev.mesh_dump)
-        sscanf(g_dev.mesh_dump, "%d,%d", &dump_r, &dump_c);
-    if (s_pass == 2)
-    {
-        /*  The corridors are NOTCHED into the terrain, and a notch only
-         *  ever cuts.  So a corner the band reaches is lowered to the
-         *  corridor's height and never lifted above the ground it was
-         *  cut from.  Only corners the band itself reaches are touched
-         *  at all: the batter ring beyond them is terrain.  Terrain is
-         *  left as it is.  The wall rule closes the sides of the cut,
-         *  and the watertight check covers the corridor like any other
-         *  ground. */
-        {
-
-            /*  No global solve, and nothing written to the terrain.  The
-             *  corridor's height is its own spur between node altitudes,
-             *  which every segment computes for itself and writes into
-             *  its corners.  So two segments that meet spur to the same
-             *  node and nothing here has to reconcile them.  The
-             *  corridor carries its own surface tile by tile, the ground
-             *  stays exactly where it was, and the wall rule closes the
-             *  step between them. */
-        }
-    }
-
-    mesh_pass_begin(m, c, a, l, underground, dump_r, dump_c);
+        sscanf(g_dev.mesh_dump, "%d,%d", &dump_c, &dump_r);
+    mesh_build_begin(m, c, a, l, underground, dump_r, dump_c);
     memset(&s_world, 0, sizeof s_world);
     s_world.m = m, s_world.c = c, s_world.a = a, s_world.l = l;
     s_world.mask_bit    = mask_bit;
-    s_world.pass        = s_pass;
     s_world.lines       = lines;
     s_world.underground = underground;
     s_world.rotated     = rotated;
+    s_world.shaped      = s_shaped;
     return 0;
 }
 
-/*  THE FIELD, built when the DRIVE asks for it: after the rule has said
- *  where every tile's top comes from.  This is because a water tile's
- *  bed is clamped under the surface drawn over it and that surface is
- *  the rule's answer. */
-void build_pass_field(void)
+static int build_network(const RCity *c)
 {
-    const RCity *c = s_world.c;
-    if (!c)
-        return;
-    build_field(c);
-    /*  --plan-dump 1 writes the world as numbers for tools/plan.py.
-     *  This draws a city from above: the field's heights, what each tile
-     *  carries, and (with the paths) the corridors and their
-     *  centerlines.  A plan view is how this is inspected. */
-    if (s_pass != 1 && g_dev.plan_dump)
-    {
-        int32_t gx, gy;
-        dumpf("FIELD %d\n", GRID);
-        for (gy = 0; gy < GRID; ++gy)
-        {
-            for (gx = 0; gx < GRID; ++gx)
-                dumpf("%s%.3f", gx ? " " : "", (double)s_h[gy * GRID + gx]);
-            dumpf("\n");
-        }
-        /*  The corridors' shelves, four corners a tile in the order NW
-         *  NE SE SW, 1e9 where a tile has none.  What a network tile is
-         *  drawn from (tile.c tile_top).  So continuity along a corridor
-         *  can be measured. */
-        dumpf("SHELF %d\n", R_MAP);
-        for (gy = 0; gy < R_MAP; ++gy)
-        {
-            for (gx = 0; gx < R_MAP; ++gx)
-                dumpf("%s%.3f %.3f %.3f %.3f", gx ? " " : "", (double)s_tilez[(gy * R_MAP + gx) * 4 + NW], (double)s_tilez[(gy * R_MAP + gx) * 4 + NE], (double)s_tilez[(gy * R_MAP + gx) * 4 + SE], (double)s_tilez[(gy * R_MAP + gx) * 4 + SW]);
-            dumpf("\n");
-        }
-        dumpf("XBLD %d\n", R_MAP);
-        for (gy = 0; gy < R_MAP; ++gy)
-        {
-            for (gx = 0; gx < R_MAP; ++gx)
-                dumpf("%s%02x", gx ? " " : "", (unsigned)c->xbld[gy * R_MAP + gx]);
-            dumpf("\n");
-        }
-        dumpf("XTER %d\n", R_MAP);
-        for (gy = 0; gy < R_MAP; ++gy)
-        {
-            for (gx = 0; gx < R_MAP; ++gx)
-                dumpf("%s%02x", gx ? " " : "", (unsigned)c->xter[gy * R_MAP + gx]);
-            dumpf("\n");
-        }
-    }
+    double t0 = prof_now(), t1, t2, t3;
+    if (topology_build(c) != 0)
+        return -1;
+    t1 = prof_now();
+    if (network_build(c) != 0)
+        return -1;
+    t2       = prof_now();
+    s_shaped = shape_build(c) == 0;
+    t3       = prof_now();
+    s_shaped = s_shaped && bank_build(c) == 0;
+    R_DBG("net", "derived: topology %.1f, records %.1f, shape %.1f, bank %.1f ms", t1 - t0, t2 - t1, t3 - t2, prof_now() - t3);
+    if (!s_shaped)
+        R_WARN("roads", "the road network could not be worked out, so no street is drawn");
+    return 0;
 }
 
-/*  The three network passes, as primitives the composing script asks for
- *  by name.  The lane model first, since a junction beside a spur needs
- *  which slab lane that spur takes.  Then the networks' measure, the
- *  script's own pass over the meets and the lines, the networks'
- *  drawing, and the bands over them.  Answers 0, or -1 with the reason
- *  already reported. */
-int build_world_nets(WorldFan *w, int what)
-{
-    if (what == 0)
-    {
-        band_lanes(w->c);
-        return 0;
-    }
-    if (what == 1)
-    {
-        /*  What follows is the networks': the frame draws the terrain's
-         *  range once a pass, and this is where it ends. */
-        w->m->n_terrain = w->m->n_land;
-        return build_networks(w->m, w->c, w->a, w->mask_bit, !w->rotated);
-    }
-    if (what == 3)
-    {
-        return build_networks_draw(w->m, w->c, w->mask_bit, !w->rotated);
-    }
-    {
-        double t0 = tms();
-        int    rc = build_bands(w->m, w->c, w->mask_bit, !w->rotated);
-        tnote("bands, spurs, lanes", t0);
-        prof_print(); /* the pass's network profile, stage by stage, once its networks are all built */
-        seg_table_misses_print();
-        return rc;
-    }
-}
-
-static int build_passes(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel *l, int underground, int rotated, int lines, int mode)
+static int build_run(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasLevel *l, int underground, int rotated, int lines, int mode)
 {
     memset(&s_bld, 0, sizeof s_bld);
     s_bld.m = m, s_bld.c = c, s_bld.a = a, s_bld.l = l;
@@ -446,67 +230,67 @@ static int build_passes(RMesh *m, const RCity *c, const RAtlas *a, const RAtlasL
     s_bld.rotated     = rotated;
     s_bld.lines       = lines;
     s_bld.mode        = mode;
-    s_bld.two         = lines && !underground && !g_dev.no_cap;
-    return net_drive_build();
+    int32_t  box[INCR_BOXES][4];
+    int      n = incr_window(box), rc = 0, shaped;
+    uint8_t  in[MESH_CHUNKS_CAP];
+    uint64_t hash = rcity_hash(c);
+    /*  The chunks this build lays: every one without a window. */
+    {
+        int per = r_map / MESH_CHUNK, ch, k;
+        for (ch = 0; ch < MESH_CHUNKS; ++ch)
+        {
+            int32_t col = ch % per * MESH_CHUNK, row = ch / per * MESH_CHUNK;
+            in[ch] = (uint8_t)(n == 0);
+            for (k = 0; k < n; ++k)
+                in[ch] |= (uint8_t)(col >= box[k][0] && row >= box[k][1] && col < box[k][2] && row < box[k][3]);
+        }
+    }
+    /*  THE NETWORK IS DERIVED ONCE for each state of the city, for the
+     *  whole map.  A build of cells the network was derived from before
+     *  takes that network, and its chunks hold it from then on.  Any
+     *  other derives it again, and keeps it with a copy of the city it
+     *  read (network/store.h). */
+    if (net_store_reuse(hash, in, &shaped))
+        s_shaped = shaped;
+    else
+    {
+        RCity *own = (RCity *)calloc(1, sizeof *own);
+        if (!own || rcity_copy(own, c) != 0)
+        {
+            free(own);
+            return -1;
+        }
+        net_store_begin();
+        rc = build_network(own) != 0 ? -1 : 0;
+        if (net_store_keep(own, in, hash, s_shaped) != 0 && rc == 0)
+            rc = -1;
+    }
+    if (rc == 0)
+    {
+        /*  One turn of the world.  The build hands out its world once, and
+         *  compose.c composes it and offers what an edit's build shows.
+         *  Then the build is finished. */
+        WorldFan *w = (WorldFan *)build_world_next();
+        rc          = w ? compose_world(w) : 0;
+        build_world_done();
+        compose_shown(s_bld.m);
+        rc = rc != 0 ? rc : build_rc();
+    }
+    return rc;
 }
 
 /*  WHAT THE BUILD HAS TO SAY, once it is over.
  *
- *  Every pass counts what it laid and what it could not, and each keeps
+ *  Every stage counts what it laid and what it could not, and each keeps
  *  its own tally.  This asks all of them, in one place, so no check has
  *  to reach across the tree for a report that is not its business.  It
  *  is said only where a run asked to be told. */
 void build_reports(void)
 {
-    fit_stats();
-    lane_stats_print();
-    margin_stats_print();
-    junction_outline_print();
-    path_fit_probes();
-    walk_net_check();
     shape_unclaimed_report();
-    spur_stats();
-}
-
-/*  ---- how far the build has got ------------------------------------- */
-
-static BuildWatcher s_watch;
-static void        *s_watch_ud;
-
-void build_watch(BuildWatcher fn, void *ud)
-{
-    s_watch    = fn;
-    s_watch_ud = ud;
-}
-
-/*  The step under way, kept so a tick inside it can name it again. */
-static char s_step_name[64];
-static int  s_step_i, s_step_n;
-
-void build_step(const char *step, int i, int n)
-{
-    if (!step)
-        return;
-    snprintf(s_step_name, sizeof s_step_name, "%s", step);
-    s_step_i = i, s_step_n = n;
-    if (s_watch)
-        s_watch(s_watch_ud, step, i, n);
-}
-
-void build_tick(void)
-{
-    if (s_watch && s_step_name[0] && show_active())
-        s_watch(s_watch_ud, s_step_name, s_step_i, s_step_n);
-}
-
-int grade_only(int allowed)
-{
-    return s_pass == 1 && !g_dev.grade_all && !allowed;
-}
-
-/*  The width compensation this build lofts with: on when the view is
- *  not turned.  Read where a box lofts as a segment does. */
-int build_compensate(void)
-{
-    return !s_world.rotated;
+    if (g_dev.net_dump)
+    {
+        topology_dump();
+        network_dump();
+    }
 }

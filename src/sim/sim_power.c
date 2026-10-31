@@ -18,8 +18,8 @@ enum
  * ================================================================== */
 void sim_fit_power(City *c, int y, int x)
 {
-    const int b    = c->xbld[y][x];
-    int       s    = c->xter[y][x];
+    const int b    = T_XBLD(c, y, x);
+    int       s    = T_XTER(c, y, x);
     int       mask = 0;
 
     if (b < POWER_FIRST || b >= POWER_END)
@@ -36,13 +36,13 @@ void sim_fit_power(City *c, int y, int x)
         return;
     }
 
-    if (y > 0 && (c->xbit[y - 1][x] & XBIT_CONDUCTIVE) && NET_JOIN_Y[c->xter[y - 1][x]])
+    if (y > 0 && (T_XBIT(c, y - 1, x) & XBIT_CONDUCTIVE) && NET_JOIN_Y[T_XTER(c, y - 1, x)])
         mask += 8; /* $1F3B4 */
-    if (y < 0x7F && (c->xbit[y + 1][x] & XBIT_CONDUCTIVE) && NET_JOIN_Y[c->xter[y + 1][x]])
+    if (y < c->h - 1 && (T_XBIT(c, y + 1, x) & XBIT_CONDUCTIVE) && NET_JOIN_Y[T_XTER(c, y + 1, x)])
         mask += 2; /* $1F3F0 */
-    if (x > 0 && (c->xbit[y][x - 1] & XBIT_CONDUCTIVE) && NET_JOIN_X[c->xter[y][x - 1]])
+    if (x > 0 && (T_XBIT(c, y, x - 1) & XBIT_CONDUCTIVE) && NET_JOIN_X[T_XTER(c, y, x - 1)])
         mask += 1; /* $1F434 */
-    if (x < 0x7F && (c->xbit[y][x + 1] & XBIT_CONDUCTIVE) && NET_JOIN_X[c->xter[y][x + 1]])
+    if (x < c->w - 1 && (T_XBIT(c, y, x + 1) & XBIT_CONDUCTIVE) && NET_JOIN_X[T_XTER(c, y, x + 1)])
         mask += 4; /* $1F47C */
 
     sim_set_tile(c, y, x, POWER_FIRST + NET_PIECE[mask]); /* $1F490 */

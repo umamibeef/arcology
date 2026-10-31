@@ -9,13 +9,15 @@ measurements taken from one city.
     2. NO TRANSCRIPT  No quotes from, or references to, a conversation.
     3. NO DATA CASES  No per-city coordinates or measured constants as
                       illustration.
+    4. NO PROGRESS    No statement of how far the work has got: that is a
+                      status page's alone (plans/*-status.md, TODO.md).
 
 The checker reads comments only.  A coordinate pair in a table literal is
 code and is never reported.  Run it over the tree, over a path, or with
 ``--hook`` to read a Claude Code hook payload on stdin.
 
     python3 tools/comment_lint.py                 # whole tree
-    python3 tools/comment_lint.py src/render/net  # one directory
+    python3 tools/comment_lint.py src/render/mesh  # one directory
     python3 tools/comment_lint.py --stats         # counts per rule
 """
 
@@ -39,11 +41,17 @@ HASH_NAMES = {"CMakeLists.txt"}
 #  for it.  docs/conventions.rst is the one file that states those rules,
 #  so it quotes the words they forbid and is left alone.
 RST_LIKE = {".rst"}
-#  Markdown pages get the cited-path rule alone: their prose is the
-#  house rules themselves, which quote the words the other rules ban.
+#  Markdown pages get the cited-path rule and the progress rule: their
+#  prose is the house rules themselves, which quote the words the other
+#  rules ban.  A word quoted in italics is passed over by the progress rule.
 MD_LIKE = {".md"}
-#  The refactor plan names files that are gone and files that are to come.
-MD_EXEMPT = {"REFACTOR.md"}
+#  The pages that say how far the work has got, which the progress rule
+#  passes over: an area's status page, the list of open items, and the
+#  report of what the simulation reproduces.
+PROGRESS_HOMES = {"TODO.md", "sc2k-report.rst"}
+PROGRESS_HOME_SUFFIX = "-status.md"
+#  A Markdown page that may name files the tree does not have: none.
+MD_EXEMPT = set()
 RST_EXEMPT = {"conventions.rst", "notebook.rst"}
 #  A script carries the same prose as the code it drives, and the same two
 #  rules hold for it.  Lua comments start with -- and a long one with --[[.
@@ -469,6 +477,72 @@ HISTORY = [
 ]
 
 
+#  ---- W: no progress ------------------------------------------------------
+#  How far the work has got changes with every commit, so a sentence that
+#  records it is wrong the day after.  It lives on a status page alone.
+PROGRESS_MSG = "states how far the work has got; say what is, or point to the status page"
+
+#  On a page, which has no running program to describe, these words state
+#  progress.  "so far" orders a sequence and "at the moment" times an
+#  event, so neither is here.
+PROGRESS = [
+    ("W1", r"\byet\b", PROGRESS_MSG, r"\b(?:and|but|or) yet\b|\byet (?:another|again)\b"),
+    (
+        "W2",
+        r"\bfor now\b|\bat present\b|\bcurrently\b|\bfor the time being\b"
+        r"|\bas of (?:now|today|this writing)\b|\bright now\b|\bas things stand\b",
+        PROGRESS_MSG,
+    ),
+    ("W3", r"\bstill (?:not|no|lacks?|missing|open|waits?|needs|to be|unbuilt|undrawn|unshaped)\b", PROGRESS_MSG),
+    (
+        "W4",
+        r"\b(?:until|once|when) (?:it|they|this|that|the \w+|\w+) (?:is|are|has been|have been) "
+        r"(?:built|drawn|written|ported|designed|shaped|implemented|finished|reconstructed)\b",
+        PROGRESS_MSG,
+    ),
+    ("W5", r"\btoday\b", PROGRESS_MSG),
+]
+
+#  In code, "not yet built" and "until it is done" describe the running
+#  program.  Only the work's own words state progress there: a piece of the
+#  original not taken apart, a feature not made.
+PROGRESS_CODE = [
+    (
+        "W6",
+        r"\b(?:not|no|nothing)\b[^.\n]{0,40}?\b(?:reconstructed|decoded|model(?:l?ed)?|ported|implemented"
+        r"|named|designed|discussed|verified|read out|taken apart)\b[^.\n]{0,24}?\byet\b"
+        r"|\byet (?:reconstructed|decoded|modell?ed|ported|implemented|designed|verified)\b"
+        r"|\bdraws? no\b[^.\n]{0,40}?\byet\b|\bnot done yet\b|\bas of this writing\b",
+        PROGRESS_MSG,
+    ),
+]
+
+
+def progress_home(path):
+    """Answer whether a page is where progress is written."""
+    base = os.path.basename(path)
+    return base in PROGRESS_HOMES or base.endswith(PROGRESS_HOME_SUFFIX)
+
+
+def comments_md(src):
+    """Extract the prose of a Markdown page as (line, text): a fenced block
+    holds code, and is dropped."""
+    out, fence = [], False
+    for i, line in enumerate(src.split("\n"), 1):
+        if line.lstrip().startswith("```"):
+            fence = not fence
+            continue
+        if fence or not line.strip() or line.startswith("    ") and not line.lstrip().startswith(("*", "-", "|")):
+            continue
+        out.append((i, line.strip()))
+    return out
+
+
+#  A word quoted in italics, as a rule quotes the words it bans.  It is
+#  blanked to spaces of its own length, so every other match keeps its line.
+ITALIC = re.compile(r"(?<![*\w])\*(?!\*)(?=\S)[^*\n]+?(?<=\S)\*(?![*\w])")
+
+
 def data_rules(root):
     """Build the per-city rules, which depend on the names in cities/."""
     city = city_pattern(root)
@@ -526,6 +600,8 @@ def compile_rules(raw):
 
 
 TEXT_RULES = compile_rules(TRANSCRIPT + HISTORY)
+PROGRESS_RULES = compile_rules(PROGRESS)
+PROGRESS_CODE_RULES = compile_rules(PROGRESS_CODE)
 
 #  A comment may carry a marker where the rule genuinely does not apply.
 ALLOW = re.compile(r"comment-lint:\s*allow", re.I)
@@ -637,9 +713,9 @@ def stacked_c(path):
 #  (build/, out/, assets/, rsrc/, the rendered previews) are not
 #  tested: what they hold depends on the machine.
 
-#  Three shapes of citation: a path from the root (src/render/net/cut.c),
-#  a path inside a tree (net/cut.c, mesh/fit.c), and a bare file in
-#  backticks (`cut.c`).  The second is tested as the tail of any path in
+#  Three shapes of citation: a path from the root (src/render/mesh/emit.c),
+#  a path inside a tree (mesh/emit.c, draw/roads.c), and a bare file in
+#  backticks (`emit.c`).  The second is tested as the tail of any path in
 #  the tree, the third as any file's name.
 CITED = re.compile(r"(?<![\w/.-])((?:src|tools|scripts|docs|cities|tests|cmake|media)/[A-Za-z0-9_./+-]*[A-Za-z0-9_+])")
 CITED_IN = re.compile(r"(?<![\w/.-])([a-z_][a-z0-9_]*(?:/[a-z_][a-z0-9_]*)+\.(?:c|h|cpp|lua|py|sh|rst|glsl|json))\b")
@@ -655,7 +731,11 @@ def tree_files(root):
     if root not in _TREE:
         rels = []
         for dirpath, dirnames, names in os.walk(root):
-            dirnames[:] = [d for d in dirnames if d not in ("build", ".git", ".venv", "_build", "_deps", "__pycache__", "out", "assets", "rsrc")]
+            #  the machine's own folders at the root; scripts/build is the tree's
+            top = dirpath == root
+            dirnames[:] = [d for d in dirnames
+                           if d not in (".git", ".venv", "_build", "_deps", "__pycache__")
+                           and not (top and d in ("build", "out", "assets", "rsrc"))]
             for n in names:
                 rels.append(os.path.relpath(os.path.join(dirpath, n), root))
         _TREE[root] = (set(rels), {os.path.basename(r) for r in rels})
@@ -705,11 +785,21 @@ def check_file(path, rules):
         found += stacked_c(path)
     if ext in RST_LIKE | MD_LIKE and os.path.basename(path) not in MD_EXEMPT:
         found += cited_paths(path, project_root(path))
+    prose = ext in RST_LIKE | MD_LIKE
     if ext in MD_LIKE:
-        return found
-    for text, owner, allowed in paragraphs(comments(path)):
+        #  A page's prose is held to the progress rule alone.
+        rules = [] if progress_home(path) else PROGRESS_RULES
+        with open(path, "r", errors="replace") as f:
+            items = comments_md(f.read())
+    else:
+        if not progress_home(path):
+            rules = rules + (PROGRESS_RULES if prose else PROGRESS_CODE_RULES)
+        items = comments(path)
+    for text, owner, allowed in paragraphs(items):
         if not text.strip():
             continue
+        if prose:
+            text = ITALIC.sub(lambda m: " " * len(m.group(0)), text)
         for rid, pat, msg, exc in rules:
             for m in pat.finditer(text):
                 if exc and exc.search(text):
@@ -770,7 +860,8 @@ def main(argv=None):
             return 0
         paths = [p]
     if not paths:
-        paths = [os.path.join(root, d) for d in ("src", "tools", "tests", "docs")]
+        paths = [os.path.join(root, d) for d in ("src", "tools", "tests", "docs", "plans")]
+        paths += [os.path.join(root, f) for f in ("CLAUDE.md", "README.md", "TODO.md")]
         paths = [p for p in paths if os.path.exists(p)]
 
     rules = TEXT_RULES + data_rules(root)
@@ -791,8 +882,8 @@ def main(argv=None):
     if args.hook:
         #  Exit 2 puts the report in front of the model that made the edit.
         if total:
-            print("Comment rules broken -- see 'Comments in the code' in", file=sys.stderr)
-            print(".claude/CLAUDE.md.  Rewrite each comment as a statement of", file=sys.stderr)
+            print("Comment rules broken -- see 'Comments: what the code does, once' in", file=sys.stderr)
+            print("CLAUDE.md.  Rewrite each comment as a statement of", file=sys.stderr)
             print("current fact: no earlier implementations, no conversation,", file=sys.stderr)
             print("no per-city examples.\n", file=sys.stderr)
             for line, rid, msg, text, hit in report:
@@ -806,7 +897,7 @@ def main(argv=None):
             print(f"{rid:4} {counts[rid]:5}")
         print(f"{'all':4} {total:5}")
     elif total and not args.quiet:
-        print(f"\n{total} comment(s) break the rules in .claude/CLAUDE.md.")
+        print(f"\n{total} comment(s) break the rules in CLAUDE.md.")
         print("A comment states what the code does now.  Rewrite the comment as a")
         print("statement of current fact: no earlier implementations, no conversation,")
         print("no per-city examples.")

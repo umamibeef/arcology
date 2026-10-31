@@ -9,10 +9,10 @@ Dynamic Road System Spec — North American Roads on a Square Grid
 
 .. container:: lede
 
-  The specification below is the reference the road and rail renderers are built against (see the road section of :doc:`enhanced-renderer`). It is reproduced verbatim. The feasibility of each part against what the original game and its save format provide is tabled on:doc:`future`.
+  The specification below is a REAL-WORLD REFERENCE: road classes, dimensions, markings, signs, signals, rail and highway hardware, as North American practice has them.  It is NOT the design of Arcology's road network.  That design is ``plans/network.md`` at the repository's root: one road network in ASAM OpenDRIVE's structure, built from the topology before anything is fitted, with every merge and diverge a node, the sidewalks as lanes, and every surface read from the filed network.  Where a section below models tiles, segments, legs, outriggers or lanes that widen and part along a road, a caution box says so, and the section is read for its real-world values only.  The feasibility of each part against what the original game and its save format provide is tabled on :doc:`future`.
 
 
-Engine-agnostic. Assumes: square grid, each cell is a *tile*, roads are placed per tile, and everything visible (lines, curbs, sidewalks, signs, furniture) is derived from tile data rather than hand-placed. Units below are metres (NA standard values; scale to your tile size).
+Engine-agnostic. Assumes: square grid, each cell is a *tile*, and roads are placed per tile. In Arcology the tiles are the topology's input, and everything visible (lines, curbs, sidewalks, signs, furniture) is derived from the road network the topology builds, never from the tiles directly. Units below are metres (NA standard values; scale to your tile size).
 
 --------------
 
@@ -209,6 +209,11 @@ Gore / channelizing             white (same dir) / yellow (opposite dir) wide so
 Part 2 — Data model
 -------------------
 
+.. caution:: Not the network's design
+
+   This section models the road network its own way. The records are ``plans/network.md``'s layer 1 (junctions and roads of cells) and layer 2 (OpenDRIVE roads, lane sections, lanes, junctions and lane links).
+
+
 ::
 
    RoadTile {
@@ -244,6 +249,11 @@ Part 3 — Dynamic rules
 3.1 Connectivity → shape classification
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+.. caution:: Not the network's design
+
+   This section models the road network its own way. In Arcology this is topology alone (layer 1). A bend is not a merge: a merge is a node of the lane graph.
+
+
 Use an 8-bit neighbour mask, but evaluate orthogonal (N/E/S/W) and diagonal bits separately. A diagonal connection is only valid when *both* intervening orthogonal cells are not road (otherwise it's just an orthogonal corner).
 
 =========== =========================== ==============================================================
@@ -267,6 +277,11 @@ Recompute the shape of a tile and all 8 neighbours whenever a tile is placed/rem
 3.2 Segment vs intersection
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+.. caution:: Not the network's design
+
+   This section models the road network its own way. A road and a junction are OpenDRIVE's. A change of class is a new lane section, and the sidewalk's width is that of its ``sidewalk`` lane in each section.
+
+
 -  A tile is an **INTERSECTION** if ortho+diag connection count ≥ 3, or if two connections meet at a corner and either neighbour class differs (a class change at a corner is a "junction" for signage).
 -  Pure CORNER tiles with same class on both legs are **SEGMENT** (curved).
 -  Tiles within ``approachLength(class)`` of an intersection along a segment are **APPROACH** tiles: they get solid lane lines, turn arrows, stop bars, no parking, crosswalk-adjacent curb ramps.
@@ -277,6 +292,11 @@ Recompute the shape of a tile and all 8 neighbours whenever a tile is placed/rem
 
 3.3 Intersection footprint
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. caution:: Not the network's design
+
+   This section models the road network its own way. A junction is a ``default`` junction, and its surface is the union of its connecting roads' lanes.
+
 
 Intersection size = f(max class among legs):
 
@@ -319,6 +339,11 @@ Per leg hardware placement (right-hand side of the approaching driver, at the st
 3.5 Corner geometry (curb returns)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+.. caution:: Not the network's design
+
+   This section models the road network its own way. A corner's sidewalk is a connecting road with one ``sidewalk`` lane, and a slip lane is a connecting road. The fit gives each its shape.
+
+
 For each corner of an intersection:
 
 ::
@@ -327,6 +352,7 @@ For each corner of an intersection:
 
 -  Curb polyline: straight along leg A → circular arc of radius ``r`` centred at (A_edge + r, B_edge + r) → straight along leg B.
 -  Sidewalk follows the curb offset by ``sidewalkWidth``; boulevard strip terminates before the arc (corners are paved to the curb).
+-  A corner beside a leg with no sidewalk (a ramp's road, a highway) has no sidewalk: its curb return is paved to the curb, so the leg's whole mouth and the arc are open to turn through, and the other leg's sidewalk ends at its own mouth.
 -  Curb ramps: two per corner, each centred on the projection of its crosswalk; if ``r`` is small (< 5 m) use one diagonal ramp.
 -  Catch basin: at the upstream start of each curb return (the tangent point, before the arc).
 -  Bulb-outs (when ``parking`` present on both legs): extend the curb out into the parking lane for ``parkingWidth`` over the approach length, keeping the same ``r``.
@@ -334,6 +360,11 @@ For each corner of an intersection:
 
 3.6 Lane assembly on approach tiles
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. caution:: Not the network's design
+
+   This section models the road network its own way. A turn pocket or a lane that changes use is a lane gained or dropped at a lane section's start, a node. Nothing widens or converts partway along a lane.
+
 
 For each approach leg, from centerline outward:
 
@@ -389,6 +420,11 @@ Geometry: build the centerline as ``line → arc → line``, then **offset** it 
 3.9 Diagonals
 ~~~~~~~~~~~~~
 
+.. caution:: Not the network's design
+
+   This section models the road network its own way. Read for the width policy only. The pavement is drawn from the filed lanes, and the sidewalk is a lane, never what a tile leaves over.
+
+
 Support **true 45° roads**, not staircases. A run of diagonal-connected tiles forms one DIAG segment.
 
 -  Tile footprint: a 45° road of width ``w`` passes through a tile as a band; the tile's pavement mesh is the intersection of that band with the tile square (a hexagon or rectangle). Neighbours along the diagonal are clipped identically so they seam perfectly. Corners of the tile outside the band are "leftover" land — assign to adjacent lots or render as sidewalk/boulevard/verge.
@@ -411,6 +447,11 @@ Support **true 45° roads**, not staircases. A run of diagonal-connected tiles f
 
 3.10 Curves, smoothing and straightening (the geometry pipeline)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. caution:: Not the network's design
+
+   This section models the road network its own way. The order is ``plans/network.md``'s: topology, then the road network, then the fit, then the drawing from the filed network. Nothing is offset from a centerline or cached on a tile.
+
 
 1.  **Extract centerline polyline** for each RoadSegment from tile centres (ortho tiles contribute their centre; diagonal tiles their centre; intersection tiles contribute the intersection centroid as the segment endpoint).
 2.  **Classify bends** at each polyline vertex by turn angle: 0° (straight), 45° (diag merge), 90° (corner), 135° (only on a staircase — see 4).
@@ -435,6 +476,11 @@ Support **true 45° roads**, not staircases. A run of diagonal-connected tiles f
 3.11 Elevation, bridges, tunnels, grade
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+.. note:: The network's design
+
+   The ramp below is the network's design: ``plans/network.md`` files it as the highway's outermost lane, which leaves the carriageway at a gore a taper along the highway.
+
+
 -  Elevation per tile is an integer level; road interpolates linearly between tile centres. Max grade by class: LOCAL 12%, COLLECTOR 10%, ARTERIAL 8%, HIGHWAY 6%, FREEWAY 4%. Reject or warn above.
 -  Crest/sag vertical curves: fillet the *profile* polyline the same way as the plan polyline (R_v = 20–60 m by class). Crest curves with limited sight → centerline becomes **solid yellow** (no passing) for 2 tiles either side; "HILL" sign if grade ≥ 8%.
 -  A road tile ≥ 1 level above terrain (or above another road) is a **bridge**: replace sidewalk boulevard with bridge rail; add abutments at the transition tiles, piers every 2–3 tiles in the span; lane lines solid on the bridge; "NARROW BRIDGE" or clearance sign. Road below gets a clearance sign and (for freeway) the piers land in the median or outside the shoulders.
@@ -445,6 +491,11 @@ Support **true 45° roads**, not staircases. A run of diagonal-connected tiles f
 
 3.12 Class transitions and one-way
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. caution:: Not the network's design
+
+   This section models the road network its own way. A lane gained or dropped is a lane section boundary, a node, and the sidewalk's width is its lane's in each section.
+
 
 -  Class increases along a segment: over 1–2 TRANSITION tiles taper the extra lane in with a ``taper = laneWidth × speed/...`` (just use 1 tile), "LANE ENDS MERGE LEFT" sign when decreasing, dotted extension through the taper.
 -  Sidewalk width change: blend over the transition tile; boulevard strip appears/disappears at a driveway or corner, never mid-slab.
@@ -484,6 +535,11 @@ Support **true 45° roads**, not staircases. A run of diagonal-connected tiles f
 
 3.15 Railway crossings
 ~~~~~~~~~~~~~~~~~~~~~~
+
+.. caution:: Not the network's design
+
+   This section models the road network its own way. Read for the control, the hardware and the timing. A level crossing is a junction of the road network whose connecting roads cross, found by the topology, never by matching where two tiles coincide.
+
 
 A crossing exists wherever a rail tile and a road tile coincide at the same elevation. It is its own object (``RailCrossing``), not an intersection: rail always has priority and the road is the one that gets controlled.
 
@@ -657,6 +713,11 @@ Lead vs lag: default leading lefts (both lefts first, then throughs). Use lag on
 Part 4 — Recommended implementation order
 -----------------------------------------
 
+.. caution:: Not the network's design
+
+   This section models the road network its own way. Arcology's order is ``plans/network-status.md``'s, network first.
+
+
 1. Bitmask classification + 1×1 intersections + straight/corner/T/X for LOCAL and ARTERIAL (two classes is enough to force all the class-based branching).
 2. Centerline → offset → loft pipeline with arc-length parameterisation (get dash phase right first; everything else reuses it).
 3. Intersection patch union + corner returns + stop bars/crosswalks + control selection; signal phasing and timing per 3.16 once vehicles exist.
@@ -745,6 +806,11 @@ Track centre spacing (multi-track): 4.0 m mainline, 4.3 m if ≥ 100 km/h, 5.0 m
 5.3 Data model
 ~~~~~~~~~~~~~~
 
+.. caution:: Not the network's design
+
+   This section models the road network its own way. A track is a ``rail`` lane of a road, a turnout is a ``default`` junction whose branches are connecting roads, and parallel tracks are lanes of one road.
+
+
 ::
 
    RailTile {
@@ -767,6 +833,11 @@ Track centre spacing (multi-track): 4.0 m mainline, 4.3 m if ≥ 100 km/h, 5.0 m
 
 5.4 Placement & connectivity rules
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. caution:: Not the network's design
+
+   This section models the road network its own way. Read for the placement rules only. The junctions and roads they make are the topology's and the road network's.
+
 
 -  **No T or cross intersections.** A rail tile has at most 2 through connections unless it is a TURNOUT (3: main-in, main-out, branch-out, with branch within 45° of main-out) or a DIAMOND (4: two straight tracks crossing at 45–90°, no connection between them). Placing a third connection into a plain tile automatically converts it to a turnout if the geometry permits, otherwise rejects.
 -  **Turn angle per tile is limited**: max 45° at any tile (so ortho→diag is a valid one-tile bend for yards/spurs only). A 90° bend must be built from two 45° bends with at least ``minTangent(class)`` tiles between them, *or* as a multi-tile arc (see 5.5).
@@ -1056,22 +1127,20 @@ Scope: a grade-separated, two-direction freeway carried on a viaduct, built from
 7.1 The baked cross-section
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Deck width = 2 tiles = 30 m. That fits the common urban-viaduct section, which is what we bake:
+A highway's segment is 2 tiles = 30 m wide, and the deck is drawn narrower than that: **a tile and a half, 22.5 m**, so it can fit and curve within its segments, and its ramps' runs and its interchanges' connectors have room beside it (``plans/network.md``, "A lane's width"). This is the drawn section:
 
 ====================================================================== ========
 Element (outer → centre, one direction)                                Width
 ====================================================================== ========
-Outer parapet / barrier (F-shape concrete, 0.81 m tall)                0.5
-Outer shoulder                                                         2.4
-Lane 3 (outer / merge lane)                                            3.7
-Lane 2                                                                 3.7
-Lane 1 (inner)                                                         3.7
-Inner shoulder                                                         0.6
-Half of median barrier (single-slope, 1.07 m tall, light poles on top) 0.3
-**Half deck**                                                          **14.9**
+Shoulder                                                               0.45
+Lane 3 (outer / merge lane)                                            3.35
+Lane 2                                                                 3.35
+Lane 1 (inner)                                                         3.35
+Half of the median                                                     0.75
+**Half deck**                                                          **11.25**
 ====================================================================== ========
 
-Two directions → 29.8 m, leaving 0.1 m each side inside the 30 m footprint. **3 + 3 through lanes is the bake.** Everything else in Part 7 derives from this: lane count, shoulder space for a merge taper, where the lights go.
+A real urban viaduct of this kind is 29.8 m: per direction a 0.5 m parapet, a 2.4 m outer shoulder, three 3.7 m lanes, a 0.6 m inner shoulder and half a 0.3 m median barrier.  The drawn section keeps its lanes and narrows its shoulders and median.  **3 + 3 through lanes is the bake.** Everything else in Part 7 derives from this: lane count, shoulder space for a merge taper, where the lights go.
 
 If your tile is smaller than ~13.5 m, drop to 2 + 2 lanes with full shoulders (2+2+shoulders = 12.6 m per direction) rather than squeezing lane widths — a 3.0 m freeway lane looks wrong at speed.
 
@@ -1088,22 +1157,23 @@ Fixed elements on the deck (rendered per 2×2 segment, arc-length parameterised 
 7.2 Structure
 ~~~~~~~~~~~~~
 
--  **Deck**: post-tensioned concrete box girder (single cell, 2.4 m deep, sloped webs, the modern default) or steel plate girders (4–6 girders, 2.0 m deep, older/grey-green paint) on a 0.25 m slab. Deck underside is flat for the box girder, ribbed for plate girders. Bottom of deck = ``elevation``; road surface = ``elevation + deckDepth + 0.25``.
+-  **Deck**: drawn as a thin slab, 0.06 tiles (0.9 m) deep, its sides and underside light concrete and its top asphalt with grey shoulders and a pale median (``plans/drawing.md``, "A highway").  A real viaduct's box girder is 2.4 m deep on a 0.25 m slab; the drawn deck is thinner so that interchange connectors one lane wide read as decks, not walls.
 -  **Clearance**: 5.0 m minimum from any surface road crown to the bottom of the deck (5.3 for truck routes; 7.0 over rail); so a raised highway sits at ``elevation ≥ 5.0 + deckDepth`` above the highest thing below it — practically **7.5–8 m to the road surface** for a box girder. This number drives every ramp length in 7.3.
--  **Piers**: one per segment boundary (span = 2 tiles = 30 m; box girders can do 2 segments = 60 m if you want fewer columns). Choose the pier type from what's underneath:
+-  **Columns**: one every tile (15 m) along every raised deck, interchange connectors included, wherever the deck stands 0.6 levels or more over the ground (``plans/drawing.md``, "A highway stands on columns").  A deck with a median has one under the middle of each way's traffic, and any other deck one under its middle.  A column is 1.5 m square, of concrete, standing on the ground, its top at the deck's underside where that is lowest over it.  It never stands in another road, a lower deck, or its own road where that road comes back under itself: it moves along its deck a tenth of a tile at a time, half a tile at most, and is left out where none is clear.
 
-   -  Nothing / lot / verge: single hammerhead pier (1.8 m octagonal column, 1.5 m deep cap the full deck width) in the deck centreline.
-   -  Surface road running parallel under the deck: two-column bent placed in the road's median or outside its curbs; never in a lane.
-   -  Surface road crossing under the deck: straddle bent (portal frame) with the columns outside the road's curbs, or a span long enough to clear the road with the hammerhead landing in a corner lot.
-   -  Rail under: straddle bent only, 7 m clearance.
-   -  Water: 2-column bents on pile caps; add a fender.
-
+-  **Profile**: the deck stands a level over the highest ground under each segment and never climbs steeper than 18.4°, a level for each tile and a half.  Its height is one smooth profile: through an interchange a carriageway keeps one profile across the gores, with no kink where the arm meets the interchange (``plans/interchanges.md``, "The levels").
+-  **End of a highway**: where a raised highway stops, its deck runs on level over its last segment to the segment's far edge, on its columns, and ends in a closed concrete end (``plans/drawing.md``, "A dead end").
 -  **Ground transition**: the highway leaves grade over an MSE wall approach (panelled retaining walls, 1 segment per ~2.5 m of rise at 4%: 4 segments to reach 8 m — or 3 segments at 6% for a game-scale compromise), then the first abutment. Alternatively depressed-to-raised via a bridge over a cross street.
 -  **Noise walls**: on the outer parapet wherever residential lots are within 2 tiles (2.4–4.0 m tall panels, concrete or absorptive, on the parapet top).
 -  **Under-deck zone**: the ground tiles beneath a raised highway keep their ground use, but with ``underDeck = true``: lots there may hold only parking, storage, low industrial, or a surface road; building height capped at ``elevation − 1``; chain-link fence around pier bases; permanent shadow decal; drainage grates; graffiti aging on piers.
 
 7.3 Ramps — 1×1 in data, rendered as the deck's outer lane
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. note:: The network's design
+
+   Step 2 is the network's design for a ramp (``plans/network.md``): the outer lane leaves at the gore, the band carries one lane fewer until the lane comes back, and no auxiliary lane is kept.
+
 
 **Hard constraint.** A ramp is one 1×1 tile adjacent to a deck edge, connected to a surface road on its far side. The data does not grow. An interchange (or another ramp, or the map edge) may sit on the very next tile along the deck. So the renderer never *requires* extra tiles; it *opportunistically* uses free air beside the deck, and degrades gracefully to a form that fits in the ramp tile
 alone.
@@ -1121,9 +1191,9 @@ occupied.
 -  **The turn-out.** Over the ramp's deck tile and the ramp tile beside it — one tile of length — the lane shifts sideways, 0.15 inside the deck's edge to the ramp tile's centreline, as one S (two arcs, R ≈ 0.55 tile), flat on the ramp tile's ground, and meets the surface road at the ramp tile's far edge head-on, one lane, a T. The ramp tile's road edge lies *along* the deck: the road is the one crossing under the deck beside the ramp, and the ramp tile is the corner between them.
 -  **ON ramp.** The mirror, downstream: one lane leaves the road into the ramp tile, shifts across to the deck's edge over one tile, and rises beside the two-lane deck over the taper to become the outer lane at the merge gore. The entry is genuinely one lane; the carriageway is two lanes over the taper and three after it.
 -  **Between the two ramps of a cross street** — the OFF before it, the ON after — the deck stays two lanes on that side, over the crossing itself; the exiting lane is the one the entering lane replaces. A ramp with no partner within six tiles gets a gore of its own on the other side of its deck tile: the deck widens back to three lanes over one tile.
--  **Termini.** A deck that ends at a cross street with a ramp on each side reads each ramp as the ON or OFF that leaves it a taper along the deck; a ramp with a road on both sides along the deck is read the way that has deck behind it.
+-  **Termini.** A deck that ends at a cross street with a ramp on each side reads each ramp as the ON or OFF that leaves it a taper along the deck; a ramp with a road on both sides along the deck is read the way that has deck behind it.  Where two exits meet one end, the arriving lanes are shared between them, and each lane leaves by one exit.  The exit on the carriageway's own side takes the outer lanes, the exit straight ahead the next, and an odd lane goes straight ahead, so no lane crosses another.  Two entries share the leaving lanes the same way.
 -  **Two crossings close together** on the same side give an ON taper running into the next OFF taper; each takes the tiles left to it (the lane table is first come), so both shorten, and at the limit the lane rises and falls between them. No auxiliary lane is kept at deck level between them.
--  **What is drawn.** The narrowed slab carries an edge line where the third lane was; the strip carries a solid line either side; the gore is where the two lines part. The strip has half the deck's girder, a parapet outside, a fascia inside once it has parted from the deck, and a slender column under it wherever it stands more than a fraction of a level above the ground. The turn-out is a flat one-lane slab.
+-  **What is drawn.** The narrowed slab carries an edge line where the third lane was; the strip carries a solid line either side; the gore is where the two lines part. The narrowed slab ends at its second lane, with no shoulder on that side, and the strip is the ramp's road, a one-lane slab edge to edge with it, from the gore to the turn-out and on to the street. The turn-out is a flat one-lane slab.
 -  **Fallback.** A ramp whose taper would be shorter than two tiles — a deck that ends or turns right beside it — keeps the older forms below: the helix in the tile, or the parallel climb where free air exists after all.
 
 **The older forms, for the fallback.** (ON ramp described; OFF is mirrored.) ``D`` = free-air tiles immediately downstream of the ramp tile along the deck edge, capped at 8: ``D ≥ 4`` a parallel climb over ``min(D − 2, 6)`` tiles one tile outboard, turning in at the last; otherwise a **1.25-turn helix** in the ramp tile (R = 0.30 tile centreline, a 4 m drum inside) with the turn-in over the tile's deck edge. Helix loops turn *toward* the deck so the last quarter-turn is the turn-in.
@@ -1137,6 +1207,11 @@ ON→OFF within 4 segments = aux lane; no touchdown within 1 tile of a rail cros
 
 7.4 Highway-to-highway interchanges (X and T)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. caution:: Not the network's design
+
+   This section models the road network its own way. Read for the forms and the dimensions. Each movement is a connecting road of the interchange's ``default`` junction, and the family decides which exist from the topology. The fit shapes them and never adds or removes one.
+
 
 Reference forms follow AASHTO's *Policy on Geometric Design of Highways and Streets* (the set summarised at transportgeography.org: trumpet, three-way/directional T, single-quadrant, diamond, SPUI, cloverleaf, partial cloverleaf, stack). Diamond, SPUI and parclo are *service* interchanges (freeway ↔ surface road) and are handled by ramp pairs in 7.3; the single-quadrant type needs surface signals
 and is not generated between two raised highways. This section is about *system* interchanges between two raised 2×2 highways: trumpet and directional T at a T; cloverleaf, partial cloverleaf, turbine and stack at an X.
@@ -1284,6 +1359,11 @@ slice. Priority 1's outboard run is an air claim on the tiles beside the segment
 7.5 Placement and data model
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+.. caution:: Not the network's design
+
+   This section models the road network its own way. The records are ``plans/network.md``'s road network. A merge or a diverge is a node, never an interval on a segment.
+
+
 ::
 
    HighwaySegment {                 // one 2×2 block
@@ -1315,6 +1395,11 @@ it in air** along the same heading and show the extension ghosted until the play
 
 7.6 Validation (raised highways)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. caution:: Not the network's design
+
+   This section models the road network its own way. In Arcology these are checks on the road network's nodes, such as the distance in ``s`` between a merge and the next diverge.
+
 
 -  Reject: ramp grade > 16% (nothing fits, not even a helix — only possible if the ramp tile isn't adjacent to a deck edge); ramp with no reachable deck edge; ramp touching down on a LOCAL or ALLEY; two mainline gores < 2 segments apart; a pier landing in a lane, a rail track, or a crossing; interchange template overlapping another interchange's air claims; highway block adjacent to a highway
    block at a different elevation without a transition segment.

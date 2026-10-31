@@ -33,30 +33,22 @@ struct Mode
     const char *name, *args, *help;
     ArcRun      run;
 };
-/*  The four that are programs of their own.  Each reads the line from
+/*  The three that are programs of their own.  Each reads the line from
  *  its own first argument, so the mode's word is stepped over.  They are
  *  C, and this file is the one C++ in the dispatch. */
-extern "C"
-{
-    int atlas_main(int argc, char **argv);
-    int soft_main(int argc, char **argv);
-    int testcity_main(int argc, char **argv);
-    int lua_lint_main(int argc, char **argv);
+extern "C" {
+int atlas_main(int argc, char **argv);
+int soft_main(int argc, char **argv);
+int testcity_main(int argc, char **argv);
 }
 int run_atlas(int argc, char **argv) { return atlas_main(argc - 1, argv + 1); }
 int run_soft(int argc, char **argv) { return soft_main(argc - 1, argv + 1); }
 int run_testcity(int argc, char **argv) { return testcity_main(argc - 1, argv + 1); }
-int run_lua_lint(int argc, char **argv) { return lua_lint_main(argc - 1, argv + 1); }
 
 const Mode PROGRAMS[] = {
-    {"--atlas", "<assets> [shape [out.png]]",
-     "dump the sprite atlas", run_atlas},
-    {"--soft", "<assets> <city> [out.png]",
-     "the software rasteriser", run_soft},
-    {"--testcity", "<template> <out.sc2>",
-     "a city of every network case", run_testcity},
-    {"--lua-lint", "<script.lua>...",
-     "read the scripts and say what is wrong with them", run_lua_lint},
+    {"--atlas",    "<assets> [shape [out.png]]", "dump the sprite atlas",        run_atlas   },
+    {"--soft",     "<assets> <city> [out.png]",  "the software rasteriser",      run_soft    },
+    {"--testcity", "<template> <out.arco>",      "a city of every network case", run_testcity},
 };
 /*  What the parser settled on: the spelling it matched, how short a line
  *  it refuses, and what runs it.  Thrown, because CLI11 tells a callback
@@ -117,8 +109,7 @@ extern "C" ArcMode arc_mode(int argc, char **argv, ArcRun *run)
         }
         if (argc < c.min_argc)
         {
-            R_ERR("app", "arcology: %s wants %d words on the line, and this has %d",
-                  c.name, c.min_argc, argc);
+            R_ERR("app", "arcology: %s wants %d words on the line, and this has %d", c.name, c.min_argc, argc);
             return ARC_BAD;
         }
         *run = c.run;

@@ -1,21 +1,20 @@
 /*  shapes.c: the shape primitives over the triangle emitter.
  *
- *  It holds line quads and fans,
- *  boxes, cylinders, bars, faces, wires and ground highlights.  None of
- *  them names a thing the world contains: what a box or a bar or a face
- *  IS, is the script's. */
+ *  It holds line quads and fans, boxes, cylinders, bars, faces, wires
+ *  and ground highlights.  None of them names a thing the world
+ *  contains: what a box or a bar or a face IS, is the caller's. */
 #include <math.h>
 #include <string.h>
 
+#include "geo.h"
 #include "mesh/internal.h"
-#include "pipeline.h"
 
-#include "net/meet.h"
-#include "mesh/shapes.h"
 #include "mesh/emit.h"
-#include "mesh/surface.h"
-#include "net/cell.h"
 #include "mesh/model.h"
+#include "mesh/shapes.h"
+#include "mesh/surface.h"
+
+static int curves_hidden(float mat); /* the outline view: the materials it hides */
 
 #define ARM_TRI(A, B, C, N)                                                                                  \
     do                                                                                                       \
@@ -26,28 +25,47 @@
         if (put_tri_line_n(m, c, mask_bit, order + 0.05f, (const float (*)[3])t3, (N), col, ref, ref2) != 0) \
             return -1;                                                                                       \
     } while (0)
-static int gix_foot_sink = -1, gix_wire_w = -1;
-/*  The overlay's marks and the decal's slot, which the script names. */
-static int gix_mark_end = -1, gix_mark_arc = -1, gix_mark_corner = -1, gix_mark_lid = -1;
-static int gix_straight_dot = -1, gix_decal_slot = -1;
+static int gix_wire_w = -1;
+/*  The decal's slot, which the geo store holds as decal_slot. */
+static int gix_decal_slot = -1;
 
-/*  A line face clipped to the tile grid.  Each piece takes the painter's
- *  order of the tile under its own centroid (the caller's fraction of an
- *  order, a strip's small offset, carried over).  A quad that straddles
- *  two tiles had carried the order of the tile under its midpoint.  The
- *  later tile's ground was drawn over the part of the quad inside it.
- *  That left a wedge of grass cut into every arc and every diagonal at
- *  each tile boundary.  Sutherland-Hodgman against every integer x and y
- *  line the triangle's box spans, the across and along values
- *  interpolated with the points. */
+/*  A face laid over the ground, clipped to the tile grid.  Each piece
+ *  takes the painter's order of the tile under its own centroid, with the
+ *  caller's fraction of an order carried over.  So the ground of a later
+ *  tile never paints over the part of a face inside it.  Sutherland-
+ *  Hodgman against every integer x and y line the triangle's box spans,
+ *  the across and along values interpolated with the points. */
 typedef struct
 {
     float x, y, z, ac, al;
 } ClipVert;
 
+/*  Where the edge from a to b meets the line at k, a's value being va
+ *  and b's vb.  It is worked out from the edge's first end, by x, then
+ *  y, then z.  So the edge gives the same point whichever way round it
+ *  is met. */
+static ClipVert edge_cut(const ClipVert *a, const ClipVert *b, float va, float vb, float k)
+{
+    ClipVert v;
+    float    t;
+    if (b->x < a->x || (b->x == a->x && (b->y < a->y || (b->y == a->y && b->z < a->z))))
+    {
+        const ClipVert *s = a;
+        float           u = va;
+        a = b, b = s, va = vb, vb = u;
+    }
+    t    = (k - va) / (vb - va);
+    v.x  = a->x + (b->x - a->x) * t;
+    v.y  = a->y + (b->y - a->y) * t;
+    v.z  = a->z + (b->z - a->z) * t;
+    v.ac = a->ac + (b->ac - a->ac) * t;
+    v.al = a->al + (b->al - a->al) * t;
+    return v;
+}
+
 /*  A polygon cut by the half plane ax*x + ay*y <= k, or >= k.  The same
  *  cut clip_axis makes, on any line rather than a grid line.  The tile's
- *  own diagonal is such a line.  A strip laid on the ground is cut on it
+ *  own diagonal is such a line.  A face laid on the ground is cut on it
  *  so that no triangle spans the fold in the tile's top. */
 static int clip_half(const ClipVert *in, int n, float ax, float ay, float k, int below, ClipVert *out)
 {
@@ -61,16 +79,7 @@ static int clip_half(const ClipVert *in, int n, float ax, float ay, float k, int
         if (ia)
             out[m++] = *a;
         if (ia != ib && fabsf(vb - va) > 1e-9f)
-        {
-            float    t = (k - va) / (vb - va);
-            ClipVert v;
-            v.x      = a->x + (b->x - a->x) * t;
-            v.y      = a->y + (b->y - a->y) * t;
-            v.z      = a->z + (b->z - a->z) * t;
-            v.ac     = a->ac + (b->ac - a->ac) * t;
-            v.al     = a->al + (b->al - a->al) * t;
-            out[m++] = v;
-        }
+            out[m++] = edge_cut(a, b, va, vb, k);
         if (m >= 14)
             break;
     }
@@ -82,10 +91,36 @@ static int clip_half(const ClipVert *in, int n, float ax, float ay, float k, int
  *  tile whose top is flat is folded on either to the same effect. */
 static void tile_fold(const RCity *c, int32_t tc, int32_t tr, float *ax, float *ay, float *k)
 {
-    if (cut_ne_sw(slope_code(c->xter[tr * R_MAP + tc])))
+    if (cut_ne_sw(slope_code(c->map.xter[tr * r_map + tc])))
         *ax = 1.0f, *ay = 1.0f, *k = (float)tc + (float)tr + 1.0f;
     else
         *ax = 1.0f, *ay = -1.0f, *k = (float)tc - (float)tr;
+}
+
+/*  A polygon cut to one of the dual ground's eight triangles in tile
+ *  (tc, tr).  It is the one of edge e, its first half where h is 0.
+ *  Each of the triangle's three sides cuts away what lies outside it.
+ *  Answers how many points are left. */
+static int dual_piece(const ClipVert *in, int n, int32_t tc, int32_t tr, int e, int h, ClipVert *out)
+{
+    static const float CU[4] = {0.0f, 0.0f, 1.0f, 1.0f}, CV[4] = {0.0f, 1.0f, 1.0f, 0.0f};
+    ClipVert           a[16], b[16];
+    float              px[3], py[3];
+    int                s, m = n, a_ = EDGE_A[e], b_ = EDGE_B[e];
+    float              mu = 0.5f * (CU[a_] + CU[b_]), mv = 0.5f * (CV[a_] + CV[b_]);
+    px[0] = (float)tc + 0.5f, py[0] = (float)tr + 0.5f;
+    px[1] = (float)tc + (h ? mu : CU[a_]), py[1] = (float)tr + (h ? mv : CV[a_]);
+    px[2] = (float)tc + (h ? CU[b_] : mu), py[2] = (float)tr + (h ? CV[b_] : mv);
+    memcpy(a, in, (size_t)n * sizeof a[0]);
+    for (s = 0; s < 3 && m >= 3; ++s)
+    {
+        int   i = s, j = (s + 1) % 3, w = (s + 2) % 3;
+        float ax = py[j] - py[i], ay = -(px[j] - px[i]), k = ax * px[i] + ay * py[i];
+        m = clip_half(a, m, ax, ay, k, ax * px[w] + ay * py[w] <= k, b);
+        memcpy(a, b, (size_t)m * sizeof a[0]);
+    }
+    memcpy(out, a, (size_t)m * sizeof a[0]);
+    return m;
 }
 
 static int clip_axis(const ClipVert *in, int n, int axis, float k, int below, ClipVert *out)
@@ -100,33 +135,20 @@ static int clip_axis(const ClipVert *in, int n, int axis, float k, int below, Cl
         if (ia)
             out[m++] = *a;
         if (ia != ib && fabsf(vb - va) > 1e-9f)
-        {
-            float    t = (k - va) / (vb - va);
-            ClipVert v;
-            v.x      = a->x + (b->x - a->x) * t;
-            v.y      = a->y + (b->y - a->y) * t;
-            v.z      = a->z + (b->z - a->z) * t;
-            v.ac     = a->ac + (b->ac - a->ac) * t;
-            v.al     = a->al + (b->al - a->al) * t;
-            out[m++] = v;
-        }
+            out[m++] = edge_cut(a, b, va, vb, k);
         if (m >= 14)
             break;
     }
     return m;
 }
 
-/*  What "show curves" hides: EVERY network material, the strips, the
- *  stripes, the walks, the threads and their laps, the panel and
- *  approaches of a level meet, the slabs and their bents, so the overlay
- *  stands on bare ground.  One rule for all of them.  The vehicles (15)
- *  carry the overlay's wires and stay, and so do the ground tints above
- *  20. */
-int curves_hidden(float mat)
+/*  What the outline view hides: the props and their lit faces.  The
+ *  ground tints and the materials named at run time stay. */
+static int curves_hidden(float mat)
 {
     if (!(TUNE(show_curves) > 0.5f))
         return 0;
-    return MAT_IN(mat, MAT_LINE, MAT_BAND) && !MAT_IS(mat, MAT_VEHICLE);
+    return MAT_IN(mat, MAT_PROP, MAT_LAMP);
 }
 
 /*  A convex polygon as a fan of triangles. */
@@ -152,28 +174,40 @@ static int emit_fan(const char *where, const char *who, RMesh *m, const ClipVert
     return 0;
 }
 
-/*  One triangle of a line, a thread or their decals.  It is clipped to
- *  the tiles it crosses, so each piece is drawn in its own tile's slot.
- *  `drape` lays it ON the ground.  The piece is cut again on the tile's
- *  fold and every vertex takes the drawn surface at its own position.
- *  So no triangle of a band ever stands above the terrain or dips under
- *  it. */
-static int draped_tri(const char *where, const char *who, RMesh *m, const RCity *c, uint8_t mask_bit, float order, const float tri[3][3], const float *nrm, const float col[3], const float ref[3], const float ref2[3], int drape)
+/*  One triangle laid over the ground.  It is clipped to the tiles it
+ *  crosses, so each piece is drawn in its own tile's slot.  `drape` lays
+ *  it ON the ground, `lift` over it.  The piece is cut again on the
+ *  tile's fold and every vertex takes the drawn surface at its own
+ *  position.  So no piece stands clear of the terrain or dips under it. */
+static int draped_tri(const char *where, const char *who, RMesh *m, const RCity *c, uint8_t mask_bit, float order, const float tri_in[3][3], const float *nrm, const float col[3], const float ref_in[3], const float ref2_in[3], int drape, float lift)
 {
-    if (s_pass == 1)
-        return 0; /* the grading pass draws nothing */
-    /*  With the curves shown, the line itself gets out of the way.  Only
-     *  the fitted centerline and the marks at its piece boundaries are
-     *  drawn, over bare ground.  Vehicles carry the overlay, so they are
-     *  what survives the filter.  The viaducts go the same way, slab and
-     *  bents. */
+    /*  From its first corner, by x, then y, then z, its winding kept.
+     *  The pieces it is cut into are then the same whatever order its
+     *  corners came in. */
+    float        tri[3][3], rref[3], rref2[3];
+    const float *ref = ref_in ? rref : NULL, *ref2 = ref2_in ? rref2 : NULL;
+    {
+        int f = 0, i;
+        for (i = 1; i < 3; ++i)
+            if (tri_in[i][0] < tri_in[f][0] ||
+                (tri_in[i][0] == tri_in[f][0] && (tri_in[i][1] < tri_in[f][1] || (tri_in[i][1] == tri_in[f][1] && tri_in[i][2] < tri_in[f][2]))))
+                f = i;
+        for (i = 0; i < 3; ++i)
+        {
+            memcpy(tri[i], tri_in[(f + i) % 3], sizeof tri[i]);
+            if (ref_in)
+                rref[i] = ref_in[(f + i) % 3];
+            if (ref2_in)
+                rref2[i] = ref2_in[(f + i) % 3];
+        }
+    }
+    /*  The outline view lays no face of a material it hides. */
     if (curves_hidden(col[2]))
         return 0;
     static ClipVert poly[48][16];
     static int      cnt[48];
     ClipVert        tmp[16];
-    const float     xcol[3] = {col[0], col[1], MAT_THREAD_X};
-    const float    *pcol    = col;
+    const float    *pcol = col;
     float           minx = tri[0][0], maxx = tri[0][0], miny = tri[0][1], maxy = tri[0][1], frac;
     int             np = 1, k, axis, q;
     for (k = 1; k < 3; ++k)
@@ -187,28 +221,15 @@ static int draped_tri(const char *where, const char *who, RMesh *m, const RCity 
         if (tri[k][1] > maxy)
             maxy = tri[k][1];
     }
-    /*  An edit's build keeps the chunks it does not rebuild, and drops
-     *  every triangle that lands in one.  The pieces of this triangle lie
-     *  in its box.  So where no chunk under the box builds, all of them
-     *  would be dropped, and none is cut.  The box is a tile wider on
-     *  every side, for a piece the cutting rounds just past it. */
-    if (s_incr_on && !incr_want_rect((int32_t)floorf(minx) - 1, (int32_t)floorf(miny) - 1, (int32_t)floorf(maxx) + 1, (int32_t)floorf(maxy) + 1))
-        return 0;
     frac = order - floorf(order);
-    /*  Within one tile it is drawn as it is, in that tile's slot.  A
-     *  face of a train car lying wholly in the tile ahead of the car's
-     *  center had kept the center's slot.  Lay under that tile's
-     *  ground), a thread on a lap tile as its threads alone. */
+    /*  Within one tile it is drawn as it is, in that tile's slot, so a
+     *  face lying wholly in one tile never takes another tile's. */
     if (!drape && floorf(minx) == floorf(maxx - 1e-6f) && floorf(miny) == floorf(maxy - 1e-6f))
     {
         int32_t tc = (int32_t)floorf(minx), tr = (int32_t)floorf(miny);
-        if (tc >= 0 && tr >= 0 && tc < R_MAP && tr < R_MAP)
+        if (tc >= 0 && tr >= 0 && tc < r_map && tr < r_map)
         {
-            uint8_t b = c->xbld[tr * R_MAP + tc];
-            order     = tile_order(c, tc, tr, mask_bit) + frac;
-            if (MAT_IS(col[2], MAT_THREAD) && net_line_lapped(b) &&
-                on_lap_panel(c, tc, tr, (tri[0][0] + tri[1][0] + tri[2][0]) / 3.0f, (tri[0][1] + tri[1][1] + tri[2][1]) / 3.0f))
-                pcol = xcol;
+            order = tile_order(c, tc, tr, mask_bit) + frac;
         }
         return put_tri_r2_at(where, who, m, tri, nrm, order, pcol, ref, ref2, 0);
     }
@@ -261,10 +282,10 @@ static int draped_tri(const char *where, const char *who, RMesh *m, const RCity 
             tc = 0;
         if (tr < 0)
             tr = 0;
-        if (tc >= R_MAP)
-            tc = R_MAP - 1;
-        if (tr >= R_MAP)
-            tr = R_MAP - 1;
+        if (tc >= r_map)
+            tc = r_map - 1;
+        if (tr >= r_map)
+            tr = r_map - 1;
         /*  A hair nearer than the surface it lies on.  A marking is a
          *  decal at the surface's own height.  Where that surface twists
          *  the two quads interpolate differently.  A spur's first tile
@@ -272,23 +293,36 @@ static int draped_tri(const char *where, const char *who, RMesh *m, const RCity 
          *  interpolate different depths and the line tore into a
          *  sawtooth.  A slot's fraction outranks any height term. */
         porder = tile_order(c, tc, tr, mask_bit) + frac + geo_num(&gix_decal_slot, "decal_slot");
-        /* a thread on a lapped tile: only its threads, in the lap's surface (spec 3.15) */
-        pcol = col;
-        if (MAT_IS(col[2], MAT_THREAD) && on_lap_panel(c, tc, tr, cx, cy))
-            pcol = xcol;
+        pcol   = col;
         if (drape)
         {
             /*  Cut on the tile's fold, with every vertex on the drawn
              *  surface under it.  The piece then lies in the tile's own
              *  two planes rather than bridging them. */
             ClipVert half[2][16];
-            float    ax, ay, kk;
+            float    ax, ay, kk, zt[4], zc, zm[4];
             int      side, hn;
+            if (!tile_top_planar(c, tc, tr, mask_bit) && tile_top(c, tc, tr, mask_bit, zt) == T_LAND &&
+                tile_dual(c, tc, tr, &zc, zm))
+            {
+                /*  The dual ground: cut to each of its eight triangles. */
+                int e, h;
+                for (e = 0; e < 4; ++e)
+                    for (h = 0; h < 2; ++h)
+                    {
+                        hn = dual_piece(poly[q], cnt[q], tc, tr, e, h, half[0]);
+                        for (k = 0; k < hn; ++k)
+                            half[0][k].z = surface_at_tile(c, mask_bit, tc, tr, half[0][k].x, half[0][k].y) + lift;
+                        if (hn >= 3 && emit_fan(where, who, m, half[0], hn, nrm, porder, pcol) != 0)
+                            return -1;
+                    }
+                continue;
+            }
             if (tile_top_planar(c, tc, tr, mask_bit))
             {
                 /* one plane: the piece lies on it whole */
                 for (k = 0; k < cnt[q]; ++k)
-                    poly[q][k].z = surface_at_tile(c, mask_bit, tc, tr, poly[q][k].x, poly[q][k].y);
+                    poly[q][k].z = surface_at_tile(c, mask_bit, tc, tr, poly[q][k].x, poly[q][k].y) + lift;
                 if (emit_fan(where, who, m, poly[q], cnt[q], nrm, porder, pcol) != 0)
                     return -1;
                 continue;
@@ -298,7 +332,7 @@ static int draped_tri(const char *where, const char *who, RMesh *m, const RCity 
             {
                 hn = clip_half(poly[q], cnt[q], ax, ay, kk, !side, half[side]);
                 for (k = 0; k < hn; ++k)
-                    half[side][k].z = surface_at_tile(c, mask_bit, tc, tr, half[side][k].x, half[side][k].y);
+                    half[side][k].z = surface_at_tile(c, mask_bit, tc, tr, half[side][k].x, half[side][k].y) + lift;
                 if (emit_fan(where, who, m, half[side], hn, nrm, porder, pcol) != 0)
                     return -1;
             }
@@ -312,240 +346,15 @@ static int draped_tri(const char *where, const char *who, RMesh *m, const RCity 
 
 int put_tri_draped_n_at(const char *where, const char *who, RMesh *m, const RCity *c, uint8_t mask_bit, float order, const float tri[3][3], const float *nrm, const float col[3], const float ref[3], const float ref2[3])
 {
-    return draped_tri(where, who, m, c, mask_bit, order, tri, nrm, col, ref, ref2, 0);
+    return draped_tri(where, who, m, c, mask_bit, order, tri, nrm, col, ref, ref2, 0, 0.0f);
 }
 
-/*  The same, laid ON the ground: the triangle's own heights are not used
- *  at all.  Each piece it is cut into takes the drawn surface of the
- *  tile it lands in.  A junction's fill is drawn this way, as a
- *  segment's band is. */
-int put_tri_ground_at(const char *where, const char *who, RMesh *m, const RCity *c, uint8_t mask_bit, float order, const float tri[3][3], const float col[3], const float ref[3], const float ref2[3])
+/*  The same, `lift` over the ground.  Each piece follows the drawn
+ *  surface of its tile, fold and all, so it never passes through it. */
+int put_tri_over_ground_at(const char *where, const char *who, RMesh *m, const RCity *c, uint8_t mask_bit, float order, const float tri[3][3], const float col[3], float lift)
 {
-    return draped_tri(where, who, m, c, mask_bit, order, tri, NULL, col, ref, ref2, 1); /* the ground's own normal */
-}
-
-static int put_tri_draped(RMesh *m, const RCity *c, uint8_t mask_bit, float order, const float tri[3][3], const float col[3], const float ref[3], const float ref2[3])
-{
-    return put_tri_line_n(m, c, mask_bit, order, tri, NULL, col, ref, ref2);
-}
-
-/*  One quad of a strip between two cross-sections.  Each is given by its
- *  two end points in world tile coordinates, with the across and along
- *  values of the material.  `za`/`zb` are the sections' heights, or
- *  negative to take the ground under each corner.  The across at each
- *  corner: across0 and across1 at the near station's right and left,
- *  across0b and across1b at the far station's.  A quad between two
- *  widths keeps the material true to the lanes at both. */
-int strip_quad_z_at(const char *where, const char *who, RMesh *m, const RCity *c, uint8_t mask_bit, float order, const float a0[2], const float a1[2], const float b0[2], const float b1[2], float za, float zb, float across0, float across1, float across0b, float across1b, float along_a, float along_b, float mat)
-{
-    /*  A height below zero at both ends means the quad lies on the
-     *  ground: its corners take the drawn surface.  The pieces it is cut
-     *  into take it at their own corners too (draped_tri's drape). */
-    const int    drape       = za < 0.0f && zb < 0.0f;
-    float        line_col[3] = {0.0f, 0.0f, mat};
-    float        p[4][3], tri[3][3], ref[3], ref2[3];
-    const float *pt[4] = {a0, a1, b1, b0};
-    float        lo[2] = {a0[0], a0[1]}, hi[2] = {a0[0], a0[1]};
-    int          k;
-    /*  The grading pass draws nothing, and an edit's build draws nothing
-     *  in a chunk it keeps: draped_tri drops the two triangles there.  So
-     *  the ground is not read for their corners either. */
-    if (s_pass == 1)
-        return 0;
-    for (k = 1; k < 4; ++k)
-    {
-        lo[0] = fminf(lo[0], pt[k][0]), lo[1] = fminf(lo[1], pt[k][1]);
-        hi[0] = fmaxf(hi[0], pt[k][0]), hi[1] = fmaxf(hi[1], pt[k][1]);
-    }
-    if (s_incr_on && !incr_want_rect((int32_t)floorf(lo[0]) - 1, (int32_t)floorf(lo[1]) - 1, (int32_t)floorf(hi[0]) + 1, (int32_t)floorf(hi[1]) + 1))
-        return 0;
-    for (k = 0; k < 4; ++k)
-    {
-        float z = k < 2 ? za : zb;
-        p[k][0] = pt[k][0];
-        p[k][1] = pt[k][1];
-        p[k][2] = z >= 0.0f ? z : surface_at_world(c, mask_bit, p[k][0], p[k][1]);
-    }
-    memcpy(tri[0], p[0], sizeof tri[0]);
-    memcpy(tri[1], p[1], sizeof tri[1]);
-    memcpy(tri[2], p[2], sizeof tri[2]);
-    ref[0]  = across0;
-    ref[1]  = across1;
-    ref[2]  = across1b;
-    ref2[0] = along_a;
-    ref2[1] = along_a;
-    ref2[2] = along_b;
-    if (draped_tri(where, who, m, c, mask_bit, order, (const float (*)[3])tri, NULL, line_col, ref, ref2, drape) != 0)
-        return -1;
-    memcpy(tri[0], p[0], sizeof tri[0]);
-    memcpy(tri[1], p[2], sizeof tri[1]);
-    memcpy(tri[2], p[3], sizeof tri[2]);
-    ref[0]  = across0;
-    ref[1]  = across1b;
-    ref[2]  = across0b;
-    ref2[0] = along_a;
-    ref2[1] = along_b;
-    ref2[2] = along_b;
-    return draped_tri(where, who, m, c, mask_bit, order, (const float (*)[3])tri, NULL, line_col, ref, ref2, drape);
-}
-
-int strip_quad_at(const char *where, const char *who, RMesh *m, const RCity *c, uint8_t mask_bit, float order, const float a0[2], const float a1[2], const float b0[2], const float b1[2], float across0, float across1, float along_a, float along_b, float mat)
-{
-    return strip_quad_z_at(where, who, m, c, mask_bit, order, a0, a1, b0, b1, -1.0f, -1.0f, across0, across1, across0, across1, along_a, along_b, mat);
-}
-
-/*  A fan of triangles about a point, from angle t0 at radius r0 to t1 at
- *  r1, one material.  The rim carries across 1, the apex `across_c`.
- *  `lift` is added to the ground under each vertex.  So a cap on a slope
- *  lies on the slope.  Set flat at its center's height, the uphill half
- *  of a dead end's cap on a slope piece lies under the ground. */
-int strip_fan_z(RMesh *m, const RCity *c, uint8_t mask_bit, float order, float cx, float cy, float t0, float t1, float r0, float r1, float across_c, float mat, int n, float lift)
-{
-    float line_col[3] = {0.0f, 0.0f, mat};
-    int   i;
-    for (i = 0; i < n; ++i)
-    {
-        float fa = (float)i / (float)n, fb = (float)(i + 1) / (float)n;
-        float ta = t0 + (t1 - t0) * fa, tb = t0 + (t1 - t0) * fb;
-        float ra = r0 + (r1 - r0) * fa, rb = r0 + (r1 - r0) * fb;
-        float tri[3][3], ref[3] = {across_c, 1.0f, 1.0f}, ref2[3] = {-1.0f, -1.0f, -1.0f};
-        tri[0][0] = cx;
-        tri[0][1] = cy;
-        tri[1][0] = cx + ra * cosf(ta);
-        tri[1][1] = cy + ra * sinf(ta);
-        tri[2][0] = cx + rb * cosf(tb);
-        tri[2][1] = cy + rb * sinf(tb);
-        tri[0][2] = surface_at_world(c, mask_bit, tri[0][0], tri[0][1]) + lift;
-        tri[1][2] = surface_at_world(c, mask_bit, tri[1][0], tri[1][1]) + lift;
-        tri[2][2] = surface_at_world(c, mask_bit, tri[2][0], tri[2][1]) + lift;
-        if (put_tri_draped(m, c, mask_bit, order, (const float (*)[3])tri, line_col, ref, ref2) != 0)
-            return -1;
-    }
-    return 0;
-}
-
-/*  A round column.  It is a twelve-sided prism of radius r about (cx,
- *  cy).  Its top is flat at z1 over the ground under its center.  Its
- *  foot is draped on the terrain, with each base vertex at the ground
- *  under itself.  So the column meets a slope along its whole rim.  It
- *  does not hang over the downhill side, or bury a foot that then paints
- *  over the grass in front of it.  Every face goes through the tile
- *  clipper: a column meet a tile line with one painter's order was
- *  banded by the ground either side. */
-int put_cyl(RMesh *m, const RCity *c, uint8_t mask_bit, float order, float cx, float cy, float r, float z0, float z1, float mat)
-{
-    enum
-    {
-        N = 12
-    };
-    float g       = surface_at_world(c, mask_bit, cx, cy);
-    float hi      = g + z1;
-    float col3[3] = {0.0f, 0.0f, mat}, ref[3] = {0.0f, 0.0f, 0.0f};
-    float px[N], py[N], pz[N];
-    int   k;
-    (void)z0;
-    for (k = 0; k < N; ++k)
-    {
-        float a = -6.2831853f * ((float)k + 0.5f) / (float)N;
-        px[k]   = cx + r * cosf(a);
-        py[k]   = cy + r * sinf(a);
-        pz[k]   = surface_at_world(c, mask_bit, px[k], py[k]) - geo_num(&gix_foot_sink, "foot_sink");
-        if (pz[k] > hi - 0.02f)
-            pz[k] = hi - 0.02f;
-    }
-    for (k = 0; k < N; ++k)
-    {
-        int   j  = (k + 1) % N;
-        float mx = 0.5f * (px[k] + px[j]) - cx, my = 0.5f * (py[k] + py[j]) - cy;
-        float ml  = sqrtf(mx * mx + my * my), nrm[3], tri[3][3];
-        nrm[0]    = ml > 1e-6f ? mx / ml : 1.0f;
-        nrm[1]    = ml > 1e-6f ? my / ml : 0.0f;
-        nrm[2]    = 0.0f;
-        tri[0][0] = px[k];
-        tri[0][1] = py[k];
-        tri[0][2] = hi;
-        tri[1][0] = px[j];
-        tri[1][1] = py[j];
-        tri[1][2] = hi;
-        tri[2][0] = px[j];
-        tri[2][1] = py[j];
-        tri[2][2] = pz[j];
-        if (put_tri_line_n(m, c, mask_bit, order, (const float (*)[3])tri, nrm, col3, ref, ref) != 0)
-            return -1;
-        tri[1][0] = px[j];
-        tri[1][1] = py[j];
-        tri[1][2] = pz[j];
-        tri[2][0] = px[k];
-        tri[2][1] = py[k];
-        tri[2][2] = pz[k];
-        if (put_tri_line_n(m, c, mask_bit, order, (const float (*)[3])tri, nrm, col3, ref, ref) != 0)
-            return -1;
-    }
-    for (k = 1; k + 1 < N; ++k)
-    {
-        float up[3] = {0.0f, 0.0f, 1.0f}, tri[3][3];
-        tri[0][0]   = px[0];
-        tri[0][1]   = py[0];
-        tri[0][2]   = hi;
-        tri[1][0]   = px[k];
-        tri[1][1]   = py[k];
-        tri[1][2]   = hi;
-        tri[2][0]   = px[k + 1];
-        tri[2][1]   = py[k + 1];
-        tri[2][2]   = hi;
-        if (put_tri_line_n(m, c, mask_bit, order, (const float (*)[3])tri, up, col3, ref, ref) != 0)
-            return -1;
-    }
-    return 0;
-}
-
-/*  A ground highlight under "show curves".  It is the tile's own top,
- *  tinted and blended, a hair up, under the lines and everything else
- *  that stands on the tile.  Col.r picks the tint: 3 the corridor's tan,
- *  6 the free air's blue. */
-int tile_highlight(RMesh *m, const RCity *c, uint8_t mask_bit, int32_t col, int32_t row, float paint)
-{
-    if (s_pass == 1)
-        return 0; /* the grading pass draws nothing */
-    /*  A sliver above the ground's own slot and under the lines.  A line
-     *  strip is pulled a fifth of a slot nearer than its ground (the
-     *  vertex shader).  The zone tint's 0.4 would otherwise outrank that
-     *  and lie over the fill.  A paint at `mark_lid` or above is a LID:
-     *  it is drawn over what it marks rather than under it.
-     *
-     *      At the top of the tile's own slot.
-     *      Over the spur's concrete and its edge lines.
-     *      Translucent so they show through it orange.
-     *
-     *  The spur is drawn in the ground's slot too, and nothing sits
-     *  between them. */
-    int   lid   = paint >= geo_num(&gix_mark_lid, "mark_lid");
-    float lift  = lid ? 0.0f : 0.02f;
-    float order = tile_order(c, col, row, mask_bit) + (lid ? 0.98f : 0.05f);
-    float z[4], zc[3] = {paint, 0.0f, MAT_HILITE}, ref[3] = {paint, paint, paint}, tri[3][3];
-    int   was = m->to_water, rc;
-    tile_top(c, col, row, mask_bit, z);
-    m->to_water = 1; /* the blended list, drawn after the opaque mesh */
-    tri[0][0]   = (float)col;
-    tri[0][1]   = (float)row;
-    tri[0][2]   = z[NW] + lift;
-    tri[1][0]   = (float)col + 1.0f;
-    tri[1][1]   = (float)row;
-    tri[1][2]   = z[NE] + lift;
-    tri[2][0]   = (float)col + 1.0f;
-    tri[2][1]   = (float)row + 1.0f;
-    tri[2][2]   = z[SE] + lift;
-    rc          = put_tri_r2(m, (const float (*)[3])tri, NULL, order, zc, ref, ref, 1);
-    tri[1][0]   = (float)col + 1.0f;
-    tri[1][1]   = (float)row + 1.0f;
-    tri[1][2]   = z[SE] + lift;
-    tri[2][0]   = (float)col;
-    tri[2][1]   = (float)row + 1.0f;
-    tri[2][2]   = z[SW] + lift;
-    if (rc == 0)
-        rc = put_tri_r2(m, (const float (*)[3])tri, NULL, order, zc, ref, ref, 1);
-    m->to_water = was;
-    return rc;
+    const float ref[3] = {0.0f, 0.0f, 0.0f};
+    return draped_tri(where, who, m, c, mask_bit, order, tri, NULL, col, ref, ref, 1, lift);
 }
 
 /*  A box standing on the surface at world (x, y).  It is `w` by `d` in
@@ -553,11 +362,9 @@ int tile_highlight(RMesh *m, const RCity *c, uint8_t mask_bit, int32_t col, int3
  *  sides and a top, in one material.  `phase` in col.r. */
 int put_box(RMesh *m, const RCity *c, uint8_t mask_bit, float order, float cx, float cy, float w, float d, float z0, float z1, float mat, float phase)
 {
-    if (s_pass == 1)
-        return 0; /* the grading pass draws nothing */
     float g  = surface_at_world(c, mask_bit, cx, cy);
     float x0 = cx - w * 0.5f, x1 = cx + w * 0.5f, y0 = cy - d * 0.5f, y1 = cy + d * 0.5f;
-    /*  A bent is the viaduct's, and hides with it under the curve overlay. */
+    /*  The outline view lays no box of a material it hides. */
     if (curves_hidden(mat))
         return 0;
     float lo = g + z0, hi = g + z1;
@@ -606,22 +413,59 @@ int put_box(RMesh *m, const RCity *c, uint8_t mask_bit, float order, float cx, f
     return put_tri_r2(m, (const float (*)[3])tri, NULL, order, col3, ref, ref, 0);
 }
 
+int put_frustum(RMesh *m, float order, float x, float y, float g, float z0, float z1, float r0, float r1, int sides, float turn, float mat)
+{
+    const float col[3] = {0.0f, 0.0f, mat};
+    const float dz = (z1 - z0) * MESH_LEVEL_H, slant = r0 - r1, nl = sqrtf(dz * dz + slant * slant);
+    int         k;
+    if (curves_hidden(mat))
+        return 0;
+    for (k = 0; k < sides; ++k)
+    {
+        float a0 = turn + 6.2831853f * (float)k / (float)sides, a1 = turn + 6.2831853f * (float)(k + 1) / (float)sides, am = 0.5f * (a0 + a1);
+        float c0 = cosf(a0), s0 = sinf(a0), c1 = cosf(a1), s1 = sinf(a1);
+        float nrm[3]  = {cosf(am) * dz / nl, sinf(am) * dz / nl, slant / nl};
+        float t[3][3] = {
+            {x + c0 * r0, y + s0 * r0, g + z0},
+            {x + c1 * r0, y + s1 * r0, g + z0},
+            {x + c1 * r1, y + s1 * r1, g + z1}
+        };
+        if (put_tri_r2(m, (const float (*)[3])t, nrm, order, col, NULL, NULL, 0) != 0)
+            return -1;
+        if (r1 > 0.0f)
+        {
+            float u[3][3] = {
+                {x + c0 * r0, y + s0 * r0, g + z0},
+                {x + c1 * r1, y + s1 * r1, g + z1},
+                {x + c0 * r1, y + s0 * r1, g + z1}
+            };
+            if (put_tri_r2(m, (const float (*)[3])u, nrm, order, col, NULL, NULL, 0) != 0)
+                return -1;
+        }
+    }
+    if (r1 > 0.0f)
+    {
+        static const float up[3] = {0.0f, 0.0f, 1.0f};
+        for (k = 1; k + 1 < sides; ++k)
+        {
+            float a0 = turn, a1 = turn + 6.2831853f * (float)k / (float)sides, a2 = turn + 6.2831853f * (float)(k + 1) / (float)sides;
+            float t[3][3] = {
+                {x + cosf(a0) * r1, y + sinf(a0) * r1, g + z1},
+                {x + cosf(a1) * r1, y + sinf(a1) * r1, g + z1},
+                {x + cosf(a2) * r1, y + sinf(a2) * r1, g + z1}
+            };
+            if (put_tri_r2(m, (const float (*)[3])t, up, order, col, NULL, NULL, 0) != 0)
+                return -1;
+        }
+    }
+    return 0;
+}
+
 /*  A wire.  It is a thin quad from world (x0, y0) at height z0 to (x1,
  *  y1) at z1 above the ground at each end.  It sags in the middle. */
 int put_wire(RMesh *m, const RCity *c, uint8_t mask_bit, float order, float x0, float y0, float z0, float x1, float y1, float z1, float sag)
 {
-    return put_wire_paint(m, c, mask_bit, order, x0, y0, z0, x1, y1, z1, sag, -1.0f);
-}
-
-/*  The same in a vehicle paint.  Terrain.frag reads 0 dark, 1 brown, 2
- *  gray and 3 tan.  It reads 4 white, 5 red, 6 blue and 7 light gray.
- *  Or the pole's own material when the paint is negative.  The lane
- *  overlay draws in colors so two lane lines never read as a thread bed. */
-int put_wire_paint(RMesh *m, const RCity *c, uint8_t mask_bit, float order, float x0, float y0, float z0, float x1, float y1, float z1, float sag, float paint)
-{
-    if (s_pass == 1)
-        return 0; /* the grading pass draws nothing */
-    const float col3[3] = {paint < 0.0f ? 0.0f : paint, 0.0f, paint < 0.0f ? MAT_PROP : MAT_VEHICLE};
+    const float col3[3] = {0.0f, 0.0f, MAT_PROP};
     const int   n       = 4;
     float       w       = geo_num(&gix_wire_w, "wire_w");
     float       dx = x1 - x0, dy = y1 - y0, len = sqrtf(dx * dx + dy * dy);
@@ -657,6 +501,27 @@ int put_wire_paint(RMesh *m, const RCity *c, uint8_t mask_bit, float order, floa
             return -1;
     }
     return 0;
+}
+
+int put_lamp_under(RMesh *m, float order, float x, float y, float g, float z, float fx, float fy, float len, float wid, float code)
+{
+    static const float down[3] = {0.0f, 0.0f, -1.0f};
+    float              col[3] = {0.0f, code, MAT_LAMP}, ref[3] = {0.0f, 0.0f, 0.0f}, ref2[3] = {code, code, code};
+    float              ax = fx * len * 0.5f, ay = fy * len * 0.5f, bx = -fy * wid * 0.5f, by = fx * wid * 0.5f;
+    float              q[4][3], t[3][3];
+    int                k;
+    if (curves_hidden(MAT_LAMP))
+        return 0;
+    for (k = 0; k < 4; ++k)
+    {
+        float sa = (k == 1 || k == 2) ? 1.0f : -1.0f, sb = k >= 2 ? 1.0f : -1.0f;
+        q[k][0] = x + ax * sa + bx * sb, q[k][1] = y + ay * sa + by * sb, q[k][2] = g + z;
+    }
+    memcpy(t[0], q[0], sizeof t[0]), memcpy(t[1], q[2], sizeof t[1]), memcpy(t[2], q[1], sizeof t[2]);
+    if (put_tri_r2(m, (const float (*)[3])t, down, order, col, ref, ref2, 0) != 0)
+        return -1;
+    memcpy(t[1], q[3], sizeof t[1]), memcpy(t[2], q[2], sizeof t[2]);
+    return put_tri_r2(m, (const float (*)[3])t, down, order, col, ref, ref2, 0);
 }
 
 /*  ONE FACE: a small square of MAT_LAMP carrying `code`, facing (fx, fy)
@@ -715,100 +580,61 @@ int put_lamp_face(RMesh *m, float order, float x, float y, float g, float z, flo
     return put_tri_r2(m, (const float (*)[3])tri, nrm, order, lamp, ref, ref2, 0);
 }
 
-/*  A bar between two points in the air, `w` half its width across the
- *  face it turns to (fx, fy) and `d` half its depth: that face and its
- *  top, the far side being the post's and unseen.  `code` is the aspect
- *  the material paints along it: a gate arm's red and white stripes live
- *  in the channel MAT_LAMP reads, and a hair of a bar, or the code in
- *  the wrong channel, makes a white thread no zoom can show. */
-int put_bar(RMesh *m, const RCity *c, uint8_t mask_bit, float order,
-            float x0, float y0, float z0, float x1, float y1, float z1,
-            float fx, float fy, float w, float d, float mat, float code, float phase)
+/*  A PRISM clipped to the tile grid: a box with a skirt.  Each piece
+ *  takes the depth slot of the tile under it.  So a prism that straddles
+ *  two tiles is not pushed under the ground of the nearer one.  `order`
+ *  is the center tile's slot, with the fraction each piece keeps above
+ *  the ground it stands on. */
+int put_prism_clip_m(RMesh *m, const RCity *c, uint8_t mask_bit, float order, float cx, float cy, float dx, float dy, float len, float wid, float zb, float zf, float z0, float z1, float paint, float mat)
 {
-    float col[3] = {phase, code, mat}, ref[3] = {0.0f, 0.0f, 0.0f}, ref2[3] = {code, code, code};
-    float a0[3] = {x0 - fx * w, y0 - fy * w, z0 + d}, a1[3] = {x1 - fx * w, y1 - fy * w, z1 + d};
-    float b0[3] = {x0 - fx * w, y0 - fy * w, z0 - d}, b1[3] = {x1 - fx * w, y1 - fy * w, z1 - d};
-    float c0[3] = {x0 + fx * w, y0 + fy * w, z0 + d}, c1[3] = {x1 + fx * w, y1 + fy * w, z1 + d};
-    float nrm[3] = {fx, fy, 0.0f}, up[3] = {0.0f, 0.0f, 1.0f}, t3[3][3];
-    ARM_TRI(a0, a1, b1, nrm);
-    ARM_TRI(a0, b1, b0, nrm);
-    ARM_TRI(a0, c0, c1, up);
-    ARM_TRI(a0, c1, a1, up);
-    return 0;
-}
-
-/*  A SMOOTHSTEP over 0..1, level at both ends.  The ease anything that
- *  has to leave one height and arrive at another without a crease is
- *  laid along. */
-float ease_smooth(float f)
-{
-    if (f < 0.0f)
-        f = 0.0f;
-    if (f > 1.0f)
-        f = 1.0f;
-    return f * f * (3.0f - 2.0f * f);
-}
-
-/*  AN EDGE BEAM along a line in the air: the fascia `girder` deep below
- *  it, in its own shadow.  Where `parapet` asks for one an upstand above
- *  it with two faces and a top.  Nothing about it is a slab's: a
- *  viaduct's edge, a spur's, a retaining wall's are the same shape at
- *  different depths. */
-int put_fascia(RMesh *m, const RCity *c, uint8_t mask_bit, float order, const float ea[2], const float eb[2], float za, float zb, const float nrm[3], float girder, int parapet)
-{
-    static const float conc[3]  = {1.0f, 0.0f, MAT_PIER}; /* cast concrete, plain */
-    static const float shade[3] = {1.0f, 1.0f, MAT_PIER};
-    static int         gix_slab_parapet    = -1;
-    const float        pw       = geo_num(&gix_slab_parapet, "slab_parapet");
-    float              ia[2]    = {ea[0] - nrm[0] * pw, ea[1] - nrm[1] * pw};
-    float              ib[2]    = {eb[0] - nrm[0] * pw, eb[1] - nrm[1] * pw};
-    float              inn[3] = {-nrm[0], -nrm[1], 0.0f}, up[3] = {0.0f, 0.0f, 1.0f};
-    float              t0[3] = {ea[0], ea[1], za}, t1[3] = {eb[0], eb[1], zb};
-    float              g0[3] = {ea[0], ea[1], za - girder}, g1[3] = {eb[0], eb[1], zb - girder};
-    float              p0[3] = {ea[0], ea[1], za + BAND_PARAPET}, p1[3] = {eb[0], eb[1], zb + BAND_PARAPET};
-    float              k0[3] = {ia[0], ia[1], za + BAND_PARAPET}, k1[3] = {ib[0], ib[1], zb + BAND_PARAPET};
-    float              n0[3] = {ia[0], ia[1], za}, n1[3] = {ib[0], ib[1], zb};
-    (void)c;
-    (void)mask_bit;
-    if (put_wall(m, t0, t1, g0, g1, nrm, order, shade) != 0)
-        return -1;
-    if (!parapet)
-        return 0;
-    if (put_wall(m, p0, p1, t0, t1, nrm, order, conc) != 0)
-        return -1;
-    if (put_wall(m, k0, k1, n0, n1, inn, order, conc) != 0)
-        return -1;
-    return put_wall(m, p0, p1, k0, k1, up, order, conc);
-}
-
-/*  SHOW CURVES: the vertices of a fitted path marked with the node models,
- *  `lift` over the ground.  An end is one mark and a corner another.  The
- *  paint says whether the corner was swept: 7 an end, 3 an arc, 1 a corner
- *  left as a corner.  A vertex with no turn between two straights reads as
- *  an end, not a corner that failed.  Answers 0, or -1 where a mark could
- *  not be put. */
-int curve_marks(RMesh *m, const RCity *c, uint8_t mask_bit, const V2 *q, const float *rad, int nk, float lift)
-{
-    int k3;
-    for (k3 = 0; k3 < nk; ++k3)
+    static const float up[3] = {0.0f, 0.0f, 1.0f};
+    float              ax = dx * len * 0.5f, ay = dy * len * 0.5f, bx = -dy * wid * 0.5f, by = dx * wid * 0.5f;
+    float              p[4][3], top[4][3], col[3] = {paint, 0.0f, mat}, nrm[3], t3[3][3];
+    float              ref[3] = {paint, paint, paint}, ref2[3] = {0.0f, 0.0f, 0.0f};
+    int                k;
+    p[0][0] = cx - ax - bx;
+    p[0][1] = cy - ay - by;
+    p[1][0] = cx + ax - bx;
+    p[1][1] = cy + ay - by;
+    p[2][0] = cx + ax + bx;
+    p[2][1] = cy + ay + by;
+    p[3][0] = cx - ax + bx;
+    p[3][1] = cy - ay + by;
+    for (k = 0; k < 4; ++k)
     {
-        int32_t tc = (int32_t)floorf(q[k3].x), tr = (int32_t)floorf(q[k3].y);
-        float   paint, z;
-        if (tc < 0 || tr < 0 || tc >= R_MAP || tr >= R_MAP)
+        float zg  = (k == 1 || k == 2) ? zf : zb;
+        p[k][2]   = zg + z0;
+        top[k][0] = p[k][0];
+        top[k][1] = p[k][1];
+        top[k][2] = zg + z1;
+    }
+    for (k = 0; k < 4; ++k)
+    {
+        const float *a = p[k], *b = p[(k + 1) & 3], *ta = top[k], *tb = top[(k + 1) & 3];
+        float        ex = b[0] - a[0], ey = b[1] - a[1], el = sqrtf(ex * ex + ey * ey);
+        if (el < 1e-6f)
             continue;
-        paint = (k3 == 0 || k3 + 1 == nk) ? geo_num(&gix_mark_end, "mark_end")
-                                          : (rad[k3] > 0.001f ? geo_num(&gix_mark_arc, "mark_arc") : geo_num(&gix_mark_corner, "mark_corner"));
-        if (k3 > 0 && k3 + 1 < nk && rad[k3] <= 0.001f)
-        {
-            V2    u1 = {q[k3].x - q[k3 - 1].x, q[k3].y - q[k3 - 1].y};
-            V2    u2 = {q[k3 + 1].x - q[k3].x, q[k3 + 1].y - q[k3].y};
-            float l1 = v2len(u1), l2 = v2len(u2);
-            if (l1 > 1e-5f && l2 > 1e-5f && (u1.x * u2.x + u1.y * u2.y) / (l1 * l2) > geo_num(&gix_straight_dot, "fit_straight_dot"))
-                paint = geo_num(&gix_mark_end, "mark_end");
-        }
-        z = surface_at_world(c, mask_bit, q[k3].x, q[k3].y) + lift;
-        if (net_model_put_on(net_model_find(k3 == 0 || k3 + 1 == nk ? "node_end" : "node_mid"), m, c, mask_bit, tile_order(c, tc, tr, mask_bit), q[k3].x, q[k3].y, 1.0f, 0.0f, 0.0f, paint, 0.0f, z, z, 1) != 0)
+        nrm[0] = ey / el;
+        nrm[1] = -ex / el;
+        nrm[2] = 0.0f;
+        memcpy(t3[0], ta, sizeof t3[0]);
+        memcpy(t3[1], tb, sizeof t3[1]);
+        memcpy(t3[2], b, sizeof t3[2]);
+        if (put_tri_line_n(m, c, mask_bit, order, (const float (*)[3])t3, nrm, col, ref, ref2) != 0)
+            return -1;
+        memcpy(t3[0], ta, sizeof t3[0]);
+        memcpy(t3[1], b, sizeof t3[1]);
+        memcpy(t3[2], a, sizeof t3[2]);
+        if (put_tri_line_n(m, c, mask_bit, order, (const float (*)[3])t3, nrm, col, ref, ref2) != 0)
             return -1;
     }
-    return 0;
+    memcpy(t3[0], top[0], sizeof t3[0]);
+    memcpy(t3[1], top[1], sizeof t3[1]);
+    memcpy(t3[2], top[2], sizeof t3[2]);
+    if (put_tri_line_n(m, c, mask_bit, order, (const float (*)[3])t3, up, col, ref, ref2) != 0)
+        return -1;
+    memcpy(t3[0], top[0], sizeof t3[0]);
+    memcpy(t3[1], top[2], sizeof t3[1]);
+    memcpy(t3[2], top[3], sizeof t3[2]);
+    return put_tri_line_n(m, c, mask_bit, order, (const float (*)[3])t3, up, col, ref, ref2);
 }

@@ -17,81 +17,15 @@
 #include <stdlib.h>
 #include <string.h>
 
-/*  $41B8 and $42AC: which infra[] counter a military building id belongs
- *  to.  The two switches in $4110 share this one table. */
-static int infra_slot(int bld)
-{
-    /*        $DD $DE $DF $E0 $E1 $E2 $E3 $E4 $E5 $E6 $E7 $E8 $E9 $EA $EB */
-    static const uint8_t SLOT[0x1D] = {
-        1, 2, 0, 10, 0, 11, 6, 7, 8, 0, 12, 13, 0, 5, 0,
-        /* $EC $ED $EE $EF $F0 $F1 $F2 $F3 $F4 $F5 $F6 $F7 $F8 $F9 */
-        0,
-        0,
-        0,
-        3,
-        0,
-        9,
-        4,
-        0,
-        0,
-        0,
-        14,
-        0,
-        0,
-        15};
-    if (bld < 0xDD || bld > 0xF9)
-        return 0; /* $41AA */
-    return SLOT[bld - 0xDD];
-}
-
-/* ================================================================== *
- *  $4110  setTile: the routine 168 call sites funnel through.
- *
- *  Besides writing XBLD it keeps a running census of every building id
- *  on the map.  That census is what lets the growth pass ask questions
- *  like "how many churches are there" without walking the map.
- *
- *  The id is a word.  XBLD keeps its low byte, and the census counts the
- *  whole word.  The network fitters read a table past its end, and then
- *  give a word of $100 or more.  That count lands past the end of the
- *  census, outside anything the city keeps, so the low byte gets none.
- * ================================================================== */
-void sim_set_tile(City *c, int y, int x, int bld)
-{
-    uint8_t old;
-
-    if (y < 0 || y >= MAP_H || x < 0 || x >= MAP_W)
-        return; /* $4124 */
-
-    if (XZON_TYPE(c->xzon[y][x]) == ZONE_MILITARY)
-    {
-        /*  $418C: a military tile keeps its own tally instead.  Two
-         *  identical 29-case switches over ids $DD..$F9 pick a slot in
-         *  infra[]: the old building's slot goes down, the new one's
-         *  goes up.  Anything outside that range, and every id in it the
-         *  table does not name, lands on slot 0. */
-        c->infra[infra_slot(c->xbld[y][x])]--; /* $41B8 */
-        c->infra[infra_slot(bld)]++;           /* $42AC */
-        c->xbld[y][x] = (uint8_t)bld;          /* $4396 */
-        return;
-    }
-
-    old = c->xbld[y][x]; /* $4166 */
-    c->census[old]--;    /* $4174 */
-    if (bld < 0x100)
-        c->census[bld]++;         /* $417E */
-    c->xbld[y][x] = (uint8_t)bld; /* $4184 */
-}
-
 /*  Rebuild the census from scratch.  The game maintains it incrementally
  *  from a new-city state.  We have to derive it after loading a save. */
 void sim_rebuild_census(City *c)
 {
     int y, x;
     memset(c->census, 0, sizeof c->census);
-    for (y = 0; y < MAP_H; y++)
-        for (x = 0; x < MAP_W; x++)
-            c->census[c->xbld[y][x]]++;
+    for (y = 0; y < c->h; y++)
+        for (x = 0; x < c->w; x++)
+            c->census[T_XBLD(c, y, x)]++;
 }
 
 /* ================================================================== *
@@ -403,7 +337,7 @@ void sim_rebuild_census(City *c)
  *  the band department.
  * ================================================================== */
 
-int32_t sim_ordinance_cost(const City *c, int which) /* ordinanceCost $41368 */
+static int32_t sim_ordinance_cost(const City *c, int which) /* ordinanceCost $41368 */
 {
     OrdinanceCost o;
     int32_t       v;
@@ -561,7 +495,7 @@ void sim_density(City *c)
  *  on the index array) and the sorted counts are kept beside them.  The
  *  newspaper and the advisors read the ranking.  Nothing else does.
  * ================================================================== */
-int sim_opinion_poll(City *c)
+static int sim_opinion_poll(City *c)
 {
     int16_t w[N_PROBLEM];
     int16_t counts[N_PROBLEM];
@@ -683,6 +617,47 @@ int sim_opinion_poll(City *c)
  *  simulation: the window title, dialogs, menus, the cursor, the graph
  *  windows, the newspaper: is named here and left out.
  * ==================================================================== */
+/*  THE LIMITS: a disc of the glow about every tile that is zoned or has
+ *  anything built on it past the trees and the rubble. */
+void sim_limits(City *c)
+{
+    const int g = c->limits_glow;
+    int       y, x, dy, dx;
+    memset(c->limits, 0, (size_t)c->w * (size_t)c->h);
+    c->limits_n = 0;
+    if (g <= 0)
+        return;
+    for (y = 0; y < c->h; ++y)
+        for (x = 0; x < c->w; ++x)
+        {
+            if (!(T_XZON(c, y, x) & 0x0F) && T_XBLD(c, y, x) < 0x0E)
+                continue;
+            for (dy = -g; dy <= g; ++dy)
+                for (dx = -g; dx <= g; ++dx)
+                    if (dx * dx + dy * dy <= g * g && y + dy >= 0 && y + dy < c->h && x + dx >= 0 && x + dx < c->w &&
+                        !T_LIMITS(c, y + dy, x + dx))
+                    {
+                        T_LIMITS(c, y + dy, x + dx) = 1;
+                        c->limits_n++;
+                    }
+        }
+    /*  A city whose limits come within a chunk of its window's right or
+     *  bottom edge asks for a chunk more there.  It only asks: its store
+     *  may be the world's, so the world widens it between phases
+     *  (world_city_grow). */
+    c->want_w = c->w;
+    c->want_h = c->h;
+    for (y = 0; y < c->h; ++y)
+        for (x = 0; x < c->w; ++x)
+            if (T_LIMITS(c, y, x))
+            {
+                if (x >= c->w - TILE_CHUNK && c->want_w < CITY_MAX_SIDE)
+                    c->want_w = c->w + TILE_CHUNK;
+                if (y >= c->h - TILE_CHUNK && c->want_h < CITY_MAX_SIDE)
+                    c->want_h = c->h + TILE_CHUNK;
+            }
+}
+
 int sim_tick(City *c)
 {
     int ev = SIM_EV_NONE;
@@ -690,6 +665,10 @@ int sim_tick(City *c)
 
     c->date++;
     phase = (int)(c->date % 25);
+    /*  The limits as the city stands, once a month: growth builds only
+     *  inside them, so a month's limits hold for the month. */
+    if (c->limits_glow > 0 && phase == 0)
+        sim_limits(c);
     if (phase < 0)
         return ev; /* $21EF6: bhi.w past the table */
     switch (phase)

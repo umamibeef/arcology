@@ -8,8 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define JSMN_STATIC
-#include "jsmn.h"
+#include "json.h"
 #include "log.h"
 #include "music.h"
 
@@ -89,9 +88,9 @@ struct RMusic
     int    n_song;
     /* the song playing */
     Song     cur;
-    Voice   *v;       /* the voice pool, grown to the song's peak demand */
+    Voice   *v; /* the voice pool, grown to the song's peak demand */
     int      n_voices;
-    int      grow;    /* grow the pool on demand (off when ARC_MUSIC_VOICES pins it) */
+    int      grow; /* grow the pool on demand (off when ARC_MUSIC_VOICES pins it) */
     int      cur_id;
     Ev      *ev;
     int      n_ev, next_ev, ended;
@@ -104,76 +103,13 @@ struct RMusic
     /* the scheduler, $471E: the last four songs, and when the next may start */
     int enabled;
     uint16_t (*rand_fn)(void *at, uint16_t);
-    void *rand_at;
+    void             *rand_at;
     uint32_t          lcg; /* the private copy: THINK C's rand, from 1 */
     int               history[4];
     Uint64            next_tick;
     SDL_AudioDeviceID dev;
     SDL_AudioStream  *stream;
 };
-
-/* ---- json ---------------------------------------------------------------- */
-
-static int tok_eq(const char *js, const jsmntok_t *t, const char *s)
-{
-    size_t n = (size_t)(t->end - t->start);
-    return t->type == JSMN_STRING && strlen(s) == n && memcmp(js + t->start, s, n) == 0;
-}
-
-static int tok_skip(const jsmntok_t *t, int i)
-{
-    int k, n = t[i].size;
-    if (t[i].type == JSMN_OBJECT)
-    {
-        i++;
-        for (k = 0; k < n; k++)
-            i = tok_skip(t, i + 1); /* the key, then its value */
-        return i;
-    }
-    if (t[i].type == JSMN_ARRAY)
-    {
-        i++;
-        for (k = 0; k < n; k++)
-            i = tok_skip(t, i);
-        return i;
-    }
-    return i + 1;
-}
-
-/* the value token of `key` in the object at `obj`, or -1 */
-static int obj_get(const char *js, const jsmntok_t *t, int obj, const char *key)
-{
-    int i = obj + 1, k;
-    if (t[obj].type != JSMN_OBJECT)
-        return -1;
-    for (k = 0; k < t[obj].size; k++)
-    {
-        if (tok_eq(js, &t[i], key))
-            return i + 1;
-        i = tok_skip(t, i + 1);
-    }
-    return -1;
-}
-
-static long tok_long(const char *js, const jsmntok_t *t, int i, long dflt)
-{
-    return i < 0 ? dflt : strtol(js + t[i].start, NULL, 10);
-}
-
-static double tok_dbl(const char *js, const jsmntok_t *t, int i, double dflt)
-{
-    return i < 0 ? dflt : strtod(js + t[i].start, NULL);
-}
-
-static void tok_str(const char *js, const jsmntok_t *t, int i, char *out, size_t n)
-{
-    size_t k = i < 0 ? 0 : (size_t)(t[i].end - t[i].start);
-    if (k >= n)
-        k = n - 1;
-    if (i >= 0)
-        memcpy(out, js + t[i].start, k);
-    out[k] = 0;
-}
 
 /* ---- loading ------------------------------------------------------------- */
 
@@ -229,13 +165,12 @@ static int load_sample(RMusic *m, int id, const char *file, double rate, int l0,
 
 static int load_json(RMusic *m)
 {
-    char        path[1200];
-    FILE       *f;
-    long        len;
-    char       *js;
-    jsmn_parser jp;
-    jsmntok_t  *t;
-    int         nt, i, k, sec;
+    char       path[1200];
+    FILE      *f;
+    long       len;
+    char      *js;
+    jsmntok_t *t;
+    int        nt, i, k, sec;
     snprintf(path, sizeof path, "%s/music/music.json", m->dir);
     f = fopen(path, "rb");
     if (!f)
@@ -257,71 +192,67 @@ static int load_json(RMusic *m)
     }
     fclose(f);
     js[len] = 0;
-    jsmn_init(&jp);
-    nt = jsmn_parse(&jp, js, (size_t)len, NULL, 0);
-    if (nt < 1)
+    t       = json_parse(js, (size_t)len, &nt);
+    if (!t)
     {
         free(js);
         return -1;
     }
-    t = (jsmntok_t *)malloc((size_t)nt * sizeof *t);
-    jsmn_init(&jp);
-    jsmn_parse(&jp, js, (size_t)len, t, (unsigned)nt);
 
     /* the samples */
-    sec = obj_get(js, t, 0, "samples");
+    sec = json_get(js, t, 0, "samples");
     if (sec >= 0)
         for (i = sec + 1, k = 0; k < t[sec].size; k++)
         {
-            int  v = i + 1, lp = obj_get(js, t, v, "loop");
+            int  v = i + 1, lp = json_get(js, t, v, "loop");
             char file[128];
-            tok_str(js, t, obj_get(js, t, v, "file"), file, sizeof file);
-            load_sample(m, (int)strtol(js + t[i].start, NULL, 10), file, tok_dbl(js, t, obj_get(js, t, v, "rate"), 0.0), lp >= 0 ? (int)tok_long(js, t, lp + 1, 0) : 0, lp >= 0 ? (int)tok_long(js, t, lp + 2, 0) : 0, (int)tok_long(js, t, obj_get(js, t, v, "base"), 60));
-            i = tok_skip(t, v);
+            json_str(js, t, json_get(js, t, v, "file"), file, sizeof file);
+            load_sample(m, (int)json_long(js, t, i, 0), file, json_dbl(js, t, json_get(js, t, v, "rate"), 0.0), lp >= 0 ? (int)json_long(js, t, lp + 1, 0) : 0, lp >= 0 ? (int)json_long(js, t, lp + 2, 0) : 0, (int)json_long(js, t, json_get(js, t, v, "base"), 60));
+            i = json_skip(t, v);
         }
     /* the instruments */
-    sec = obj_get(js, t, 0, "instruments");
+    sec = json_get(js, t, 0, "instruments");
     if (sec >= 0)
         for (i = sec + 1, k = 0; k < t[sec].size; k++)
         {
-            int v = i + 1, id = (int)strtol(js + t[i].start, NULL, 10);
+            int v = i + 1, id = (int)json_long(js, t, i, 0);
             if (id >= 0 && id < MAX_INST)
             {
                 m->inst[id].used = 1;
-                m->inst[id].snd  = (int)tok_long(js, t, obj_get(js, t, v, "snd"), 0);
-                m->inst[id].root = (int)tok_long(js, t, obj_get(js, t, v, "root"), 0);
-                tok_str(js, t, obj_get(js, t, v, "name"), m->inst[id].name, sizeof m->inst[id].name);
+                m->inst[id].snd  = (int)json_long(js, t, json_get(js, t, v, "snd"), 0);
+                m->inst[id].root = (int)json_long(js, t, json_get(js, t, v, "root"), 0);
+                json_str(js, t, json_get(js, t, v, "name"), m->inst[id].name, sizeof m->inst[id].name);
             }
-            i = tok_skip(t, v);
+            i = json_skip(t, v);
         }
     /* the songs */
-    sec = obj_get(js, t, 0, "songs");
+    sec = json_get(js, t, 0, "songs");
     if (sec >= 0)
         for (i = sec + 1, k = 0; k < t[sec].size && m->n_song < MAX_SONGS; k++)
         {
-            int   v = i + 1, rm = obj_get(js, t, v, "remap"), j, c;
+            int   v = i + 1, rm = json_get(js, t, v, "remap"), j, c;
             Song *s       = &m->song[m->n_song];
-            s->id         = (int)strtol(js + t[i].start, NULL, 10);
-            s->midi_id    = (int)tok_long(js, t, obj_get(js, t, v, "midi_id"), 0);
-            s->max_notes  = (int)tok_long(js, t, obj_get(js, t, v, "max_notes"), 6);
-            s->note_decay = (int)tok_long(js, t, obj_get(js, t, v, "note_decay"), 40);
-            s->flags1     = (int)tok_long(js, t, obj_get(js, t, v, "flags1"), 0);
-            s->seconds    = tok_dbl(js, t, obj_get(js, t, v, "seconds"), 0.0);
-            tok_str(js, t, obj_get(js, t, v, "name"), s->name, sizeof s->name);
-            tok_str(js, t, obj_get(js, t, v, "midi"), s->midi, sizeof s->midi);
+            s->id         = (int)json_long(js, t, i, 0);
+            s->midi_id    = (int)json_long(js, t, json_get(js, t, v, "midi_id"), 0);
+            s->max_notes  = (int)json_long(js, t, json_get(js, t, v, "max_notes"), 6);
+            s->note_decay = (int)json_long(js, t, json_get(js, t, v, "note_decay"), 40);
+            s->flags1     = (int)json_long(js, t, json_get(js, t, v, "flags1"), 0);
+            s->seconds    = json_dbl(js, t, json_get(js, t, v, "seconds"), 0.0);
+            json_str(js, t, json_get(js, t, v, "name"), s->name, sizeof s->name);
+            json_str(js, t, json_get(js, t, v, "midi"), s->midi, sizeof s->midi);
             for (c = 0; c < 128; c++)
                 s->remap[c] = -1;
             if (rm >= 0)
                 for (j = rm + 1, c = 0; c < t[rm].size; c++)
                 {
-                    int from = (int)strtol(js + t[j].start, NULL, 10), to = (int)tok_long(js, t, j + 1, -1);
+                    int from = (int)json_long(js, t, j, 0), to = (int)json_long(js, t, j + 1, -1);
                     if (from >= 0 && from < 128)
                         s->remap[from] = to;
-                    j = tok_skip(t, j + 1);
+                    j = json_skip(t, j + 1);
                 }
             if (s->midi[0])
                 m->n_song++;
-            i = tok_skip(t, v);
+            i = json_skip(t, v);
         }
     free(t);
     free(js);
@@ -806,11 +737,10 @@ void music_destroy(RMusic *m)
     free(m);
 }
 
-int         music_n_songs(const RMusic *m) { return m ? m->n_song : 0; }
-int         music_song_id(const RMusic *m, int k) { return m && k >= 0 && k < m->n_song ? m->song[k].id : 0; }
-const char *music_song_name(const RMusic *m, int k) { return m && k >= 0 && k < m->n_song ? m->song[k].name : ""; }
-int         music_enabled(const RMusic *m) { return m ? m->enabled : 0; }
-int         music_playing(const RMusic *m) { return m && !m->ended ? m->cur_id : 0; }
+int music_n_songs(const RMusic *m) { return m ? m->n_song : 0; }
+int music_enabled(const RMusic *m) { return m ? m->enabled : 0; }
+/*  The song playing now, its id, or 0. */
+static int music_playing(const RMusic *m) { return m && !m->ended ? m->cur_id : 0; }
 
 static int start(RMusic *m, const Song *s)
 {
@@ -825,7 +755,8 @@ static int start(RMusic *m, const Song *s)
     return 0;
 }
 
-int music_play(RMusic *m, int song_id)
+/*  Play one song now, by its SONG resource id (10000..10018). */
+static int music_play(RMusic *m, int song_id)
 {
     int k, rc = -1;
     if (!m)
@@ -843,7 +774,8 @@ int music_play(RMusic *m, int song_id)
     return rc;
 }
 
-void music_stop(RMusic *m)
+/*  The song playing stopped. */
+static void music_stop(RMusic *m)
 {
     if (!m)
         return;

@@ -23,7 +23,14 @@ struct RSound
     Uint8            *data[N_SOUNDS];
     Uint32            len[N_SOUNDS];
     SDL_AudioStream  *stream[N_STREAMS];
-    int               loaded;
+    int               id[N_STREAMS];    /* the sound each stream plays */
+    int               loops[N_STREAMS]; /* it plays again whenever it runs low, until stopped */
+    struct LoopFeed
+    {
+        struct RSound *s;
+        int            k;
+    } feed[N_STREAMS];
+    int loaded;
 };
 
 RSound *sound_create(const char *assets_dir)
@@ -78,14 +85,27 @@ int sound_loaded(const RSound *s)
     return s ? s->loaded : 0;
 }
 
-void sound_play(RSound *s, int id)
+/*  A looping stream asks for more as it runs low, and is given the whole
+ *  sound again as often as that takes. */
+static void SDLCALL loop_more(void *ud, SDL_AudioStream *st, int additional, int total)
+{
+    const struct LoopFeed *f = (const struct LoopFeed *)ud;
+    (void)total;
+    while (additional > 0 && f->s->len[f->k] > 0)
+    {
+        SDL_PutAudioStreamData(st, f->s->data[f->k], (int)f->s->len[f->k]);
+        additional -= (int)f->s->len[f->k];
+    }
+}
+
+static void start(RSound *s, int id, int loop)
 {
     int k = id - R_SND_FIRST, slot = -1, j;
     if (!s || k < 0 || k >= N_SOUNDS || !s->data[k])
         return;
-    /* a drained stream, else a fresh one, else the oldest */
+    /* a drained stream, else a fresh one, else the oldest that does not loop */
     for (j = 0; j < N_STREAMS; ++j)
-        if (s->stream[j] && SDL_GetAudioStreamAvailable(s->stream[j]) == 0)
+        if (s->stream[j] && !s->loops[j] && SDL_GetAudioStreamAvailable(s->stream[j]) == 0)
         {
             slot = j;
             break;
@@ -97,8 +117,11 @@ void sound_play(RSound *s, int id)
                 slot = j;
                 break;
             }
+    for (j = 0; slot < 0 && j < N_STREAMS; ++j)
+        if (!s->loops[j])
+            slot = j;
     if (slot < 0)
-        slot = 0;
+        return; /* every stream loops */
     if (s->stream[slot])
     {
         SDL_DestroyAudioStream(s->stream[slot]);
@@ -113,6 +136,45 @@ void sound_play(RSound *s, int id)
         s->stream[slot] = NULL;
         return;
     }
+    s->id[slot]    = id;
+    s->loops[slot] = loop;
+    if (loop)
+    {
+        s->feed[slot].s = s;
+        s->feed[slot].k = k;
+        SDL_SetAudioStreamGetCallback(s->stream[slot], loop_more, &s->feed[slot]);
+    }
     SDL_PutAudioStreamData(s->stream[slot], s->data[k], (int)s->len[k]);
-    SDL_FlushAudioStream(s->stream[slot]);
+    if (!loop)
+        SDL_FlushAudioStream(s->stream[slot]);
+}
+
+void sound_play(RSound *s, int id)
+{
+    start(s, id, 0);
+}
+
+void sound_loop(RSound *s, int id)
+{
+    int j;
+    if (!s)
+        return;
+    for (j = 0; j < N_STREAMS; ++j)
+        if (s->stream[j] && s->loops[j] && s->id[j] == id)
+            return; /* it plays already */
+    start(s, id, 1);
+}
+
+void sound_stop(RSound *s, int id)
+{
+    int j;
+    if (!s)
+        return;
+    for (j = 0; j < N_STREAMS; ++j)
+        if (s->stream[j] && s->id[j] == id)
+        {
+            SDL_DestroyAudioStream(s->stream[j]);
+            s->stream[j] = NULL;
+            s->loops[j]  = 0;
+        }
 }

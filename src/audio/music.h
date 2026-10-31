@@ -24,13 +24,8 @@ typedef struct RMusic RMusic;
 RMusic *music_create(const char *assets_dir, SDL_AudioDeviceID dev);
 void    music_destroy(RMusic *m);
 
-int         music_n_songs(const RMusic *m);
-int         music_song_id(const RMusic *m, int k);
-const char *music_song_name(const RMusic *m, int k);
+int music_n_songs(const RMusic *m);
 
-/*  Play one song now, by its SONG resource id (10000..10018). */
-int  music_play(RMusic *m, int song_id);
-void music_stop(RMusic *m);
 /*  The generator the scheduler draws from: n in, 0..n-1 out.  The app
  *  hands it the game's own rand, so the music shares the stream the
  *  simulation uses, as the original's does.  `at` is passed back to it:
@@ -43,8 +38,6 @@ void music_set_enabled(RMusic *m, int on);
 int  music_enabled(const RMusic *m);
 /*  Once a frame: moves the rotation on when a song has ended. */
 void music_update(RMusic *m);
-/*  The song playing now, its id, or 0. */
-int music_playing(const RMusic *m);
 
 /*  Offline: one song rendered whole to a 16-bit mono WAV at `rate`.
  *  `song` is a SONG id, or the path of a MIDI file played with the

@@ -1,111 +1,91 @@
-/*  The incremental rebuild.  An edit changes a few tiles.  The mesh is
- *  kept in chunks (mesh.h, MESH_CHUNK), so a rebuild after an edit need
- *  only replace the chunks whose geometry changed.  Which those are is a
- *  closure over the tables the grading pass leaves behind.  A segment
- *  whose tiles touch a dirty tile has a new fit.  A junction at its end
- *  has a new box.  So every segment ending there has new trims.  A band
- *  band near the dirty tiles has a new fit.  So has every spur on it and
- *  the line at each spur's foot.  A spur beside a changed junction has a
- *  new join, and its band carries the lane drop.  Their tiles, dilated
- *  by a tile or two, name the chunks.  The building pass then runs as it
- *  always does.  Every table is complete, the traffic's graph and the
- *  lane model are whole.  But the terrain loop skips the other chunks'
- *  tiles.  The one triangle emitter drops what falls outside them
- *  (mesh_want_xy, by the same first-vertex rule the partition keys on).
- *  The result is sorted by chunk and spliced into the previous mesh
- *  range by range.  What decides an edit is a snapshot of the city the
- *  last build saw: the tiles that differ are the dirty ones.  A change
- *  of anything else the build reads is a different build key.  The view,
- *  the knobs and the furniture switch are all such changes, and each
- *  takes a full build.  So does an edit touching more than an eighth of
- *  the map, or the same city again (nothing to do). */
+/*  incr.c: THE BUILD BY WINDOWS.  The world is kept in chunks (mesh.h,
+ *  MESH_CHUNK), and every build lays a WINDOW of them.  A whole build is
+ *  the window that is every chunk.  A window laid into the mesh standing
+ *  replaces its chunks whole, and every other chunk stands as it is.
+ *
+ *  An edit is such a window: the chunks within net_halo (geo.c) of the
+ *  tiles it changed.  What decides that is a snapshot of the city the
+ *  last build saw, and the tiles that differ are the dirty ones.  A
+ *  change of anything else the build reads is a different build key.
+ *  The view and the knobs are both such changes, and
+ *  each takes a whole build.  So does a change to more than an eighth of
+ *  the map, and the same city again needs nothing. */
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "city.h"
 #include "dump.h"
-#include "log.h"
+#include "geo.h"
 #include "incr.h"
-#include "mesh/internal.h"
+#include "mesh/ground_bytes.h"
 #include "mesh/mesh.h"
-#include "pipeline.h"
-#include "net/net.h"
 #include "opt.h"
-#include "script.h"
 #include "show.h"
 
-/*  The incremental rebuild's own scratch, kept between builds because
- *  every build wants the same three arrays at about the same size.  They
- *  are the pass's, not a mesh's: incr_free gives them back when the
- *  program is done with meshes altogether. */
-static uint16_t *s_key;
-static uint32_t *s_auxtmp;
-static uint32_t *s_idtmp;
+#define NT (r_map * r_map)
 
-void incr_free(void)
-{
-    free(s_key), s_key = NULL;
-    free(s_auxtmp), s_auxtmp = NULL;
-    free(s_idtmp), s_idtmp = NULL;
-}
-
-
-#define NT       (R_MAP * R_MAP)
-#define SEGS_MAX 65536
-
-int s_incr_on; /* an incremental build is under way: the emitter tests mesh_want_xy */
-
-static uint8_t  s_want[MESH_CHUNKS];
-static uint8_t  s_dirty[NT];
-static uint8_t  s_near1[NT]; /* the dirty tiles and their neighbors, from the build's start */
+/*  Each tile this build changed, INCR_CHANGE_* (incr.h). */
+R_MAP_BUF(static, uint8_t, s_dirty, 1)
 static int      s_ndirty;
 static uint32_t s_old_n, s_old_nw; /* the previous lists' counts, while they stand aside */
-static struct
-{
-    int      hot, reemit, nseg, hotb, nband, chunks;
-    uint32_t emitted;
-} s_stat;
+/*  The window this build lays (incr_window_set, incr_window_next) and
+ *  whether it is laid into the mesh standing.  An edit's window is boxes
+ *  of its own, one round each group of the tiles it changed. */
+static int     s_win_on, s_win_read, s_win_at; /* s_win_at: where the next of the switch's list starts */
+static int32_t s_win[4];
+static int     s_win_build; /* this build lays a window into the mesh standing */
+static int     s_win_edit;  /* and the window is an edit's, s_edit */
+static int32_t s_edit[INCR_BOXES][4];
+static int     s_n_edit;
+static int     s_quiet, s_quiet_next; /* this build, and the next, are the clock's: they show nothing */
 
-static void dilate_into(const uint8_t *src, uint8_t *dst, int r);
-
-int mesh_chunk_of(int32_t col, int32_t row)
+/*  The INCR_CHANGE_ value of tile i, from the city o to c.
+ *  Bare land, rubble and the forest's stages are one ground to every
+ *  reader but the trees, and a tile's trees read only the tile.  So that
+ *  change reaches its own chunk alone.  `f` says which layers moved:
+ *  ALTM, XBLD, XZON, XTER, XUND, XBIT and the street layer. */
+static uint8_t dirty_of(const RCity *o, const RCity *c, int32_t i, int f[7])
 {
-    if (col < 0)
-        col = 0;
-    if (row < 0)
-        row = 0;
-    if (col >= R_MAP)
-        col = R_MAP - 1;
-    if (row >= R_MAP)
-        row = R_MAP - 1;
-    return (row / MESH_CHUNK) * (R_MAP / MESH_CHUNK) + col / MESH_CHUNK;
+    f[0] = o->map.altm[i] != c->map.altm[i], f[1] = o->xbld[i] != c->xbld[i], f[2] = o->xzon[i] != c->xzon[i];
+    f[3] = o->map.xter[i] != c->map.xter[i], f[4] = o->xund[i] != c->xund[i], f[5] = o->xbit[i] != c->xbit[i];
+    f[6] = o->street[i] != c->street[i];
+    if (!(f[0] | f[1] | f[2] | f[3] | f[4] | f[5] | f[6]))
+        return 0;
+    return f[0] | f[2] | f[3] | f[4] | f[5] | f[6] || tile_built(o->xbld[i]) || tile_built(c->xbld[i]) ? INCR_CHANGE_FAR : INCR_CHANGE_NEAR;
 }
 
-int mesh_want_xy(float x, float y)
+int incr_pending(const RMesh *m, const RCity *c)
 {
-    return s_want[mesh_chunk_of((int32_t)floorf(x), (int32_t)floorf(y))];
+    const RCity *o = m->snap;
+    int32_t      i;
+    int          most = 0;
+    if (!o || !m->snap_ok)
+        return INCR_CHANGE_FAR;
+    for (i = 0; i < NT && most < INCR_CHANGE_FAR; ++i)
+    {
+        int     f[7];
+        uint8_t d = dirty_of(o, c, i, f);
+        most      = d > most ? d : most;
+    }
+    return most;
 }
 
-int incr_editing(void)
+void incr_quiet_next(void)
 {
-    return s_incr_on;
-}
-
-int incr_dirty_tile(int32_t col, int32_t row)
-{
-    return col >= 0 && row >= 0 && col < R_MAP && row < R_MAP && s_dirty[row * R_MAP + col];
+    s_quiet_next = 1;
 }
 
 int incr_dirty_box(int32_t box[4])
 {
     int32_t t, n = 0;
-    box[0] = box[1] = R_MAP;
+    box[0] = box[1] = r_map;
     box[2] = box[3] = -1;
     for (t = 0; t < NT; ++t)
         if (s_dirty[t])
         {
-            int32_t col = t % R_MAP, row = t / R_MAP;
+            int32_t col = t % r_map, row = t / r_map;
             box[0] = col < box[0] ? col : box[0];
             box[1] = row < box[1] ? row : box[1];
             box[2] = col > box[2] ? col : box[2];
@@ -115,232 +95,313 @@ int incr_dirty_box(int32_t box[4])
     return n ? 0 : -1;
 }
 
-int incr_want_rect(int32_t c0, int32_t r0, int32_t c1, int32_t r1)
+/*  THE WINDOW a build lays, in chunks, as the tiles of the chunks it
+ *  covers.  --build-window names a list of them in tiles, and the first
+ *  is in use until incr_window_next steps on.  incr_window_set names
+ *  one outright.  The whole map where none is named. */
+
+void incr_window_set(const int32_t tiles[4])
 {
-    const int per = R_MAP / MESH_CHUNK;
-    const int a = mesh_chunk_of(c0, r0), b = mesh_chunk_of(c1, r1);
-    int       cr, cc;
-    for (cr = a / per; cr <= b / per; ++cr)
-        for (cc = a % per; cc <= b % per; ++cc)
-            if (s_want[cr * per + cc])
-                return 1;
-    return 0;
+    s_win_read = 1;
+    s_win_on   = tiles != NULL;
+    if (!tiles)
+        return;
+    s_win[0] = (tiles[0] < tiles[2] ? tiles[0] : tiles[2]) / MESH_CHUNK * MESH_CHUNK;
+    s_win[1] = (tiles[1] < tiles[3] ? tiles[1] : tiles[3]) / MESH_CHUNK * MESH_CHUNK;
+    s_win[2] = ((tiles[0] < tiles[2] ? tiles[2] : tiles[0]) / MESH_CHUNK + 1) * MESH_CHUNK;
+    s_win[3] = ((tiles[1] < tiles[3] ? tiles[3] : tiles[1]) / MESH_CHUNK + 1) * MESH_CHUNK;
 }
 
-/*  A tile's faces reach a quarter step past its edges (the seabed, the
- *  water's back faces) and its walls stand on its far edge.  So a tile
- *  builds when its own chunk or any neighbor's does. */
-int incr_want_tile(int32_t col, int32_t row)
+int incr_window_next(void)
 {
-    int32_t dc, dr;
-    if (!s_incr_on)
+    const char *s = g_dev.build_window;
+    int32_t     t[4];
+    int         n = 0;
+    if (!s || sscanf(s + s_win_at, "%d,%d,%d,%d%n", &t[0], &t[1], &t[2], &t[3], &n) != 4)
+        return 0;
+    s_win_at += n;
+    if (s[s_win_at] == ';')
+        ++s_win_at;
+    incr_window_set(t);
+    return 1;
+}
+
+int incr_window(int32_t box[INCR_BOXES][4])
+{
+    if (!s_win_read)
+    {
+        s_win_read = 1;
+        incr_window_next();
+    }
+    if (s_win_edit)
+    {
+        memcpy(box, s_edit, (size_t)s_n_edit * sizeof s_edit[0]);
+        return s_n_edit;
+    }
+    if (s_win_on)
+        memcpy(box[0], s_win, sizeof s_win);
+    return s_win_on;
+}
+
+/*  Whether a tile lies in one of the boxes, grown by `out` tiles on every
+ *  side.  Every tile where there are none. */
+static int in_boxes(int32_t col, int32_t row, int out)
+{
+    int32_t b[INCR_BOXES][4];
+    int     n = incr_window(b), k;
+    if (!n)
         return 1;
-    for (dr = -1; dr <= 1; ++dr)
-        for (dc = -1; dc <= 1; ++dc)
-            if (s_want[mesh_chunk_of(col + dc, row + dr)])
-                return 1;
+    for (k = 0; k < n; ++k)
+        if (col >= b[k][0] - out && row >= b[k][1] - out && col < b[k][2] + out && row < b[k][3] + out)
+            return 1;
     return 0;
 }
 
 /* ---- the partition ------------------------------------------------------ */
 
-/*  A stable counting sort of a triangle list by chunk.  The opaque list
- *  is sorted by terrain or network as well.  The triangles before
- *  `n_split` are the terrain's.  `start`/`count` come out in vertices.
- *  And `aux`, one entry a triangle, is permuted the same way.  The
- *  component ids must follow their geometry through the chunk sort, or
- *  the inspector would name whatever ended up in the slot. */
-static int bucket_sort(const RMeshVert *src, uint32_t n, int split, uint32_t n_split, RMeshVert *dst, uint32_t *start, uint32_t *count, int nk, uint32_t *aux)
+/*  Whether chunk `ch` lies in the window: every chunk where there is
+ *  none. */
+static int chunk_in(int ch)
 {
-    static uint32_t  key_cap;
-    uint32_t         fill[2 * MESH_CHUNKS], ntri = n / 3u, t, acc = 0;
-    int              k;
-    memset(count, 0, (size_t)nk * sizeof *count);
-    memset(start, 0, (size_t)nk * sizeof *start);
-    if (ntri == 0)
-        return 0;
-    if (key_cap < ntri)
-    {
-        uint16_t *nkey = (uint16_t *)realloc(s_key, ntri * sizeof *s_key);
-        if (!nkey)
-            return -1;
-        s_key     = nkey;
-        key_cap = ntri;
-    }
-    for (t = 0; t < ntri; ++t)
-    {
-        const RMeshVert *v0 = &src[3u * t];
-        int              c  = mesh_chunk_of((int32_t)floorf(v0->pos[0]), (int32_t)floorf(v0->pos[1]));
-        if (split) /* the opaque list: terrain before n_split, networks after (even when nothing follows) */
-            c = 2 * c + (3u * t >= n_split ? 1 : 0);
-        s_key[t] = (uint16_t)c;
-        ++count[c];
-    }
-    for (k = 0; k < nk; ++k)
-    {
-        start[k] = acc * 3u;
-        fill[k]  = start[k];
-        acc += count[k];
-    }
-    {
-        static uint32_t  auxcap;
-        if (aux)
-        {
-            if (auxcap < ntri)
-            {
-                uint32_t *na = (uint32_t *)realloc(s_auxtmp, ntri * sizeof *na);
-                if (!na)
-                    return -1;
-                s_auxtmp = na;
-                auxcap = ntri;
-            }
-            memcpy(s_auxtmp, aux, ntri * sizeof *aux);
-        }
-        for (t = 0; t < ntri; ++t)
-        {
-            memcpy(&dst[fill[s_key[t]]], &src[3u * t], 3u * sizeof(RMeshVert));
-            if (aux)
-                aux[fill[s_key[t]] / 3u] = s_auxtmp[t];
-            fill[s_key[t]] += 3u;
-        }
-    }
-    for (k = 0; k < nk; ++k)
-        count[k] *= 3u;
-    return 0;
+    return in_boxes(ch % (r_map / MESH_CHUNK) * MESH_CHUNK, ch / (r_map / MESH_CHUNK) * MESH_CHUNK, 0);
 }
 
-static int reserve(RMeshVert **buf, uint32_t *cap, uint32_t need)
-{
-    RMeshVert *nb;
-    if (*cap >= need)
-        return 0;
-    nb = (RMeshVert *)realloc(*buf, (size_t)need * sizeof *nb);
-    if (!nb)
-        return -1;
-    *buf = nb;
-    *cap = need;
-    return 0;
-}
-
-static void swap_lists(RMeshVert **a, uint32_t *ca, RMeshVert **b, uint32_t *cb)
-{
-    RMeshVert *t  = *a;
-    uint32_t   tc = *ca;
-    *a            = *b;
-    *ca           = *cb;
-    *b            = t;
-    *cb           = tc;
-}
-
-/*  After a full build: both lists sorted by chunk, the ranges set. */
+/*  After a full build: each list packed, the ranges set.  The emitter
+ *  filed every triangle in its chunk's list as it laid it, so there is
+ *  nothing to sort. */
 int mesh_partition(RMesh *m)
 {
     m->ranged = 0;
+    {
+        int ch;
+        for (ch = 0; ch < MESH_CHUNKS; ++ch)
+            m->chunk_laid[ch] = (uint8_t)chunk_in(ch);
+    }
+    {
+        double t0 = tms();
+        mesh_lists_pack(m);
+        if (g_dev.times)
+            dumpf("time  packed and cut into levels of detail: %.1f ms\n", tms() - t0);
+    }
+    mesh_ranges_set(m);
     if (m->n_land == 0)
         return 0;
-    if (reserve(&m->bucket, &m->cap_bucket, m->n_land) != 0 || reserve(&m->wbucket, &m->cap_wbucket, m->n_water) != 0)
-        return -1;
-    if (bucket_sort(m->land, m->n_land, 1, m->n_terrain, m->bucket, m->range_start, m->range_count, 2 * MESH_CHUNKS, m->tri_comp) != 0)
-        return -1;
-    swap_lists(&m->land, &m->cap_land, &m->bucket, &m->cap_bucket);
-    if (bucket_sort(m->water, m->n_water, 0, 0, m->wbucket, m->wrange_start, m->wrange_count, MESH_CHUNKS, NULL) != 0)
-        return -1;
-    if (m->n_water)
-        swap_lists(&m->water, &m->cap_water, &m->wbucket, &m->cap_wbucket);
     m->ranged = 1;
     memset(m->chunk_changed, 1, sizeof m->chunk_changed);
     return 0;
 }
 
-/* ---- the edit ----------------------------------------------------------- */
+/* ---- an edit's window ---------------------------------------------------- */
+
+/*  THE BOXES OF AN EDIT.  Each tile it changed marks the chunks within
+ *  net_halo (geo.c) of it.  A INCR_CHANGE_NEAR tile marks its own chunk.  Nothing a build lays reads the map further
+ *  than that.  Each group of marked chunks that touch, sides or corners,
+ *  is one box round them.  Boxes that overlap are one box.  Where there
+ *  are more than INCR_BOXES, the two nearest are one.  So an edit in two
+ *  places far apart lays the chunks near each, and none between. */
+static void edit_boxes(void)
+{
+    static int     ix   = -1;
+    int32_t        halo = (int32_t)geo_num(&ix, "net_halo"), per = r_map / MESH_CHUNK, t, k;
+    static uint8_t mark[MESH_CHUNKS_CAP];
+    static int     stack[MESH_CHUNKS_CAP];
+    int32_t        box[MESH_CHUNKS_CAP > 64 ? 64 : MESH_CHUNKS_CAP][4];
+    int            nb = 0, merged;
+    memset(mark, 0, sizeof mark);
+    for (t = 0; t < NT; ++t)
+        if (s_dirty[t])
+        {
+            int32_t col = t % r_map, row = t / r_map, cx, cy, h = s_dirty[t] == INCR_CHANGE_NEAR ? 0 : halo;
+            int32_t x0 = (col - h < 0 ? 0 : col - h) / MESH_CHUNK, x1 = (col + h >= r_map ? r_map - 1 : col + h) / MESH_CHUNK;
+            int32_t y0 = (row - h < 0 ? 0 : row - h) / MESH_CHUNK, y1 = (row + h >= r_map ? r_map - 1 : row + h) / MESH_CHUNK;
+            for (cy = y0; cy <= y1; ++cy)
+                for (cx = x0; cx <= x1; ++cx)
+                    mark[cy * per + cx] = 1;
+        }
+    /*  The groups, each as the chunks round it, by a flood over the marks. */
+    for (t = 0; t < per * per; ++t)
+    {
+        int     sp = 0;
+        int32_t b[4];
+        if (mark[t] != 1)
+            continue;
+        b[0] = b[2] = t % per, b[1] = b[3] = t / per;
+        mark[t] = 2, stack[sp++] = (int)t;
+        while (sp)
+        {
+            int     u  = stack[--sp], dx, dy;
+            int32_t ux = u % per, uy = u / per;
+            b[0] = ux < b[0] ? ux : b[0], b[2] = ux > b[2] ? ux : b[2];
+            b[1] = uy < b[1] ? uy : b[1], b[3] = uy > b[3] ? uy : b[3];
+            for (dy = -1; dy <= 1; ++dy)
+                for (dx = -1; dx <= 1; ++dx)
+                {
+                    int32_t vx = ux + dx, vy = uy + dy;
+                    if (vx < 0 || vy < 0 || vx >= per || vy >= per || mark[vy * per + vx] != 1)
+                        continue;
+                    mark[vy * per + vx] = 2, stack[sp++] = vy * per + vx;
+                }
+        }
+        if (nb < (int)(sizeof box / sizeof box[0]))
+            memcpy(box[nb++], b, sizeof b);
+        else
+        {
+            /*  More groups than boxes: this one joins the last. */
+            box[nb - 1][0] = b[0] < box[nb - 1][0] ? b[0] : box[nb - 1][0];
+            box[nb - 1][1] = b[1] < box[nb - 1][1] ? b[1] : box[nb - 1][1];
+            box[nb - 1][2] = b[2] > box[nb - 1][2] ? b[2] : box[nb - 1][2];
+            box[nb - 1][3] = b[3] > box[nb - 1][3] ? b[3] : box[nb - 1][3];
+        }
+    }
+    /*  Boxes that overlap are one, and then the nearest two while there
+     *  are too many.  A box is in chunks here, last column and row
+     *  included. */
+    do
+    {
+        int     i, j, bi = -1, bj = -1;
+        int32_t gap_best = 1 << 30;
+        merged           = 0;
+        for (i = 0; i < nb && !merged; ++i)
+            for (j = i + 1; j < nb && !merged; ++j)
+            {
+                int32_t gx  = box[j][0] > box[i][2] ? box[j][0] - box[i][2] - 1 : box[i][0] > box[j][2] ? box[i][0] - box[j][2] - 1
+                                                                                                        : -1;
+                int32_t gy  = box[j][1] > box[i][3] ? box[j][1] - box[i][3] - 1 : box[i][1] > box[j][3] ? box[i][1] - box[j][3] - 1
+                                                                                                        : -1;
+                int32_t gap = (gx > gy ? gx : gy);
+                if (gap < 0 || (nb > INCR_BOXES && gap < gap_best))
+                {
+                    bi = i, bj = j, gap_best = gap;
+                    if (gap < 0)
+                        merged = 1;
+                }
+            }
+        if (bi >= 0 && (merged || nb > INCR_BOXES))
+        {
+            box[bi][0] = box[bj][0] < box[bi][0] ? box[bj][0] : box[bi][0];
+            box[bi][1] = box[bj][1] < box[bi][1] ? box[bj][1] : box[bi][1];
+            box[bi][2] = box[bj][2] > box[bi][2] ? box[bj][2] : box[bi][2];
+            box[bi][3] = box[bj][3] > box[bi][3] ? box[bj][3] : box[bi][3];
+            memmove(box[bj], box[bj + 1], (size_t)(nb - bj - 1) * sizeof box[0]);
+            --nb;
+            merged = 1;
+        }
+    } while (merged);
+    /*  In tiles, last column and row + 1, as every window is. */
+    for (k = 0; k < nb; ++k)
+    {
+        s_edit[k][0] = box[k][0] * MESH_CHUNK, s_edit[k][1] = box[k][1] * MESH_CHUNK;
+        s_edit[k][2] = (box[k][2] + 1) * MESH_CHUNK, s_edit[k][3] = (box[k][3] + 1) * MESH_CHUNK;
+    }
+    s_n_edit = nb;
+    if (g_dev.times)
+        dumpf("time  edit window: %d box%s\n", nb, nb == 1 ? "" : "es");
+}
+
+/* ---- the build's begin ------------------------------------------------ */
 
 int incr_begin(RMesh *m, const RCity *c, const void *key, size_t keylen)
 {
     const RCity *o = m->snap;
     int32_t      i;
-    s_incr_on = 0;
-    s_ndirty  = 0;
-    if (g_dev.no_incr || !o || !m->snap_ok || !m->ranged || keylen != m->key_len || memcmp(key, m->key, keylen) != 0 ||
-        o->rotation != c->rotation)
+    int32_t      win[INCR_BOXES][4];
+    int          app_win;
+    s_ndirty    = 0;
+    s_win_build = 0;
+    s_win_edit  = 0;
+    s_quiet = s_quiet_next, s_quiet_next = 0;
+    app_win = incr_window(win);
+    if (g_dev.no_incr || !o || !m->snap_ok || !m->ranged || m->n_rl != MESH_RANGES * MESH_CHUNKS || keylen != m->key_len || memcmp(key, m->key, keylen) != 0)
     {
         if (g_dev.times)
-            dumpf("time  full build: %s\n", g_dev.no_incr ? "--no-incr" : !o || !m->snap_ok                                      ? "no snapshot"
-                                                                      : !m->ranged                                               ? "not partitioned"
-                                                                      : keylen != m->key_len || memcmp(key, m->key, keylen) != 0 ? "a different key"
-                                                                                                                                 : "a different rotation");
-        return 0;
+            dumpf("time  full build%s: %s\n", app_win ? " of a window" : "", g_dev.no_incr ? "--disable incremental" : !o || !m->snap_ok ? "no snapshot"
+                                                                                                                   : !m->ranged          ? "not partitioned"
+                                                                                                                                         : "a different key");
+        return INCR_WHOLE;
     }
     {
-        int by[6] = {0};
+        int by[7] = {0};
         for (i = 0; i < NT; ++i)
         {
-            int     f[6] = {o->altm[i] != c->altm[i], o->xbld[i] != c->xbld[i], o->xzon[i] != c->xzon[i], o->xter[i] != c->xter[i], o->xund[i] != c->xund[i], o->xbit[i] != c->xbit[i]};
-            uint8_t d    = (uint8_t)(f[0] | f[1] | f[2] | f[3] | f[4] | f[5]);
+            int     f[7];
+            uint8_t d = dirty_of(o, c, i, f);
             int     k;
-            for (k = 0; k < 6; ++k)
+            for (k = 0; k < 7; ++k)
                 by[k] += f[k];
             s_dirty[i] = d;
-            s_ndirty += d;
+            s_ndirty += d != 0;
         }
-        if (s_ndirty == 0)
-            return -1;
+        /*  A change too large for an edit.  With a window named, every
+         *  chunk is out of date, and each stands until a window lays it
+         *  again.  With none, the build is whole. */
         if (s_ndirty > NT / 8)
         {
             if (g_dev.times)
-            {
-                dumpf("time  full build: %d tiles changed (altm %d, xbld %d, xzon %d, xter %d, xund %d, xbit %d)\n", s_ndirty, by[0], by[1], by[2], by[3], by[4], by[5]);
-            }
-            return 0;
+                dumpf("time  full build%s: %d tiles changed (altm %d, xbld %d, xzon %d, xter %d, xund %d, xbit %d, street %d)\n",
+                      app_win ? " of a window" : "",
+                      s_ndirty,
+                      by[0],
+                      by[1],
+                      by[2],
+                      by[3],
+                      by[4],
+                      by[5],
+                      by[6]);
+            if (!app_win)
+                return INCR_WHOLE;
+            memset(m->chunk_laid, 0, sizeof m->chunk_laid);
+            s_ndirty = 0;
         }
     }
-    /*  The old lists step aside, still sorted and ranged.  The build
-     *  emits into the scratch, which the last partition left as large. */
-    s_old_n  = m->n_land;
-    s_old_nw = m->n_water;
-    swap_lists(&m->land, &m->cap_land, &m->bucket, &m->cap_bucket);
-    swap_lists(&m->water, &m->cap_water, &m->wbucket, &m->cap_wbucket);
-    memset(s_want, 0, sizeof s_want);
-    memset(&s_stat, 0, sizeof s_stat);
-    memset(s_near1, 0, sizeof s_near1);
-    dilate_into(s_dirty, s_near1, 1);
-    /*  The last build's component ids, kept while this one overwrites the
-     *  array: the chunks that stand take theirs from here (meet). */
+    /*  AN EDIT IS A WINDOW.  Nothing a build lays reads the map further
+     *  than net_halo (geo.c) tiles from it.  So an edit can change only
+     *  the chunks that near its tiles.  Those chunks are laid again
+     *  whole, and every other chunk stands. */
+    if (s_ndirty > 0)
     {
-        uint32_t ntri = s_old_n / 3u;
-        if (m->cap_tri_comp_old < ntri)
-        {
-            uint32_t *no = (uint32_t *)realloc(m->tri_comp_old, (ntri ? ntri : 1u) * sizeof *no);
-            if (!no)
-                return 0; /* no room to remember them: a full build says everything again */
-            m->tri_comp_old     = no;
-            m->cap_tri_comp_old = ntri;
-        }
-        if (ntri && m->tri_comp)
-            memcpy(m->tri_comp_old, m->tri_comp, (size_t)ntri * sizeof *m->tri_comp_old);
-        m->n_tri_comp_old = ntri;
+        edit_boxes();
+        s_win_edit = 1;
     }
-    s_incr_on = 1;
-    return 1;
+    /*  A WINDOW INTO THE MESH STANDING, under the same key: the window's
+     *  chunks are laid again whole and every other chunk stands as it
+     *  is. */
+    if (s_win_edit || (app_win && s_ndirty == 0))
+    {
+        s_old_n   = m->n_land;
+        s_old_nw  = m->n_water;
+        m->rl_old = m->rl, m->wl_old = m->wl;
+        m->rl = m->wl = NULL;
+        m->n_rl = m->n_wl = 0;
+        s_win_build       = 1;
+        return s_win_edit ? INCR_EDIT : INCR_WINDOW;
+    }
+    return INCR_STANDS;
 }
 
-/*  Did the edit come within a tile of this one?  Never, in a full build. */
-int incr_near(int32_t col, int32_t row)
-{
-    if (!s_incr_on || col < 0 || row < 0 || col >= R_MAP || row >= R_MAP)
-        return 0;
-    return s_near1[row * R_MAP + col];
-}
-
+/*  A window's build that failed leaves the mesh standing as it was. */
 void incr_abort(RMesh *m)
 {
-    if (!s_incr_on)
+    if (!s_win_build)
         return;
-    swap_lists(&m->land, &m->cap_land, &m->bucket, &m->cap_bucket);
-    swap_lists(&m->water, &m->cap_water, &m->wbucket, &m->cap_wbucket);
-    m->n_land  = s_old_n;
-    m->n_water = s_old_nw;
-    m->snap_ok = 0; /* the next build is a full one */
-    s_incr_on  = 0;
+    mesh_lists_free(m->rl, m->n_rl);
+    mesh_lists_free(m->wl, m->n_wl);
+    m->rl = m->rl_old, m->wl = m->wl_old;
+    m->n_rl = MESH_RANGES * MESH_CHUNKS, m->n_wl = MESH_CHUNKS;
+    m->rl_old = m->wl_old = NULL;
+    m->n_land             = s_old_n;
+    m->n_water            = s_old_nw;
+    m->snap_ok            = 0; /* the next build is a whole one */
+    s_win_build           = 0;
+    s_win_edit            = 0;
+}
+
+void incr_free(RMesh *m)
+{
+    if (m->snap)
+        rcity_free((RCity *)m->snap);
+    free(m->snap);
+    m->snap    = NULL;
+    m->snap_ok = 0;
 }
 
 int incr_snapshot(RMesh *m, const RCity *c, const void *key, size_t keylen)
@@ -349,387 +410,76 @@ int incr_snapshot(RMesh *m, const RCity *c, const void *key, size_t keylen)
         return -1;
     if (!m->snap)
     {
-        m->snap = malloc(sizeof *c); /* one RCity.  The field is a void pointer, so size it by the city */
+        m->snap = calloc(1, sizeof *c); /* one RCity.  The field is a void pointer, so size it by the city */
         if (!m->snap)
             return -1;
     }
-    memcpy(m->snap, c, sizeof *c);
+    if (rcity_copy((RCity *)m->snap, c) != 0)
+        return -1;
     memcpy(m->key, key, keylen);
     m->key_len = keylen;
     m->snap_ok = 1;
     return 0;
 }
 
-int incr_dirty(void)
+/*  The window's lists meet the mesh standing.  A chunk in the window
+ *  takes what this build laid.  Every other chunk keeps its own lists,
+ *  moved and not copied.  So a mesh built window by window is the mesh a
+ *  whole build lays, chunk for chunk. */
+int incr_window_end(RMesh *m)
 {
-    return s_incr_on ? s_ndirty : 0;
-}
-
-/* ---- the closure -------------------------------------------------------- */
-
-static void dilate_into(const uint8_t *src, uint8_t *dst, int r)
-{
-    int32_t col, row, dc, dr;
-    for (row = 0; row < R_MAP; ++row)
-        for (col = 0; col < R_MAP; ++col)
+    int32_t b[INCR_BOXES][4];
+    int     ch;
+    if (!s_win_build || !incr_window(b) || m->n_rl != MESH_RANGES * MESH_CHUNKS || m->n_wl != MESH_CHUNKS)
+        return -1;
+    s_win_build = 0;
+    {
+        double t0 = tms();
+        mesh_lists_pack(m);
+        if (g_dev.times)
+            dumpf("time  packed and cut into levels of detail: %.1f ms\n", tms() - t0);
+    }
+    for (ch = 0; ch < MESH_CHUNKS; ++ch)
+    {
+        int in               = chunk_in(ch);
+        m->chunk_changed[ch] = (uint8_t)in;
+        m->chunk_laid[ch] |= (uint8_t)in;
+        if (!in)
         {
-            if (!src[row * R_MAP + col])
-                continue;
-            for (dr = -r; dr <= r; ++dr)
-                for (dc = -r; dc <= r; ++dc)
-                {
-                    int32_t nc = col + dc, nr = row + dr;
-                    if (nc >= 0 && nr >= 0 && nc < R_MAP && nr < R_MAP)
-                        dst[nr * R_MAP + nc] = 1;
-                }
+            RMeshList q;
+            int       r;
+            for (r = MESH_RANGES * ch; r < MESH_RANGES * (ch + 1); ++r)
+                q = m->rl[r], m->rl[r] = m->rl_old[r], m->rl_old[r] = q;
+            q = m->wl[ch], m->wl[ch] = m->wl_old[ch], m->wl_old[ch] = q;
         }
-}
-
-static void mark_around(uint8_t *dst, int32_t col, int32_t row, int r)
-{
-    int32_t dc, dr;
-    for (dr = -r; dr <= r; ++dr)
-        for (dc = -r; dc <= r; ++dc)
-        {
-            int32_t nc = col + dc, nr = row + dr;
-            if (nc >= 0 && nr >= 0 && nc < R_MAP && nr < R_MAP)
-                dst[nr * R_MAP + nc] = 1;
-        }
-}
-
-static int any_near(const uint8_t *mask, int32_t col, int32_t row, int r)
-{
-    int32_t dc, dr;
-    for (dr = -r; dr <= r; ++dr)
-        for (dc = -r; dc <= r; ++dc)
-        {
-            int32_t nc = col + dc, nr = row + dr;
-            if (nc >= 0 && nr >= 0 && nc < R_MAP && nr < R_MAP && mask[nr * R_MAP + nc])
-                return 1;
-        }
+    }
+    mesh_ranges_set(m);
+    m->ranged = m->n_land > 0;
+    /*  An edit's network ranges, the last build's lists and this one's,
+     *  for what the edit shows going and coming. */
+    if (s_win_edit && !s_quiet)
+    {
+        for (ch = 0; ch < MESH_CHUNKS; ++ch)
+            if (chunk_in(ch))
+            {
+                int r = MESH_RANGES * ch + MESH_RANGE_STANDS;
+                show_chunk(r, &m->rl_old[r], &m->rl[r], m->range_start[r] / 3u);
+            }
+        show_settle();
+    }
+    s_win_edit = 0;
+    mesh_lists_free(m->rl_old, MESH_RANGES * MESH_CHUNKS);
+    mesh_lists_free(m->wl_old, MESH_CHUNKS);
+    m->rl_old = m->wl_old = NULL;
     return 0;
 }
 
-static void want_all(void)
+int incr_window_building(void)
 {
-    memset(s_want, 1, sizeof s_want);
+    return s_win_build;
 }
 
-/*  How far the closure reaches, in tiles, and every distance in it the
- *  SCRIPT'S (scripts/incr.lua).  Read once a build: the closure runs
- *  once, so a rule here costs one call.
- *
- *  With no rule there are no distances, and a closure with no distances
- *  would predict too few chunks and leave the last build's triangles
- *  standing.  So the answer to a missing rule is every chunk, which is
- *  slow and correct, rather than a guess, which is fast and wrong. */
-static const char *const REACH[] = {"band_fit", "spur", "band_ground", "band_spur", "band_margin", "segment"};
-enum
+int incr_window_edit(void)
 {
-    R_BAND_FIT = 0,
-    R_SPUR,
-    R_BAND_GROUND,
-    R_BAND_SPUR,
-    R_BAND_MARGIN,
-    R_SEGMENT,
-    R_N
-};
-
-/*  After the grading pass, with its tables complete: which chunks the
- *  building pass emits into.  `lines` says the tables were filled. */
-void incr_closure(int lines)
-{
-    static uint8_t near2[NT], changed[NT], want_t[NT], hot[SEGS_MAX], reemit[SEGS_MAX], hotb[SEGS_MAX];
-    const uint8_t *near1 = s_near1;
-    float          reach[R_N];
-    int32_t        t;
-    int            i, k, ns = 0, nb = 0;
-    if (!s_incr_on)
-        return;
-    memset(reach, 0, sizeof reach);
-    if (!script_numbers("incr_reach", REACH, reach, R_N))
-    {
-        R_ERR("mesh", "no arc.numbers(\"incr_reach\"): every chunk is built again");
-        want_all();
-        s_stat.chunks = MESH_CHUNKS;
-        return;
-    }
-    memset(near2, 0, sizeof near2);
-    memset(changed, 0, sizeof changed);
-    memset(want_t, 0, sizeof want_t);
-    dilate_into(s_dirty, near2, (int)reach[R_BAND_FIT]);
-    memcpy(changed, near1, sizeof changed);
-    if (lines)
-    {
-        ns = seg_table_count();
-        nb = band_count();
-        if (ns > SEGS_MAX || nb > SEGS_MAX || nb < 0)
-        {
-            want_all(); /* beyond the closure's tables: every chunk, still correct */
-            s_stat.chunks = MESH_CHUNKS;
-            return;
-        }
-        /* a segment through the dirty tiles' neighborhood has a new fit.  Its ends have new boxes */
-        for (i = 0; i < ns; ++i)
-        {
-            int32_t        col, row, cc, cr;
-            const int32_t *tc, *tr;
-            int            nt;
-            hot[i] = 0;
-            if (seg_table_get(i, &col, &row, &cc, &cr, &tc, &tr, &nt) != 0)
-                continue;
-            for (k = 0; k < nt && !hot[i]; ++k)
-                if (tc[k] >= 0 && tr[k] >= 0 && tc[k] < R_MAP && tr[k] < R_MAP && near1[tr[k] * R_MAP + tc[k]])
-                    hot[i] = 1;
-            if (hot[i])
-            {
-                changed[row * R_MAP + col] = 1;
-                changed[cr * R_MAP + cc]   = 1;
-                ++s_stat.hot;
-            }
-        }
-        /* a band near the dirty tiles has a new fit: the free-air check reads two tiles out */
-        for (i = 0; i < nb; ++i)
-        {
-            const int32_t *bt;
-            int            n;
-            hotb[i] = 0;
-            if (band_get(i, &bt, &n) != 0)
-                continue;
-            for (k = 0; k < n && !hotb[i]; ++k)
-                if (near2[bt[k]])
-                    hotb[i] = 1;
-        }
-        /* a spur beside a changed tile has a new join, and its band carries the lane drop */
-        for (t = 0; t < NT; ++t)
-        {
-            int32_t col = t % R_MAP, row = t / R_MAP;
-            if (!lane_spur_tile(col, row) || !any_near(changed, col, row, (int)reach[R_SPUR]))
-                continue;
-            for (i = 0; i < nb; ++i)
-            {
-                const int32_t *bt;
-                int            n;
-                if (hotb[i] || band_get(i, &bt, &n) != 0)
-                    continue;
-                for (k = 0; k < n; ++k)
-                    if (abs(bt[k] % R_MAP - col) <= 1 && abs(bt[k] / R_MAP - row) <= 1)
-                    {
-                        hotb[i] = 2;
-                        break;
-                    }
-            }
-        }
-        /*  A hot band's spurs and the lines at their feet, and the lines
-         *  its ends become: two tiles out.  A hot band whose fit came
-         *  out as before changes geometry only where the ground under it
-         *  did.  Its profile follows the ground, eased at a sixth of a
-         *  level a tile.  It also changes where a lane drop did.  Those
-         *  tiles of it, eight out from the edit and six from a changed
-         *  spur, with the same margin.  A band whose fit changed is
-         *  drawn again whole. */
-        for (i = 0; i < nb; ++i)
-        {
-            const int32_t *bt;
-            int            n, whole;
-            if (!hotb[i] || band_get(i, &bt, &n) != 0)
-                continue;
-            ++s_stat.hotb;
-            whole = !seg_table_unchanged(seg_table_band_index(i));
-            for (k = 0; k < n; ++k)
-            {
-                int32_t bc = bt[k] % R_MAP, br = bt[k] / R_MAP;
-                if (!whole && !any_near(s_dirty, bc, br, (int)reach[R_BAND_GROUND]) &&
-                    !(hotb[i] == 2 && any_near(changed, bc, br, (int)reach[R_BAND_SPUR])))
-                    continue;
-                mark_around(changed, bc, br, (int)reach[R_BAND_MARGIN]);
-                mark_around(want_t, bc, br, (int)reach[R_BAND_MARGIN]);
-            }
-        }
-        /* every segment through a changed tile is drawn again, a tile out */
-        for (i = 0; i < ns; ++i)
-        {
-            int32_t        col, row, cc, cr;
-            const int32_t *tc, *tr;
-            int            nt;
-            reemit[i] = 0;
-            if (seg_table_get(i, &col, &row, &cc, &cr, &tc, &tr, &nt) != 0)
-                continue;
-            for (k = 0; k < nt && !reemit[i]; ++k)
-                if (tc[k] >= 0 && tr[k] >= 0 && tc[k] < R_MAP && tr[k] < R_MAP && changed[tr[k] * R_MAP + tc[k]])
-                    reemit[i] = 1;
-            if (!reemit[i])
-                continue;
-            ++s_stat.reemit;
-            for (k = 0; k < nt; ++k)
-                if (tc[k] >= 0 && tr[k] >= 0 && tc[k] < R_MAP && tr[k] < R_MAP)
-                    mark_around(want_t, tc[k], tr[k], (int)reach[R_SEGMENT]);
-        }
-    }
-    s_stat.nseg  = ns;
-    s_stat.nband = nb;
-    /* the ground beside an edit: a face reads its neighbors' heights */
-    for (t = 0; t < NT; ++t)
-        if (near1[t])
-            want_t[t] = 1;
-    for (t = 0; t < NT; ++t)
-        if (want_t[t])
-            s_want[mesh_chunk_of(t % R_MAP, t / R_MAP)] = 1;
-    for (k = 0; k < MESH_CHUNKS; ++k)
-        s_stat.chunks += s_want[k];
-}
-
-/* ---- the meet --------------------------------------------------------- */
-
-/*  `aux` and `aux_old` are the component ids of the new list and of the
- *  last build's.  A chunk that stands keeps its old ids, a chunk redrawn
- *  takes the new ones, exactly as its triangles do.  So the inspector
- *  names the component that actually drew each triangle. */
-static int meet(RMeshVert **list, uint32_t *n, uint32_t *cap, int split, uint32_t n_split, const RMeshVert *old, uint32_t *start, uint32_t *count, int nk, uint32_t *aux, const uint32_t *aux_old)
-{
-    uint32_t   pstart[2 * MESH_CHUNKS], pcount[2 * MESH_CHUNKS], ostart[2 * MESH_CHUNKS], ocount[2 * MESH_CHUNKS];
-    uint32_t   need = 0, pos = 0;
-    RMeshVert *tmp = NULL;
-    int        k;
-    memcpy(ostart, start, (size_t)nk * sizeof *start);
-    memcpy(ocount, count, (size_t)nk * sizeof *count);
-    if (*n)
-    {
-        tmp = (RMeshVert *)malloc((size_t)*n * sizeof *tmp);
-        if (!tmp)
-            return -1;
-    }
-    /*  An edit's re-sort of one list: the component ids are the full
-     *  build's and are left alone here.  So the inspector names them
-     *  from the last full build until the next one. */
-    if (bucket_sort(*list, *n, split, n_split, tmp, pstart, pcount, nk, aux) != 0)
-    {
-        free(tmp);
-        return -1;
-    }
-    for (k = 0; k < nk; ++k)
-        need += s_want[nk == MESH_CHUNKS ? k : k / 2] ? pcount[k] : ocount[k];
-    if (reserve(list, cap, need) != 0)
-    {
-        free(tmp);
-        return -1;
-    }
-    {
-        static uint32_t  idcap;
-        if (aux && aux_old)
-        {
-            uint32_t ntri = need / 3u;
-            if (idcap < ntri)
-            {
-                uint32_t *ni = (uint32_t *)realloc(s_idtmp, (ntri ? ntri : 1u) * sizeof *ni);
-                if (!ni)
-                {
-                    free(tmp);
-                    return -1;
-                }
-                s_idtmp = ni;
-                idcap = ntri;
-            }
-        }
-        for (k = 0; k < nk; ++k)
-        {
-            int              w   = s_want[nk == MESH_CHUNKS ? k : k / 2];
-            const RMeshVert *src = w ? &tmp[pstart[k]] : &old[ostart[k]];
-            uint32_t         cnt = w ? pcount[k] : ocount[k];
-            /*  A network range the edit drew again: which of its pieces
-             *  changed, for what the edit shows coming. */
-            if (w && (k & 1) && aux && aux_old)
-                show_meet(&old[ostart[k]], &aux_old[ostart[k] / 3u], ocount[k] / 3u,
-                          &tmp[pstart[k]], &aux[pstart[k] / 3u], pcount[k] / 3u);
-            if (cnt)
-                memcpy(&(*list)[pos], src, (size_t)cnt * sizeof **list);
-            if (aux && aux_old && cnt)
-            {
-                const uint32_t *isrc = w ? &aux[pstart[k] / 3u] : &aux_old[ostart[k] / 3u];
-                memcpy(&s_idtmp[pos / 3u], isrc, (size_t)(cnt / 3u) * sizeof *s_idtmp);
-            }
-            start[k] = pos;
-            count[k] = cnt;
-            pos += cnt;
-        }
-        if (aux && aux_old && pos)
-            memcpy(aux, s_idtmp, (size_t)(pos / 3u) * sizeof *aux);
-    }
-    *n = pos;
-    free(tmp);
-    return 0;
-}
-
-int incr_end(RMesh *m)
-{
-    if (!s_incr_on)
-        return -1;
-    s_stat.emitted = m->n_land / 3u;
-    if (meet(&m->land, &m->n_land, &m->cap_land, 1, m->n_terrain, m->bucket, m->range_start, m->range_count, 2 * MESH_CHUNKS, m->tri_comp, m->tri_comp_old) != 0 ||
-        meet(&m->water, &m->n_water, &m->cap_water, 0, 0, m->wbucket, m->wrange_start, m->wrange_count, MESH_CHUNKS, NULL, NULL) != 0)
-        return -1;
-    m->ranged = 1;
-    memcpy(m->chunk_changed, s_want, sizeof m->chunk_changed);
-    if (g_dev.times)
-        dumpf("time  incremental  %d dirty tiles; %d hot, %d drawn again of %d segments; %d of %d bands; %d of %d chunks; %u triangles emitted, %u now\n",
-              s_ndirty,
-              s_stat.hot,
-              s_stat.reemit,
-              s_stat.nseg,
-              s_stat.hotb,
-              s_stat.nband,
-              s_stat.chunks,
-              MESH_CHUNKS,
-              (unsigned)s_stat.emitted,
-              (unsigned)(m->n_land / 3u));
-    s_incr_on = 0;
-    return 0;
-}
-
-/* ---- the check ---------------------------------------------------------- */
-
-/*  Every triangle in a range keys to that range's chunk, the ranges tile
- *  the list: what a meet must keep true. */
-int mesh_ranges_check(const RMesh *m, int verbose)
-{
-    uint32_t bad = 0, pos = 0, i;
-    int      k;
-    if (!m->ranged)
-    {
-        if (verbose)
-            dumpf("chunks  the mesh is not partitioned\n");
-        return m->n_land ? 1 : 0;
-    }
-    for (k = 0; k < 2 * MESH_CHUNKS; ++k)
-    {
-        if (m->range_start[k] != pos)
-            ++bad;
-        pos += m->range_count[k];
-        for (i = 0; i < m->range_count[k]; i += 3)
-        {
-            const RMeshVert *v = &m->land[m->range_start[k] + i];
-            if (mesh_chunk_of((int32_t)floorf(v->pos[0]), (int32_t)floorf(v->pos[1])) != k / 2)
-                ++bad;
-        }
-    }
-    if (pos != m->n_land)
-        ++bad;
-    pos = 0;
-    for (k = 0; k < MESH_CHUNKS; ++k)
-    {
-        if (m->wrange_start[k] != pos)
-            ++bad;
-        pos += m->wrange_count[k];
-        for (i = 0; i < m->wrange_count[k]; i += 3)
-        {
-            const RMeshVert *v = &m->water[m->wrange_start[k] + i];
-            if (mesh_chunk_of((int32_t)floorf(v->pos[0]), (int32_t)floorf(v->pos[1])) != k)
-                ++bad;
-        }
-    }
-    if (pos != m->n_water)
-        ++bad;
-    if (verbose)
-        dumpf("chunks  %d land and %d water ranges, %u triangles out of place\n", 2 * MESH_CHUNKS, MESH_CHUNKS, (unsigned)bad);
-    return bad != 0;
+    return s_win_edit && !s_quiet;
 }

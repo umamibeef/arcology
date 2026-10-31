@@ -22,8 +22,10 @@
  * ==================================================================== */
 #include "arco.h"
 #include "lodepng.h"
+#include "world.h"
 
 #include <stdarg.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -313,115 +315,114 @@ static long json_int(const char *js, const char *key, long dflt)
 }
 
 /* ---- layers -------------------------------------------------------- */
-/*  Every grid the world holds, with its element size and resolution
- *  divisor.  Adding a layer is a line here and a file in the archive.  A
- *  reader that does not know the name simply does not ask for it. */
+/*  Every grid a chunk holds, with its element size and its side.  Adding
+ *  a layer is a line here and a file in the archive.  A reader that does
+ *  not know the name simply does not ask for it. */
 typedef struct
 {
     const char *name;
-    void       *base;
+    size_t      off;  /* where it lies in a TileChunk */
     size_t      elem; /* 1 or 2 bytes */
-    int         div;  /* 1 full res, 2 half, 4 quarter */
+    int         side; /* cells a side */
 } Layer;
 
-static void layers_of(City *c, Layer *L, int *n)
+#define LAYER(nm, sz, sd) {#nm, offsetof(TileChunk, nm), (sz), (sd)}
+static const Layer LAYERS[] = {
+    LAYER(altm, 2, TILE_CHUNK),
+    LAYER(xbld, 1, TILE_CHUNK),
+    LAYER(xzon, 1, TILE_CHUNK),
+    LAYER(xter, 1, TILE_CHUNK),
+    LAYER(xund, 1, TILE_CHUNK),
+    LAYER(xbit, 1, TILE_CHUNK),
+    LAYER(xtxt, 1, TILE_CHUNK),
+    LAYER(owner, 1, TILE_CHUNK),
+    LAYER(street, 1, TILE_CHUNK),
+    LAYER(xtrf, 1, TILE_HALF_CHUNK),
+    LAYER(xplt, 1, TILE_HALF_CHUNK),
+    LAYER(xval, 1, TILE_HALF_CHUNK),
+    LAYER(xcrm, 1, TILE_HALF_CHUNK),
+    LAYER(xplc, 1, TILE_QTR_CHUNK),
+    LAYER(xfir, 1, TILE_QTR_CHUNK),
+    LAYER(xpop, 1, TILE_QTR_CHUNK),
+    LAYER(xrog, 1, TILE_QTR_CHUNK),
+};
+#undef LAYER
+#define N_LAYERS ((int)(sizeof LAYERS / sizeof LAYERS[0]))
+
+/*  A chunk's layers, little-endian.  Little-endian is the one place this
+ *  format breaks with the original on purpose: the 1995 file is
+ *  big-endian because a 68000 was.  Every machine that will ever open a
+ *  .arco is not.  The street layer is written only where the world
+ *  has one.  A world imported from a .sc2 has none until it is worked
+ *  out.  A file without it is worked out again when it is read. */
+static int put_chunk(Zip *z, const TileChunk *k, int with_street)
 {
-    int i = 0;
-#define ADD(nm, arr, sz, dv)       \
-    do                             \
-    {                              \
-        L[i].name = nm;            \
-        L[i].base = (void *)(arr); \
-        L[i].elem = (sz);          \
-        L[i].div  = (dv);          \
-        i++;                       \
-    } while (0)
-    ADD("altm", c->altm, 2, 1);
-    ADD("xbld", c->xbld, 1, 1);
-    ADD("xzon", c->xzon, 1, 1);
-    ADD("xter", c->xter, 1, 1);
-    ADD("xund", c->xund, 1, 1);
-    ADD("xbit", c->xbit, 1, 1);
-    ADD("xtxt", c->xtxt, 1, 1);
-    ADD("xtrf", c->xtrf, 1, 2);
-    ADD("xplt", c->xplt, 1, 2);
-    ADD("xval", c->xval, 1, 2);
-    ADD("xcrm", c->xcrm, 1, 2);
-    ADD("xplc", c->xplc, 1, 4);
-    ADD("xfir", c->xfir, 1, 4);
-    ADD("xpop", c->xpop, 1, 4);
-    ADD("xrog", c->xrog, 1, 4);
-#undef ADD
-    *n = i;
-}
-
-/*  A layer, chunk by chunk, little-endian.  Little-endian is the one
- *  place this format breaks with the original on purpose: the 1995 file
- *  is big-endian because a 68000 was.  Every machine that will ever open
- *  a .arco is not. */
-static int put_layer(Zip *z, int cx, int cy, const Layer *l)
-{
-    int      side = ARCO_CHUNK / l->div;
-    int      w    = MAP_W / l->div;
-    size_t   n    = (size_t)side * (size_t)side * l->elem;
-    uint8_t *tile = (uint8_t *)malloc(n);
-    char     path[160];
-    int      y, x, rc;
-
-    if (!tile)
-        return -1;
-    for (y = 0; y < side; y++)
-        for (x = 0; x < side; x++)
-        {
-            size_t src = (size_t)(cy * side + y) * (size_t)w +
-                         (size_t)(cx * side + x);
-            size_t dst = ((size_t)y * (size_t)side + (size_t)x) * l->elem;
-            if (l->elem == 2)
-            {
-                uint16_t v    = ((const uint16_t *)l->base)[src];
-                tile[dst]     = (uint8_t)(v & 0xFF);
-                tile[dst + 1] = (uint8_t)(v >> 8);
-            }
-            else
-                tile[dst] = ((const uint8_t *)l->base)[src];
-        }
-    snprintf(path, sizeof path, "chunks/%d_%d/%s.bin", cx, cy, l->name);
-    rc = zip_add(z, path, tile, n);
-    free(tile);
-    return rc;
-}
-
-static int get_layer(const Ar *a, int cx, int cy, const Layer *l)
-{
-    int      side = ARCO_CHUNK / l->div;
-    int      w    = MAP_W / l->div;
-    size_t   want = (size_t)side * (size_t)side * l->elem, got = 0;
-    char     path[160];
-    uint8_t *tile;
-    int      y, x;
-
-    snprintf(path, sizeof path, "chunks/%d_%d/%s.bin", cx, cy, l->name);
-    tile = ar_get(a, path, &got);
-    if (!tile)
-        return 0; /* a layer the file does not carry stays as it was */
-    if (got != want)
+    int l;
+    for (l = 0; l < N_LAYERS; l++)
     {
-        free(tile);
-        return -1;
+        const Layer *ly = &LAYERS[l];
+        if (!with_street && !strcmp(ly->name, "street"))
+            continue;
+        size_t         n = (size_t)ly->side * (size_t)ly->side * ly->elem;
+        const uint8_t *s = (const uint8_t *)k + ly->off;
+        uint8_t       *d = (uint8_t *)malloc(n);
+        char           path[160];
+        size_t         i;
+        int            rc;
+        if (!d)
+            return -1;
+        if (ly->elem == 2)
+            for (i = 0; i < n / 2; i++)
+            {
+                uint16_t v   = ((const uint16_t *)(const void *)s)[i];
+                d[2 * i]     = (uint8_t)(v & 0xFF);
+                d[2 * i + 1] = (uint8_t)(v >> 8);
+            }
+        else
+            memcpy(d, s, n);
+        snprintf(path, sizeof path, "chunks/%d_%d/%s.bin", (int)k->cx, (int)k->cy, ly->name);
+        rc = zip_add(z, path, d, n);
+        free(d);
+        if (rc)
+            return -1;
     }
-    for (y = 0; y < side; y++)
-        for (x = 0; x < side; x++)
+    return 0;
+}
+
+/*  A layer the file does not carry stays as it was, which is 0.  The
+ *  caller learns whether the owner and the street layer were there, so
+ *  either can be worked out from the tiles where it was not. */
+static int get_chunk(const Ar *a, TileChunk *k, int *had_owner, int *had_street)
+{
+    int l;
+    *had_owner = *had_street = 0;
+    for (l = 0; l < N_LAYERS; l++)
+    {
+        const Layer *ly   = &LAYERS[l];
+        size_t       want = (size_t)ly->side * (size_t)ly->side * ly->elem, got = 0, i;
+        uint8_t     *d = (uint8_t *)k + ly->off;
+        char         path[160];
+        uint8_t     *s;
+        snprintf(path, sizeof path, "chunks/%d_%d/%s.bin", (int)k->cx, (int)k->cy, ly->name);
+        s = ar_get(a, path, &got);
+        if (!s)
+            continue;
+        if (got != want)
         {
-            size_t dst = (size_t)(cy * side + y) * (size_t)w +
-                         (size_t)(cx * side + x);
-            size_t src = ((size_t)y * (size_t)side + (size_t)x) * l->elem;
-            if (l->elem == 2)
-                ((uint16_t *)l->base)[dst] =
-                    (uint16_t)(tile[src] | ((uint16_t)tile[src + 1] << 8));
-            else
-                ((uint8_t *)l->base)[dst] = tile[src];
+            free(s);
+            return -1;
         }
-    free(tile);
+        if (ly->elem == 2)
+            for (i = 0; i < want / 2; i++)
+                ((uint16_t *)(void *)d)[i] = (uint16_t)(s[2 * i] | ((uint16_t)s[2 * i + 1] << 8));
+        else
+            memcpy(d, s, want);
+        if (!strcmp(ly->name, "owner"))
+            *had_owner = 1;
+        if (!strcmp(ly->name, "street"))
+            *had_street = 1;
+        free(s);
+    }
     return 0;
 }
 
@@ -462,66 +463,56 @@ static void city_name(const City *c, char *out, size_t n)
     out[len] = 0;
 }
 
-static int write_manifest(Zip *z, const City *c)
+static int write_manifest(Zip *z, const World *w)
 {
-    Buf  b = {0};
-    char name[128];
-    int  chunks = MAP_W / ARCO_CHUNK;
-    int  rc;
+    Buf     b = {0};
+    int32_t i, x0, y0, x1, y1;
+    int     rc;
 
-    {
-        char raw[64];
-        city_name(c, raw, sizeof raw);
-        json_escape(name, sizeof name, raw[0] ? raw : "Untitled");
-    }
+    world_bounds(w, &x0, &y0, &x1, &y1);
     buf_fmt(&b, "{\n");
     buf_fmt(&b, "  \"format\": \"arcology-world\",\n");
     buf_fmt(&b, "  \"version\": %d,\n", ARCO_VERSION);
     buf_fmt(&b, "\n");
-    buf_fmt(&b, "  \"_\": \"Grids live in chunks/<cx>_<cy>/<layer>.bin, "
-                "little-endian, row-major, chunk_size square. A layer file "
-                "that is absent is simply not carried.\",\n\n");
-    buf_fmt(&b, "  \"chunk_size\": %d,\n", ARCO_CHUNK);
-    buf_fmt(&b, "  \"chunks\": { \"x\": %d, \"y\": %d },\n", chunks, chunks);
-    buf_fmt(&b, "  \"tiles\":  { \"w\": %d, \"h\": %d },\n", MAP_W, MAP_H);
-    buf_fmt(&b, "\n");
-    /*  The list is one long today.  It is a LIST because the format
-     *  exists to hold a region, and a region is many. */
+    buf_fmt(&b, "  \"_\": \"The map is in chunks/<cx>_<cy>/<layer>.bin, little-endian, row-major, chunk_size "
+                "square, one directory for each chunk listed. A chunk not listed is bare land. The world is as "
+                "large as its chunks and grows with them. A layer file that is absent is simply not carried.\",\n\n");
+    buf_fmt(&b, "  \"chunk_size\": %d,\n", TILE_CHUNK);
+    buf_fmt(&b, "  \"drive_left\": %d,\n", w->map.drive_left ? 1 : 0);
+    buf_fmt(&b, "  \"bounds\": { \"x0\": %d, \"y0\": %d, \"x1\": %d, \"y1\": %d },\n", (int)x0, (int)y0, (int)x1, (int)y1);
+    buf_fmt(&b, "  \"chunk_list\": \"");
+    for (i = 0; i < w->map.n; i++)
+        buf_fmt(&b, "%s%d_%d", i ? "," : "", (int)w->map.all[i]->cx, (int)w->map.all[i]->cy);
+    buf_fmt(&b, "\",\n\n");
+    buf_fmt(&b, "  \"_cities\": \"Each city runs the window its origin and extent give, and owns the tiles "
+                "chunks/*/owner.bin gives its number plus one.\",\n");
+    buf_fmt(&b, "  \"_streets\": \"chunks/*/street.bin is the player's street data, a byte a tile: the edge to the "
+                "tile in the next column in the low four bits and the edge to the tile in the next row in the high "
+                "four. In an edge, bits 0-1 are the class (0 a street, 1 an avenue, 2 a boulevard) and bits 2-3 the "
+                "direction (0 two-way, 1 one way from this tile to the next, 2 one way from the next tile to this "
+                "one). An edge counts only while the two tiles join across it.\",\n");
     buf_fmt(&b, "  \"cities\": [\n");
-    buf_fmt(&b, "    { \"id\": \"0\", \"name\": \"%s\",\n", name);
-    buf_fmt(&b, "      \"origin\": { \"x\": 0, \"y\": 0 },\n");
-    buf_fmt(&b, "      \"state\": \"cities/0.json\" }\n");
-    buf_fmt(&b, "  ],\n");
-    buf_fmt(&b, "\n");
-    buf_fmt(&b, "  \"origin\": {\n");
-    buf_fmt(&b, "    \"_\": \"Where this world came from. A world imported "
-                "from a 1995 save keeps its MISC block in cities/<id>/"
-                "misc.bin, which is what makes the round trip exact while "
-                "fields are still being named.\",\n");
-    buf_fmt(&b, "    \"imported_from\": \"sc2\",\n");
-    /*  The order the 1995 file listed its chunks in.  It has no meaning
-     *  to this format.  .arco stores layers by name.  But writing a .sc2
-     *  back out in a different order would change the bytes.  A round
-     *  trip that is only ALMOST exact is not worth having. */
-    buf_fmt(&b, "    \"sc2_chunk_order\": \"");
+    for (i = 0; i < w->n_city; i++)
     {
-        int k;
-        for (k = 0; k < c->n_chunks; k++)
-            buf_fmt(&b, "%s%s", k ? "," : "", c->order[k]);
+        char raw[64], name[128];
+        city_name(w->city[i].city, raw, sizeof raw);
+        json_escape(name, sizeof name, raw[0] ? raw : "Untitled");
+        buf_fmt(&b, "    { \"id\": \"%d\", \"name\": \"%s\", \"origin\": { \"x\": %d, \"y\": %d }, ", (int)i, name, (int)w->city[i].city->ox, (int)w->city[i].city->oy);
+        buf_fmt(&b, "\"window\": { \"w\": %d, \"h\": %d }, ", (int)w->city[i].city->w, (int)w->city[i].city->h);
+        buf_fmt(&b, "\"state\": \"cities/%d.json\" }%s\n", (int)i, i + 1 < w->n_city ? "," : "");
     }
-    buf_fmt(&b, "\"\n");
-    buf_fmt(&b, "  }\n");
+    buf_fmt(&b, "  ]\n");
     buf_fmt(&b, "}\n");
     rc = zip_add(z, "world.json", b.p, b.n);
     free(b.p);
     return rc;
 }
 
-static int write_city(Zip *z, const City *c)
+static int write_city(Zip *z, const City *c, int id)
 {
     Buf  b = {0};
-    char name[128];
-    int  rc;
+    char name[128], p[64];
+    int  rc, k;
 
     {
         char raw[64];
@@ -532,7 +523,6 @@ static int write_city(Zip *z, const City *c)
     buf_fmt(&b, "  \"name\": \"%s\",\n", name);
     buf_fmt(&b, "  \"founded\": %d,\n", (int)c->year_founded);
     buf_fmt(&b, "  \"date\": %d,\n", (int)c->date);
-    buf_fmt(&b, "  \"rotation\": %d,\n", (int)c->rotation);
     buf_fmt(&b, "  \"difficulty\": %d,\n", (int)c->difficulty);
     buf_fmt(&b, "  \"funds\": %d,\n", (int)c->funds);
     buf_fmt(&b, "  \"bonds\": %d,\n", (int)c->bonds);
@@ -540,7 +530,7 @@ static int write_city(Zip *z, const City *c)
     buf_fmt(&b, "\n");
     buf_fmt(&b, "  \"_\": \"These are the fields the reconstruction has "
                 "named. They are written so the file can be read, but "
-                "misc.bin is what is loaded -- see world.json.\",\n\n");
+                "misc.bin is what is loaded.\",\n\n");
     buf_fmt(&b, "  \"indicators\": {\n");
     buf_fmt(&b, "    \"land_value\": %d,\n", (int)c->land_value_tot);
     buf_fmt(&b, "    \"crime\": %d,\n", (int)c->crime_tot);
@@ -553,79 +543,100 @@ static int write_city(Zip *z, const City *c)
     buf_fmt(&b, "    \"power_supplied_pct\": %d,\n", (int)c->power_pct);
     buf_fmt(&b, "    \"water_supplied_pct\": %d\n", (int)c->water_pct);
     buf_fmt(&b, "  },\n");
+    /*  Where the world came from, and the order the 1995 file listed its
+     *  chunks in.  Both are a record for a reader.  This format stores
+     *  layers by name, and nothing is built from the order. */
+    buf_fmt(&b, "  \"imported_from\": \"%s\",\n", c->n_chunks ? "sc2" : "arcology");
+    buf_fmt(&b, "  \"sc2_chunk_order\": \"");
+    for (k = 0; k < c->n_chunks; k++)
+        buf_fmt(&b, "%s%s", k ? "," : "", c->order[k]);
+    buf_fmt(&b, "\",\n");
     buf_fmt(&b, "  \"state\": {\n");
-    buf_fmt(&b, "    \"misc\": \"cities/0/misc.bin\",\n");
-    buf_fmt(&b, "    \"signs\": \"cities/0/xlab.bin\",\n");
-    buf_fmt(&b, "    \"microsim\": \"cities/0/xmic.bin\",\n");
-    buf_fmt(&b, "    \"things\": \"cities/0/xthg.bin\",\n");
-    buf_fmt(&b, "    \"graphs\": \"cities/0/graphs.bin\"\n");
+    buf_fmt(&b, "    \"misc\": \"cities/%d/misc.bin\",\n", id);
+    buf_fmt(&b, "    \"signs\": \"cities/%d/xlab.bin\",\n", id);
+    buf_fmt(&b, "    \"microsim\": \"cities/%d/xmic.bin\",\n", id);
+    buf_fmt(&b, "    \"things\": \"cities/%d/xthg.bin\",\n", id);
+    buf_fmt(&b, "    \"graphs\": \"cities/%d/graphs.bin\"\n", id);
     buf_fmt(&b, "  }\n");
     buf_fmt(&b, "}\n");
-    rc = zip_add(z, "cities/0.json", b.p, b.n);
+    snprintf(p, sizeof p, "cities/%d.json", id);
+    rc = zip_add(z, p, b.p, b.n);
     free(b.p);
     return rc;
 }
 
-/* ---- the public pair ----------------------------------------------- */
-int arco_save(const char *path, const City *c)
+/*  A city's own state.  MISC is written little-endian, with the named
+ *  scalars folded back in.  The graph history follows, and then every
+ *  chunk the reconstruction does not take apart, verbatim. */
+static int write_state(Zip *z, const City *c, int id)
 {
-    Zip     z = {{0}, NULL, 0, 0};
-    Layer   L[24];
-    int     n, i, cx, cy, chunks = MAP_W / ARCO_CHUNK;
-    int32_t misc_le[MISC_LONGS];
+    static int32_t misc[MISC_LONGS];
+    static int32_t misc_le[MISC_LONGS];
+    static int32_t g[N_GRAPH * GRAPH_SAMPLES];
+    char           p[64];
+    int            i, gi, gk;
 
-    if (write_manifest(&z, c) || write_city(&z, c))
-        goto fail;
-
-    layers_of((City *)c, L, &n);
-    for (cy = 0; cy < chunks; cy++)
-        for (cx = 0; cx < chunks; cx++)
-            for (i = 0; i < n; i++)
-                if (put_layer(&z, cx, cy, &L[i]))
-                    goto fail;
-
-    /*  MISC little-endian, and the four chunks the reconstruction has
-     *  not taken apart yet, verbatim.  Between them these are what make
-     *  a converted save convert back byte for byte. */
+    memcpy(misc, c->misc, sizeof misc);
+    city_scalars_to_misc(c, misc);
     for (i = 0; i < MISC_LONGS; i++)
     {
-        uint32_t v                  = (uint32_t)c->misc[i];
+        uint32_t v                  = (uint32_t)misc[i];
         ((uint8_t *)&misc_le[i])[0] = (uint8_t)(v & 0xFF);
         ((uint8_t *)&misc_le[i])[1] = (uint8_t)((v >> 8) & 0xFF);
         ((uint8_t *)&misc_le[i])[2] = (uint8_t)((v >> 16) & 0xFF);
         ((uint8_t *)&misc_le[i])[3] = (uint8_t)((v >> 24) & 0xFF);
     }
-    if (zip_add(&z, "cities/0/misc.bin", misc_le, sizeof misc_le))
-        goto fail;
-    if (c->xlab && zip_add(&z, "cities/0/xlab.bin", c->xlab, c->xlab_len))
-        goto fail;
-    if (c->xmic && zip_add(&z, "cities/0/xmic.bin", c->xmic, c->xmic_len))
-        goto fail;
-    if (c->xthg && zip_add(&z, "cities/0/xthg.bin", c->xthg, c->xthg_len))
-        goto fail;
+    snprintf(p, sizeof p, "cities/%d/misc.bin", id);
+    if (zip_add(z, p, misc_le, sizeof misc_le))
+        return -1;
+#define RAW(f)                                             \
+    do                                                     \
+    {                                                      \
+        snprintf(p, sizeof p, "cities/%d/" #f ".bin", id); \
+        if (c->f && zip_add(z, p, c->f, c->f##_len))       \
+            return -1;                                     \
+    } while (0)
+    RAW(xlab);
+    RAW(xmic);
+    RAW(xthg);
+    RAW(cnam);
+#undef RAW
     /*  The graph history is NOT passed through as the original's blob.
      *  XGRP is graph[16][52] written big-endian.  So .arco stores the
      *  numbers themselves, little-endian, under a name that says what
-     *  they are. city_save rebuilds the chunk from them. */
-    {
-        static int32_t g[N_GRAPH * GRAPH_SAMPLES];
-        int            gi, gk;
-        for (gi = 0; gi < N_GRAPH; gi++)
-            for (gk = 0; gk < GRAPH_SAMPLES; gk++)
-            {
-                uint32_t v = (uint32_t)c->graph[gi][gk];
-                uint8_t *o = (uint8_t *)&g[gi * GRAPH_SAMPLES + gk];
-                o[0]       = (uint8_t)(v & 0xFF);
-                o[1]       = (uint8_t)((v >> 8) & 0xFF);
-                o[2]       = (uint8_t)((v >> 16) & 0xFF);
-                o[3]       = (uint8_t)((v >> 24) & 0xFF);
-            }
-        if (zip_add(&z, "cities/0/graphs.bin", g, sizeof g))
-            goto fail;
-    }
-    if (c->cnam && zip_add(&z, "cities/0/cnam.bin", c->cnam, c->cnam_len))
-        goto fail;
+     *  they are. */
+    for (gi = 0; gi < N_GRAPH; gi++)
+        for (gk = 0; gk < GRAPH_SAMPLES; gk++)
+        {
+            uint32_t v = (uint32_t)c->graph[gi][gk];
+            uint8_t *o = (uint8_t *)&g[gi * GRAPH_SAMPLES + gk];
+            o[0]       = (uint8_t)(v & 0xFF);
+            o[1]       = (uint8_t)((v >> 8) & 0xFF);
+            o[2]       = (uint8_t)((v >> 16) & 0xFF);
+            o[3]       = (uint8_t)((v >> 24) & 0xFF);
+        }
+    snprintf(p, sizeof p, "cities/%d/graphs.bin", id);
+    return zip_add(z, p, g, sizeof g);
+}
 
+/* ---- the public calls ---------------------------------------------- */
+int arco_save_world(const char *path, const World *w, const ArcoFile *extra, int n_extra)
+{
+    Zip     z = {{0}, NULL, 0, 0};
+    int32_t i;
+
+    if (write_manifest(&z, w))
+        goto fail;
+    for (i = 0; i < w->map.n; i++)
+        if (put_chunk(&z, w->map.all[i], w->map.has_streets))
+            goto fail;
+    for (i = 0; i < w->n_city; i++)
+        if (write_city(&z, w->city[i].city, (int)i) || write_state(&z, w->city[i].city, (int)i))
+            goto fail;
+    /*  The caller's own files, as they were handed over. */
+    for (i = 0; i < n_extra; i++)
+        if (extra[i].name && zip_add(&z, extra[i].name, extra[i].data, extra[i].len))
+            goto fail;
     if (zip_finish(&z, path))
         goto fail;
     zip_free(&z);
@@ -633,6 +644,31 @@ int arco_save(const char *path, const City *c)
 fail:
     zip_free(&z);
     return -1;
+}
+
+/*  One city as a world of its own: its tiles and its records, lent to a
+ *  world for the writing and never taken. */
+static int arco_save_with(const char *path, const City *c, const ArcoFile *extra, int n_extra)
+{
+    World     w;
+    WorldCity one;
+    int       rc = -1;
+    if (world_init(&w) == 0 && tilemap_copy(&w.map, c->map) == 0)
+    {
+        one.city = (City *)c;
+        w.city   = &one;
+        w.n_city = 1;
+        rc       = arco_save_world(path, &w, extra, n_extra);
+        w.city   = NULL;
+        w.n_city = 0;
+    }
+    world_free(&w);
+    return rc;
+}
+
+int arco_save(const char *path, const City *c)
+{
+    return arco_save_with(path, c, NULL, 0);
 }
 
 static uint8_t **slot_for(City *c, const char *k, size_t **len)
@@ -666,76 +702,83 @@ static uint8_t **slot_for(City *c, const char *k, size_t **len)
     return NULL;
 }
 
-int arco_load(const char *path, City *c)
+/*  The archive's bytes, whole.  0 on success. */
+static int ar_open(const char *path, Ar *a)
 {
-    Ar                       a  = {NULL, 0};
-    FILE                    *f  = fopen(path, "rb");
-    uint8_t                 *js = NULL, *mb = NULL;
-    size_t                   jn = 0, mn = 0;
-    Layer                    L[24];
-    int                      n, i, cx, cy, chunks, rc = -1;
-    long                     side;
-    static const char *const RAW[] = {"xlab", "xmic", "xthg", "cnam", NULL};
-
+    FILE *f = fopen(path, "rb");
+    a->raw  = NULL;
+    a->len  = 0;
     if (!f)
         return -1;
     fseek(f, 0, SEEK_END);
-    a.len = (size_t)ftell(f);
+    a->len = (size_t)ftell(f);
     fseek(f, 0, SEEK_SET);
-    a.raw = (uint8_t *)malloc(a.len ? a.len : 1);
-    if (!a.raw || fread(a.raw, 1, a.len, f) != a.len)
+    a->raw = (uint8_t *)malloc(a->len ? a->len : 1);
+    if (!a->raw || fread(a->raw, 1, a->len, f) != a->len)
     {
         fclose(f);
-        free(a.raw);
+        free(a->raw);
+        a->raw = NULL;
         return -1;
     }
     fclose(f);
+    return 0;
+}
 
-    js = ar_get(&a, "world.json", &jn);
-    if (!js)
-        goto done;
-    /*  NUL-terminate before any strstr touches it. */
+/*  A file of the archive as a NUL-terminated string, which the caller
+ *  frees.  NULL where there is none. */
+static char *ar_text(const Ar *a, const char *name)
+{
+    size_t   n = 0;
+    uint8_t *s = ar_get(a, name, &n), *t;
+    if (!s)
+        return NULL;
+    t = (uint8_t *)realloc(s, n + 1);
+    if (!t)
     {
-        uint8_t *t = (uint8_t *)realloc(js, jn + 1);
-        if (!t)
-            goto done;
-        js     = t;
-        js[jn] = 0;
+        free(s);
+        return NULL;
     }
-    side = json_int((const char *)js, "chunk_size", ARCO_CHUNK);
-    if (side != ARCO_CHUNK)
-        goto done; /* a world this build cannot lay out */
-    chunks = MAP_W / ARCO_CHUNK;
+    t[n] = 0;
+    return (char *)t;
+}
+
+/*  One city's state, `cities/<id>/...`, into a City whose tile layers
+ *  the window fills.  0 on success. */
+static int read_city(const Ar *a, City *c, int id, int32_t ww, int32_t wh)
+{
+    static const char *const RAWS[] = {"xlab", "xmic", "xthg", "cnam", NULL};
+    char                     p[64];
+    size_t                   mn = 0, gn = 0;
+    uint8_t                 *mb, *g;
+    char                    *js;
+    int                      i;
 
     memset(c, 0, sizeof *c);
+    if (city_extent(c, ww, wh))
+        return -1;
     /*  The dice come up at one: the seeds are not in the file, and a
      *  shift register at nought never leaves it. */
     rng_seed(c, 1, 1);
-    layers_of(c, L, &n);
-    for (cy = 0; cy < chunks; cy++)
-        for (cx = 0; cx < chunks; cx++)
-            for (i = 0; i < n; i++)
-                if (get_layer(&a, cx, cy, &L[i]))
-                    goto done;
-
-    mb = ar_get(&a, "cities/0/misc.bin", &mn);
+    snprintf(p, sizeof p, "cities/%d/misc.bin", id);
+    mb = ar_get(a, p, &mn);
     if (!mb || mn != sizeof c->misc)
-        goto done;
-    for (i = 0; i < MISC_LONGS; i++)
-        c->misc[i] = (int32_t)((uint32_t)mb[i * 4] |
-                               ((uint32_t)mb[i * 4 + 1] << 8) |
-                               ((uint32_t)mb[i * 4 + 2] << 16) |
-                               ((uint32_t)mb[i * 4 + 3] << 24));
-
-    for (i = 0; RAW[i]; i++)
     {
-        char      p[64];
+        free(mb);
+        return -1;
+    }
+    for (i = 0; i < MISC_LONGS; i++)
+        c->misc[i] = (int32_t)((uint32_t)mb[i * 4] | ((uint32_t)mb[i * 4 + 1] << 8) |
+                               ((uint32_t)mb[i * 4 + 2] << 16) | ((uint32_t)mb[i * 4 + 3] << 24));
+    free(mb);
+    for (i = 0; RAWS[i]; i++)
+    {
         size_t   *plen;
-        uint8_t **slot = slot_for(c, RAW[i], &plen);
+        uint8_t **slot = slot_for(c, RAWS[i], &plen);
         size_t    got  = 0;
         uint8_t  *d;
-        snprintf(p, sizeof p, "cities/0/%s.bin", RAW[i]);
-        d = ar_get(&a, p, &got);
+        snprintf(p, sizeof p, "cities/%d/%s.bin", id, RAWS[i]);
+        d = ar_get(a, p, &got);
         if (d && slot)
         {
             *slot = d;
@@ -744,35 +787,31 @@ int arco_load(const char *path, City *c)
         else
             free(d);
     }
-
     /*  The scalars come from MISC, exactly as they do for a 1995 save.
      *  So there is one path that turns MISC into a City and not two that
-     *  can disagree.  The graph history goes back into graph[][], and
-     *  city_save writes XGRP from there, so nothing has to keep the
-     *  original blob. */
+     *  can disagree.  The graph history goes back into graph[][]. */
+    snprintf(p, sizeof p, "cities/%d/graphs.bin", id);
+    g = ar_get(a, p, &gn);
+    if (g && gn == (size_t)N_GRAPH * GRAPH_SAMPLES * 4)
     {
-        size_t   gn = 0;
-        uint8_t *g  = ar_get(&a, "cities/0/graphs.bin", &gn);
-        if (g && gn == (size_t)N_GRAPH * GRAPH_SAMPLES * 4)
-        {
-            int gi, gk;
-            for (gi = 0; gi < N_GRAPH; gi++)
-                for (gk = 0; gk < GRAPH_SAMPLES; gk++)
-                {
-                    const uint8_t *o = g + (gi * GRAPH_SAMPLES + gk) * 4;
-                    c->graph[gi][gk] =
-                        (int32_t)((uint32_t)o[0] | ((uint32_t)o[1] << 8) |
-                                  ((uint32_t)o[2] << 16) |
-                                  ((uint32_t)o[3] << 24));
-                }
-        }
-        free(g);
+        int gi, gk;
+        for (gi = 0; gi < N_GRAPH; gi++)
+            for (gk = 0; gk < GRAPH_SAMPLES; gk++)
+            {
+                const uint8_t *o = g + (gi * GRAPH_SAMPLES + gk) * 4;
+                c->graph[gi][gk] = (int32_t)((uint32_t)o[0] | ((uint32_t)o[1] << 8) | ((uint32_t)o[2] << 16) |
+                                             ((uint32_t)o[3] << 24));
+            }
     }
-
-    /*  Restore the chunk order, so converting back to .sc2 reproduces
-     *  the original file and not merely an equivalent one. */
+    free(g);
+    /*  The chunk order of the 1995 file the world came from, which the
+     *  load log prints.  A world written at version 1 keeps it in
+     *  world.json. */
+    snprintf(p, sizeof p, "cities/%d.json", id);
+    js = ar_text(a, p);
     {
-        const char *q = strstr((const char *)js, "\"sc2_chunk_order\"");
+        char       *wj = js && strstr(js, "\"sc2_chunk_order\"") ? NULL : ar_text(a, "world.json");
+        const char *q  = strstr(wj ? wj : (js ? js : ""), "\"sc2_chunk_order\"");
         if (q && (q = strchr(q, ':')) && (q = strchr(q, '"')))
         {
             q++;
@@ -792,15 +831,171 @@ int arco_load(const char *path, City *c)
                     q++;
             }
         }
+        free(wj);
+    }
+    free(js);
+    city_misc_to_scalars(c);
+    return 0;
+}
+
+int arco_load_world(const char *path, World *w)
+{
+    Ar          a  = {NULL, 0};
+    char       *js = NULL;
+    const char *q;
+    int         rc = -1, version, id = 0, any_owner = 0, any_street = 0;
+
+    if (world_init(w))
+        return -1;
+    if (ar_open(path, &a))
+    {
+        world_free(w);
+        return -1;
+    }
+    js = ar_text(&a, "world.json");
+    if (!js || json_int(js, "chunk_size", TILE_CHUNK) != TILE_CHUNK)
+        goto done; /* a world this build cannot lay out */
+    version           = (int)json_int(js, "version", 1);
+    w->map.drive_left = json_int(js, "drive_left", 0) != 0;
+
+    /*  The chunks: the list a world names, or the four by four of a world
+     *  written at version 1, one city's square. */
+    if (version >= 2)
+    {
+        q = strstr(js, "\"chunk_list\"");
+        if (!q || !(q = strchr(q, ':')) || !(q = strchr(q, '"')))
+            goto done;
+        q++;
+        while (*q && *q != '"')
+        {
+            char      *e;
+            long       cx = strtol(q, &e, 10), cy;
+            TileChunk *k;
+            int        had, had_street;
+            if (*e != '_')
+                goto done;
+            cy = strtol(e + 1, &e, 10);
+            k  = world_chunk(w, (int32_t)cx, (int32_t)cy, 1);
+            if (!k || get_chunk(&a, k, &had, &had_street))
+                goto done;
+            any_owner |= had;
+            any_street |= had_street;
+            q = *e == ',' ? e + 1 : e;
+        }
+    }
+    else
+    {
+        int cx, cy, had, had_street;
+        for (cy = 0; cy < MAP_H / TILE_CHUNK; cy++)
+            for (cx = 0; cx < MAP_W / TILE_CHUNK; cx++)
+            {
+                TileChunk *k = world_chunk(w, cx, cy, 1);
+                if (!k || get_chunk(&a, k, &had, &had_street))
+                    goto done;
+                any_street |= had_street;
+            }
     }
 
-    city_misc_to_scalars(c);
-    rc = 0;
+    /*  The cities, in the order the list gives them, each at its origin. */
+    q = strstr(js, "\"cities\"");
+    {
+        const char *end = q ? strchr(q, ']') : NULL;
+        while (q && (q = strstr(q, "\"origin\"")) && q < end)
+        {
+            long        x0 = json_int(q, "x", 0), y0 = json_int(q, "y", 0);
+            const char *wn = strstr(q, "\"window\"");
+            const char *nx = strstr(q + 1, "\"origin\"");
+            /*  The window's extent, where this city's entry gives one: a
+             *  world written before windows holds 128 by 128 cities. */
+            long  ww = wn && (!nx || wn < nx) ? json_int(wn, "w", MAP_W) : MAP_W;
+            long  wh = wn && (!nx || wn < nx) ? json_int(wn, "h", MAP_H) : MAP_H;
+            City *c  = (City *)calloc(1, sizeof *c);
+            if (!c || read_city(&a, c, id, (int32_t)ww, (int32_t)wh) || world_place_city(w, c, (int32_t)x0, (int32_t)y0) < 0)
+            {
+                if (c)
+                    city_free(c);
+                free(c);
+                goto done;
+            }
+            id++;
+            q++;
+        }
+    }
+    if (w->n_city == 0)
+        goto done;
+    /*  A world written before owners: each city owns what it zoned or
+     *  built inside its window. */
+    if (!any_owner)
+    {
+        int32_t ci, y, x;
+        for (ci = 0; ci < w->n_city; ci++)
+            for (y = 0; y < w->city[ci].city->h; y++)
+                for (x = 0; x < w->city[ci].city->w; x++)
+                {
+                    int32_t    i;
+                    TileChunk *k = world_at(w, w->city[ci].city->ox + x, w->city[ci].city->oy + y, 0, &i);
+                    if (k && !k->owner[i] && world_claims(k->xzon[i], k->xbld[i]))
+                        k->owner[i] = (uint8_t)(ci + 1);
+                }
+    }
+    /*  A city whose misc.bin still holds a map turn was written with its
+     *  tiles in the terms of that turn.  Its own tiles are decoded as
+     *  city_load decodes a 1995 file, and the turn goes to 0.  A tile
+     *  nobody owns is the city's when the world holds one city. */
+    {
+        int32_t ci, y, x;
+        for (ci = 0; ci < w->n_city; ci++)
+        {
+            City *cc   = w->city[ci].city;
+            int   turn = (int)(cc->misc[MISC_ROTATION] & 3);
+            if (!turn)
+                continue;
+            for (y = 0; y < cc->h; y++)
+                for (x = 0; x < cc->w; x++)
+                {
+                    int32_t    i;
+                    TileChunk *k = world_at(w, cc->ox + x, cc->oy + y, 0, &i);
+                    if (k && (k->owner[i] == (uint8_t)(ci + 1) || (!k->owner[i] && w->n_city == 1)))
+                        city_cell_unturn(&k->xzon[i], &k->xbit[i], k->xbld[i], turn);
+                }
+            cc->misc[MISC_ROTATION] = 0;
+        }
+    }
+    w->map.has_streets = any_street;
+    rc                 = 0;
 done:
+    if (rc)
+        world_free(w);
     free(js);
-    free(mb);
     free(a.raw);
     return rc;
+}
+
+int arco_load(const char *path, City *c)
+{
+    World    w;
+    City    *one;
+    TileMap *m = (TileMap *)malloc(sizeof *m);
+    if (!m)
+        return -1;
+    if (arco_load_world(path, &w))
+    {
+        free(m);
+        return -1;
+    }
+    /*  The first city, and the world's store as its own: the city keeps
+     *  its tiles, and the world is freed without them. */
+    one = w.city[0].city;
+    memcpy(c, one, sizeof *c);
+    free(one);
+    w.city[0].city = NULL;
+    *m             = w.map;
+    memset(&w.map, 0, sizeof w.map);
+    c->map     = m;
+    c->own_map = 1;
+    city_bind(c);
+    world_free(&w);
+    return 0;
 }
 
 int arco_is_arco(const char *path)

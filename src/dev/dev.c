@@ -14,13 +14,26 @@
 #include "dev.h"
 #include "advisor.h"
 #include "arco.h"
+#include "city.h"
+#include "net_cell.h"
 #include "sim.h"
+#include "world.h"
+#include <ctype.h>
 #include <dirent.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/*  A whole layer of a city's window as one flat run, the way the
+ *  original lays it out (city_layer_get).  One run for each layer. */
+static const uint8_t *lay(const City *c, int layer)
+{
+    static uint8_t run[CL_N][MAP_W * MAP_H * 2];
+    city_layer_get(c, layer, run[layer]);
+    return run[layer];
+}
 
 /*  The trace the reconstruction is handed when a mode wants to watch a
  *  trip walk.  The simulation does not print.  This does, and only for
@@ -110,10 +123,10 @@ static void check_city(const char *path, City *c, void *ctx)
     long           bad;
 
     /* --- aggregates, straight off the loaded layers --------------- */
-    plt = sum_bytes(&c->xplt[0][0], sizeof c->xplt);
-    val = sum_bytes(&c->xval[0][0], sizeof c->xval);
-    crm = sum_bytes(&c->xcrm[0][0], sizeof c->xcrm);
-    trf = sum_bytes(&c->xtrf[0][0], sizeof c->xtrf);
+    plt = sum_bytes(lay(c, CL_XPLT), city_layer_bytes(c, CL_XPLT));
+    val = sum_bytes(lay(c, CL_XVAL), city_layer_bytes(c, CL_XVAL));
+    crm = sum_bytes(lay(c, CL_XCRM), city_layer_bytes(c, CL_XCRM));
+    trf = sum_bytes(lay(c, CL_XTRF), city_layer_bytes(c, CL_XTRF));
     pop = sim_map_population(c);
 
     t->cities++;
@@ -132,10 +145,10 @@ static void check_city(const char *path, City *c, void *ctx)
         t->agg_ok[4]++;
 
     /* --- per-cell: crime, density, land value --------------------- */
-    memcpy(xcrm0, c->xcrm, sizeof xcrm0);
-    memcpy(xpop0, c->xpop, sizeof xpop0);
-    memcpy(xval0, c->xval, sizeof xval0);
-    memcpy(xplt0, c->xplt, sizeof xplt0);
+    city_layer_get(c, CL_XCRM, xcrm0);
+    city_layer_get(c, CL_XPOP, xpop0);
+    city_layer_get(c, CL_XVAL, xval0);
+    city_layer_get(c, CL_XPLT, xplt0);
 
     /*  Two different questions, so two different runs.  ISOLATED gives
      *  each stage the inputs the file recorded and asks whether the
@@ -150,48 +163,48 @@ static void check_city(const char *path, City *c, void *ctx)
     for (y = 0; y < HALF_H; y++)
         for (x = 0; x < HALF_W; x++)
         {
-            if (c->xcrm[y][x] || xcrm0[y][x])
+            if (T_XCRM(c, y, x) || xcrm0[y][x])
             {
                 t->crm_live++;
-                if (c->xcrm[y][x] == xcrm0[y][x])
+                if (T_XCRM(c, y, x) == xcrm0[y][x])
                     t->crm_live_ok++;
             }
-            if (c->xcrm[y][x] == xcrm0[y][x])
+            if (T_XCRM(c, y, x) == xcrm0[y][x])
                 t->crm_ok++;
             else
                 bad++;
-            t->crm_err += abs((int)c->xcrm[y][x] - (int)xcrm0[y][x]);
+            t->crm_err += abs((int)T_XCRM(c, y, x) - (int)xcrm0[y][x]);
         }
     t->crm_cells += HALF_H * HALF_W;
     if (!bad)
         t->crm_perfect++;
-    memcpy(c->xcrm, xcrm0, sizeof xcrm0);
+    city_layer_set(c, CL_XCRM, xcrm0);
 
     sim_pollution(c);  /* stages 1-2 first */
     sim_land_value(c); /* isolated */
     for (y = 0; y < HALF_H; y++)
         for (x = 0; x < HALF_W; x++)
         {
-            if (c->xval[y][x] || xval0[y][x])
+            if (T_XVAL(c, y, x) || xval0[y][x])
             {
                 t->val_live++;
-                if (c->xval[y][x] == xval0[y][x])
+                if (T_XVAL(c, y, x) == xval0[y][x])
                     t->val_live_ok++;
             }
-            if (c->xval[y][x] == xval0[y][x])
+            if (T_XVAL(c, y, x) == xval0[y][x])
                 t->val_ok++;
-            t->val_err += abs((int)c->xval[y][x] - (int)xval0[y][x]);
+            t->val_err += abs((int)T_XVAL(c, y, x) - (int)xval0[y][x]);
         }
     t->val_cells += HALF_H * HALF_W;
-    memcpy(c->xval, xval0, sizeof xval0);
+    city_layer_set(c, CL_XVAL, xval0);
 
     /*  Police and fire coverage, and the budget amounts they scale with.
      *  All three are new here.  Coverage was blocked until the budget
      *  block was found in MISC.  The budget amounts come from the
      *  census.  They are checked against what the file recorded for
      *  them. */
-    memcpy(xplc0, c->xplc, sizeof xplc0);
-    memcpy(xfir0, c->xfir, sizeof xfir0);
+    city_layer_get(c, CL_XPLC, xplc0);
+    city_layer_get(c, CL_XFIR, xfir0);
     {
         static Dept saved[N_DEPT];
         static City rebuilt;
@@ -215,7 +228,7 @@ static void check_city(const char *path, City *c, void *ctx)
         /*  Does a census rebuilt from the map match the one the game
          *  has been maintaining incrementally?  Where it does not, the
          *  budget cannot be expected to either. */
-        memcpy(rebuilt.xbld, c->xbld, sizeof rebuilt.xbld);
+        city_copy(&rebuilt, c);
         sim_rebuild_census(&rebuilt);
         t->census_exact += !memcmp(rebuilt.census, c->census, sizeof rebuilt.census);
     }
@@ -225,41 +238,41 @@ static void check_city(const char *path, City *c, void *ctx)
         for (x = 0; x < QTR_W; x++)
         {
             t->cov_cells++;
-            if (c->xplc[y][x] || xplc0[y][x])
+            if (T_XPLC(c, y, x) || xplc0[y][x])
             {
                 t->plc_live++;
-                if (c->xplc[y][x] == xplc0[y][x])
+                if (T_XPLC(c, y, x) == xplc0[y][x])
                     t->plc_live_ok++;
             }
-            if (c->xfir[y][x] || xfir0[y][x])
+            if (T_XFIR(c, y, x) || xfir0[y][x])
             {
                 t->fir_live++;
-                if (c->xfir[y][x] == xfir0[y][x])
+                if (T_XFIR(c, y, x) == xfir0[y][x])
                     t->fir_live_ok++;
             }
-            t->plc_err += abs((int)c->xplc[y][x] - (int)xplc0[y][x]);
-            t->fir_err += abs((int)c->xfir[y][x] - (int)xfir0[y][x]);
+            t->plc_err += abs((int)T_XPLC(c, y, x) - (int)xplc0[y][x]);
+            t->fir_err += abs((int)T_XFIR(c, y, x) - (int)xfir0[y][x]);
         }
-    t->plc_perfect += !memcmp(c->xplc, xplc0, sizeof xplc0);
-    t->fir_perfect += !memcmp(c->xfir, xfir0, sizeof xfir0);
-    memcpy(c->xplc, xplc0, sizeof xplc0);
-    memcpy(c->xfir, xfir0, sizeof xfir0);
+    t->plc_perfect += !memcmp(lay(c, CL_XPLC), xplc0, sizeof xplc0);
+    t->fir_perfect += !memcmp(lay(c, CL_XFIR), xfir0, sizeof xfir0);
+    city_layer_set(c, CL_XPLC, xplc0);
+    city_layer_set(c, CL_XFIR, xfir0);
 
     bad = 0;
     for (y = 0; y < QTR_H; y++)
         for (x = 0; x < QTR_W; x++)
         {
-            if (c->xpop[y][x] || xpop0[y][x])
+            if (T_XPOP(c, y, x) || xpop0[y][x])
             {
                 t->pop_live++;
-                if (c->xpop[y][x] == xpop0[y][x])
+                if (T_XPOP(c, y, x) == xpop0[y][x])
                     t->pop_live_ok++;
             }
-            if (c->xpop[y][x] == xpop0[y][x])
+            if (T_XPOP(c, y, x) == xpop0[y][x])
                 t->pop_ok++;
             else
                 bad++;
-            t->pop_err_abs += abs((int)c->xpop[y][x] - (int)xpop0[y][x]);
+            t->pop_err_abs += abs((int)T_XPOP(c, y, x) - (int)xpop0[y][x]);
         }
     t->pop_cells += QTR_H * QTR_W;
     if (!bad)
@@ -270,37 +283,37 @@ static void check_city(const char *path, City *c, void *ctx)
      *  each stage feeding the next.  Starting part way in would not be
      *  the same experiment: the stages share one scratch plane that
      *  stage 1 is responsible for filling. */
-    memcpy(c->xpop, xpop0, sizeof xpop0);
-    memcpy(c->xval, xval0, sizeof xval0);
-    memcpy(c->xcrm, xcrm0, sizeof xcrm0);
-    memcpy(c->xplt, xplt0, sizeof xplt0);
+    city_layer_set(c, CL_XPOP, xpop0);
+    city_layer_set(c, CL_XVAL, xval0);
+    city_layer_set(c, CL_XCRM, xcrm0);
+    city_layer_set(c, CL_XPLT, xplt0);
     sim_pollution(c);
     sim_land_value(c);
     for (y = 0; y < HALF_H; y++)
         for (x = 0; x < HALF_W; x++)
-            if (c->xval[y][x] || xval0[y][x])
+            if (T_XVAL(c, y, x) || xval0[y][x])
             {
                 t->cval_live++;
-                if (c->xval[y][x] == xval0[y][x])
+                if (T_XVAL(c, y, x) == xval0[y][x])
                     t->cval_ok++;
             }
     sim_density(c);
     sim_crime(c);
     for (y = 0; y < HALF_H; y++)
         for (x = 0; x < HALF_W; x++)
-            if (c->xcrm[y][x] || xcrm0[y][x])
+            if (T_XCRM(c, y, x) || xcrm0[y][x])
             {
                 t->ccrm_live++;
-                if (c->xcrm[y][x] == xcrm0[y][x])
+                if (T_XCRM(c, y, x) == xcrm0[y][x])
                     t->ccrm_ok++;
             }
 
     /* --- per-tile: the two flood fills ---------------------------- */
-    memcpy(xbit0, c->xbit, sizeof xbit0);
+    city_layer_get(c, CL_XBIT, xbit0);
     for (y = 0; y < MAP_H && !random_plant; y++)
         for (x = 0; x < MAP_W; x++)
         {
-            uint8_t b = c->xbld[y][x];
+            uint8_t b = T_XBLD(c, y, x);
             if (b == 0xC8 || b == 0xCC)
             {
                 random_plant = 1;
@@ -313,12 +326,12 @@ static void check_city(const char *path, City *c, void *ctx)
     for (y = 0; y < MAP_H; y++)
         for (x = 0; x < MAP_W; x++)
         {
-            if ((xbit0[y][x] ^ c->xbit[y][x]) & XBIT_POWERED)
+            if ((xbit0[y][x] ^ T_XBIT(c, y, x)) & XBIT_POWERED)
             {
                 t->pow_bad++;
                 bad++;
             }
-            if ((xbit0[y][x] ^ c->xbit[y][x]) & XBIT_WATERED)
+            if ((xbit0[y][x] ^ T_XBIT(c, y, x)) & XBIT_WATERED)
                 t->wat_bad++;
         }
     t->tiles += MAP_W * MAP_H;
@@ -328,88 +341,6 @@ static void check_city(const char *path, City *c, void *ctx)
         if (!bad)
             t->pow_det_ok++;
     }
-}
-
-/*  A whole file in memory, and how many bytes that was.  Answers NULL,
- *  and a length of zero, for a file that will not open, will not
- *  measure, will not fit.  Will not read to its end, so a caller has one
- *  thing to test rather than four. */
-static uint8_t *slurp(const char *path, long *len)
-{
-    FILE    *f = fopen(path, "rb");
-    uint8_t *b;
-    long     n;
-    *len = 0;
-    if (!f)
-        return NULL;
-    if (fseek(f, 0, SEEK_END) != 0 || (n = ftell(f)) < 0)
-    {
-        fclose(f);
-        return NULL;
-    }
-    rewind(f);
-    b = (uint8_t *)malloc((size_t)n ? (size_t)n : 1u);
-    if (!b || fread(b, 1, (size_t)n, f) != (size_t)n)
-    {
-        free(b);
-        fclose(f);
-        return NULL;
-    }
-    fclose(f);
-    *len = n;
-    return b;
-}
-
-/* ---- codec round-trip -------------------------------------------- */
-static void roundtrip(const char *dir, int *files, int *lossless, int *exact)
-{
-    DIR           *d = opendir(dir);
-    struct dirent *e;
-    static City    a, b;
-    char           path[1024];
-    const char    *tmp = "/tmp/arc_roundtrip.tmp";
-
-    *files = *lossless = *exact = 0;
-    if (!d)
-        return;
-    while ((e = readdir(d)))
-    {
-        long     n1, n2;
-        uint8_t *o1, *o2;
-        if (e->d_name[0] == '.')
-            continue;
-        snprintf(path, sizeof path, "%s/%s", dir, e->d_name);
-        if (!city_load(path, &a))
-            continue;
-        (*files)++;
-        if (!city_save(tmp, &a))
-        {
-            city_free(&a);
-            continue;
-        }
-        if (city_load(tmp, &b))
-        {
-            if (!memcmp(a.xbld, b.xbld, sizeof a.xbld) &&
-                !memcmp(a.xzon, b.xzon, sizeof a.xzon) &&
-                !memcmp(a.altm, b.altm, sizeof a.altm) &&
-                !memcmp(a.misc, b.misc, sizeof a.misc))
-                (*lossless)++;
-            city_free(&b);
-        }
-        /*  Both files whole, to compare byte for byte.  A file that will
-         *  not open, will not measure or will not fit in memory reads as
-         *  no bytes.  This is not an exact round trip. */
-        o1 = slurp(path, &n1);
-        o2 = slurp(tmp, &n2);
-        /*  An exact round trip: both files read whole, the same length,
-         *  and the same bytes. */
-        if (o1 && o2 && n1 > 0 && n1 == n2 && !memcmp(o1, o2, (size_t)n1))
-            (*exact)++;
-        free(o1);
-        free(o2);
-        city_free(&a);
-    }
-    closedir(d);
 }
 
 static void pct(const char *label, long ok, long total, const char *note)
@@ -519,27 +450,216 @@ static int dev_micro(int argc, char **argv)
     return 0;
 }
 
+/*  --net-cells <city> ...: layer 0 of the road network held to two
+ *  checks.  First, every XBLD byte a fitter's join test counts as its
+ *  network carries a part of that network.  The fitters do not join a
+ *  bridge, which its own placer ends ($1A820), so a bridge is the one
+ *  byte the test leaves out.  Second, over the cities named, how many of
+ *  the edges each byte claims the cell across claims back.  A band
+ *  claims by unit, two cells by two at an even row and col, and its arms
+ *  are counted between units.  The first check fails the mode.  The
+ *  second is reported. */
+
+static int nc_has(uint8_t b, uint8_t xbit, int net, int *edges)
+{
+    NetPart p[2];
+    int     n = net_cell_parts(b, xbit, p), i;
+    for (i = 0; i < n; i++)
+        if (p[i].net == net)
+        {
+            if (edges)
+                *edges = p[i].edges;
+            return 1;
+        }
+    return 0;
+}
+
+static int nc_consistent(void)
+{
+    int b, bad = 0;
+    for (b = 0; b < 256; b++)
+    {
+        int road   = nc_has((uint8_t)b, 0, NETW_ROAD, NULL) || nc_has((uint8_t)b, 2, NETW_ROAD, NULL);
+        int rail   = nc_has((uint8_t)b, 0, NETW_RAIL, NULL) || nc_has((uint8_t)b, 2, NETW_RAIL, NULL);
+        int bridge = b >= 0x51 && b < 0x5D;
+        if (sim_road_joins(b) != road && !(bridge && road))
+        {
+            printf("FAULT  0x%02X: the road fitter joins it %s, layer 0 gives it %s road part\n", b, sim_road_joins(b) ? "yes" : "no", road ? "a" : "no");
+            bad++;
+        }
+        if (sim_rail_joins(b) != rail && !(bridge && rail))
+        {
+            printf("FAULT  0x%02X: the rail fitter joins it %s, layer 0 gives it %s rail part\n", b, sim_rail_joins(b) ? "yes" : "no", rail ? "a" : "no");
+            bad++;
+        }
+    }
+    printf("layer 0 against the fitters' join tests: %d of 256 bytes disagree\n", bad);
+    return bad;
+}
+
+typedef struct
+{
+    long tiles, claimed, met, unmet, off;
+} NcCount;
+
+static void nc_city(const City *c, NcCount (*by)[NETW_COUNT])
+{
+    int y, x;
+    for (y = 0; y < c->h; y++)
+        for (x = 0; x < c->w; x++)
+        {
+            uint8_t b = T_XBLD(c, y, x);
+            NetPart p[2];
+            int     n = net_cell_parts(b, T_XBIT(c, y, x), p), i, e;
+            for (i = 0; i < n; i++)
+            {
+                NcCount *k    = &by[b][p[i].net];
+                int      unit = p[i].net == NETW_BAND && p[i].kind != NETP_RAMP;
+                if (unit && ((y & 1) || (x & 1)))
+                    continue;
+                k->tiles++;
+                for (e = 1; e < 16; e <<= 1)
+                {
+                    int edges = p[i].edges, step = unit ? 2 : 1, ny, nx, theirs = 0;
+                    if (unit && b >= 0x6A && b <= 0x6B && x + 1 < c->w)
+                        nc_has(b, T_XBIT(c, y, x + 1), NETW_BAND, &edges);
+                    if (!(edges & e))
+                        continue;
+                    k->claimed++;
+                    ny = y + rcity_edge_dr(e) * step;
+                    nx = x + rcity_edge_dc(e) * step;
+                    if (ny < 0 || nx < 0 || ny >= c->h || nx >= c->w)
+                    {
+                        k->off++;
+                        continue;
+                    }
+                    if (p[i].kind == NETP_RAMP)
+                    {
+                        if (nc_has(T_XBLD(c, ny, nx), T_XBIT(c, ny, nx), p[i].net, NULL))
+                            k->met++;
+                        else
+                            k->unmet++;
+                        continue;
+                    }
+                    if (unit)
+                    {
+                        uint8_t nb   = T_XBLD(c, ny, nx);
+                        uint8_t nbit = nx + 1 < c->w ? T_XBIT(c, ny, nx + 1) : 0;
+                        if (!nc_has(nb, nb >= 0x6A && nb <= 0x6B ? nbit : T_XBIT(c, ny, nx), NETW_BAND, &theirs))
+                            theirs = 0;
+                        if (nb == 0x69)
+                            theirs = 15;
+                    }
+                    else if (!nc_has(T_XBLD(c, ny, nx), T_XBIT(c, ny, nx), p[i].net, &theirs))
+                        theirs = 0;
+                    if (theirs & rcity_edge_back(e))
+                        k->met++;
+                    else
+                        k->unmet++;
+                }
+            }
+        }
+}
+
+static int dev_net_cells(int argc, char **argv)
+{
+    static NcCount by[256][NETW_COUNT];
+    int            i, b, n, cities = 0, bad = nc_consistent();
+    memset(by, 0, sizeof by);
+    for (i = 2; i < argc; i++)
+    {
+        City *c = (City *)calloc(1, sizeof *c);
+        if (!c || !city_load(argv[i], c))
+        {
+            fprintf(stderr, "cannot read %s\n", argv[i]);
+            free(c);
+            continue;
+        }
+        nc_city(c, by);
+        cities++;
+        city_free(c);
+        free(c);
+    }
+    printf("%d of %d cities read\n", cities, argc - 2);
+    printf("byte  network  tiles  claimed  met  unmet  off-map\n");
+    for (b = 0; b < 256; b++)
+        for (n = 0; n < NETW_COUNT; n++)
+            if (by[b][n].tiles)
+                printf("0x%02X  %-7s  %ld  %ld  %ld  %ld  %ld\n", b, net_cell_net_name(n), by[b][n].tiles, by[b][n].claimed, by[b][n].met, by[b][n].unmet, by[b][n].off);
+    return bad ? 1 : 0;
+}
+
 static int dev_convert(int argc, char **argv)
 {
     (void)argc; /* the list says how long its line must be */
-    City  *c = (City *)calloc(1, sizeof *c);
+    City  *c    = (City *)calloc(1, sizeof *c);
+    size_t olen = strlen(argv[3]);
     int    ok;
-    size_t olen    = strlen(argv[3]);
-    int    to_arco = olen > 5 && !strcmp(argv[3] + olen - 5, ".arco");
     if (!c)
         return 1;
+    /*  A city is written as .arco and only as .arco: a .sc2 is loaded and
+     *  never written. */
+    if (olen <= 5 || strcmp(argv[3] + olen - 5, ".arco"))
+    {
+        fprintf(stderr, "%s: a world is written as .arco\n", argv[3]);
+        free(c);
+        return 1;
+    }
     if (!city_load(argv[2], c))
     {
         fprintf(stderr, "cannot read %s\n", argv[2]);
         free(c);
         return 1;
     }
-    /*  city_save answers 1 for success, arco_save answers 0: see the
-     *  note in city_load.  Normalize here, once. */
-    ok = to_arco ? arco_save(argv[3], c) == 0 : city_save(argv[3], c) != 0;
+    ok = arco_save(argv[3], c) == 0;
     printf("%s  %s -> %s\n", ok ? "wrote" : "FAILED", argv[2], argv[3]);
     city_free(c);
     free(c);
+    return ok ? 0 : 1;
+}
+
+static int dev_compose(int argc, char **argv)
+{
+    /*  --compose <out.arco> <city>@<x>,<y>[:<w>x<h>] ...: a world of the
+     *  cities named, each with its window's top-left tile at x, y.  A
+     *  size widens the window from that corner, its new tiles bare. */
+    World w;
+    int   i, ok;
+    world_init(&w);
+    for (i = 3; i < argc; i++)
+    {
+        char  path[1024];
+        int   x = 0, y = 0;
+        char *at;
+        City *c = (City *)calloc(1, sizeof *c);
+        snprintf(path, sizeof path, "%s", argv[i]);
+        at     = strrchr(path, '@');
+        int ww = 0, wh = 0;
+        if (!c || !at || sscanf(at + 1, "%d,%d", &x, &y) != 2)
+        {
+            fprintf(stderr, "%s: want <city>@<x>,<y>[:<w>x<h>]\n", argv[i]);
+            free(c);
+            world_free(&w);
+            return 1;
+        }
+        {
+            const char *sz = strchr(at + 1, ':');
+            if (sz && sscanf(sz + 1, "%dx%d", &ww, &wh) != 2)
+                ww = wh = 0;
+        }
+        *at = 0;
+        if (!city_load(path, c) || (ww && city_grow(c, ww, wh)) || world_add_city(&w, c, x, y) < 0)
+        {
+            fprintf(stderr, "cannot place %s at %d,%d\n", path, x, y);
+            city_free(c);
+            free(c);
+            world_free(&w);
+            return 1;
+        }
+    }
+    ok = arco_save_world(argv[2], &w, NULL, 0) == 0;
+    printf("%s  %s: %d cities, %d chunks\n", ok ? "wrote" : "FAILED", argv[2], (int)w.n_city, (int)w.map.n);
+    world_free(&w);
     return ok ? 0 : 1;
 }
 
@@ -563,34 +683,33 @@ static int dev_riot(int argc, char **argv)
     c.disaster_v = (int16_t)atoi(argv[4]);
     c.view_y     = c.disaster_h;
     c.view_x     = c.disaster_v;
-    if (!strcmp(kind, "storm"))
-        sim_disaster_firestorm(&c);
-    else if (!strcmp(kind, "flood"))
-        sim_disaster_flood(&c);
-    else if (!strcmp(kind, "chem"))
-        sim_disaster_chemical(&c);
-    else if (!strcmp(kind, "poll"))
-        sim_disaster_pollution(&c);
-    else if (!strcmp(kind, "crash"))
-        sim_disaster_air_crash(&c);
-    else if (!strcmp(kind, "fire"))
-        sim_disaster_fire(&c);
-    else if (!strcmp(kind, "tornado"))
-        sim_disaster_tornado(&c);
-    else if (!strcmp(kind, "monster"))
-        sim_disaster_monster(&c);
-    else if (!strcmp(kind, "micro"))
-        sim_disaster_microwave(&c);
-    else if (!strcmp(kind, "volcano"))
-        sim_disaster_volcano(&c);
-    else if (!strcmp(kind, "quake"))
-        sim_disaster_earthquake(&c);
-    else if (!strcmp(kind, "melt"))
-        sim_disaster_meltdown(&c);
-    else if (!strcmp(kind, "hurricane"))
-        sim_disaster_hurricane(&c);
-    else
-        sim_disaster_riot(&c);
+    {
+        /*  The words the mode takes for each disaster.  Any other is the riot. */
+        static const struct
+        {
+            const char *word;
+            int         kind;
+        } WORD[] = {
+            {"storm",     SIM_DISASTER_FIRESTORM },
+            {"flood",     SIM_DISASTER_FLOOD     },
+            {"chem",      SIM_DISASTER_CHEMICAL  },
+            {"poll",      SIM_DISASTER_POLLUTION },
+            {"crash",     SIM_DISASTER_AIR_CRASH },
+            {"fire",      SIM_DISASTER_FIRE      },
+            {"tornado",   SIM_DISASTER_TORNADO   },
+            {"monster",   SIM_DISASTER_MONSTER   },
+            {"micro",     SIM_DISASTER_MICROWAVE },
+            {"volcano",   SIM_DISASTER_VOLCANO   },
+            {"quake",     SIM_DISASTER_EARTHQUAKE},
+            {"melt",      SIM_DISASTER_MELTDOWN  },
+            {"hurricane", SIM_DISASTER_HURRICANE },
+        };
+        int w, which = SIM_DISASTER_RIOT;
+        for (w = 0; w < (int)(sizeof WORD / sizeof WORD[0]); w++)
+            if (!strcmp(kind, WORD[w].word))
+                which = WORD[w].kind;
+        sim_disaster_start(&c, which);
+    }
     if (argc >= 7 && !strcmp(argv[6], "rng"))
     {
         int i, drawn = rng_log_count(&c);
@@ -605,16 +724,16 @@ static int dev_riot(int argc, char **argv)
     }
     for (ry = 0; ry < MAP_H; ry++)
         for (rx = 0; rx < MAP_W; rx++)
-            if (c.xtxt[ry][rx])
-                printf("x %d %d %02X\n", ry, rx, c.xtxt[ry][rx]), hits++;
+            if (T_XTXT(&c, ry, rx))
+                printf("x %d %d %02X\n", ry, rx, T_XTXT(&c, ry, rx)), hits++;
     for (ry = 0; ry < MAP_H; ry++)
         for (rx = 0; rx < MAP_W; rx++)
         {
-            printf("XTER %d %d %02X\n", ry, rx, c.xter[ry][rx]);
-            printf("XBIT %d %d %02X\n", ry, rx, c.xbit[ry][rx]);
-            printf("XZON %d %d %02X\n", ry, rx, c.xzon[ry][rx]);
-            printf("XBLD %d %d %02X\n", ry, rx, c.xbld[ry][rx]);
-            printf("ALTM %d %d %04X\n", ry, rx, c.altm[ry][rx]);
+            printf("XTER %d %d %02X\n", ry, rx, T_XTER(&c, ry, rx));
+            printf("XBIT %d %d %02X\n", ry, rx, T_XBIT(&c, ry, rx));
+            printf("XZON %d %d %02X\n", ry, rx, T_XZON(&c, ry, rx));
+            printf("XBLD %d %d %02X\n", ry, rx, T_XBLD(&c, ry, rx));
+            printf("ALTM %d %d %04X\n", ry, rx, T_ALTM(&c, ry, rx));
         }
     printf("funds 0 0 %08X\n", (unsigned)c.funds);
     for (ry = 1; ry < 40; ry++)
@@ -632,7 +751,7 @@ static int dev_riot(int argc, char **argv)
 static int dev_demolish1(int argc, char **argv)
 {
     (void)argc; /* the list says how long its line must be */
-    /*  --demolish1 <city> <y> <x>: one demolition, seeded, so a
+    /*  --demolish-tile <city> <y> <x>: one demolition, seeded, so a
      *  single call can be lined up against the original. */
     static City c;
     int         y, x, r, q;
@@ -650,7 +769,7 @@ static int dev_demolish1(int argc, char **argv)
     for (r = y - 1; r <= y + 3; r++)
     {
         for (q = x - 2; q <= x + 2; q++)
-            printf("%02X ", c.xbld[r][q]);
+            printf("%02X ", T_XBLD(&c, r, q));
         printf("\n");
     }
     city_free(&c);
@@ -711,7 +830,7 @@ static int dev_advisor(int argc, char **argv)
     rng_seed(&c, 1, 1);
     for (ai = 0; ai < nticks; ai++)
     {
-        before = c;
+        city_copy(&before, &c);
         sim_tick(&c);
         /*  the original picks its story in phase 24, once a month,
          *  so that is when the board gets to speak */
@@ -735,6 +854,127 @@ static int dev_advisor(int argc, char **argv)
             last_topic = -1;
     }
     city_free(&c);
+    return 0;
+}
+
+/*  --limits <city> <glow> <ticks>: whether the clock stays inside a
+ *  city's limits.  The limits are every tile within <glow> tiles of a
+ *  zoned tile or of anything built.  Outside them the city is cleared to
+ *  bare land, the way the map's edge reads.  The clock then runs <ticks>
+ *  phases, and after each phase every layer is compared with what it
+ *  held before, outside the limits only.  A change there is a write the
+ *  limits would have to forbid, counted by phase and by layer. */
+static int dev_limits(int argc, char **argv)
+{
+    static City     c, before;
+    static uint8_t  in[MAP_H][MAP_W];
+    static long     writes[25][CL_N];
+    static unsigned bits[25]; /* the XBIT bits each phase changed outside */
+    int             shown = 0;
+    int             glow = atoi(argv[3]), ticks = atoi(argv[4]), x, y, i, k, n_in = 0;
+    (void)argc;
+    if (!city_load(argv[2], &c))
+    {
+        fprintf(stderr, "not a city\n");
+        return 1;
+    }
+    /*  The limits, as the clock derives them (sim_limits): a disc of
+     *  <glow> about every developed tile. */
+    c.limits_glow = glow;
+    sim_limits(&c);
+    for (y = 0; y < MAP_H; ++y)
+        for (x = 0; x < MAP_W; ++x)
+            in[y][x] = T_LIMITS(&c, y, x);
+    /*  Outside them, bare land: the map's own altitude and terrain stay. */
+    for (y = 0; y < MAP_H; ++y)
+        for (x = 0; x < MAP_W; ++x)
+        {
+            n_in += in[y][x];
+            if (!in[y][x])
+            {
+                T_XBLD(&c, y, x) = 0;
+                T_XZON(&c, y, x) = 0;
+                T_XUND(&c, y, x) = 0;
+                T_XTXT(&c, y, x) = 0;
+                T_XBIT(&c, y, x) = 0;
+            }
+        }
+    printf("limits  %s: %d of %d tiles inside, a glow of %d\n", argv[2], n_in, MAP_H * MAP_W, glow);
+    rng_seed(&c, 1, 1);
+    for (i = 0; i < ticks; ++i)
+    {
+        int phase = (int)((c.date + 1) % 25);
+        city_copy(&before, &c);
+        sim_tick(&c);
+        if (phase < 0)
+            phase += 25;
+        for (y = 0; y < MAP_H; ++y)
+            for (x = 0; x < MAP_W; ++x)
+            {
+                /*  Outside the limits the clock worked to this tick. */
+                if (T_LIMITS(&c, y, x))
+                    continue;
+                writes[phase][0] += T_ALTM(&c, y, x) != T_ALTM(&before, y, x);
+                writes[phase][1] += T_XBLD(&c, y, x) != T_XBLD(&before, y, x);
+                writes[phase][2] += T_XZON(&c, y, x) != T_XZON(&before, y, x);
+                writes[phase][3] += T_XTER(&c, y, x) != T_XTER(&before, y, x);
+                writes[phase][4] += T_XUND(&c, y, x) != T_XUND(&before, y, x);
+                writes[phase][5] += T_XTXT(&c, y, x) != T_XTXT(&before, y, x);
+                writes[phase][6] += T_XBIT(&c, y, x) != T_XBIT(&before, y, x);
+                bits[phase] |= (unsigned)(T_XBIT(&c, y, x) ^ T_XBIT(&before, y, x));
+                if ((T_XBLD(&c, y, x) != T_XBLD(&before, y, x) || T_XTXT(&c, y, x) != T_XTXT(&before, y, x)) && shown < 12)
+                {
+                    printf("  phase %2d at %d,%d (col,row): xbld %02x -> %02x, xtxt %02x -> %02x\n", phase, x, y, T_XBLD(&before, y, x), T_XBLD(&c, y, x), T_XTXT(&before, y, x), T_XTXT(&c, y, x));
+                    ++shown;
+                }
+                /*  A coarse cell counts as outside where its first tile is. */
+                if (!(y & 1) && !(x & 1))
+                {
+                    writes[phase][7] += T_XTRF(&c, y >> 1, x >> 1) != T_XTRF(&before, y >> 1, x >> 1);
+                    writes[phase][8] += T_XPLT(&c, y >> 1, x >> 1) != T_XPLT(&before, y >> 1, x >> 1);
+                    writes[phase][9] += T_XVAL(&c, y >> 1, x >> 1) != T_XVAL(&before, y >> 1, x >> 1);
+                    writes[phase][10] += T_XCRM(&c, y >> 1, x >> 1) != T_XCRM(&before, y >> 1, x >> 1);
+                }
+                if (!(y & 3) && !(x & 3))
+                {
+                    writes[phase][11] += T_XPLC(&c, y >> 2, x >> 2) != T_XPLC(&before, y >> 2, x >> 2);
+                    writes[phase][12] += T_XFIR(&c, y >> 2, x >> 2) != T_XFIR(&before, y >> 2, x >> 2);
+                    writes[phase][13] += T_XPOP(&c, y >> 2, x >> 2) != T_XPOP(&before, y >> 2, x >> 2);
+                    writes[phase][14] += T_XROG(&c, y >> 2, x >> 2) != T_XROG(&before, y >> 2, x >> 2);
+                }
+            }
+    }
+    {
+        int n_end = 0;
+        for (y = 0; y < MAP_H; ++y)
+            for (x = 0; x < MAP_W; ++x)
+                n_end += T_LIMITS(&c, y, x) != 0;
+        printf("limits  after %d phases: %d tiles inside, population %d\n", ticks, n_end, (int)c.population);
+    }
+    printf("writes outside the limits over %d phases, by phase and layer:\n", ticks);
+    for (i = 0; i < 25; ++i)
+    {
+        int any = 0;
+        for (k = 0; k < CL_N; ++k)
+            any |= writes[i][k] != 0;
+        if (!any)
+            continue;
+        printf("  phase %2d:", i);
+        for (k = 0; k < CL_N; ++k)
+            if (writes[i][k])
+            {
+                char        low[8];
+                const char *t = city_layer_tag(k);
+                int         j;
+                for (j = 0; t[j] && j < 7; j++)
+                    low[j] = (char)tolower((unsigned char)t[j]);
+                low[j] = 0;
+                printf(" %s %ld", low, writes[i][k]);
+            }
+        if (bits[i])
+            printf(" (xbit bits %02x)", bits[i]);
+        printf("\n");
+    }
     return 0;
 }
 
@@ -782,29 +1022,29 @@ static int dev_clock(int argc, char **argv)
         }
     }
 
-#define DUMPL(name, buf)                           \
-    snprintf(p, sizeof p, "%s/%s", argv[4], name); \
-    f = fopen(p, "wb");                            \
-    if (f)                                         \
-    {                                              \
-        fwrite(buf, 1, sizeof buf, f);             \
-        fclose(f);                                 \
+#define DUMPL(name, buf)                                       \
+    snprintf(p, sizeof p, "%s/%s", argv[4], name);             \
+    f = fopen(p, "wb");                                        \
+    if (f)                                                     \
+    {                                                          \
+        fwrite(lay(&c, buf), 1, city_layer_bytes(&c, buf), f); \
+        fclose(f);                                             \
     }
-    DUMPL("ALTM", c.altm)
-    DUMPL("XBLD", c.xbld)
-    DUMPL("XZON", c.xzon)
-    DUMPL("XTER", c.xter)
-    DUMPL("XUND", c.xund)
-    DUMPL("XBIT", c.xbit)
-    DUMPL("XTXT", c.xtxt)
-    DUMPL("XTRF", c.xtrf)
-    DUMPL("XPLT", c.xplt)
-    DUMPL("XVAL", c.xval)
-    DUMPL("XCRM", c.xcrm)
-    DUMPL("XPLC", c.xplc)
-    DUMPL("XFIR", c.xfir)
-    DUMPL("XPOP", c.xpop)
-    DUMPL("XROG", c.xrog)
+    DUMPL("ALTM", CL_ALTM)
+    DUMPL("XBLD", CL_XBLD)
+    DUMPL("XZON", CL_XZON)
+    DUMPL("XTER", CL_XTER)
+    DUMPL("XUND", CL_XUND)
+    DUMPL("XBIT", CL_XBIT)
+    DUMPL("XTXT", CL_XTXT)
+    DUMPL("XTRF", CL_XTRF)
+    DUMPL("XPLT", CL_XPLT)
+    DUMPL("XVAL", CL_XVAL)
+    DUMPL("XCRM", CL_XCRM)
+    DUMPL("XPLC", CL_XPLC)
+    DUMPL("XFIR", CL_XFIR)
+    DUMPL("XPOP", CL_XPOP)
+    DUMPL("XROG", CL_XROG)
 #undef DUMPL
 
     snprintf(p, sizeof p, "%s/scalars", argv[4]);
@@ -965,8 +1205,8 @@ static int dev_things(int argc, char **argv)
         printf("\n");
     }
     for (i = 0; i < MAP_H * MAP_W; i++)
-        if (((const uint8_t *)c.xtxt)[i])
-            printf("x %d %02X\n", i, ((const uint8_t *)c.xtxt)[i]);
+        if (T_XTXT(&c, i / MAP_W, i % MAP_W))
+            printf("x %d %02X\n", i, T_XTXT(&c, i / MAP_W, i % MAP_W));
     printf("c 12E0 %d\nc 12E2 %d\nc 12E4 %d\nc 12E6 %d\n"
            "c 12E8 %d\nc 12EA %d\nc 12EC %d\nc 12EE %d\n",
            c.plane_count,
@@ -1000,7 +1240,7 @@ static int dev_demolish(int argc, char **argv)
     for (y = 3; y < 124; y++)
         for (x = 3; x < 124; x++)
         {
-            int b = c.xbld[y][x];
+            int b = T_XBLD(&c, y, x);
             if (b >= 6 && !seen[b])
             {
                 seen[b] = 1;
@@ -1008,7 +1248,7 @@ static int dev_demolish(int argc, char **argv)
             }
         }
     for (i = 0; i < MAP_H * MAP_W; i++)
-        printf("d %d %02X %02X %02X %02X %04X\n", i, ((const uint8_t *)c.xbld)[i], ((const uint8_t *)c.xzon)[i], ((const uint8_t *)c.xbit)[i], ((const uint8_t *)c.xtxt)[i], ((const uint16_t *)c.altm)[i]);
+        printf("d %d %02X %02X %02X %02X %04X\n", i, T_XBLD(&c, i / MAP_W, i % MAP_W), T_XZON(&c, i / MAP_W, i % MAP_W), T_XBIT(&c, i / MAP_W, i % MAP_W), T_XTXT(&c, i / MAP_W, i % MAP_W), T_ALTM(&c, i / MAP_W, i % MAP_W));
     printf("n 0 %d\n", rng_log_count(&c));
     city_free(&c);
     return 0;
@@ -1033,10 +1273,10 @@ static int dev_terrain(int argc, char **argv)
         for (k = 0; k < 2000; k++)
             sim_fix_terrain(&c, (k * 31) % 128, (k * 17) % 128);
     for (i = 0; i < MAP_H * MAP_W; i++)
-        printf("t %d %04X %02X %02X %02X %02X\n", i, ((const uint16_t *)c.altm)[i], ((const uint8_t *)c.xter)[i], ((const uint8_t *)c.xbit)[i], ((const uint8_t *)c.xzon)[i], ((const uint8_t *)c.xbld)[i]);
+        printf("t %d %04X %02X %02X %02X %02X\n", i, T_ALTM(&c, i / MAP_W, i % MAP_W), T_XTER(&c, i / MAP_W, i % MAP_W), T_XBIT(&c, i / MAP_W, i % MAP_W), T_XZON(&c, i / MAP_W, i % MAP_W), T_XBLD(&c, i / MAP_W, i % MAP_W));
     for (i = 0; i < MAP_H * MAP_W; i++)
-        if (((const uint8_t *)c.xund)[i])
-            printf("u %d %02X\n", i, ((const uint8_t *)c.xund)[i]);
+        if (T_XUND(&c, i / MAP_W, i % MAP_W))
+            printf("u %d %02X\n", i, T_XUND(&c, i / MAP_W, i % MAP_W));
     city_free(&c);
     return 0;
 }
@@ -1063,7 +1303,7 @@ static int dev_raise(int argc, char **argv)
             sim_raise_tile(&c, y, x);
     }
     for (i = 0; i < MAP_H * MAP_W; i++)
-        printf("a %d %04X %02X %02X %02X %02X\n", i, ((const uint16_t *)c.altm)[i], ((const uint8_t *)c.xbit)[i], ((const uint8_t *)c.xzon)[i], ((const uint8_t *)c.xter)[i], ((const uint8_t *)c.xbld)[i]);
+        printf("a %d %04X %02X %02X %02X %02X\n", i, T_ALTM(&c, i / MAP_W, i % MAP_W), T_XBIT(&c, i / MAP_W, i % MAP_W), T_XZON(&c, i / MAP_W, i % MAP_W), T_XTER(&c, i / MAP_W, i % MAP_W), T_XBLD(&c, i / MAP_W, i % MAP_W));
     printf("m 0 %08X\n", (unsigned)c.funds);
     city_free(&c);
     return 0;
@@ -1077,7 +1317,7 @@ static void dump_tool_state(const City *c)
 {
     int i;
     for (i = 0; i < MAP_H * MAP_W; i++)
-        printf("a %d %04X %02X %02X %02X %02X %02X %02X\n", i, ((const uint16_t *)c->altm)[i], ((const uint8_t *)c->xbit)[i], ((const uint8_t *)c->xzon)[i], ((const uint8_t *)c->xter)[i], ((const uint8_t *)c->xbld)[i], ((const uint8_t *)c->xund)[i], ((const uint8_t *)c->xtxt)[i]);
+        printf("a %d %04X %02X %02X %02X %02X %02X %02X\n", i, T_ALTM(c, i / MAP_W, i % MAP_W), T_XBIT(c, i / MAP_W, i % MAP_W), T_XZON(c, i / MAP_W, i % MAP_W), T_XTER(c, i / MAP_W, i % MAP_W), T_XBLD(c, i / MAP_W, i % MAP_W), T_XUND(c, i / MAP_W, i % MAP_W), T_XTXT(c, i / MAP_W, i % MAP_W));
     printf("m 0 %08X\n", (unsigned)c->funds);
     for (i = 0; i < 256; i++)
         printf("c %d %04X\n", i, (unsigned)c->census[i]);
@@ -1216,13 +1456,13 @@ static int dev_call(int argc, char **argv)
             return 1;
         }
         if (set && set[1] == 'B')
-            c.xbld[y][x] = (uint8_t)strtoul(set + 2, NULL, 16);
+            T_XBLD(&c, y, x) = (uint8_t)strtoul(set + 2, NULL, 16);
         else if (set && set[1] == 'U')
-            c.xund[y][x] = (uint8_t)strtoul(set + 2, NULL, 16);
+            T_XUND(&c, y, x) = (uint8_t)strtoul(set + 2, NULL, 16);
         else if (set && set[1] == 'T')
-            c.xter[y][x] = (uint8_t)strtoul(set + 2, NULL, 16);
+            T_XTER(&c, y, x) = (uint8_t)strtoul(set + 2, NULL, 16);
         else if (set && set[1] == 'I')
-            c.xbit[y][x] = (uint8_t)strtoul(set + 2, NULL, 16);
+            T_XBIT(&c, y, x) = (uint8_t)strtoul(set + 2, NULL, 16);
         else
             fn(&c, y, x);
     }
@@ -1252,7 +1492,7 @@ static int dev_settile(int argc, char **argv)
     for (k = 0; k < 4000; k++)
         sim_set_tile(&c, (k * 37) % 128, (k * 53) % 128, (uint8_t)((k * 11) & 0xFF));
     for (i = 0; i < MAP_H * MAP_W; i++)
-        printf("b %d %02X\n", i, ((const uint8_t *)c.xbld)[i]);
+        printf("b %d %02X\n", i, T_XBLD(&c, i / MAP_W, i % MAP_W));
     for (i = 0; i < 256; i++)
         printf("c %d %04X\n", i, (unsigned)(uint16_t)(c.census[i] - cen0[i]));
     for (i = 0; i < 16; i++)
@@ -1277,7 +1517,7 @@ static int dev_footprint(int argc, char **argv)
         for (x = 0; x < MAP_W; x++)
         {
             int oy = y, ox = x;
-            int fn = sim_footprint_origin(&c, &oy, &ox, c.xbld[y][x]);
+            int fn = sim_footprint_origin(&c, &oy, &ox, T_XBLD(&c, y, x));
             printf("f %d %d %d %d %d\n", y, x, fn, oy, ox);
         }
     city_free(&c);
@@ -1363,19 +1603,19 @@ static int dev_dump_growth_all(int argc, char **argv)
             printf("%c %d\n", k, v);
         }
     }
-#define GDUMP(name, buf)                             \
-    snprintf(pp, sizeof pp, "%s/%s", argv[3], name); \
-    f = fopen(pp, "wb");                             \
-    if (f)                                           \
-    {                                                \
-        fwrite(buf, 1, sizeof buf, f);               \
-        fclose(f);                                   \
+#define GDUMP(name, buf)                                       \
+    snprintf(pp, sizeof pp, "%s/%s", argv[3], name);           \
+    f = fopen(pp, "wb");                                       \
+    if (f)                                                     \
+    {                                                          \
+        fwrite(lay(&c, buf), 1, city_layer_bytes(&c, buf), f); \
+        fclose(f);                                             \
     }
-    GDUMP("XBLD", c.xbld)
-    GDUMP("XZON", c.xzon)
-    GDUMP("XBIT", c.xbit)
-    GDUMP("XTRF", c.xtrf)
-    GDUMP("XTXT", c.xtxt)
+    GDUMP("XBLD", CL_XBLD)
+    GDUMP("XZON", CL_XZON)
+    GDUMP("XBIT", CL_XBIT)
+    GDUMP("XTRF", CL_XTRF)
+    GDUMP("XTXT", CL_XTXT)
 #undef GDUMP
     /*  XTHG is a raw block, not a row-pointer layer. */
     snprintf(pp, sizeof pp, "%s/XTHG", argv[3]);
@@ -1411,18 +1651,18 @@ static int dev_dump_growth(int argc, char **argv)
         for (q = 0; q < 8; q++)
             printf("ACC %d %d\n", q, (int)c.accum8[q]);
     }
-#define GDUMP(name, buf)                             \
-    snprintf(pp, sizeof pp, "%s/%s", argv[5], name); \
-    f = fopen(pp, "wb");                             \
-    if (f)                                           \
-    {                                                \
-        fwrite(buf, 1, sizeof buf, f);               \
-        fclose(f);                                   \
+#define GDUMP(name, buf)                                       \
+    snprintf(pp, sizeof pp, "%s/%s", argv[5], name);           \
+    f = fopen(pp, "wb");                                       \
+    if (f)                                                     \
+    {                                                          \
+        fwrite(lay(&c, buf), 1, city_layer_bytes(&c, buf), f); \
+        fclose(f);                                             \
     }
-    GDUMP("XBLD", c.xbld)
-    GDUMP("XZON", c.xzon)
-    GDUMP("XBIT", c.xbit)
-    GDUMP("XTRF", c.xtrf)
+    GDUMP("XBLD", CL_XBLD)
+    GDUMP("XZON", CL_XZON)
+    GDUMP("XBIT", CL_XBIT)
+    GDUMP("XTRF", CL_XTRF)
 #undef GDUMP
     city_free(&c);
     return 0;
@@ -1595,21 +1835,21 @@ static int dev_dump(int argc, char **argv)
             sim_crime(&c);
         }
     }
-#define DUMP(name, buf)                            \
-    snprintf(p, sizeof p, "%s/%s", argv[3], name); \
-    f = fopen(p, "wb");                            \
-    if (f)                                         \
-    {                                              \
-        fwrite(buf, 1, sizeof buf, f);             \
-        fclose(f);                                 \
+#define DUMP(name, buf)                                        \
+    snprintf(p, sizeof p, "%s/%s", argv[3], name);             \
+    f = fopen(p, "wb");                                        \
+    if (f)                                                     \
+    {                                                          \
+        fwrite(lay(&c, buf), 1, city_layer_bytes(&c, buf), f); \
+        fclose(f);                                             \
     }
-    DUMP("XVAL", c.xval)
-    DUMP("XCRM", c.xcrm)
-    DUMP("XPOP", c.xpop)
-    DUMP("XPLT", c.xplt)
-    DUMP("XPLC", c.xplc)
-    DUMP("XFIR", c.xfir)
-    DUMP("XBIT", c.xbit)
+    DUMP("XVAL", CL_XVAL)
+    DUMP("XCRM", CL_XCRM)
+    DUMP("XPOP", CL_XPOP)
+    DUMP("XPLT", CL_XPLT)
+    DUMP("XPLC", CL_XPLC)
+    DUMP("XFIR", CL_XFIR)
+    DUMP("XBIT", CL_XBIT)
 #undef DUMP
     city_free(&c);
     return 0;
@@ -1620,25 +1860,14 @@ static int dev_dump(int argc, char **argv)
 static int dev_verify(int argc, char **argv)
 {
     static Tally t;
-    int          files = 0, lossless = 0, exact = 0, n;
+    int          n;
 
     printf("\nSimCity 2000 simulation, reconstructed from the 68k binary\n");
     for (n = 2; n < argc; n++)
-    {
-        int f, l, x;
-        roundtrip(argv[n], &f, &l, &x);
-        files += f;
-        lossless += l;
-        exact += x;
         for_each_city(argv[n], check_city, &t);
-    }
     printf("verified against %d city files\n\n", t.cities);
 
-    printf("  file format\n");
-    pct("codec round-trip, lossless", lossless, files, "");
-    pct("byte-exact vs the shipped file", exact, files, "two encoders in the shipped cities");
-
-    printf("\n  totals recomputed from the map\n");
+    printf("  totals recomputed from the map\n");
     pct("sum(XPLT) == MISC[13]  pollution", t.agg_ok[0], t.cities, "");
     pct("sum(XVAL) == MISC[10]  land value", t.agg_ok[1], t.cities, "");
     pct("sum(XCRM) == MISC[11]  crime", t.agg_ok[2], t.cities, "");
@@ -1678,31 +1907,34 @@ static int dev_verify(int argc, char **argv)
 }
 
 const ArcDevMode ARC_DEV_MODES[] = {
-    {"--allocmicro",      "<city>",                            "place one special building of every id and report its record", 3, dev_allocmicro     },
-    {"--micro",           "<city> <out>",                      "the year-end microsim pass, and what it wrote",                3, dev_micro          },
-    {"--convert",         "<in> <out>",                        "a 1995 save becomes a world (.arco), or back again",           4, dev_convert        },
-    {"--riot",            "<city> <h> <v> [kind] [rng]",       "a disaster at (h,v), a riot unless told otherwise",            5, dev_riot           },
-    {"--demolish1",       "<city> <y> <x>",                    "demolish one tile",                                            5, dev_demolish1      },
-    {"--averages",        "<city>",                            "the city scan's averages",                                     3, dev_averages       },
-    {"--advisor",         "<city> [ticks] [plain]",            "the advisors' text after a run",                               3, dev_advisor        },
-    {"--clock",           "<city> <ticks> <out>",              "run the clock and dump it",                                    5, dev_clock          },
-    {"--graph",           "<city> <month> <years>",            "the graphs' history",                                          3, dev_graph          },
-    {"--things",          "<city> [passes]",                   "the things pass: what stands on the tiles",                    3, dev_things         },
-    {"--demolish",        "<city>",                            "demolition, city-wide",                                        3, dev_demolish       },
-    {"--terrain",         "<city> [nb]",                       "the terrain pass",                                             3, dev_terrain        },
-    {"--raise",           "<city>",                            "raise terrain",                                                3, dev_raise          },
-    {"--tool",            "<city> <gesture>...",               "the player's tools, one gesture each: TOOL,SUB,FLAGS:Y,X/Y,X", 4, dev_tool           },
-    {"--call",            "<city> <addr> <y,x>...",            "one ported tile routine, by its address, at each tile",        5, dev_call           },
-    {"--settile",         "<city>",                            "set a tile",                                                   3, dev_settile        },
-    {"--footprint",       "<city>",                            "the buildings' footprints",                                    3, dev_footprint      },
-    {"--scenario",        "<city> [zero|hard]",                "the scenario's conditions",                                    3, dev_scenario       },
-    {"--dump-growth-all", "<city> <out> [--rng | --cycles N]", "every growth phase, dumped",                                   4, dev_dump_growth_all},
-    {"--dump-growth",     "<city> <phase> <n> <out>",          "one growth scan, dumped",                                      6, dev_dump_growth    },
-    {"--trace-growth",    "<city> <phase> <n>",                "one growth scan, traced",                                      5, dev_trace_growth   },
-    {"--growth",          "<city>",                            "one growth pass",                                              3, dev_growth         },
-    {"--economy",         "<city>",                            "the economy model",                                            3, dev_economy        },
-    {"--budget",          "<city>",                            "the budget",                                                   3, dev_budget         },
-    {"--dump",            "<city> <out> [--pre=PHASES]",       "the city scan, dumped",                                        4, dev_dump           },
-    {"--verify",          "<dir>...",                          "the verification report over every save in the directories",   3, dev_verify         },
+    {"--allocmicro",      "<city>",                             "place one special building of every id and report its record",              3, dev_allocmicro     },
+    {"--micro",           "<city> <out>",                       "the year-end microsim pass, and what it wrote",                             3, dev_micro          },
+    {"--net-cells",       "<city> ...",                         "layer 0 of the road network: its parts against the fitters and the cities", 3, dev_net_cells      },
+    {"--convert",         "<in> <out>",                         "a 1995 save becomes a world (.arco)",                                       4, dev_convert        },
+    {"--compose",         "<out> <city>@<x>,<y>[:<w>x<h>] ...", "a world of several cities, each at its own place",                          4, dev_compose        },
+    {"--riot",            "<city> <h> <v> [kind] [rng]",        "a disaster at (h,v), a riot unless told otherwise",                         5, dev_riot           },
+    {"--demolish-tile",   "<city> <y> <x>",                     "demolish one tile, by its row and column",                                  5, dev_demolish1      },
+    {"--averages",        "<city>",                             "the city scan's averages",                                                  3, dev_averages       },
+    {"--advisor",         "<city> [ticks] [plain]",             "the advisors' text after a run",                                            3, dev_advisor        },
+    {"--clock",           "<city> <ticks> <out>",               "run the clock and dump it",                                                 5, dev_clock          },
+    {"--limits",          "<city> <glow> <ticks>",              "the clock inside a city's limits: what it writes outside them",             5, dev_limits         },
+    {"--graph",           "<city> <month> <years>",             "the graphs' history",                                                       3, dev_graph          },
+    {"--things",          "<city> [passes]",                    "the things pass: what stands on the tiles",                                 3, dev_things         },
+    {"--demolish",        "<city>",                             "demolition, city-wide",                                                     3, dev_demolish       },
+    {"--terrain",         "<city> [nb]",                        "the terrain pass",                                                          3, dev_terrain        },
+    {"--raise",           "<city>",                             "raise terrain",                                                             3, dev_raise          },
+    {"--tool",            "<city> <gesture>...",                "the player's tools, one gesture each: TOOL,SUB,FLAGS:Y,X/Y,X",              4, dev_tool           },
+    {"--call",            "<city> <addr> <y,x>...",             "one ported tile routine, by its address, at each tile",                     5, dev_call           },
+    {"--settile",         "<city>",                             "set a tile",                                                                3, dev_settile        },
+    {"--footprint",       "<city>",                             "the buildings' footprints",                                                 3, dev_footprint      },
+    {"--scenario",        "<city> [zero|hard]",                 "the scenario's conditions",                                                 3, dev_scenario       },
+    {"--dump-growth-all", "<city> <out> [--rng | --cycles N]",  "every growth phase, dumped",                                                4, dev_dump_growth_all},
+    {"--dump-growth",     "<city> <phase> <n> <out>",           "one growth scan, dumped",                                                   6, dev_dump_growth    },
+    {"--trace-growth",    "<city> <phase> <n>",                 "one growth scan, traced",                                                   5, dev_trace_growth   },
+    {"--growth",          "<city>",                             "one growth pass",                                                           3, dev_growth         },
+    {"--economy",         "<city>",                             "the economy model",                                                         3, dev_economy        },
+    {"--budget",          "<city>",                             "the budget",                                                                3, dev_budget         },
+    {"--dump",            "<city> <out> [--pre=PHASES]",        "the city scan, dumped",                                                     4, dev_dump           },
+    {"--verify",          "<dir>...",                           "the verification report over every save in the directories",                3, dev_verify         },
 };
 const int ARC_DEV_MODE_COUNT = (int)(sizeof ARC_DEV_MODES / sizeof ARC_DEV_MODES[0]);

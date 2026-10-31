@@ -42,7 +42,7 @@ SIM_DIRS = ("sim/", "dev/", "vendor/")
 #  The files that may see both sides, by path from src/.
 #  Whole layers, not a list of files that grows every time one is split.
 ALLOWED_DIRS = ("app/",)
-ALLOWED = {"render/adapt.h", "render/adapt.c"}
+ALLOWED = {"cells/adapt.h", "cells/adapt.c"}
 SUFFIX = (".c", ".h", ".cpp", ".cc", ".hpp", ".mm")
 INCLUDE = re.compile(r'^\s*#\s*include\s*["<]([^">]+)[">]')
 
@@ -61,7 +61,7 @@ def sim_symbols():
                              h.read_text(errors="ignore"), re.M):
             out.add(m.group(1))
     #  Names the renderer legitimately has of its own.
-    return out - {"city_load", "city_free", "city_save"}
+    return out - {"city_load", "city_free"}
 
 
 def includes_of(path):

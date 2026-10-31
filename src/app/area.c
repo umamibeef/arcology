@@ -8,11 +8,11 @@
 #include <string.h>
 #include <sys/stat.h>
 
+#include "area_report.h"
 #include "dump.h"
 #include "internal.h"
-#include "mesh/mesh.h"
-#include "net/report.h"
 #include "log.h"
+#include "mesh/mesh.h"
 
 static int area_text(App *a, int32_t c0, int32_t r0, int32_t c1, int32_t r1, char **text)
 {
@@ -67,11 +67,7 @@ int area_report_cli(App *a, const char *spec)
         for (rr = r0; rr <= r1; ++rr)
             for (cc = c0; cc <= c1; ++cc)
             {
-                char  who[1024], label[120];
-                static float pts[512];
-                int   np = 0;
-                if (a->view && net_component_at(a->view, cc, rr, pts, 256, &np, label, sizeof label) == 0)
-                    dumpf("the component at %d,%d: %s, outlined by %d points\n", (int)cc, (int)rr, label, np);
+                char who[1024];
                 if (mesh_origins(cc, rr, who, sizeof who) > 0)
                     dumpf("what drew the mesh on %d,%d\n%s", (int)cc, (int)rr, who);
             }

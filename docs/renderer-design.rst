@@ -10,7 +10,17 @@ Renderer brief
 
 .. container:: lede
 
-   A plan for a modern C renderer for the SimCity 2000 reconstruction — **standard PNG tile atlases**, continuous zoom, the whole map on screen at once, and a hard read-only boundary against the simulation. What the renderer makes of that data is a script's: see :ref:`scripting`.
+   A plan for a modern C renderer for the SimCity 2000 reconstruction — **standard PNG tile atlases**, continuous zoom, the whole map on screen at once, and a hard read-only boundary against the simulation. What the renderer makes of that data is C's.
+
+.. caution::
+
+   This page is the brief the renderer started from. Its decisions D7, D8 and D10 do not hold for the current
+   renderer. The world is built in chunks, the mesh uses a depth buffer, and a turn changes only the view:
+   nothing in the city's data rotates. The region is much larger than one 1995 map, so the renderer draws
+   the visible chunks, not the whole map every frame. Section 11, "The third dimension", does not hold
+   either. The ground is the dual ground of ``plans/terrain.md``: a height per tile, not ``ALTM`` plus four
+   corner bits, and no sculpt has to return to a legal ``XTER`` and ``ALTM`` pair. The current renderer is
+   :doc:`enhanced-renderer`, and the work in progress is in ``plans/``.
 
 .. grid:: 1 1 5 5
    :gutter: 2
@@ -57,10 +67,6 @@ original at all three zooms.
 
       a city drawn from the atlas equals one drawn from the resource fork
 
-   .. grid-item-card:: 5 / 5
-
-      invariants hold against the city data, on cities covering all four rotations
-
    .. grid-item-card:: 11
 
       data views plus the underground view, transcribed from the game's own jump table
@@ -68,11 +74,11 @@ original at all three zooms.
 
 What retires the old format is that the renderer draws from ``assets/`` alone — the MIFF container is off the critical path — and that the result is checked against the original renderer rather than against another of ours. ``tools/shapedec.py`` keeps the two honest by decoding the tileset through the game’s own blitter; it agrees with the local codec on all 1,448.
 
-The invariant check runs against the city data itself, not against another renderer. Two renderers agreeing is not evidence — a check can only find them disagreeing, and both can carry the same fault.
+Two renderers agreeing is not evidence — a check can only find them disagreeing, and both can carry the same fault.
 
 The terrain mapping, the altitude rule and the zoom geometry are read out of the game’s own tile drawing routine at :ref:`$167CC <rt-167CC>`, and the XTER table is generated into ``tables.c`` straight from the A5 image rather than inferred from the shipped cities.
 
-Separately, the rotation question is settled: rotation *rewrites every layer* rather than remapping at draw time. Turning all 103 cities four times under ``tools/rotate.py`` returns all fifteen map layers to their original bytes. See :ref:`Crossfade the four rotations; do not promise smooth rotation <d10>`.
+The original's rotation *rewrites every layer*. Our port has no rotation outside the rendering: a turned view reads each cell of the one grid and passes each direction-encoded id through the original's art table for that orientation (``src/render/turn.c``). See :ref:`the original's rotation <d10>`.
 
 New files, none of them shared with the simulation: ``tools/artpack.py``, the oracle set (``render_oracle``, ``render_diff``, ``render_pixels``, ``pixel_diff``, ``pixel_scan``, ``pixel_sbs``, ``blit_check``, ``shapedec``), and ``render/`` with its own ``CMakeLists.txt`` so the simulation’s build file needs no edit.
 
@@ -249,10 +255,7 @@ Keep the base atlas immutable and always composite. A mod that breaks is then re
 
 The original has three zoom stops. The art is drawn for exactly those three. The question is how to move continuously between them without turning crisp pixel art into mush.
 
-.. figure:: img/fig-renderer-design-6.svg
-   :alt: A continuous zoom scale from 0.125 to 4 times, showing which of the three hand-drawn art sets is used across each part of the range, with crossfade bands, compared with the original game's three fixed stops.
-
-   What smooth zoom actually adds. The three hand-drawn sets stop being three destinations and become three levels of detail across a continuous range — the same art, reached by a camera that can sit anywhere. Each set covers the range where it is closest to native, so nothing is ever stretched more than 1.41×; past 1× the 32 px art is magnified, which the original never offered.
+The game draws the 32 px art at every zoom and scales it by the zoom (D5). The three stops stay the original's, and the software renderer's.
 
 .. _d4:
 
@@ -290,26 +293,24 @@ Two conditions make it correct. The atlas must be **premultiplied alpha**, or ev
      - Purest result and it makes an indexed-atlas path viable, at the cost of one full-screen pass and a lot of memory at 4K. Keep as an option for people who want it exact.
    * - Plain nearest, snapped zoom
      - The retro-purist mode. Worth a toggle — some players want the original's exact look, and snapping to 1×, 2×, 3×, 4× gives it to them.
-   * - Mipmaps
-     - Only below 0.5×, and the hand-drawn 16 px and 8 px sets beat any mip chain generated from the 32 px art. Prefer the artist's minification to the GPU's.
+   * - The hand-drawn 16 px and 8 px sets
+     - The original's own minification, which beats a mip chain made from the 32 px art. The software renderer keeps them, so it matches the original's frame at each of its three stops.
 
 .. _d5:
 
-Treat the three art sets as LODs and crossfade at the geometric midpoints
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Draw the 32 px art at every zoom
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. container:: eyebrow
 
    D5 · level of detail
 
 
-**Take** 8 px below 0.354×, 16 px from 0.354× to 0.707×, 32 px above — each with a ±10% crossfade band.
+**Take** One art set, the 32 px one, at every zoom, scaled by the zoom itself.
 
-The switch points are the geometric means of the neighbouring scales, so each set is used where it is closest to native and never stretched more than about 1.4× in either direction. Crossfading over a narrow band, rather than snapping, hides the fact that the sets are not simple rescalings of each other — the 8 px art is redrawn, not reduced, and a hard cut is visible.
+The enhanced view draws the ground, the roads and the water as a mesh. The art left is the buildings, which stand in until they are models. So there is one set, and no switch between sets as the view zooms: a switch makes the city be swept again, and the frame it lands on shows. The software renderer keeps the original's three sets, because it is checked against the original's own frame at each.
 
-Crossfading means drawing the map twice inside the band. At 16,384 tiles that costs nothing, and the band is a few percent of the zoom range.
-
-Altitude has to scale with the set: 12 pixels per level at 32 px, 6 at 16 px, 3 at 8 px. Keep the camera in continuous world units and derive pixel offsets, rather than carrying three integer constants around.
+Keep the camera in continuous world units and derive pixel offsets from them: 12 pixels a level at the 32 px art's own size.
 
 .. _d6:
 
@@ -364,7 +365,7 @@ Keep the anti-diagonal painter's sweep; cache its output
 
 A depth buffer looks tempting and is a trap. Multi-tile buildings are drawn once, at whichever corner the rotation's mask selects, but they occupy up to sixteen tiles' worth of depth; a single depth per quad cannot express that, and per-fragment depth costs more than the sort it replaces. Sorting 16,384 tiles is a sweep over anti-diagonals with no comparisons in it at all — the order is arithmetic, not a sort.
 
-Because the order is fixed by geometry, it only changes when the map does. Rebuild dirty rows on a tile edit; rebuild everything on load or rotate. The frame itself does no ordering work.
+Because the order is fixed by geometry, it only changes when the map does. Rebuild dirty rows on a tile edit; rebuild everything on load. The frame itself does no ordering work.
 
 Draw order per tile, extending what the original does:
 
@@ -403,7 +404,7 @@ Crossfade the four rotations; do not promise smooth rotation
 
 **Take** A short camera swing plus a crossfade between the two states, roughly 250 ms — over a *full* rebuild, because rotating is not a camera operation at all.
 
-**Rotation rewrites the map.** :ref:`$3AECA <rt-3AECA>` turns all seven full-resolution layers, all eight data layers and every ``XTHG`` record through 90° in place, and only then bumps the rotation counter. The geometry, read off the four stores in the ring loop, is ``new[y][x] = old[N-1-x][y]``. So the arrays in a save file are already in whichever of the four orientations the city was left in; there is no canonical north.
+**The original's rotation rewrites the map.** Our renderer turns only the view, and the grid is never rotated (``src/render/turn.c``). The rest of this section is the original's. :ref:`$3AECA <rt-3AECA>` turns all seven full-resolution layers, all eight data layers and every ``XTHG`` record through 90° in place, and only then bumps the rotation counter. The geometry, read off the four stores in the ring loop, is ``new[y][x] = old[N-1-x][y]``. So the arrays in a save file are already in whichever of the four orientations the city was left in; there is no canonical north.
 
 Three of the layers pass every byte through a translation table on the way, because their ids encode a direction — ``XBLD`` through ``A5-0xEE2``, ``XTER`` through ``A5-0xDE2``, ``XUND`` through ``A5-0xD9C``. The ``XBLD`` table is a clean permutation: 176 ids fixed, 12 two-cycles for tiles with two orientations, 14 four-cycles for tiles with four. Composing any of the three four times is the identity on every value that occurs in the 103 shipped cities.
 
@@ -446,7 +447,7 @@ The software path is the point, not a fallback
 
 This project's discipline is that claims are checked. The brief says a number without a denominator is not a result, and that a routine should be run rather than read. A renderer deserves the same treatment, and it can have it: **a software rasteriser that reproduces the original's frame exactly**, byte for byte, at 1× and rotation 0.
 
-That gives a regression test with no tolerance in it, on a path with no driver and no shader compiler. The GPU path is then checked against the same image within a small tolerance, and a difference is a bug in one of two places rather than a matter of opinion. It also means the project can render a city in continuous integration, on a machine with no display.
+That gives a regression test with no tolerance in it, on a path with no driver and no shader compiler. ``arcology --compare-renderers`` compares the GPU frame with the software frame. That shows where the two backends part, and proves neither one right: only the software path is checked against the original's frame. It also means the project can render a city in continuous integration, on a machine with no display.
 
 Module layout
 ~~~~~~~~~~~~~
@@ -455,7 +456,9 @@ Module layout
 
    src/render/
        atlas/atlas.c  atlas + sidecar load, palette resolve
+   src/app/
        camera.c       iso projection, continuous zoom, pan, rotation state
+   src/render/
        soft/soft.c    reference rasteriser: the sweep's op list, and the paint
        gpu/gpu.c      SDL_GPU backend: the same op list as instances
    tools/
@@ -507,7 +510,7 @@ The tests that hold it together
 .. code-block:: console
 
    python3 tools/artpack.py verify         shapes round-trip through our own codec
-   ctest --test-dir render/build/...  atlas loads; blit_check; invariants
+   ctest --test-dir build -R 'atlas_loads|blit_matches_game'
    python3 tools/blit_check.py             our blit() vs $18E96, both mirrors
    python3 tools/render_diff.py  CITY      our blit list vs the game's
    python3 tools/pixel_diff.py   CITY      PIXELS vs the game's own renderer
@@ -554,7 +557,7 @@ Extractor and round-trip
 
    Step 1 · done
 
-``artpack.py`` emits the three indexed atlases plus sidecars, reads them back, and re-encodes to MIFF. All 1,448 shapes round-trip pixel for pixel — the same standard the RLE codec is already held to. It also imports SCURK packs and can write one, so art edited as a PNG here can be loaded by the 1995 game.
+``artpack.py`` emits the three indexed atlases plus sidecars, reads them back, and re-encodes to MIFF. All 1,448 shapes round-trip pixel for pixel. It also imports SCURK packs and can write one, so art edited as a PNG here can be loaded by the 1995 game.
 
 Software rasteriser
 ~~~~~~~~~~~~~~~~~~~
@@ -563,7 +566,7 @@ Software rasteriser
 
    Step 2 · done
 
-``soft.c`` draws a city from a read-only view, with no GPU in the picture. ``tools/pixel_diff.py`` measures it against the original's frame, pixel for pixel, on cities covering all four rotations. The view type is ``RCity``, defined in the renderer and deliberately *not* the simulation's ``City`` — an adapter will fill one from the other, and until then ``city.c`` reads a ``.SC2`` directly so the renderer builds and tests standalone.
+``soft.c`` draws a city from a read-only view, with no GPU in the picture. ``tools/pixel_diff.py`` measures it against the original's frame, pixel for pixel, on cities covering all four rotations. The view type is ``RCity``, defined in ``src/cells/city.h`` and deliberately *not* the simulation's ``City``. An adapter (``src/cells/adapt.c``) fills one from the other.
 
 Window and GPU path
 ~~~~~~~~~~~~~~~~~~~
@@ -604,7 +607,7 @@ A C reader for the SCURK format, the mod override directory, live reload. Load a
 11. The third dimension
 -----------------------
 
-The grid keeps every constraint the 1995 game puts on it — 128×128 tiles, the same layers, the same altitudes, the same rules about what may stand where. What changes is that the grid stops being a stack of pre-drawn diamonds and becomes real geometry: an isometric view of a surface that can be deformed, lit and moved through, rather than a picture of one.
+The grid keeps every constraint the 1995 game puts on it — the same layers, the same altitudes, the same rules about what may stand where. What changes is that the grid stops being a stack of pre-drawn diamonds and becomes real geometry: an isometric view of a surface that can be deformed, lit and moved through, rather than a picture of one.
 
 Two decisions above are made *on the assumption that the renderer is a sprite compositor*, and this direction overturns both. They are worth naming rather than quietly dropping.
 
@@ -626,6 +629,10 @@ A surface needs the height of each of a tile’s four corners, and the game stat
 The derivation itself is in the reconstruction: ``src/sim/sim.c`` carries ``fixTerrain`` with both tables, and ``tools/terrain_check.py`` holds it exact against the original, 90,745 of 90,745 values on five cities, with ``fixNeighbourhood`` at 90,166 of 90,166.
 
 Two consequences decide how the mesh is built. **ALTM is the tile’s lowest corner, not its centre** — corners are only ever lifted, never lowered, so a tile’s surface spans exactly ``[alt, alt+1]`` and every corner height is an integer. And **a pit cannot exist**: mask 15, all four corners higher, is not a shape but the instruction to raise the tile and start again. The heightfield is therefore fully determined by ALTM plus four bits per tile, with no half-levels anywhere.
+
+.. note::
+
+   This is the original's ground. The enhanced world draws the dual ground of ``plans/terrain.md`` instead.
 
 Two mechanisms have no third-dimensional meaning at all
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -659,6 +666,10 @@ That requirement is worth more than it costs, because it hands back the thing th
 
 Decided: terrain sculpting, through a signed distance field
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. note::
+
+   The caution at the top of this page applies. The land is a height per tile (``plans/terrain.md``), and this round trip is not part of the design.
 
 The deformation the original had — raise, lower, level — kept, with far more flexibility in how it is expressed. The intended representation is an SDF the surface is meshed from, rather than a heightfield edited in place.
 

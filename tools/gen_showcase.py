@@ -3,6 +3,8 @@
 
     python3 tools/gen_showcase.py                 # Bayview, the defaults
     python3 tools/gen_showcase.py --city Hawaii --frames 40
+    python3 tools/gen_showcase.py --cities-dir cities --city oakland.sc2 \
+        --record zoom:120 --every 3 --centre 64,64 --out media/oakland-clouds.gif
 
 Each frame is a real frame of the real game: the script runs `arcology`
 with `--run N --shot`, letting the simulation advance between shots, so
@@ -11,10 +13,12 @@ running, not a mock-up.  Regenerate it whenever either changes -- the
 image is only as current as the last run, which is why `cmake --build
 build --target showcase` exists.
 
-The GPU renderer draws from the game's own palette, so a frame holds
-around 140 distinct colours and maps straight onto a GIF's 256-entry
-table with no quantiser in the way.  If a frame ever exceeds 256 the
-script says so rather than dithering silently.
+The geometry frames are the full render: the mesh, the art standing on
+it, and the air pass (haze, smog, scattered light and the clouds), which
+a geometry frame draws unless `--disable air` turns it off.  Nothing here
+passes `--disable`.  A shaded frame holds tens of thousands of colours,
+so one median-cut palette is built over every frame of the animation and
+each pixel maps onto it with no dithering.
 """
 import argparse
 import collections
@@ -216,6 +220,15 @@ def main():
     ap.add_argument("--compare", action="store_true",
                     help="the original sprite terrain beside the new "
                          "geometry, same city, same frame")
+    ap.add_argument("--zoom", default=None,
+                    help="how near the camera is, as the game's --zoom")
+    ap.add_argument("--record", default=None,
+                    help="KIND:N -- one run of the game's own --record "
+                         "(turn, zoom or still), N frames at 60 Hz, in "
+                         "place of a run a frame.  The clouds drift and the "
+                         "camera moves as they do in the window")
+    ap.add_argument("--every", type=int, default=1,
+                    help="with --record: keep every Nth frame")
     a = ap.parse_args()
 
     if not BIN.exists():
@@ -250,13 +263,13 @@ def main():
                "--shot", str(png)]
         cmd += (["--centre", a.centre] if a.centre
                 else ["--scroll", a.scroll])
-        #  --sprites is the original's own terrain and water art, from the
-        #  same atlas the 1995 build drew from.  --geometry is the mesh and
-        #  the water shader.  Both are named explicitly because a headless
-        #  --run defaults to sprites -- it is a comparison harness first --
-        #  and a showcase that quietly rendered the old art on both sides
-        #  is exactly the mistake this comment exists to stop.
-        cmd.append("--sprites" if sprites else "--geometry")
+        if a.zoom:
+            cmd += ["--zoom", a.zoom]
+        #  --look sprites is the original's own terrain and water art, from
+        #  the same atlas the 1995 build drew from; --look geometry is the
+        #  mesh, the game's own look.  Both are named so that each side of
+        #  the comparison says what it draws.
+        cmd += ["--look", "sprites" if sprites else "geometry"]
         r = subprocess.run(cmd, stdout=subprocess.DEVNULL,
                            stderr=subprocess.DEVNULL)
         if r.returncode != 0 or not png.exists():
@@ -265,6 +278,30 @@ def main():
         return downscale(w, h, rgb, a.scale)
 
     hist = collections.Counter()
+    if a.record:
+        #  One run of the live loop's own frames: the shot's name, numbered.
+        for old in tmp.glob("r_*.png"):
+            old.unlink()
+        cmd = [str(BIN), str(ASSETS), str(city), "--shot", str(tmp / "r.png"),
+               "--record", a.record, "--look", "geometry"]
+        cmd += (["--centre", a.centre] if a.centre
+                else ["--scroll", a.scroll])
+        if a.zoom:
+            cmd += ["--zoom", a.zoom]
+        r = subprocess.run(cmd, stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL)
+        pngs = sorted(tmp.glob("r_*.png"))[::a.every]
+        if r.returncode != 0 or not pngs:
+            raise SystemExit("the recording failed: %s" % " ".join(cmd))
+        a.frames = 0
+        for k, png in enumerate(pngs):
+            w, h, rgb = read_rgb_png(png)
+            w, h, rgb = downscale(w, h, rgb, a.scale)
+            shots.append(rgb)
+            for i in range(0, len(rgb), 3):
+                hist[rgb[i:i + 3]] += 1
+            sys.stdout.write("\r  frame %d/%d" % (k + 1, len(pngs)))
+            sys.stdout.flush()
     for k in range(a.frames):
         w, h, rgb = shoot(k, tmp / ("f%03d.png" % k), False)
         if a.compare:

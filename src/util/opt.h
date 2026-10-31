@@ -13,32 +13,31 @@ extern "C" {
 #endif
 typedef struct
 {
-    /* looking at the road work */
-    int         curve_dump, junc_dump, path_dump, plan_dump, prof_dump, loft_dump, band_dump, clip_dump, input_log, inspect;
-    int         line_dump, lane_dump;        /* given at all */
-    int         margin_dump;                   /* the margin ends that meet nothing */
-    int         buried_all;                      /* every margin with its own piece under it, not the first few */
-    const char *line_dump_at, *lane_dump_at; /* ... and at a tile, C,R, or NULL */
-    const char *mesh_dump, *tile_dump, *field_dump, *sweep_probe, *show_at;
-    const char *probe; /* --probe X,Y: every surface over one point of the map */
-    const char *dump_to; /* the dumps' sink: a file, or NULL for stdout */
-    const char *lua;      /* --lua FILE: the script, watched and read again when it changes */
-    const char *lua_eval; /* --lua-eval SRC: one chunk, run once the world is up */
+    /* looking at the build */
+    int         input_log, inspect;
+    int         net_dump; /* the road network's topology, end by end and road by road */
+    const char *mesh_dump, *tile_dump, *field_dump, *show_at, *build_window;
+    const char *work_window;   /* --work-outside N: work this far from an edit's tiles is its own, and listed */
+    const char *open_menu;     /* --open-menu NAME: a menu open from the first frame, for a --shot */
+    const char *probe;         /* --probe X,Y: every surface over one point of the map */
+    int         net_check;     /* --net-check: the road network built from the cells and checked, nothing drawn */
+    const char *net_svg;       /* --net-svg FILE: and written as a diagram */
+    const char *net_svg_box;   /* --net-svg-box C0,R0,C1,R1: the diagram of those tiles alone */
+    const char *shape_profile; /* --shape-profile FILE: street and deck profiles through the shape's solves */
+    const char *dump_to;       /* the dumps' sink: a file, or NULL for stdout */
     /* the build, one stage at a time */
-    int noscale, no_sort, no_shadow, no_cap, no_replay, no_incr, no_smp_cache, grade_loft, grade_all, grade_junc, grade_lanes, gpu_tight, spike_check, check_open, show_edits, async_build;
-    /*  The runaway guard's budget, in whole seconds, or 0 for the
-     *  generous default.  A rule that will never finish costs that long
-     *  EVERY build, so a short one is worth having while chasing one. */
-    const char *rule_seconds;
-    int times;
+    int         no_sort, no_shadow, no_sky, no_incr, gpu_tight, no_lod, no_air, spike_check, check_open, show_edits, async_build, whole_build;
+    int         tri_colors;  /* --tri-colors: each triangle of the mesh in a color of its own, from the start */
+    const char *save_to;     /* --save-to FILE: the city saved as the Save menu saves it, once the run is done */
+    const char *limits_glow; /* --limits-glow N: the clock bounded by the city's limits, N tiles past what is built */
+    int         times;
     /* the window and the run */
-    const char *tune, *win, *cities, *traffic_t, *edit, *gesture, *seed, *area, *turn;
-    int         tunewin, scriptwin, mute;
+    const char *tune, *win, *cities, *edit, *gesture, *seed, *area, *record;
+    const char *map_tile; /* --map-tile K: the renderer draws the city K x K times over, a map K times as wide */
+    int         mute;
     /* the device */
-    int         gpu_debug, gpu_dump;
+    int         gpu_counts;
     const char *gpu_dump_at;
-    /* verbose corners */
-    int lap_debug, box_debug;
 } DevOpts;
 extern DevOpts g_dev;
 

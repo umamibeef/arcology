@@ -9,9 +9,15 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define JSMN_STATIC
-#include "jsmn.h"
+#include "json.h"
 #include "lodepng.h"
+
+static void atlas_resolve_rect(RAtlas *a, RAtlasLevel *l, int32_t x, int32_t y, int32_t w, int32_t h);
+
+/*  Re-resolve `indices` into `rgba` through the current palette.  Cheap
+ *  enough per frame for the handful of palette-cycled tiles, which is how
+ *  water shimmer and a day and night tint come for free. */
+static void atlas_resolve(RAtlas *a, RAtlasLevel *l);
 
 /* ------------------------------------------------------------------ *
  *  small helpers
@@ -29,7 +35,7 @@ static void fail(RAtlas *a, const char *fmt, const char *arg)
 static int join(char *dst, size_t cap, const char *dir, const char *name)
 {
     int n = snprintf(dst, cap, "%s/%s", dir, name);
-    return (n > 0 && (size_t) n < cap) ? 0 : -1;
+    return (n > 0 && (size_t)n < cap) ? 0 : -1;
 }
 
 /*  Binary mode is not optional: on Windows a text-mode read eats \r and
@@ -55,15 +61,15 @@ static char *read_text(const char *path)
         return NULL;
     }
     rewind(f);
-    buf = (char *) malloc((size_t) n + 1u);
+    buf = (char *)malloc((size_t)n + 1u);
     if (!buf)
     {
         fclose(f);
         return NULL;
     }
-    got = fread(buf, 1, (size_t) n, f);
+    got = fread(buf, 1, (size_t)n, f);
     fclose(f);
-    if (got != (size_t) n)
+    if (got != (size_t)n)
     {
         free(buf);
         return NULL;
@@ -73,135 +79,42 @@ static char *read_text(const char *path)
 }
 
 /* ------------------------------------------------------------------ *
- *  jsmn navigation.  Jsmn gives a flat token array.  These walk it.
- * ------------------------------------------------------------------ */
-static int tok_eq(const char *js, const jsmntok_t *t, const char *s)
-{
-    size_t n = (size_t) (t->end - t->start);
-    return t->type == JSMN_STRING && strlen(s) == n &&
-           strncmp(js + t->start, s, n) == 0;
-}
-
-/*  Index of the first token after the subtree rooted at i. */
-static int tok_skip(const jsmntok_t *t, int i)
-{
-    int j, n;
-    if (t[i].type == JSMN_OBJECT)
-    {
-        n = t[i].size;
-        j = i + 1;
-        while (n-- > 0)
-        {
-            j = tok_skip(t, j); /* key   */
-            j = tok_skip(t, j); /* value */
-        }
-        return j;
-    }
-    if (t[i].type == JSMN_ARRAY)
-    {
-        n = t[i].size;
-        j = i + 1;
-        while (n-- > 0)
-            j = tok_skip(t, j);
-        return j;
-    }
-    return i + 1;
-}
-
-/*  Index of the value token for `key` inside the object at `obj`, or -1. */
-static int obj_get(const char *js, const jsmntok_t *t, int obj, const char *key)
-{
-    int i, n;
-    if (obj < 0 || t[obj].type != JSMN_OBJECT)
-        return -1;
-    n = t[obj].size;
-    i = obj + 1;
-    while (n-- > 0)
-    {
-        if (tok_eq(js, &t[i], key))
-            return i + 1;
-        i = tok_skip(t, i + 1);
-    }
-    return -1;
-}
-
-static long tok_long(const char *js, const jsmntok_t *t)
-{
-    char   buf[32];
-    size_t n = (size_t) (t->end - t->start);
-    if (n >= sizeof buf)
-        n = sizeof buf - 1u;
-    memcpy(buf, js + t->start, n);
-    buf[n] = '\0';
-    return strtol(buf, NULL, 10);
-}
-
-static long obj_long(const char *js, const jsmntok_t *t, int obj,
-                     const char *key, long fallback)
-{
-    int v = obj_get(js, t, obj, key);
-    return v < 0 ? fallback : tok_long(js, &t[v]);
-}
-
-/*  Parse a whole document.  Two passes: jsmn counts tokens when handed a
- *  NULL array, which saves guessing at a cap. */
-static jsmntok_t *json_parse(const char *js, size_t len, int *n_out)
-{
-    jsmn_parser p;
-    jsmntok_t  *toks;
-    int         n;
-
-    jsmn_init(&p);
-    n = jsmn_parse(&p, js, len, NULL, 0);
-    if (n <= 0)
-        return NULL;
-    toks = (jsmntok_t *) malloc(sizeof(jsmntok_t) * (size_t) n);
-    if (!toks)
-        return NULL;
-    jsmn_init(&p);
-    if (jsmn_parse(&p, js, len, toks, (unsigned int) n) != n)
-    {
-        free(toks);
-        return NULL;
-    }
-    *n_out = n;
-    return toks;
-}
-
-/* ------------------------------------------------------------------ *
  *  palette resolve
  * ------------------------------------------------------------------ */
-void atlas_resolve_rect(RAtlas *a, RAtlasLevel *l, int32_t x0, int32_t y0,
-                          int32_t w, int32_t h)
+static void atlas_resolve_rect(RAtlas *a, RAtlasLevel *l, int32_t x0, int32_t y0, int32_t w, int32_t h)
 {
     int32_t x, y;
     if (!l->indices || !l->rgba)
         return;
-    if (x0 < 0) x0 = 0;
-    if (y0 < 0) y0 = 0;
-    if (x0 + w > l->w) w = l->w - x0;
-    if (y0 + h > l->h) h = l->h - y0;
+    if (x0 < 0)
+        x0 = 0;
+    if (y0 < 0)
+        y0 = 0;
+    if (x0 + w > l->w)
+        w = l->w - x0;
+    if (y0 + h > l->h)
+        h = l->h - y0;
 
     for (y = 0; y < h; ++y)
     {
-        const uint8_t *src = l->indices + (size_t) (y0 + y) * (size_t) l->w + (size_t) x0;
-        uint8_t       *dst = l->rgba + (((size_t) (y0 + y) * (size_t) l->w + (size_t) x0) << 2);
+        const uint8_t *src = l->indices + (size_t)(y0 + y) * (size_t)l->w + (size_t)x0;
+        uint8_t       *dst = l->rgba + (((size_t)(y0 + y) * (size_t)l->w + (size_t)x0) << 2);
         for (x = 0; x < w; ++x)
         {
             const uint8_t *c  = a->palette[src[x]];
             uint32_t       al = c[3];
             /*  Premultiplied, so the bilinear taps at a sprite's edge blend
              *  toward transparent rather than toward black. */
-            dst[0] = (uint8_t) ((c[0] * al + 127u) / 255u);
-            dst[1] = (uint8_t) ((c[1] * al + 127u) / 255u);
-            dst[2] = (uint8_t) ((c[2] * al + 127u) / 255u);
-            dst[3] = (uint8_t) al;
+            dst[0] = (uint8_t)((c[0] * al + 127u) / 255u);
+            dst[1] = (uint8_t)((c[1] * al + 127u) / 255u);
+            dst[2] = (uint8_t)((c[2] * al + 127u) / 255u);
+            dst[3] = (uint8_t)al;
             dst += 4;
         }
     }
 }
 
-void atlas_resolve(RAtlas *a, RAtlasLevel *l)
+static void atlas_resolve(RAtlas *a, RAtlasLevel *l)
 {
     atlas_resolve_rect(a, l, 0, 0, l->w, l->h);
 }
@@ -209,8 +122,7 @@ void atlas_resolve(RAtlas *a, RAtlasLevel *l)
 /* ------------------------------------------------------------------ *
  *  one level
  * ------------------------------------------------------------------ */
-static int load_level(RAtlas *a, const char *dir, const char *sheet_name,
-                      RAtlasLevel *l)
+static int load_level(RAtlas *a, const char *dir, const char *sheet_name, RAtlasLevel *l)
 {
     char           path[1024];
     char          *js = NULL;
@@ -242,28 +154,28 @@ static int load_level(RAtlas *a, const char *dir, const char *sheet_name,
     }
 
     root   = 0;
-    meta   = obj_get(js, t, root, "meta");
-    frames = obj_get(js, t, root, "frames");
-    arc   = obj_get(js, t, meta, "arc");
-    size   = obj_get(js, t, meta, "size");
-    tiles  = obj_get(js, t, arc, "tiles");
+    meta   = json_get(js, t, root, "meta");
+    frames = json_get(js, t, root, "frames");
+    arc    = json_get(js, t, meta, "arc");
+    size   = json_get(js, t, meta, "size");
+    tiles  = json_get(js, t, arc, "tiles");
     if (meta < 0 || frames < 0 || arc < 0 || size < 0 || tiles < 0)
     {
         fail(a, "%s: not an artpack sheet", path);
         goto done;
     }
 
-    l->zoom        = (int32_t) obj_long(js, t, arc, "zoom", 32);
-    l->id_base     = (int32_t) obj_long(js, t, arc, "id_base", 0);
-    l->tile_w      = (int32_t) obj_long(js, t, arc, "tile_w", l->zoom);
-    l->tile_h      = (int32_t) obj_long(js, t, arc, "tile_h", l->zoom / 2);
-    l->alt_step    = (int32_t) obj_long(js, t, arc, "alt_step", 12);
-    l->transparent = (int32_t) obj_long(js, t, arc, "transparent", 0);
-    l->w           = (int32_t) obj_long(js, t, size, "w", 0);
-    l->h           = (int32_t) obj_long(js, t, size, "h", 0);
+    l->zoom        = (int32_t)json_long(js, t, json_get(js, t, arc, "zoom"), 32);
+    l->id_base     = (int32_t)json_long(js, t, json_get(js, t, arc, "id_base"), 0);
+    l->tile_w      = (int32_t)json_long(js, t, json_get(js, t, arc, "tile_w"), l->zoom);
+    l->tile_h      = (int32_t)json_long(js, t, json_get(js, t, arc, "tile_h"), l->zoom / 2);
+    l->alt_step    = (int32_t)json_long(js, t, json_get(js, t, arc, "alt_step"), 12);
+    l->transparent = (int32_t)json_long(js, t, json_get(js, t, arc, "transparent"), 0);
+    l->w           = (int32_t)json_long(js, t, json_get(js, t, size, "w"), 0);
+    l->h           = (int32_t)json_long(js, t, json_get(js, t, size, "h"), 0);
 
     /* ---- the image ------------------------------------------------ */
-    img_tok = obj_get(js, t, meta, "image");
+    img_tok = json_get(js, t, meta, "image");
     if (img_tok < 0)
     {
         fail(a, "%s: no meta.image", path);
@@ -271,7 +183,7 @@ static int load_level(RAtlas *a, const char *dir, const char *sheet_name,
     }
     {
         char   name[256];
-        size_t ln = (size_t) (t[img_tok].end - t[img_tok].start);
+        size_t ln = (size_t)(t[img_tok].end - t[img_tok].start);
         if (ln >= sizeof name)
         {
             fail(a, "%s: image name too long", path);
@@ -287,8 +199,8 @@ static int load_level(RAtlas *a, const char *dir, const char *sheet_name,
     }
 
     lodepng_state_init(&st);
-    st.info_raw.colortype  = LCT_PALETTE;
-    st.info_raw.bitdepth   = 8;
+    st.info_raw.colortype    = LCT_PALETTE;
+    st.info_raw.bitdepth     = 8;
     st.decoder.color_convert = 0; /* hand back the raw palette indices */
     {
         unsigned char *file = NULL;
@@ -316,7 +228,7 @@ static int load_level(RAtlas *a, const char *dir, const char *sheet_name,
         lodepng_state_cleanup(&st);
         goto done;
     }
-    if ((int32_t) pw != l->w || (int32_t) ph != l->h)
+    if ((int32_t)pw != l->w || (int32_t)ph != l->h)
     {
         fail(a, "%s: image size disagrees with the sidecar", path);
         lodepng_state_cleanup(&st);
@@ -326,7 +238,7 @@ static int load_level(RAtlas *a, const char *dir, const char *sheet_name,
     memset(a->palette, 0, sizeof a->palette);
     /*  Keep phase 0 so atlas_animate can compose every later phase from
      *  it rather than from whatever the last rotation left behind. */
-    for (i = 0; i < (int) st.info_png.color.palettesize && i < 256; ++i)
+    for (i = 0; i < (int)st.info_png.color.palettesize && i < 256; ++i)
     {
         a->palette[i][0] = st.info_png.color.palette[i * 4 + 0];
         a->palette[i][1] = st.info_png.color.palette[i * 4 + 1];
@@ -338,7 +250,7 @@ static int load_level(RAtlas *a, const char *dir, const char *sheet_name,
 
     l->indices = png;
     png        = NULL;
-    l->rgba    = (uint8_t *) malloc((size_t) l->w * (size_t) l->h * 4u);
+    l->rgba    = (uint8_t *)malloc((size_t)l->w * (size_t)l->h * 4u);
     if (!l->rgba)
     {
         fail(a, "out of memory for the atlas", NULL);
@@ -350,8 +262,8 @@ static int load_level(RAtlas *a, const char *dir, const char *sheet_name,
         l->by_id[k] = -1;
 
     l->n_tiles = t[frames].size;
-    l->tiles   = (RTile *) calloc((size_t) (l->n_tiles > 0 ? l->n_tiles : 1),
-                                  sizeof(RTile));
+    l->tiles   = (RTile *)calloc((size_t)(l->n_tiles > 0 ? l->n_tiles : 1),
+                                 sizeof(RTile));
     if (!l->tiles)
     {
         fail(a, "out of memory for the tile table", NULL);
@@ -365,28 +277,28 @@ static int load_level(RAtlas *a, const char *dir, const char *sheet_name,
         int32_t idx = 0;
         while (n-- > 0)
         {
-            int   key = i;
-            int   val = i + 1;
-            int   fr  = obj_get(js, t, val, "frame");
-            long  id  = tok_long(js, &t[key]);
-            RTile *rt = &l->tiles[idx];
+            int    key = i;
+            int    val = i + 1;
+            int    fr  = json_get(js, t, val, "frame");
+            long   id  = json_long(js, t, key, 0);
+            RTile *rt  = &l->tiles[idx];
             if (fr >= 0 && id > 0 && id < R_MAX_SHAPE)
             {
-                rt->id   = (uint16_t) id;
-                rt->x    = (uint16_t) obj_long(js, t, fr, "x", 0);
-                rt->y    = (uint16_t) obj_long(js, t, fr, "y", 0);
-                rt->w    = (uint16_t) obj_long(js, t, fr, "w", 0);
-                rt->h    = (uint16_t) obj_long(js, t, fr, "h", 0);
-                rt->tile = (uint16_t) (id - l->id_base);
-                rt->foot = (uint8_t) (rt->w / (uint16_t) l->tile_w);
+                rt->id   = (uint16_t)id;
+                rt->x    = (uint16_t)json_long(js, t, json_get(js, t, fr, "x"), 0);
+                rt->y    = (uint16_t)json_long(js, t, json_get(js, t, fr, "y"), 0);
+                rt->w    = (uint16_t)json_long(js, t, json_get(js, t, fr, "w"), 0);
+                rt->h    = (uint16_t)json_long(js, t, json_get(js, t, fr, "h"), 0);
+                rt->tile = (uint16_t)(id - l->id_base);
+                rt->foot = (uint8_t)(rt->w / (uint16_t)l->tile_w);
                 if (rt->foot == 0)
                     rt->foot = 1;
-                rt->ax = 0;
-                rt->ay = (int16_t) ((int32_t) rt->h - l->tile_h);
+                rt->ax       = 0;
+                rt->ay       = (int16_t)((int32_t)rt->h - l->tile_h);
                 l->by_id[id] = idx;
                 ++idx;
             }
-            i = tok_skip(t, val);
+            i = json_skip(t, val);
         }
         l->n_tiles = idx;
     }
@@ -400,16 +312,16 @@ static int load_level(RAtlas *a, const char *dir, const char *sheet_name,
     {
         int  key = i;
         int  val = i + 1;
-        long id  = tok_long(js, &t[key]);
+        long id  = json_long(js, t, key, 0);
         if (id > 0 && id < R_MAX_SHAPE && l->by_id[id] >= 0)
         {
             RTile *rt = &l->tiles[l->by_id[id]];
-            rt->foot  = (uint8_t) obj_long(js, t, val, "foot", rt->foot);
-            rt->ax    = (int16_t) obj_long(js, t, val, "ax", rt->ax);
-            rt->ay    = (int16_t) obj_long(js, t, val, "ay", rt->ay);
-            rt->tile  = (uint16_t) obj_long(js, t, val, "tile", rt->tile);
+            rt->foot  = (uint8_t)json_long(js, t, json_get(js, t, val, "foot"), rt->foot);
+            rt->ax    = (int16_t)json_long(js, t, json_get(js, t, val, "ax"), rt->ax);
+            rt->ay    = (int16_t)json_long(js, t, json_get(js, t, val, "ay"), rt->ay);
+            rt->tile  = (uint16_t)json_long(js, t, json_get(js, t, val, "tile"), rt->tile);
         }
-        i = tok_skip(t, val);
+        i = json_skip(t, val);
     }
 
     atlas_resolve(a, l);
@@ -455,25 +367,25 @@ int atlas_load(RAtlas *a, const char *dir)
     /*  The runs the game cycles with _AnimatePalette.  Optional: an atlas
      *  without them simply never animates. */
     {
-        int an = obj_get(js, t, 0, "animated");
+        int an = json_get(js, t, 0, "animated");
         if (an >= 0 && t[an].type == JSMN_ARRAY)
         {
             int k = t[an].size, j = an + 1;
             while (k-- > 0 && a->n_anim < 4)
             {
                 RAnim *r = &a->anim[a->n_anim];
-                r->first = (int32_t) obj_long(js, t, j, "first", -1);
-                r->count = (int32_t) obj_long(js, t, j, "count", 0);
-                r->clut  = (int32_t) obj_long(js, t, j, "clut", 0);
+                r->first = (int32_t)json_long(js, t, json_get(js, t, j, "first"), -1);
+                r->count = (int32_t)json_long(js, t, json_get(js, t, j, "count"), 0);
+                r->clut  = (int32_t)json_long(js, t, json_get(js, t, j, "clut"), 0);
                 if (r->first >= 0 && r->count > 1 &&
                     r->first + r->count <= 256)
                     a->n_anim++;
-                j = tok_skip(t, j);
+                j = json_skip(t, j);
             }
         }
     }
 
-    zooms = obj_get(js, t, 0, "zooms");
+    zooms = json_get(js, t, 0, "zooms");
     if (zooms < 0 || t[zooms].type != JSMN_ARRAY)
     {
         fail(a, "%s: no zooms array", path);
@@ -484,7 +396,7 @@ int atlas_load(RAtlas *a, const char *dir)
     i = zooms + 1;
     while (n-- > 0 && a->n_levels < R_MAX_LEVELS)
     {
-        int    sheet = obj_get(js, t, i, "sheet");
+        int    sheet = json_get(js, t, i, "sheet");
         char   name[128];
         size_t ln;
         if (sheet < 0)
@@ -492,7 +404,7 @@ int atlas_load(RAtlas *a, const char *dir)
             fail(a, "%s: a zoom entry has no sheet", path);
             goto done;
         }
-        ln = (size_t) (t[sheet].end - t[sheet].start);
+        ln = (size_t)(t[sheet].end - t[sheet].start);
         if (ln >= sizeof name)
         {
             fail(a, "%s: sheet name too long", path);
@@ -503,7 +415,7 @@ int atlas_load(RAtlas *a, const char *dir)
         if (load_level(a, dir, name, &a->level[a->n_levels]) != 0)
             goto done; /* load_level has already set a->err */
         ++a->n_levels;
-        i = tok_skip(t, i);
+        i = json_skip(t, i);
     }
     rc = a->n_levels > 0 ? 0 : -1;
     if (rc != 0)
@@ -548,7 +460,8 @@ void atlas_animate(RAtlas *a, int32_t phase)
                 continue;
             for (i = 0; i < r->count; ++i)
                 memcpy(a->palette[r->first + i],
-                       tmp[r->first + perm[i]], 4);
+                       tmp[r->first + perm[i]],
+                       4);
         }
     }
     for (k = 0; k < a->n_levels; ++k)
@@ -655,8 +568,8 @@ const RAtlasLevel *atlas_level_for_scale(const RAtlas *a, float scale)
     {
         if (a->level[i].zoom == want)
             return &a->level[i];
-        if (abs((int) a->level[i].zoom - want) <
-            abs((int) a->level[best].zoom - want))
+        if (abs((int)a->level[i].zoom - want) <
+            abs((int)a->level[best].zoom - want))
             best = i;
     }
     return a->n_levels ? &a->level[best] : NULL;

@@ -122,12 +122,11 @@ static const Line PLAIN[] = {
 static int advisor_which = ADVISOR_JOKE;
 
 void advisor_set(int which) { advisor_which = which; }
-int  advisor_get_set(void) { return advisor_which; }
 
 /*  $30E30's ladder: which problem the city would lead with.  -1.  The
  *  population gates are the original's, so a village is never told about
  *  things a village cannot have. */
-int advisor_topic(const City *c)
+static int advisor_topic(const City *c)
 {
     /*  $30E72 compares 98 against the meter and branches PAST the story
      *  while 98 >= it.  So the story is for a grid running over 98 per

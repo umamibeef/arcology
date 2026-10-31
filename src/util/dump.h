@@ -11,11 +11,6 @@ extern "C" {
 #endif
 void dump_open(const char *path); /* NULL or "-": stdout.  Else the file, truncated */
 void dumpf(const char *fmt, ...);
-/*  While a buffer is set, dumpf writes into it and nowhere else.  So a
- *  window can show what a report answered without it also going to the
- *  sink people pipe.  Set NULL to send the dumps back to the sink. */
-void dump_capture(char *buf, unsigned long cap);
-void dump_close(void);
 #ifdef __cplusplus
 }
 #endif

@@ -59,9 +59,10 @@ every passive with a known actor active, and replace every nominalisation
 Plans
 -----
 
-Plans live on the :doc:`future` page and nowhere else. Every item there
+Long-range ideas live on the :doc:`future` page. The work in progress
+lives in ``plans/``, one page an area. Every item on the future page
 carries a status eyebrow: *Decided*, *Open* or *Not started*. A decision
-is a direction the project has chosen, written as one; it is never
+is a direction the project has chosen, written as one. It is never
 written as a description of the reconstruction. The facts a decision
 rests on are stated with it and link to the page that checks them. The
 other pages describe what exists and what the binary does.

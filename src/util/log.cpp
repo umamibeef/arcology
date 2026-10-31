@@ -35,8 +35,8 @@ std::unordered_map<std::string, std::shared_ptr<spdlog::logger>> g_loggers;
 spdlog::sink_ptr                                                 g_sink;
 /*  Which palette entry each source got.  Filled in logger_for, read by
  *  source_flag, both under g_mutex. */
-std::unordered_map<std::string, size_t> g_colour_of;
-bool                                    g_colour = false;
+std::unordered_map<std::string, size_t> g_color_of;
+bool                                    g_color = false;
 
 /*  no-color.org: present AND non-empty.  An empty NO_COLOR means
  *  nothing, which is the part that is usually got wrong. */
@@ -111,7 +111,7 @@ class source_flag : public spdlog::custom_flag_formatter
 
         std::string name(msg.logger_name.data(), msg.logger_name.size());
 
-        if (!g_colour)
+        if (!g_color)
         {
             dest.append(name.data(), name.data() + name.size());
             return;
@@ -129,8 +129,8 @@ class source_flag : public spdlog::custom_flag_formatter
             std::lock_guard<std::mutex> lock(g_mutex);
             std::string                 key(msg.logger_name.data(),
                                             msg.logger_name.size());
-            auto                        it = g_colour_of.find(key);
-            idx                            = it == g_colour_of.end() ? g_colour_of.size() : it->second;
+            auto                        it = g_color_of.find(key);
+            idx                            = it == g_color_of.end() ? g_color_of.size() : it->second;
         }
         const char       *c       = PALETTE[idx % N];
         static const char reset[] = "\033[m";
@@ -230,7 +230,7 @@ void setup()
      *  source_flag reads g_color to decide whether to emit escapes at
      *  all.  So under NO_COLOR the lines come out clean rather than
      *  stripped afterwards. */
-    g_colour = sink->should_color();
+    g_color = sink->should_color();
     sink->set_formatter(make_formatter());
 
     /*  The formatter goes on the registry too, not just the sink:
@@ -251,7 +251,7 @@ spdlog::logger *logger_for(const char *source)
     auto                        it = g_loggers.find(key);
     if (it != g_loggers.end())
         return it->second.get();
-    g_colour_of.emplace(key, g_colour_of.size());
+    g_color_of.emplace(key, g_color_of.size());
     auto lg = std::make_shared<spdlog::logger>(key, g_sink);
     lg->flush_on(spdlog::level::warn);
     /*  initialize_logger applies whatever SPDLOG_LEVEL asked for: the
@@ -282,8 +282,6 @@ spdlog::level::level_enum to_spdlog(RLogLevel l)
 
 extern "C" {
 
-void log_init(void) { std::call_once(g_once, setup); }
-
 void log_set_level(RLogLevel max)
 {
     std::call_once(g_once, setup);
@@ -303,20 +301,14 @@ void log_set_colour(int on)
     auto sink = std::make_shared<spdlog::sinks::ansicolor_stderr_sink_mt>(
         on ? spdlog::color_mode::always : spdlog::color_mode::never);
     std::lock_guard<std::mutex> lock(g_mutex);
-    g_sink   = sink;
-    g_colour = sink->should_color();
+    g_sink  = sink;
+    g_color = sink->should_color();
     /*  A new sink comes with spdlog's default pattern.  Without this the
      *  stamp, the brackets and the source color all vanish the moment
      *  color is toggled. */
     sink->set_formatter(make_formatter());
     for (auto &kv : g_loggers)
         kv.second->sinks() = {g_sink};
-}
-
-int log_colour(void)
-{
-    std::call_once(g_once, setup);
-    return g_colour ? 1 : 0;
 }
 
 /*  The banner's gradient runs across its width, character by character,
@@ -370,7 +362,7 @@ extern "C" void log_banner(const char *const *lines, int n)
         const char *l = lines[i];
         for (size_t x = 0; l[x]; ++x)
         {
-            if (l[x] == ' ' || !g_colour)
+            if (l[x] == ' ' || !g_color)
             {
                 buf += l[x];
                 continue;
@@ -380,7 +372,7 @@ extern "C" void log_banner(const char *const *lines, int n)
             buf += esc;
             buf += l[x];
         }
-        if (g_colour)
+        if (g_color)
             buf += "\033[m";
         buf += '\n';
     }

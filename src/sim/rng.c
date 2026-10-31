@@ -170,12 +170,6 @@ uint16_t game_rand3(City *c)
     logdraw(c, '3', v);
     return v;
 } /* rngAnd3 $20F64 */
-uint16_t game_rand15(City *c)
-{
-    uint16_t v = (uint16_t)(lfsr_step(c) & 0x0F);
-    logdraw(c, 'f', v);
-    return v;
-} /* $20F7C */
 uint16_t game_rand63(City *c)
 {
     uint16_t v = (uint16_t)(lfsr_step(c) & 0x3F);
@@ -188,6 +182,3 @@ uint16_t game_rand127(City *c)
     logdraw(c, '7', v);
     return v;
 } /* rngAnd127 $20FAC */
-
-uint16_t rng_lfsr(const City *c) { return c ? c->lfsr : 0; }
-int32_t  rng_toolbox_seed(const City *c) { return c ? c->tb_seed : 0; }

@@ -16,7 +16,7 @@ const char *const RUI_SUB_NAME[RUI_N_MAP_TOOLS][RUI_N_SUB] = {
     {"Power Lines", "Power Plant", "Coal Power", "Hydro Electric", "Oil Power", "Gas Power", "Nuclear", "Wind Power", "Solar Power", "Microwave", "Fusion"},
     {"Pipes", "Water Pump", "Water Tower", "Treatment", "Desalinization"},
     {"Mayors House", "City Hall", "Statue", "Braun Llama Dome", "Arcologies", "Plymoth Arco", "Forest Arco", "Darco", "Launch Arco"},
-    {"Road", "Highway", "Tunnel", "Onramp", "Bus Depot"},
+    {"Road", "Highway", "Tunnel", "Onramp", "Bus Depot", "Upgrade Street", "One-way Street"},
     {"Rail", "Subway", "Rail Depot", "Sub Station", "Sub<-->Rail"},
     {"Seaport", "Airport"},
     {"Light Residential", "Dense Residential"},
@@ -29,3 +29,6 @@ const char *const RUI_SUB_NAME[RUI_N_MAP_TOOLS][RUI_N_SUB] = {
     {"Query Tool"},
     {"Centering Tool"}
 };
+
+const char *const RUI_DISASTER_NAME[RUI_N_DISASTERS] = {
+    "", "Fire", "Flood", "Rioters", "Tornado", "Monster", "Earthquake", "Hurricane", "Chemical spill", "Air Crash", "Microwave", "Meltdown", "Volcano", "Firestorm", "Pollution"};

@@ -160,11 +160,10 @@ Prose about a simulation is cheap. The reconstruction is now a C program that lo
 
 
    sim.h     the A5 globals as a struct, layer accessors, flag bits
-   city.c     IFF load/save + the RLE codec ported from $293EC
+   city.c     the IFF reader and the RLE decoder
    tables.c   GENERATED from the DATA 0 global image
    rng.c      both generators -- the Toolbox LCG and the $20F30 LFSR
    ext80.c    soft 80-bit extended: the 8 SANE ops the game uses
-   sane.c     the _FP68K trap, reduced to the 21 opwords that occur
    sim.c      setTile, power, water, pollution, land value, coverage,
               density, crime, the budget pass
    main.c     load -> recompute -> compare -> report
@@ -232,9 +231,6 @@ The table below is the first witness. **It is not a measure of accuracy.** A sav
    * - check
      - agreement
      - what limits it
-   * - codec round-trip
-     - 103 / 103
-     - lossless
    * - sum(XPLT) == MISC[13]
      - 103 / 103
      - pollution total
@@ -307,7 +303,7 @@ Population sits past index 26 in ``MISC``, where the builder's counted loops def
    int32_t sim_map_population(const City *c)
    {
        int32_t units = 0;
-       uint8_t mask  = ROT_CORNER_MASK[c->rotation & 3];
+       uint8_t mask  = ROT_CORNER_MASK[0];  /* city_load decodes the turn */
 
        for (y = 0; y < MAP_H; y++)
          for (x = 0; x < MAP_W; x++) {
@@ -329,9 +325,7 @@ Eleven cities miss by more than 2%, all of them downloaded ``.SC2`` files rather
 The shipped cities contain two different compressors
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Porting the encoder from :ref:`$293EC <rt-293EC>` raised an awkward question: how do you tell a faithful port from a plausible one? Byte-exact output is the answer, and it splits the shipped cities cleanly. **1,218 of 1,957 compressed chunks come back byte-for-byte identical**, and 39 files match in every chunk. A coincidence at that scale is not available.
-
-The rest were written by something else. The shipped 1993–95 scenarios match 0%, and their encoder makes different choices: where the Mac build breaks a literal run the moment two bytes repeat, the other keeps going. For the source bytes ``07 ff ff 63 c3`` the shipped file emits one five-byte literal. This build emits literal-1, run-2, literal-2. Neither is wrong, and the sizes differ in both directions, so it is a different encoder rather than a better one.
+The Mac build's encoder, :ref:`$293EC <rt-293EC>`, breaks a literal run the moment two bytes repeat. **1,218 of 1,957 compressed chunks** in the shipped cities, and every chunk of 39 files, are its output. The shipped 1993–95 scenarios were written by another encoder, which keeps a literal run going. For the source bytes ``07 ff ff 63 c3`` a scenario holds one five-byte literal, where ``$293EC`` writes literal-1, run-2, literal-2. The sizes differ in both directions, so it is a different encoder rather than a better one. The reader decodes both.
 
 80-bit floats, on a machine that has none
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1457,7 +1451,7 @@ Everything above is reproducible from the files in the working directory, none o
 What is done
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-- **The economy is complete.** :ref:`$34D04 <rt-34D04>` transcribes through the ``fp68k()`` dispatcher: the national cycle, industry, the age pyramid and both directions of migration. All 63 quantities match on all 18 cities.
+- **The economy is complete.** :ref:`$34D04 <rt-34D04>` transcribes through the 80-bit arithmetic of ``ext80.c``: the national cycle, industry, the age pyramid and both directions of migration. All 63 quantities match on all 18 cities.
 - **Growth is byte exact over a whole cycle.** All sixteen phases in sequence, on all 18 cities, with no difference on any of the six layers. The growth scan reaches zero stubs, down from 436.
 - **The disasters are in.** All fourteen kinds are byte exact, and the dispatch, the name table and the menu mapping are all read. Two disasters had no name until the menu supplied one.
 - **Scenarios are simulated** —. The goal checker at ``$0221A8``, the win and loss paths, and the 52-byte ``SCEN`` layout, settled by four independent readings.
@@ -1470,7 +1464,7 @@ What is done
 - **Land value and crime reach 100%** by sharing one scratch plane between stages instead of approximating what the previous stage left in it.
 - Density's accumulation loop runs ``1..0x7E``, not ``0..0x7F``. That one bound took it from 87.6% to 90.3% and from 10 perfect cities to 24.
 - Two interpreter bugs, both found by the C and the oracle disagreeing: shifts ignored operand size, so ``asr.w`` dragged stale high-word bits into the compiler's signed-division idiom. And ``cmp`` computed carry across all 32 bits regardless of size, so a ``cmp.w``/``bhi`` guarding a switch took its default arm and silently zeroed six of the twenty ordinance costs.
-- The census is an *unsigned* word. Thirty-eight of the 103 cities hold more than 32,767 trees, and signing it broke the byte-exact round trip.
+- The census is an *unsigned* word. Thirty-eight of the 103 cities hold more than 32,767 trees.
 - :ref:`$4110 <rt-4110>` read. It maintains a 256-word census of every building id, which is how the growth pass asks "how many churches are there" without walking the map.
 - Phases 22–24 profiled and dismissed: they redraw the graphs. Only ``$030E30`` is simulation.
 - The SANE opwords decode completely, 21 of them, and ``ext80.c`` implements them.

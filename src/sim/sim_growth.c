@@ -76,7 +76,7 @@ static WalkStep walk_step(const City *c, int mode, int y, int x)
      *  the current mode in it so the result matches the table exactly
      *  and tools/walkcheck can compare the two. */
     const WalkStep NO = {(int8_t)mode, 0, 0, 0};
-    const int      b  = c->xbld[y][x];
+    const int      b  = T_XBLD(c, y, x);
     WalkStep       r  = {0, 0, 1, 0}; /* moved, same mode, no cost yet */
 
     r.mode = (int8_t)mode;
@@ -161,7 +161,7 @@ static WalkStep walk_step(const City *c, int mode, int y, int x)
     if (mode == 2 || mode == 6)
     {
         const int cost = (mode == 6) ? 2 : 3;
-        if ((c->altm[y][x] >> 10) & 0x1F)
+        if ((T_ALTM(c, y, x) >> 10) & 0x1F)
         {
             r.cost = (int8_t)cost;
             return r;
@@ -238,7 +238,7 @@ static WalkStep walk_step(const City *c, int mode, int y, int x)
     /*  $2507A.  Board a subway.  The track is in XUND, not XBLD. */
     if (mode == 11)
     {
-        const int u = c->xund[y][x];
+        const int u = T_XUND(c, y, x);
         if ((u >= 1 && u < 0x10) || u == 0x1F || u == 0x20 || u == 0x22 || u == 0x23)
         {
             r.mode = 13;
@@ -274,7 +274,7 @@ static WalkStep walk_step(const City *c, int mode, int y, int x)
      *  trip up to the surface onto a bus. */
     if (mode == 13)
     {
-        const int u = c->xund[y][x];
+        const int u = T_XUND(c, y, x);
         if (b == 0xE9)
         {
             r.mode = 9;
@@ -291,7 +291,7 @@ static WalkStep walk_step(const City *c, int mode, int y, int x)
     return NO;
 }
 
-int sim_trip(City *c, int y, int x, int zone, int tier, int budget)
+static int sim_trip(City *c, int y, int x, int zone, int tier, int budget)
 {
     rng_log_mark(c, y * 1000 + x);
     /*  Three parallel 512-byte stacks in the original's frame: the mode
@@ -311,9 +311,9 @@ int sim_trip(City *c, int y, int x, int zone, int tier, int budget)
     {
         int nx = x + NEIGHBOUR_ORDER[2 * i];
         int ny = y + NEIGHBOUR_ORDER[2 * i + 1];
-        if (ny < 0 || ny >= MAP_H || nx < 0 || nx >= MAP_W)
+        if (ny < 0 || ny >= c->h || nx < 0 || nx >= c->w)
             continue;
-        mode = start_mode(c->xbld[ny][nx]);
+        mode = start_mode(T_XBLD(c, ny, nx));
         cy   = ny;
         cx   = nx;
         if (mode >= 0)
@@ -345,12 +345,12 @@ int sim_trip(City *c, int y, int x, int zone, int tier, int budget)
             mask -= (1 << dir); /* $2476C */
             ny = cy + WALK_DY[dir];
             nx = cx + WALK_DX[dir];
-            if (ny < 0 || ny >= MAP_H || nx < 0 || nx >= MAP_W)
+            if (ny < 0 || ny >= c->h || nx < 0 || nx >= c->w)
             {
                 /*  Walked off the map.  At $247C0, if the tile it stands
                  *  on is marked 0xFA in XTXT, the road leaves for a
                  *  neighboring city, and that counts as arriving. */
-                if (c->xtxt[cy][cx] == 0xFA)
+                if (T_XTXT(c, cy, cx) == 0xFA)
                 {
                     moved   = 1;
                     arrived = 1;
@@ -372,7 +372,7 @@ int sim_trip(City *c, int y, int x, int zone, int tier, int budget)
                  *  destination.  One in a tunnel or on the subway cannot. */
                 if (mode == 0 || mode == 4 || mode == 8 || mode == 9)
                 {
-                    int z = XZON_TYPE(c->xzon[ny][nx]);
+                    int z = XZON_TYPE(T_XZON(c, ny, nx));
                     if (ZONE_ATTRACTS[zone] & (1 << z))
                     {
                         /*  $24850 sets the two flags and nothing else.
@@ -460,12 +460,12 @@ int sim_trip(City *c, int y, int x, int zone, int tier, int budget)
             used_bus = 1;
         if (m == 0 || m == 1 || m == 3)
         {
-            int32_t v = (int32_t)c->xtrf[py / 2][px / 2] + tier;
+            int32_t v = (int32_t)T_XTRF(c, py / 2, px / 2) + tier;
             if (c->trace)
                 c->trace(c->trace_at, "MARK %d %d\n", py, px);
             if (v > 255)
                 v = 255;
-            c->xtrf[py / 2][px / 2] = (uint8_t)v;
+            T_XTRF(c, py / 2, px / 2) = (uint8_t)v;
         }
     }
     if (used_subway)
@@ -487,7 +487,7 @@ int sim_trip(City *c, int y, int x, int zone, int tier, int budget)
  *  and takes the first that fits, so a block grows down and to the
  *  right by preference.
  * ================================================================== */
-void sim_grow_footprint(City *c, int y, int x, int tier, int zone)
+static void sim_grow_footprint(City *c, int y, int x, int tier, int zone)
 {
     int alt, m = 0;
 
@@ -507,7 +507,7 @@ void sim_grow_footprint(City *c, int y, int x, int tier, int zone)
         return;
     }
 
-    alt = c->altm[y][x] & 0x1F; /* $329E8 */
+    alt = T_ALTM(c, y, x) & 0x1F; /* $329E8 */
 
     if (tile_fits(c, y + 1, x, alt, zone, 0x8C))
         m |= 0x01;
@@ -544,23 +544,6 @@ void sim_grow_footprint(City *c, int y, int x, int tier, int zone)
         sim_place(c, y - 1, x, 2, 3); /* $32BC6, up and left */
 }
 
-/*  $324B8: is this tile, or one of its four neighbors, powered?  Reads
- *  only XBIT bit 6, and stops at the first hit. */
-static int powered_near(const City *c, int y, int x)
-{
-    if (c->xbit[y][x] & XBIT_POWERED)
-        return 1;
-    if (y > 1 && (c->xbit[y - 1][x] & XBIT_POWERED))
-        return 1;
-    if (x > 1 && (c->xbit[y][x - 1] & XBIT_POWERED))
-        return 1;
-    if (y < MAP_H - 1 && (c->xbit[y + 1][x] & XBIT_POWERED))
-        return 1;
-    if (x < MAP_W - 1 && (c->xbit[y][x + 1] & XBIT_POWERED))
-        return 1;
-    return 0;
-}
-
 /*  Tiles $24530 accepts as transport: the road department's own set,
  *  plus the three station buildings.  Both halves were measured by
  *  calling the routine with one tile type placed next door
@@ -587,9 +570,9 @@ static int near_transport(const City *c, int y, int x)
             int ty = y + dy, tx = x + dx;
             if ((dy == 0 && dx == 0) || abs(dy) + abs(dx) > 3)
                 continue;
-            if (ty < 0 || tx < 0 || ty >= MAP_H || tx >= MAP_W)
+            if (ty < 0 || tx < 0 || ty >= c->h || tx >= c->w)
                 continue;
-            if (is_transport(c->xbld[ty][tx]))
+            if (is_transport(T_XBLD(c, ty, tx)))
                 return 1;
         }
     }
@@ -606,16 +589,16 @@ void sim_growth_scan(City *c, int y0, int x0)
      *  residential building is replaced by a church. */
     church_pressure = (int32_t)c->census[0xF7] * 2500 < c->population;
 
-    /*  $3173A: which XZON corner bit counts this rotation, so a
-     *  multi-tile building is simulated once. */
-    rot_mask = (uint16_t)ROT_CORNER_MASK[c->rotation & 3];
+    /*  $3173A: the XZON corner bit that counts, ROT_CORNER_MASK at turn
+     *  0, so a multi-tile building is simulated once. */
+    rot_mask = (uint16_t)ROT_CORNER_MASK[0];
 
-    for (y = y0; y < MAP_H; y += 4)
+    for (y = y0; y < c->h; y += 4)
     {
-        for (x = x0; x < MAP_W; x += 4)
+        for (x = x0; x < c->w; x += 4)
         {
-            uint8_t zone = (uint8_t)XZON_TYPE(c->xzon[y][x]);
-            uint8_t bld  = c->xbld[y][x];
+            uint8_t zone = (uint8_t)XZON_TYPE(T_XZON(c, y, x));
+            uint8_t bld  = T_XBLD(c, y, x);
 
             if (zone == 0)
             {
@@ -653,7 +636,7 @@ void sim_growth_scan(City *c, int y0, int x0)
                             break;
                         }
                         sim_set_tile(c, y, x, (uint8_t)((Random(c) & 3) + 1)); /* $31824 */
-                        c->xbit[y][x] &= (uint8_t)~XBIT_CONDUCTIVE;
+                        T_XBIT(c, y, x) &= (uint8_t)~XBIT_CONDUCTIVE;
                     }
                     if (done && bld < 0x70)
                         continue; /* went to the next tile */
@@ -668,16 +651,16 @@ void sim_growth_scan(City *c, int y0, int x0)
                     if (bld < 0xED)
                         continue; /* $31B34 */
 
-                if (bld == 0xED && (c->xbit[y][x] & XBIT_POWERED) && /* $31B54 */
-                    game_rand3(c) == 0)                              /* $31B5E */
+                if (bld == 0xED && (T_XBIT(c, y, x) & XBIT_POWERED) && /* $31B54 */
+                    game_rand3(c) == 0)                                /* $31B5E */
                 {
                     if ((uint16_t)((uint16_t)c->census[0xED] >> 2) >
                         (uint16_t)c->road_count)        /* $31B6A */
                         sim_auto_rail_station(c, y, x); /* $31B76 */
                     continue;
                 }
-                if (bld == 0xF8 && (c->xbit[y][x] & XBIT_POWERED) && /* $31B9E */
-                    game_rand3(c) == 0)                              /* $31BA8 */
+                if (bld == 0xF8 && (T_XBIT(c, y, x) & XBIT_POWERED) && /* $31B9E */
+                    game_rand3(c) == 0)                                /* $31BA8 */
                 {
                     if ((uint16_t)((uint16_t)c->census[0xF8] / 9) >
                         (uint16_t)c->boat_count) /* $31BB8 */
@@ -694,9 +677,9 @@ void sim_growth_scan(City *c, int y0, int x0)
                 {
                     int slot, rec, score;
 
-                    if ((c->xzon[y][x] & 0xF0) != 0x80)
+                    if ((T_XZON(c, y, x) & 0xF0) != 0x80)
                         continue; /* $31BF6 */
-                    slot = c->xtxt[y][x];
+                    slot = T_XTXT(c, y, x);
                     if (slot < 0x33 || slot >= 0xC9)
                         continue; /* $31C14 */
                     rec = slot - 0x33;
@@ -706,14 +689,14 @@ void sim_growth_scan(City *c, int y0, int x0)
                         continue; /* $31C34 */
 
                     score = 12;
-                    score -= c->xcrm[y / 2][x / 2] >> 5; /* $31C6C */
-                    score -= c->xplt[y / 2][x / 2] >> 5; /* $31C82 */
-                    score += c->xval[y / 2][x / 2] >> 5; /* $31C98 */
+                    score -= T_XCRM(c, y / 2, x / 2) >> 5; /* $31C6C */
+                    score -= T_XPLT(c, y / 2, x / 2) >> 5; /* $31C82 */
+                    score += T_XVAL(c, y / 2, x / 2) >> 5; /* $31C98 */
                     /*  divs truncates toward zero, so a negative score
                      *  must not be shifted here. */
-                    if (!(c->xbit[y][x] & XBIT_POWERED))
+                    if (!(T_XBIT(c, y, x) & XBIT_POWERED))
                         score /= 2; /* $31CB4 */
-                    if (!(c->xbit[y][x] & XBIT_WATERED))
+                    if (!(T_XBIT(c, y, x) & XBIT_WATERED))
                         score /= 2; /* $31CD2 */
                     if (score < 0)
                         score = 0; /* $31CDA */
@@ -841,18 +824,17 @@ void sim_growth_scan(City *c, int y0, int x0)
                             continue;
                         if ((uint16_t)Random(c) % 30 != 0)
                             continue;
-                        if (!(c->xbit[y][x] & XBIT_POWERED))
+                        if (!(T_XBIT(c, y, x) & XBIT_POWERED))
                             continue; /* $3229E */
                         /*  $322A6: four times in ten a helicopter leaves
-                         *  the airport.  Otherwise a plane does, and the
-                         *  map rotation together with XBIT bit 1 picks
-                         *  which of the two plane kinds. */
+                         *  the airport.  Otherwise a plane does, and XBIT
+                         *  bit 1 picks which of the two plane kinds.
+                         *  $322CC also reads the parity of the map turn,
+                         *  which is 0 in the grid's own terms ($32314). */
                         if ((uint16_t)Random(c) % 10 < 4)
                             spawn_helicopter(c, y, x); /* $322BC */
-                        else if (c->rotation & 1)      /* $322CC */
-                            spawn_plane(c, y, x, (c->xbit[y][x] & 0x02) ? 0 : 2);
-                        else /* $32314 */
-                            spawn_plane(c, y, x, (c->xbit[y][x] & 0x02) ? 2 : 0);
+                        else
+                            spawn_plane(c, y, x, (T_XBIT(c, y, x) & 0x02) ? 2 : 0);
                         continue;
                     }
                     /*  $32352: the same seven-way ladder the military
@@ -885,7 +867,7 @@ void sim_growth_scan(City *c, int y0, int x0)
 
                 if (bld >= BLD_ZONE_FIRST)
                 { /* $31D06 */
-                    if (!(XZON_CORNERS(c->xzon[y][x]) & rot_mask))
+                    if (!(XZON_CORNERS(T_XZON(c, y, x)) & rot_mask))
                         continue;
                     tier = BUILDING[bld].tier;
                 }
@@ -901,7 +883,7 @@ void sim_growth_scan(City *c, int y0, int x0)
                 /*  $31D5C: a tile with no power nearby.  From which no
                  *  journey can be made, has no demand at all and the
                  *  whole 4000 of headroom. */
-                if (!powered_near(c, y, x) || !sim_trip(c, y, x, zone, tier, 100))
+                if (!near_powered(c, y, x) || !sim_trip(c, y, x, zone, tier, 100))
                 {
                     demand = 0;
                     head   = 4000;
@@ -960,7 +942,7 @@ void sim_growth_scan(City *c, int y0, int x0)
                     continue; /* $31F12 */
                 if (zone < 5)
                 {
-                    int hv = c->xval[y / 2][x / 2];
+                    int hv = T_XVAL(c, y / 2, x / 2);
                     if (tier == 1 && hv < 0x20)
                         continue; /* $31F46 */
                     if (tier == 2 && hv < 0x60)

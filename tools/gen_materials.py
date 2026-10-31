@@ -2,8 +2,8 @@
 """src/render/mesh/materials.def -> the C constants and the material table.
 
 A material is a number carried in a vertex colour.  The mesh writes it,
-the shaders read it, and a script names it.  Those were three hand-written
-copies of one list; this makes them one.  Run it after editing the .def:
+the shaders read it, and a report names it.  Three readers need one list,
+and this writes each of them from the one .def.  Run it after editing the .def:
 
     python3 tools/gen_materials.py
 
@@ -20,10 +20,13 @@ ROOT = os.path.join(HERE, "..")
 DEF = os.path.join(ROOT, "src", "render", "mesh", "materials.def")
 OUT = os.path.join(ROOT, "src", "render", "generated")
 
-#  Where a script's own materials start.  Far enough above the built-in
+#  Where the materials named at run time start.  Far enough above the built-in
 #  numbers that a new one here can never collide with a shader's range.
-SCRIPT_BASE = 32.0
-SCRIPT_MAX = 32
+RUNTIME_BASE = 32.0
+RUNTIME_MAX = 32
+#  The most tones the layers of a cut are dealt from (STRATA in
+#  src/render/gpu/frame.c).
+STRATA_MAX = 8
 
 
 def write(path, text, check):
@@ -75,10 +78,10 @@ def main():
     check = "--check" in sys.argv
     mats = read()
     seen = {}
-    for value, name, lua, what in mats:
-        if value >= SCRIPT_BASE:
-            print("materials.def: %s is at %g, which a script's own materials "
-                  "start at" % (name, SCRIPT_BASE), file=sys.stderr)
+    for value, name, label, what in mats:
+        if value >= RUNTIME_BASE:
+            print("materials.def: %s is at %g, which the run-time materials "
+                  "start at" % (name, RUNTIME_BASE), file=sys.stderr)
             return 1
         if value in seen:
             print("materials.def: %s and %s are both %g"
@@ -92,11 +95,11 @@ def main():
          ' *',
          " *  A material is the number a vertex colour's third component",
          ' *  carries.  The mesh writes it, the shaders read it by range, and',
-         ' *  a script names it through arc.mat. */',
+         ' *  a report names it by the name in r_materials. */',
          '#ifndef ARC_MATERIALS_H',
          '#define ARC_MATERIALS_H',
          '']
-    for value, name, lua, what in mats:
+    for value, name, label, what in mats:
         h.append("#define MAT_%-*s %-6s /* %s */" % (wide, name, flt(value), what))
     h += ['',
           '/*  A material is a NUMBER, and a variant is shaded from the whole',
@@ -111,17 +114,21 @@ def main():
           '#define MAT_FROM(m, M)  ((m) > (M) -0.5f)',
           '#define MAT_UPTO(m, M)  ((m) < (M) + 0.5f)',
           '',
-          "/*  A script's own materials are numbered from here, one per",
-          " *  arc.mat.define, and shaded from their parameters rather than",
-          ' *  from a branch of their own. */',
-          "#define MAT_SCRIPT_BASE %s" % flt(SCRIPT_BASE),
-          "#define MAT_SCRIPT_MAX  %d" % SCRIPT_MAX,
+          "/*  The materials named at run time are numbered from here, one",
+          " *  per material_define.  Each is shaded from its parameters",
+          ' *  rather than from a branch of its own. */',
+          "#define MAT_RUNTIME_BASE %s" % flt(RUNTIME_BASE),
+          "#define MAT_RUNTIME_MAX  %d" % RUNTIME_MAX,
+          '',
+          "/*  The most tones the layers of a cut are dealt from (STRATA",
+          ' *  in gpu/frame.c). */',
+          "#define MAT_STRATA_MAX  %d" % STRATA_MAX,
           '',
           '/*  How many built-in materials there are, for a table with a',
           ' *  slot for each. */',
           "#define MAT_COUNT %d" % len(mats),
           '',
-          '/*  The built-in materials by name, for the script bridge. */',
+          '/*  The built-in materials by name, for a report to print. */',
           'typedef struct',
           '{',
           '    const char *name;',
@@ -140,7 +147,7 @@ def main():
          '//  and the same membership tests the C does.  gen_shaders.py splices',
          '//  this file in where a shader asks for it.',
          '']
-    for value, name, lua, what in mats:
+    for value, name, label, what in mats:
         g.append("#define MAT_%-*s %-6s // %s" % (wide, name, glsl_flt(value), what))
     g += ['',
           '//  A material is a NUMBER, and a variant is shaded from the whole',
@@ -152,9 +159,12 @@ def main():
           '#define MAT_FROM(m, M)  ((m) > (M) - 0.5)',
           '#define MAT_UPTO(m, M)  ((m) < (M) + 0.5)',
           '',
-          "//  A script's own materials are numbered from here.",
-          "#define MAT_SCRIPT_BASE %s" % glsl_flt(SCRIPT_BASE),
-          "#define MAT_SCRIPT_MAX  %d" % SCRIPT_MAX]
+          "//  The materials named at run time are numbered from here.",
+          "#define MAT_RUNTIME_BASE %s" % glsl_flt(RUNTIME_BASE),
+          "#define MAT_RUNTIME_MAX  %d" % RUNTIME_MAX,
+          '',
+          "//  The most tones the layers of a cut are dealt from.",
+          "#define MAT_STRATA_MAX  %d" % STRATA_MAX]
     if not write(os.path.join(ROOT, "src", "render", "gpu", "shaders", "materials.glsl"),
                  "\n".join(g) + "\n", check):
         return 1
@@ -163,15 +173,15 @@ def main():
          '#include "materials.h"',
          '',
          'const RMaterial r_materials[] = {']
-    for value, name, lua, what in mats:
-        c.append('    {"%s", MAT_%s},' % (lua, name))
+    for value, name, label, what in mats:
+        c.append('    {"%s", MAT_%s},' % (label, name))
     c += ['};',
           'const int r_materials_n = (int)(sizeof r_materials / sizeof r_materials[0]);']
     if not write(os.path.join(OUT, "materials.c"), "\n".join(c) + "\n", check):
         return 1
 
-    print("materials: %d built in, a script's own from %g%s"
-          % (len(mats), SCRIPT_BASE, " (checked)" if check else ""))
+    print("materials: %d built in, the run-time ones from %g%s"
+          % (len(mats), RUNTIME_BASE, " (checked)" if check else ""))
     return 0
 
 

@@ -7,13 +7,17 @@
  *  touches the other.  The tool in hand is applied here for the same
  *  reason. */
 #include "adapt.h"
+#include "area_report.h"
+#include "atlas/atlas.h"
+#include "draw/net_graph.h"
+#include "geo.h"
 #include "internal.h"
-#include "script.h"
 #include "log.h"
-#include "net/report.h"
-#include "opt.h"
-#include "project.h"
+#include "network/network.h"
+#include "network/topology.h"
 #include "sim.h"
+#include "trees.h"
+#include "turn.h"
 
 #include <SDL3/SDL.h>
 
@@ -21,8 +25,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "dump.h"
-#include "net/net.h"
+
+static const char *const GRAPH_NAMES[RUI_N_GRAPH] = {
+    "City size", "Residents", "Commerce", "Industry", "Traffic", "Pollution", "Land value", "Crime", "Power shortfall", "Water shortfall", "Health", "Education", "Unemployment", "National GNP", "National population", "Federal rate"};
+/*  The budget block's departments as sim.h names them.  The first three
+ *  slots the reconstruction has not named. */
+static const char *const DEPT_NAMES[RUI_N_DEPT] = {
+    NULL, NULL, NULL, "Ordinances", "Bonds", "Police", "Fire", "Health", "Schools", "Colleges", "Roads", "Bands", "Subways", "Rail", "Transit", "Power"};
 
 /*  ==================================================================
  *  The interface, filled and applied
@@ -55,6 +64,24 @@ static void poly_wind(float p[4][2])
         }
 }
 
+/*  A tile's four corner heights, NW, NE, SE, SW.  They come from the
+ *  copy that the last world left (world.c).  A build under way does not
+ *  touch that copy.  With no copy for this view they come from the mesh,
+ *  and only while no build is under way. */
+static int ground_corners(const App *a, int32_t col, int32_t row, int ug, float z[4])
+{
+    if (col < 0 || row < 0 || col >= r_map || row >= r_map)
+        return -1;
+    if (a->ground_n == r_map && a->ground_under == ug)
+    {
+        memcpy(z, &a->ground[((size_t)row * (size_t)r_map + (size_t)col) * 4u], 4 * sizeof(float));
+        return 0;
+    }
+    if (a->building)
+        return -1;
+    return mesh_tile_corners(a->view, col, row, ug, z);
+}
+
 /*  The tiles from column x0 to x1 and row y0 to y1, outlined on the
  *  surface the mesh draws, as four points on the screen.  A building's
  *  pad is flat, and a lone cell follows its own plane.  In the
@@ -65,21 +92,20 @@ static int area_poly(App *a, int x0, int y0, int x1, int y1, float poly[4][2])
     const RAtlasLevel *lv = a->sw.level;
     int                ug = a->opts.underground;
     float              t[4], z[4];
-    float              f, dens;
-    int                ok = lv != NULL && !a->building, kq;
-    /*  NW, NE, SE, SW of the footprint, each from its corner tile.  The
-     *  surface is the build's, so a build under way leaves no outline. */
-    ok   = ok && mesh_tile_corners(a->view, x0, y0, ug, t) == 0;
+    float              dens;
+    int                ok = lv != NULL, kq;
+    /*  NW, NE, SE, SW of the footprint, each from its corner tile, as
+     *  the world on the device has them. */
+    ok   = ok && ground_corners(a, x0, y0, ug, t) == 0;
     z[0] = t[0];
-    ok   = ok && mesh_tile_corners(a->view, x1, y0, ug, t) == 0;
+    ok   = ok && ground_corners(a, x1, y0, ug, t) == 0;
     z[1] = t[1];
-    ok   = ok && mesh_tile_corners(a->view, x1, y1, ug, t) == 0;
+    ok   = ok && ground_corners(a, x1, y1, ug, t) == 0;
     z[2] = t[2];
-    ok   = ok && mesh_tile_corners(a->view, x0, y1, ug, t) == 0;
+    ok   = ok && ground_corners(a, x0, y1, ug, t) == 0;
     z[3] = t[3];
     if (!ok)
         return 0;
-    f    = (float)a->gv.scale * (a->gv.zoom > 0.0f ? a->gv.zoom : 1.0f);
     dens = a->win_density > 0.0f ? a->win_density : 1.0f;
     /*  The corners go to grid_to_canvas UNTURNED: it turns them about the
      *  view's pivot itself.  Turning them here first turns them twice,
@@ -88,135 +114,354 @@ static int area_poly(App *a, int x0, int y0, int x1, int y1, float poly[4][2])
     for (kq = 0; kq < 4; ++kq)
     {
         static const int dc[4] = {0, 1, 1, 0}, dr[4] = {0, 0, 1, 1};
-        float            cx, cy;
-        grid_to_canvas(a, (float)(dc[kq] ? x1 + 1 : x0), (float)(dr[kq] ? y1 + 1 : y0), z[kq], &cx, &cy);
-        poly[kq][0] = (cx - (float)a->gv.scroll_x) * f / dens;
-        poly[kq][1] = (cy - (float)a->gv.scroll_y) * f / dens;
+        grid_to_window(a, (float)(dc[kq] ? x1 + 1 : x0), (float)(dr[kq] ? y1 + 1 : y0), z[kq], dens, &poly[kq][0], &poly[kq][1]);
     }
     poly_wind(poly);
     return 1;
 }
 
+/*  THE MARKS, the one highlight of tiles on the map (ui.h, RUI_MARK_*).
+ *  Each area is its first column, first row, last column and last row,
+ *  with its mark.  An area that comes later in the list goes over one
+ *  that comes before it.  The device lights each marked tile in its
+ *  mark's color, in the mesh and on the art (tile_marks.glsl).  The
+ *  tiles go to the device only when they change. */
+typedef struct
+{
+    int32_t rect[4];
+    int     mark;
+} MarkArea;
+
+/*  How far a marked tile goes to its mark's color, out of 255
+ *  (tile_marks.glsl).  Every mark takes the same wash, so the ground and
+ *  what stands on it show through. */
+#define MARK_WASH 97
+
+/*  THE KINDS OF SPRITE a tile of the road network shows, from the parts
+ *  its bytes carry (rcity_parts).  Each kind has the color the lane graph
+ *  view marks it in, and the name the legend gives it. */
+enum
+{
+    TK_STREET,
+    TK_RAIL,
+    TK_POWER,
+    TK_HIGHWAY,
+    TK_INTERCHANGE,
+    TK_RAMP,
+    TK_CROSSING,
+    TK_BRIDGE,
+    TK_TUNNEL,
+    TK_SUBWAY,
+    TK_KINDS
+};
+static const char *const TK_NAME[TK_KINDS] = {"street", "railway", "power line", "highway", "interchange", "ramp", "crossing", "bridge", "tunnel mouth", "subway link"};
+static const uint32_t    TK_RGB[TK_KINDS]  = {0x8fa3b8, 0xb07a40, 0xffe14d, 0x3f8fff, 0xb050ff, 0xff50c8, 0xff3b30, 0x30d8c8, 0x404040, 0x50e060};
+
+/*  The kind of sprite on a cell, or -1 where it carries no piece of the
+ *  road network.  A part's own kind names it first, so a ramp of two
+ *  parts is a ramp.  Then two networks on one cell are a crossing, and
+ *  one is its network. */
+static int tile_kind(uint8_t xbld, uint8_t xbit)
+{
+    RPart part[2];
+    int   n = rcity_parts(xbld, xbit, part), k, net = -1;
+    if (n <= 0)
+        return -1;
+    for (k = 0; k < n; k++)
+    {
+        switch (part[k].kind)
+        {
+            case RPART_CROSSING:
+                return TK_CROSSING;
+            case RPART_RAMP:
+                return TK_RAMP;
+            case RPART_INTERCHANGE:
+                return TK_INTERCHANGE;
+            case RPART_BRIDGE:
+            case RPART_SPAN:
+                return TK_BRIDGE;
+            case RPART_MOUTH:
+                return TK_TUNNEL;
+            case RPART_TO_SUBWAY:
+            case RPART_STATION:
+                return TK_SUBWAY;
+            default:
+                break;
+        }
+        net = part[k].net;
+    }
+    if (n > 1)
+        return TK_CROSSING;
+    return net == RNET_BAND ? TK_HIGHWAY : net == RNET_RAIL ? TK_RAIL
+                                       : net == RNET_POWER  ? TK_POWER
+                                                            : TK_STREET;
+}
+
+/*  Under the lane graph, every tile that carries a piece of the road
+ *  network is marked in the color of its kind of sprite.  The kind is
+ *  read from the cells.  With `marks` NULL it only digests what it would paint. */
+static uint32_t graph_marks(const RCity *c, uint8_t *marks)
+{
+    uint32_t h = 2166136261u;
+    int32_t  i;
+    if (!c || !c->xbld || !c->xbit)
+        return 0;
+    for (i = 0; i < r_map * r_map; i++)
+    {
+        const int      kind = tile_kind(c->xbld[i], c->xbit[i]);
+        const uint32_t k    = (uint32_t)(kind + 1);
+        h                   = (h ^ k) * 16777619u;
+        if (marks && kind >= 0)
+        {
+            const uint32_t col = TK_RGB[kind];
+            uint8_t       *t4  = marks + (size_t)i * 4u;
+            t4[0] = (uint8_t)(col >> 16), t4[1] = (uint8_t)(col >> 8), t4[2] = (uint8_t)col, t4[3] = MARK_WASH;
+        }
+    }
+    return h;
+}
+
+/*  Each road network tile's sprite, as the sweep draws it, for the lane
+ *  graph view to draw small in the tile's corner.  It is the tile's first
+ *  piece of art that is not ground or a car.  The op names its tile in
+ *  the sweep's quarter, and the turn gives the tile of the map. */
+static void graph_sprites(App *a, RUiState *s)
+{
+    static RUiSprite  *spr;
+    static uint8_t    *seen; /* the tiles whose sprite is taken */
+    static size_t      cap, seen_n;
+    const RAtlasLevel *l     = a->sw.level;
+    const size_t       cells = (size_t)r_map * (size_t)r_map;
+    size_t             k;
+    int                n = 0;
+    s->n_spr             = 0;
+    if (!l || !l->rgba || !a->view)
+        return;
+    if (a->ops.n > cap)
+    {
+        RUiSprite *ns = (RUiSprite *)realloc(spr, a->ops.n * sizeof *ns);
+        if (!ns)
+            return;
+        spr = ns, cap = a->ops.n;
+    }
+    if (cells > seen_n)
+    {
+        uint8_t *ns = (uint8_t *)realloc(seen, cells);
+        if (!ns)
+            return;
+        seen = ns, seen_n = cells;
+    }
+    memset(seen, 0, cells);
+    for (k = 0; k < a->ops.n; k++)
+    {
+        const ROp   *op = &a->ops.v[k];
+        const RTile *t;
+        int32_t      sh = op->shape - l->id_base, mc, mr, idx;
+        if (op->kind != R_OP_BLIT || op->terrain || op->stencil >= 0 || sh < 0 || sh >= 256)
+            continue;
+        adapt_turned_src(op->col, op->row, a->sweep_quarter, r_map, &mc, &mr);
+        idx = mr * r_map + mc;
+        if (mc < 0 || mr < 0 || mc >= r_map || mr >= r_map || seen[idx] || tile_kind(a->view->xbld[idx], a->view->xbit[idx]) < 0 || !(t = atlas_tile(l, op->shape)))
+            continue;
+        seen[idx]  = 1;
+        spr[n].col = (int16_t)mc, spr[n].row = (int16_t)mr, spr[n].alt = op->alt;
+        spr[n].x = t->x, spr[n].y = t->y, spr[n].w = t->w, spr[n].h = t->h;
+        spr[n].flip = op->flip;
+        ++n;
+    }
+    s->spr      = spr;
+    s->n_spr    = n;
+    s->spr_rgba = l->rgba;
+    s->spr_w = l->w, s->spr_h = l->h;
+}
+
+static void marks_update(App *a, const MarkArea *area, int n, int lane_graph)
+{
+    uint32_t h = 2166136261u, cells = lane_graph ? graph_marks(a->view, NULL) : 0u;
+    int      k, j;
+#define MIX(v) (h = (h ^ (uint32_t)(v)) * 16777619u)
+    MIX(n);
+    MIX(cells);
+    for (k = 0; k < n; ++k)
+    {
+        for (j = 0; j < 4; ++j)
+            MIX(area[k].rect[j]);
+        MIX(area[k].mark);
+    }
+    MIX(r_map);
+    MIX(a->sweep_quarter);
+#undef MIX
+    if (!a->gpu || h == a->marks_digest)
+        return;
+    a->marks_digest = h;
+    if (n == 0 && cells == 0)
+    {
+        gpu_set_marks(a->gpu, NULL, NULL, 0);
+        return;
+    }
+    const size_t bytes = (size_t)r_map * (size_t)r_map * 4u;
+    if (a->marks_n != r_map)
+    {
+        free(a->marks);
+        free(a->marks_sweep);
+        a->marks       = (uint8_t *)malloc(bytes);
+        a->marks_sweep = (uint8_t *)malloc(bytes);
+        a->marks_n     = a->marks && a->marks_sweep ? r_map : 0;
+        if (!a->marks_n)
+            return;
+    }
+    memset(a->marks, 0, bytes);
+    if (cells)
+        graph_marks(a->view, a->marks);
+    for (k = 0; k < n; ++k)
+    {
+        const uint32_t c = ui_mark_color(area[k].mark);
+        int32_t        x, y;
+        for (y = area[k].rect[1]; y <= area[k].rect[3]; ++y)
+            for (x = area[k].rect[0]; x <= area[k].rect[2]; ++x)
+                if (x >= 0 && y >= 0 && x < r_map && y < r_map)
+                {
+                    uint8_t *t = a->marks + ((size_t)y * (size_t)r_map + (size_t)x) * 4u;
+                    t[0]       = (uint8_t)(c >> 16);
+                    t[1]       = (uint8_t)(c >> 8);
+                    t[2]       = (uint8_t)c;
+                    t[3]       = MARK_WASH;
+                }
+    }
+    /*  The art is swept in the camera's quarter, so its copy is read
+     *  off the map's through the same turn. */
+    {
+        int32_t x, y, sx, sy;
+        for (y = 0; y < r_map; ++y)
+            for (x = 0; x < r_map; ++x)
+            {
+                adapt_turned_src(x, y, a->sweep_quarter, r_map, &sx, &sy);
+                memcpy(a->marks_sweep + ((size_t)y * (size_t)r_map + (size_t)x) * 4u, a->marks + ((size_t)sy * (size_t)r_map + (size_t)sx) * 4u, 4u);
+            }
+    }
+    gpu_set_marks(a->gpu, a->marks, a->marks_sweep, r_map);
+}
+
+static int gesture_area(const App *a, int32_t col, int32_t row, ToolPreview *pv, int32_t rect[4]);
+
+/*  THE SHADING NUMBERS the shading window shows: the number in the
+ *  store, its label, the section it is shown in, and its range.  They
+ *  move the next frame and rebuild nothing.  The hour is not among them:
+ *  the View menu's Time of day sets it. */
+static const struct
+{
+    const char *name, *label, *group;
+    float       lo, hi;
+} SHADE_KNOB[] = {
+    {"sun_shadow",        "sun shadow strength",              "Light and shadow", 0.0f,   1.0f   },
+    {"ao_strength",       "corner darkening",                 "Light and shadow", 0.0f,   3.0f   },
+    {"ao_radius",         "corner darkening reach (tiles)",   "Light and shadow", 0.1f,   4.0f   },
+    {"sky_shadow",        "cloud shadow strength",            "Light and shadow", 0.0f,   1.0f   },
+    {"sky_cover_least",   "least cloud cover",                "Clouds",           0.0f,   1.0f   },
+    {"sky_scale",         "cloud size (tiles)",               "Clouds",           6.0f,   96.0f  },
+    {"sky_speed",         "wind speed (tiles a second)",      "Clouds",           0.0f,   4.0f   },
+    {"sky_altitude",      "cloud height (levels)",            "Clouds",           8.0f,   160.0f },
+    {"sky_thickness",     "cloud thickness (levels)",         "Clouds",           2.0f,   80.0f  },
+    {"cloud_light",       "cloud brightness",                 "Clouds",           0.2f,   3.0f   },
+    {"cloud_amb_floor",   "cloud underside brightness",       "Clouds",           0.0f,   1.0f   },
+    {"sky_wisp",          "cloud density",                    "Cloud edges",      0.2f,   6.0f   },
+    {"trees_sway",        "tree sway on the wind (tiles)",    "Trees",            0.0f,   0.1f   },
+    {"trees_near_px",     "whole trees above (px a tile)",    "Trees",            8.0f,   200.0f },
+    {"trees_far_px",      "no trees below (px a tile)",       "Trees",            2.0f,   60.0f  },
+    {"trees_band",        "level crossover band",             "Trees",            0.0f,   0.5f   },
+    {"cloud_ext",         "cloud opacity (per meter)",        "Cloud edges",      0.005f, 0.3f   },
+    {"sky_reach",         "wisp spread",                      "Cloud edges",      0.0f,   1.5f   },
+    {"cloud_shape_m",     "billow size (meters)",             "Cloud edges",      40.0f,  1200.0f},
+    {"cloud_detail_m",    "edge detail size (meters)",        "Cloud edges",      10.0f,  400.0f },
+    {"cloud_erode",       "edge wear",                        "Cloud edges",      0.0f,   1.0f   },
+    {"cover",             "land cover strength",              "Ground",           0.0f,   1.0f   },
+    {"cover_tiles",       "land cover patch size (tiles)",    "Ground",           8.0f,   160.0f },
+    {"ground_bump",       "ground bumps",                     "Ground",           0.0f,   0.6f   },
+    {"ground_bump_tiles", "ground bump size (tiles)",         "Ground",           1.0f,   20.0f  },
+    {"water_clarity",     "water clarity",                    "Water",            0.2f,   4.0f   },
+    {"water_wave",        "swell height",                     "Water",            0.0f,   0.4f   },
+    {"water_wave_tiles",  "swell length (tiles)",             "Water",            1.0f,   30.0f  },
+    {"cloud_res",         "cloud resolution (pixels a step)", "Cost",             1.0f,   4.0f   },
+};
+#define N_SHADE_KNOB ((int)(sizeof SHADE_KNOB / sizeof SHADE_KNOB[0]))
+
+/*  The shading window's sliders, from the store, unless the window is
+ *  mid-edit and owns them.  The first reading is each one's default. */
+static void shading_fill(RUiState *s)
+{
+    static float def[N_SHADE_KNOB];
+    static int   have;
+    int          k;
+    if (s->shading_changed)
+        return;
+    s->n_shade = N_SHADE_KNOB < RUI_MAX_KNOBS ? N_SHADE_KNOB : RUI_MAX_KNOBS;
+    for (k = 0; k < s->n_shade; ++k)
+    {
+        float v = 0.0f;
+        geo_find(SHADE_KNOB[k].name, &v);
+        if (!have)
+            def[k] = v;
+        s->shade[k] = (RUiKnob){SHADE_KNOB[k].label, SHADE_KNOB[k].group, v, SHADE_KNOB[k].lo, SHADE_KNOB[k].hi, def[k]};
+    }
+    have = 1;
+}
+
+/*  The shading numbers taken back into the store, and said once in the
+ *  log, so the values that look right can be kept in geo_defaults. */
+static void shading_take(RUiState *s)
+{
+    char   line[512];
+    size_t n = 0;
+    int    k;
+    for (k = 0; k < s->n_shade; ++k)
+    {
+        geo_put(SHADE_KNOB[k].name, s->shade[k].v);
+        if (n < sizeof line)
+            n += (size_t)snprintf(line + n, sizeof line - n, "%s%s %.3f", k ? ", " : "", SHADE_KNOB[k].name, (double)s->shade[k].v);
+    }
+    R_NOTE("shading", "%s", line);
+    s->shading_changed = 0;
+}
+
 /*  What the UI shows this frame. */
-/*  The pointer inside a triangle as the camera projects it, by the sign
- *  of the three edge tests.  `z` comes back as the triangle's highest
- *  corner, which is what decides between two that overlap. */
-static int inspect_hit(const App *a, uint32_t tri, float f, float dens, float *z, uint32_t *comp)
-{
-    float p3[3][3], sx[3], sy[3], d1, d2, d3, area;
-    int   v;
-    mesh_tri_get(&a->mesh, tri, p3, comp);
-    for (v = 0; v < 3; ++v)
-    {
-        float cx, cy;
-        grid_to_canvas(a, p3[v][0], p3[v][1], p3[v][2], &cx, &cy);
-        sx[v] = (cx - (float)a->gv.scroll_x) * f / dens;
-        sy[v] = (cy - (float)a->gv.scroll_y) * f / dens;
-    }
-    /*  A triangle with no area on screen covers no point.  It has to be
-     *  turned away here, before the edge tests.  A face seen edge on
-     *  projects to a line, the pointer is then on one side of all three
-     *  of its edges wherever it is.  The tests below answer YES to the
-     *  whole window.  The oblique camera makes such faces of every wall
-     *  and skirt that runs along the view.  So one of them, standing
-     *  higher than the thing under the pointer, wins the pick and the
-     *  outline lands somewhere the pointer never was. */
-    area = (sx[1] - sx[0]) * (sy[2] - sy[0]) - (sx[2] - sx[0]) * (sy[1] - sy[0]);
-    if (area > -1e-3f && area < 1e-3f)
-        return 0;
-    d1 = (a->q_mx - sx[1]) * (sy[0] - sy[1]) - (sx[0] - sx[1]) * (a->q_my - sy[1]);
-    d2 = (a->q_mx - sx[2]) * (sy[1] - sy[2]) - (sx[1] - sx[2]) * (a->q_my - sy[2]);
-    d3 = (a->q_mx - sx[0]) * (sy[2] - sy[0]) - (sx[2] - sx[0]) * (a->q_my - sy[0]);
-    if (((d1 < 0.0f) || (d2 < 0.0f) || (d3 < 0.0f)) && ((d1 > 0.0f) || (d2 > 0.0f) || (d3 > 0.0f)))
-        return 0;
-    *z = p3[0][2] > p3[1][2] ? p3[0][2] : p3[1][2];
-    if (p3[2][2] > *z)
-        *z = p3[2][2];
-    return 1;
-}
-
-void inspect_copy(App *a)
-{
-    const RUiState *s = &a->us;
-    char            buf[4096];
-    size_t          n = 0;
-    const char     *p;
-    int             k;
-    if (!a->inspect)
-        return;
-    if (!s->comp_who[0] && !s->comp_label[0])
-    {
-        ui_log(&a->us, "Nothing under the pointer to copy");
-        return;
-    }
-#define ADD(...) (n < sizeof buf ? n += (size_t)snprintf(buf + n, sizeof buf - n, __VA_ARGS__) : 0)
-    ADD("%s\n", s->comp_label[0] ? s->comp_label : "the mesh");
-    ADD("  rendered by   %s at %s\n", s->comp_who[0] ? s->comp_who : "?", s->comp_where[0] ? s->comp_where : "?");
-    ADD("  part of       %s%s%s\n", s->comp_gen[0] ? s->comp_gen : "nothing",
-        s->comp_gen[0] && s->comp_gen_where[0] ? ", at " : "", s->comp_gen[0] ? s->comp_gen_where : "");
-    ADD("  material      %g\n", (double)s->comp_mat);
-    if (s->comp_gen_tris > s->comp_tris)
-        ADD("  triangles     %u, %u with what is under it\n", s->comp_tris, s->comp_gen_tris);
-    else
-        ADD("  triangles     %u\n", s->comp_tris);
-    ADD("  tile          %d,%d\n", (int)s->q_col, (int)s->q_row);
-    if (s->comp_box_ok)
-    {
-        ADD("  extent        %.3f,%.3f to %.3f,%.3f\n", (double)s->comp_box[0], (double)s->comp_box[1], (double)s->comp_box[3], (double)s->comp_box[4]);
-        ADD("  height        %.3f to %.3f\n", (double)s->comp_box[2], (double)s->comp_box[5]);
-    }
-    /*  The shape's own account of itself, a row a line: the key before
-     *  the tab, the value after it. */
-    for (p = s->comp_note; *p;)
-    {
-        const char *e   = strchr(p, '\n');
-        size_t      len = e ? (size_t)(e - p) : strlen(p);
-        const char *t   = (const char *)memchr(p, '\t', len);
-        if (t)
-            ADD("  %-13.*s %.*s\n", (int)(t - p), p, (int)(len - (size_t)(t - p) - 1u), t + 1);
-        else
-            ADD("  %.*s\n", (int)len, p);
-        p = e ? e + 1 : p + len;
-    }
-    for (k = 0; k < s->comp_n_also; ++k)
-        ADD("  drawn over    %s\n", s->comp_also[k]);
-    ADD("  outline       %d edges\n", s->comp_n / 2);
-#undef ADD
-    SDL_SetClipboardText(buf);
-    ui_log(&a->us, "Copied \"%s\" to the clipboard", s->comp_label[0] ? s->comp_label : "the mesh");
-}
-
 void ui_fill(App *a)
 {
-    /*  --inspect: the inspector on from the start.  Once, before the
-     *  frame reads the switch.  Applied further down it took a frame to
-     *  arrive.  Applied every frame it could never be switched off
-     *  again. */
-    static int inspect_flag_applied;
     RUiState   *s = &a->us;
     const City *c = a->city;
-    uint32_t    inst, culled;
-    if (!inspect_flag_applied)
     {
-        inspect_flag_applied = 1;
-        if (g_dev.inspect)
-            a->inspect = 1;
+        int k;
+        s->n_biomes = trees_biomes() < 16 ? trees_biomes() : 16;
+        for (k = 0; k < s->n_biomes; ++k)
+            s->biome_names[k] = trees_biome_name(k);
     }
-    int         k;
+    /*  The time of day starts at the store's own hour, until a saved one
+     *  replaces it. */
+    {
+        static int hour_known;
+        if (!hour_known)
+            geo_find("sun_hour", &s->hour), hour_known = 1;
+    }
+    /*  The marked areas this frame, in the order they cover each other:
+     *  what the pointer is over, what a drag has taken, the selection.
+     *  What the pointer is over is marked only while the pointer is on
+     *  the map and not on a window. */
+    MarkArea  mark[sizeof a->taken / sizeof a->taken[0] + 3];
+    int       n_mark = 0;
+    const int on_map = !(a->ui && ui_wants_mouse(a->ui));
+    uint32_t  inst, culled;
+    int       k;
     if (a->view->name[0])
         snprintf(s->city_name, sizeof s->city_name, "%s", a->view->name);
     else
         snprintf(s->city_name, sizeof s->city_name, "%s", a->city_base);
-    s->year       = c->year_founded + c->date / 300;
-    s->month      = (c->date / 25) % 12;
     s->funds      = c->funds;
     s->population = c->population;
     s->stage      = c->misc[MISC_STAGE];
     for (k = 0; k < 3; ++k)
         s->demand[k] = c->rci_demand[k];
-    s->power_pct      = c->power_pct;
-    s->water_pct      = c->water_pct;
-    s->unemployment   = c->unemployment;
+    s->power_pct    = c->power_pct;
+    s->water_pct    = c->water_pct;
+    s->unemployment = c->unemployment;
     for (k = 0; k < RUI_N_MAP_TOOLS; ++k)
     {
         int j;
@@ -235,11 +480,11 @@ void ui_fill(App *a)
     s->fps            = a->fps;
     s->frame_ms       = a->frame_ms;
     gpu_stats(a->gpu, &inst, &culled);
-    s->instances  = inst;
-    s->culled     = culled;
+    s->instances = inst;
+    s->culled    = culled;
     if (!a->building)
         s->mesh_verts = a->mesh.n_land;
-    s->driver     = gpu_driver(a->gpu);
+    s->driver = gpu_driver(a->gpu);
     for (k = 0; k < RUI_N_GRAPH && k < N_GRAPH; ++k)
     {
         s->graph[k]      = c->graph[k];
@@ -252,282 +497,39 @@ void ui_fill(App *a)
         s->dept_funding[k] = c->dept[k].funding;
         s->dept_accrued[k] = c->dept[k].accrued;
     }
-    /*  The inspector points at the MESH.  The triangles near the pointer
-     *  are projected the way the camera projects them.  The one under
-     *  the pointer is found.  Through it comes the component that drew
-     *  it, and the component's silhouette is the outline.  A tile is
-     *  only how the search is narrowed.  The ground is not a thing to
-     *  inspect.  The query tool says what a tile is.  So the ground, its
-     *  banks, walls and water are passed over, and what is built on them
-     *  is what the pointer finds. */
-    s->outline      = TUNE(show_curves) > 0.5f;
-    s->show_inspect = a->inspect;
-    s->comp_ok = s->comp_n = s->comp_box_ok = 0;
-    s->comp_label[0] = s->comp_who[0] = s->comp_where[0] = s->comp_gen[0] = s->comp_gen_where[0] = s->comp_note[0] = 0;
-    s->comp_n_also                                       = 0;
-    s->comp_mat                                          = 0.0f;
-    s->comp_tris = s->comp_gen_tris = 0;
-    if (a->inspect && a->q_col >= 0 && a->q_row >= 0 && a->sw.level && !a->building)
-    {
-        float    f    = (float)a->gv.scale * (a->gv.zoom > 0.0f ? a->gv.zoom : 1.0f);
-        float    dens = a->win_density > 0.0f ? a->win_density : 1.0f;
-        uint32_t cand[4096];
-        int      kt;
-        int      best      = -1;
-        float    best_z    = -1e9f;
-        uint32_t best_comp = 0;
-        /*  Every thing the pointer is over, not only the topmost.  The
-         *  one in front tells you what you clicked, and the rest tell
-         *  you what it is drawn over.  Where two of them meet at one
-         *  height the surfaces overlap, and no outline of either can
-         *  show that. */
-        enum
-        {
-            MAX_ALSO = 16
-        };
-        uint32_t akey[MAX_ALSO], acomp[MAX_ALSO];
-        float    az[MAX_ALSO];
-        int      n_also = 0;
-        /*  Every tile whose geometry could be under the pointer, not a
-         *  patch of tiles around the GROUND tile.  A deck stands over a
-         *  meter of air.  In this projection height moves a thing up the
-         *  screen.  The tile a slab belongs to is three or four tiles
-         *  from the ground the pointer lands on.  That is further than
-         *  any fixed patch reaches, and the pick found the road
-         *  underneath instead.
-         *
-         *  For a fixed window point the difference row - col is settled.
-         *  Only the sum grows with altitude, so the candidates lie along
-         *  a diagonal.  Walk the altitude from under the ground to above
-         *  anything built.  Take the tile at each step and its
-         *  neighbors.  Test each tile's triangles as it is reached.
-         *  There is no shared budget.  So the densest place on the map,
-         *  a slab with its spurs, cannot spend it before its own tile is
-         *  looked at. */
-        {
-            static int32_t stamp[R_MAP * R_MAP];
-            static int32_t gen;
-            float          ysc, hsc, alt, step;
-            cam_scales(a, &ysc, &hsc);
-            step = hsc > 0.001f ? ysc / hsc : 1.0f; /* half a tile of travel */
-            if (step < 0.05f)
-                step = 0.05f;
-            if (step > 4.0f)
-                step = 4.0f;
-            ++gen;
-            for (alt = -4.0f; alt <= 48.0f; alt += step)
-            {
-                float   fc, fr;
-                int32_t bc, br, dc, dr;
-                canvas_to_grid_at(a, a->q_mx, a->q_my, dens, alt, &fc, &fr);
-                bc = (int32_t)floorf(fc);
-                br = (int32_t)floorf(fr);
-                for (dr = -1; dr <= 1; ++dr)
-                    for (dc = -1; dc <= 1; ++dc)
-                    {
-                        int32_t tc = bc + dc, tr = br + dr, idx;
-                        int     ntri, ktri;
-                        if (tc < 0 || tr < 0 || tc >= R_MAP || tr >= R_MAP)
-                            continue;
-                        idx = tr * R_MAP + tc;
-                        if (stamp[idx] == gen)
-                            continue;
-                        stamp[idx] = gen;
-                        ntri       = mesh_tris_at(&a->mesh, tc, tr, cand, (int)(sizeof cand / sizeof *cand));
-                        for (ktri = 0; ktri < ntri; ++ktri)
-                        {
-                            float    z;
-                            uint32_t comp;
-                            uint32_t key;
-                            int      s2;
-                            if (!inspect_hit(a, cand[ktri], f, dens, &z, &comp) || !shape_built(comp))
-                                continue;
-                            if (best < 0 || z > best_z)
-                                best = (int)cand[ktri], best_z = z, best_comp = comp;
-                            key = comp; /* by SURFACE, not by thing: a band drawn over its own junction's asphalt is the overlap worth seeing */
-                            for (s2 = 0; s2 < n_also; ++s2)
-                                if (akey[s2] == key)
-                                    break;
-                            if (s2 < n_also)
-                            {
-                                if (z > az[s2])
-                                    az[s2] = z;
-                            }
-                            else if (n_also < MAX_ALSO)
-                                akey[n_also] = key, acomp[n_also] = comp, az[n_also] = z, ++n_also;
-                        }
-                    }
-            }
-        }
-        if (best >= 0)
-        {
-            const char  *who = NULL, *where = NULL;
-            float        mat  = 0.0f, box[6];
-            uint32_t     tris = 0;
-            static float    segs[6 * 4096];
-            static int      seg_n;
-            static uint32_t seg_key = 0u, seg_land = 0u;
-            static double   seg_ms;
-            int             ns;
-            {
-                /*  What it is part of, all the way up: a margin belongs
-                 *  to its junction, and the junction to nothing.  So the
-                 *  chain reads from the nearest owner outwards. */
-                ShapeId par   = shape_parent(best_comp);
-                size_t  used  = 0;
-                int     depth = 0;
-                while (par != SHAPE_NONE && depth++ < 8 && used + 1 < sizeof s->comp_gen)
-                {
-                    const char *nm = shape_name(par);
-                    used += (size_t)snprintf(s->comp_gen + used, sizeof s->comp_gen - used, "%s%s", used ? ", in " : "", nm ? nm : "?");
-                    if (depth == 1)
-                    {
-                        const char *pw  = shape_where(par);
-                        const char *rel = pw ? strstr(pw, "src/") : NULL;
-                        snprintf(s->comp_gen_where, sizeof s->comp_gen_where, "%s", rel ? rel : (pw ? pw : ""));
-                    }
-                    par = shape_parent(par);
-                }
-            }
-            if (shape_get(best_comp, &mat, &tris, box) == 0)
-            {
-                const char *rel;
-                who   = shape_who(best_comp);
-                where = shape_where(best_comp);
-                rel   = where ? strstr(where, "src/") : NULL;
-                snprintf(s->comp_who, sizeof s->comp_who, "%s", who ? who : "?");
-                snprintf(s->comp_where, sizeof s->comp_where, "%s", rel ? rel : (where ? where : ""));
-                snprintf(s->comp_label, sizeof s->comp_label, "%s", shape_name(best_comp) ? shape_name(best_comp) : "mesh");
-                s->comp_mat  = mat;
-                s->comp_tris = tris;
-                memcpy(s->comp_box, box, sizeof s->comp_box);
-                s->comp_box_ok = 1;
-                /*  The thing the component belongs to, when it was made
-                 *  under a generating call: its triangles in all, and the
-                 *  box round all of it. */
-                if (shape_get_deep(best_comp, &tris, box) == 0)
-                {
-                    s->comp_gen_tris = tris;
-                    memcpy(s->comp_box, box, sizeof s->comp_box);
-                }
-            }
-            {
-                /*  The generating call's own account of the thing: its
-                 *  first line is the name the outline wears, the rest are
-                 *  the window's rows. */
-                const char *note = shape_note_of(best_comp);
-                if (note)
-                    snprintf(s->comp_note, sizeof s->comp_note, "%s", note);
-            }
-            {
-                /*  What else is under the pointer, the highest first, each
-                 *  with the material it is drawn in and the height it was
-                 *  met at.  A surface at the same height as the one in
-                 *  front is drawn over it. */
-                int i2, j2;
-                for (i2 = 1; i2 < n_also; ++i2)
-                    for (j2 = i2; j2 > 0 && az[j2] > az[j2 - 1]; --j2)
-                    {
-                        uint32_t tk = akey[j2], tc = acomp[j2];
-                        float    tz = az[j2];
-                        akey[j2] = akey[j2 - 1], acomp[j2] = acomp[j2 - 1], az[j2] = az[j2 - 1];
-                        akey[j2 - 1] = tk, acomp[j2 - 1] = tc, az[j2 - 1] = tz;
-                    }
-                for (i2 = 0; i2 < n_also && s->comp_n_also < (int)(sizeof s->comp_also / sizeof s->comp_also[0]); ++i2)
-                {
-                    const char *nt = shape_note_of(acomp[i2]), *wh = NULL;
-                    char        name[80];
-                    float       mat2 = 0.0f;
-                    if (akey[i2] == best_comp)
-                        continue;
-                    shape_get(acomp[i2], &mat2, NULL, NULL);
-                    wh = shape_name(acomp[i2]);
-                    if (nt)
-                    {
-                        const char *nl  = strchr(nt, '\n');
-                        size_t      len = nl ? (size_t)(nl - nt) : strlen(nt);
-                        if (len >= sizeof name)
-                            len = sizeof name - 1;
-                        memcpy(name, nt, len);
-                        name[len] = 0;
-                    }
-                    else
-                        snprintf(name, sizeof name, "%s", wh ? wh : "?");
-                    snprintf(s->comp_also[s->comp_n_also], sizeof s->comp_also[0], "%s, material %g, at %.3f", name, (double)mat2, (double)az[i2]);
-                    ++s->comp_n_also;
-                }
-            }
-            /*  The outline is the same for as long as the pointer stays
-             *  on the THING, a deck's slab, gores and columns share one.
-             *  It is a walk of every triangle of the thing.  So it is
-             *  computed when the thing under the pointer changes and
-             *  kept. */
-            {
-                uint32_t key = best_comp;
-                if (key != seg_key || a->mesh.n_land != seg_land)
-                {
-                    double t0 = (double)SDL_GetTicksNS() * 1e-6;
-                    seg_n     = mesh_comp_edges(&a->mesh, best_comp, segs, 4096);
-                    seg_ms    = (double)SDL_GetTicksNS() * 1e-6 - t0;
-                    seg_key   = key;
-                    seg_land  = a->mesh.n_land;
-                }
-            }
-            s->comp_at[0] = a->q_mx;
-            s->comp_at[1] = a->q_my;
-            ns            = seg_n;
-            if (ns > 0)
-            {
-                int       out = 0;
-                const int cap = (int)(sizeof s->comp_poly / sizeof s->comp_poly[0]);
-                for (kt = 0; kt < ns && out + 1 < cap; ++kt)
-                {
-                    int e;
-                    for (e = 0; e < 2; ++e)
-                    {
-                        const float *w = &segs[6 * kt + 3 * e];
-                        float        cx, cy;
-                        grid_to_canvas(a, w[0], w[1], w[2], &cx, &cy);
-                        s->comp_poly[out][0] = (cx - (float)a->gv.scroll_x) * f / dens;
-                        s->comp_poly[out][1] = (cy - (float)a->gv.scroll_y) * f / dens;
-                        ++out;
-                    }
-                }
-                s->comp_n  = out;
-                s->comp_ok = out >= 2;
-            }
-            /*  One line when the component under the pointer changes,
-             *  and never once a frame: it is a message.  So it goes
-             *  through the log like every other. */
-            if (g_dev.inspect && best_comp != a->inspect_comp)
-            {
-                a->inspect_comp = best_comp;
-                R_DBG("inspect", "%d,%d: %s generated by %s (%s), drawn by %s (%s), material %g, %u triangles, outline %d edges in %.1f ms",
-                      (int)a->q_col, (int)a->q_row, s->comp_label, s->comp_gen[0] ? s->comp_gen : "-", s->comp_gen_where, s->comp_who, s->comp_where, (double)s->comp_mat, s->comp_tris, seg_n, seg_ms);
-            }
-        }
-    }
+    s->outline        = TUNE(show_curves) > 0.5f;
+    s->tile_kinds     = s->outline ? TK_KINDS : 0;
+    s->tile_kind_name = TK_NAME;
+    s->tile_kind_rgb  = TK_RGB;
+    if (s->outline)
+        graph_sprites(a, s);
     else
-        a->inspect_c = a->inspect_r = -1;
+        s->n_spr = 0;
+    inspect_fill(a, s);
     s->q_ok         = a->q_col >= 0 && a->q_row >= 0;
     s->tool_poly_ok = 0;
     if (s->q_ok)
     {
-        int y = a->q_row, x = a->q_col;
-        s->q_col         = x;
-        s->q_row         = y;
-        s->q_xter        = c->xter[y][x];
-        s->q_xbld        = c->xbld[y][x];
-        s->q_xzon        = c->xzon[y][x];
-        s->q_xbit        = c->xbit[y][x];
-        s->q_xund        = c->xund[y][x];
-        s->q_xtxt        = c->xtxt[y][x];
-        s->q_altm        = c->altm[y][x];
-        s->q_alt         = s->q_xter >= 0x10 ? (int32_t)((s->q_altm >> 5) & 0x1F)
-                                             : (int32_t)(s->q_altm & 0x1F);
-        s->q_water_level = c->water_level;
-        s->q_building    = BUILDING[s->q_xbld].name;
-        if (a->building || mesh_query(a->view, x, y, s->q_mesh, sizeof s->q_mesh) != 0)
+        int32_t qdc, qdr;
+        s->q_ok = app_city_find(a, a->q_col, a->q_row, &qdc, &qdr) >= 0;
+    }
+    if (s->q_ok)
+    {
+        int32_t qdc = 0, qdr = 0;
+        int     qc = app_city_find(a, a->q_col, a->q_row, &qdc, &qdr);
+        int     y = a->q_row - qdr, x = a->q_col - qdc;
+        c             = a->world->city[qc].city;
+        s->q_col      = a->q_col;
+        s->q_row      = a->q_row;
+        s->q_xter     = T_XTER(c, y, x);
+        s->q_xbld     = T_XBLD(c, y, x);
+        s->q_xzon     = T_XZON(c, y, x);
+        s->q_xbit     = T_XBIT(c, y, x);
+        s->q_altm     = T_ALTM(c, y, x);
+        s->q_alt      = s->q_xter >= 0x10 ? (int32_t)((s->q_altm >> 5) & 0x1F)
+                                          : (int32_t)(s->q_altm & 0x1F);
+        s->q_building = BUILDING[s->q_xbld].name;
+        if (a->building || mesh_query(a->view, a->q_col, a->q_row, s->q_mesh, sizeof s->q_mesh) != 0)
             s->q_mesh[0] = 0;
         /*  The footprint the cell belongs to, as the original finds it
          *  ($763A).  It gives its edge n and its north-east tile, so it
@@ -537,10 +539,10 @@ void ui_fill(App *a)
             int n, x0, y0;
             s->q_orow = y; /* $763A moves the cell's own coordinates to the origin */
             s->q_ocol = x;
-            n         = sim_footprint_origin(c, &s->q_orow, &s->q_ocol, c->xbld[y][x]);
+            n         = sim_footprint_origin(c, &s->q_orow, &s->q_ocol, T_XBLD(c, y, x));
             x0        = s->q_ocol - n + 1;
             y0        = s->q_orow;
-            if (n < 1 || n > 4 || x0 < 0 || y0 < 0 || s->q_ocol >= R_MAP || y0 + n > R_MAP)
+            if (n < 1 || n > 4 || x0 < 0 || y0 < 0 || s->q_ocol >= MAP_W || y0 + n > MAP_H)
             {
                 n         = 1;
                 x0        = x;
@@ -548,27 +550,71 @@ void ui_fill(App *a)
                 s->q_ocol = x;
                 s->q_orow = y;
             }
-            s->q_size    = n;
-            s->q_poly_ok = area_poly(a, x0, y0, x0 + n - 1, y0 + n - 1, s->q_poly);
+            /*  Back to the view's own tiles. */
+            x0 += qdc;
+            y0 += qdr;
+            s->q_ocol += qdc;
+            s->q_orow += qdr;
+            s->q_size = n;
+            area_poly(a, x0, y0, x0 + n - 1, y0 + n - 1, s->q_poly);
+            /*  With the query window open, the query marks the footprint
+             *  under the pointer, so the art that stands on it is lit
+             *  whole.  With the inspector on, the inspector outlines the
+             *  object under the pointer instead, and no tile is marked. */
+            if (s->show_query && !a->insp.on && on_map)
+            {
+                mark[0] = (MarkArea){
+                    {x0, y0, x0 + n - 1, y0 + n - 1},
+                    RUI_MARK_HOVER
+                };
+                n_mark = 1;
+            }
         }
         /*  The selected tool's area under the pointer: what it would work
          *  on, and whether it would refuse, as the simulation says. */
         if (s->tool >= 0 && s->tool < RUI_N_MAP_TOOLS && s->tool != RUI_TOOL_QUERY)
         {
             ToolPreview pv;
+            int32_t     rect[4];
             const int   flags = s->underground ? GESTURE_UNDERGROUND : 0;
-            if (sim_tool_preview(c, s->tool, s->sub[s->tool], flags, y, x, &pv))
+            /*  gesture_area takes the tile in the view's own frame, as
+             *  every gesture call does. */
+            int got = gesture_area(a, a->q_col, a->q_row, &pv, rect);
+            if (!got && sim_tool_preview(c, s->tool, s->sub[s->tool], flags, y, x, &pv))
             {
-                s->tool_poly_ok = area_poly(a, pv.x0 - pv.n + 1, pv.y0, pv.x0, pv.y0 + pv.n - 1, s->tool_poly);
+                rect[0] = pv.x0 - pv.n + 1 + qdc;
+                rect[1] = pv.y0 + qdr;
+                rect[2] = pv.x0 + qdc;
+                rect[3] = pv.y0 + pv.n - 1 + qdr;
+                got     = 1;
+            }
+            if (got && on_map)
+            {
+                s->tool_poly_ok = area_poly(a, rect[0], rect[1], rect[2], rect[3], s->tool_poly);
                 s->tool_refused = !pv.ok;
                 s->tool_price   = pv.price;
+                mark[0]         = (MarkArea){
+                    {rect[0], rect[1], rect[2], rect[3]},
+                    pv.ok ? RUI_MARK_HOVER : RUI_MARK_REFUSED
+                };
+                n_mark = 1;
             }
         }
     }
+    /*  What the drag has taken.  The tiles stay marked until the world
+     *  built after them is up. */
+    const int pointer = n_mark;
+    for (k = 0; k < a->n_taken; ++k)
+    {
+        mark[n_mark] = (MarkArea){
+            {a->taken[k][0], a->taken[k][1], a->taken[k][2], a->taken[k][3]},
+            RUI_MARK_TAKEN
+        };
+        ++n_mark;
+    }
     /*  The area selection (Shift-drag in the map view, app.c) and, after
-     *  the release, the confirmation of what was written.  The
-     *  rectangle's four corners projected as the query outline's are,
-     *  and a caption. */
+     *  the release, the confirmation of what was written.  Its tiles are
+     *  marked, and its corners on screen place a caption. */
     s->sel_ok = 0;
     {
         /*  After the release the rectangle blinks twice over half a
@@ -576,11 +622,11 @@ void ui_fill(App *a)
         uint64_t now   = SDL_GetTicksNS();
         int      flash = now < a->sel_flash_until && (((a->sel_flash_until - now) / 120000000ull) & 1u) == 1u;
         /*  And before the drag: with Shift held, the tile under the
-         *  cursor shows in the same tint.  So the drag's start is seen.
-         *  The tile's outline belongs to this Shift-drag, which picks an
-         *  AREA.  The inspector outlines the component instead.  While
-         *  it is on, no tile is highlighted under the pointer. */
-        int hover = a->plan && !a->inspect && !a->sel && !flash && (SDL_GetModState() & SDL_KMOD_SHIFT) != 0 && a->q_col >= 0 && a->q_row >= 0;
+         *  cursor is marked as the selection is, in place of what the
+         *  pointer marks.  So the drag's start is seen.  The inspector
+         *  outlines the object instead, and while it is on no tile is
+         *  marked under the pointer. */
+        int hover = a->plan && !a->insp.on && !a->sel && !flash && (SDL_GetModState() & SDL_KMOD_SHIFT) != 0 && a->q_col >= 0 && a->q_row >= 0;
         if (a->plan && (a->sel || flash || hover) && (hover || (a->sel_c0 >= 0 && a->sel_c1 >= 0)))
         {
             int32_t x0 = hover ? a->q_col : a->sel_c0 < a->sel_c1 ? a->sel_c0
@@ -591,7 +637,20 @@ void ui_fill(App *a)
                                                                   : a->sel_r1,
                     y1 = hover ? a->q_row : a->sel_r0 < a->sel_r1 ? a->sel_r1
                                                                   : a->sel_r0;
-            if (area_poly(a, x0, y0, x1, y1, s->sel_poly))
+            if (hover && on_map && pointer)
+            {
+                memmove(mark, mark + 1, (size_t)(n_mark - 1) * sizeof mark[0]);
+                --n_mark;
+            }
+            if (!hover || on_map)
+            {
+                mark[n_mark] = (MarkArea){
+                    {x0, y0, x1, y1},
+                    RUI_MARK_SELECT
+                };
+                ++n_mark;
+            }
+            if ((!hover || on_map) && area_poly(a, x0, y0, x1, y1, s->sel_poly))
             {
                 s->sel_ok = 1;
                 if (a->sel)
@@ -603,11 +662,21 @@ void ui_fill(App *a)
             }
         }
     }
+    /*  The tiles --mark names, as the pointer marks them. */
+    if (a->have_mark_fixed && n_mark < (int)(sizeof mark / sizeof mark[0]))
+    {
+        mark[n_mark] = (MarkArea){
+            {a->mark_fixed[0], a->mark_fixed[1], a->mark_fixed[2], a->mark_fixed[3]},
+            RUI_MARK_HOVER
+        };
+        ++n_mark;
+    }
+    marks_update(a, mark, n_mark, TUNE(show_curves) > 0.5f);
     /* the switches */
     s->speed    = a->speed;
     s->geometry = a->gv.geometry;
     /*  The knobs, unless the window is mid-edit and owns them.  The list
-     *  is the store's, which the scripts filled: the window is handed
+     *  is the store's, which geo_defaults filled: the window is handed
      *  the label and the range along with the value. */
     if (!s->tune_changed)
     {
@@ -625,92 +694,74 @@ void ui_fill(App *a)
             s->knob[i].def   = got.def;
         }
     }
+    shading_fill(s);
     s->plan    = a->plan;
     s->cell_ok = 0;
-    if (a->plan && s->show_cells && a->sw.level)
+    if (((a->plan && s->show_cells) || s->outline) && a->sw.level)
     {
-        /*  The map's frame on screen: where tile 0,0's corner lands and
-         *  what one column and one row step by.  Straight down, height
-         *  moves nothing, so the ground's own zero will do. */
-        float f    = (float)a->gv.scale * (a->gv.zoom > 0.0f ? a->gv.zoom : 1.0f);
+        /*  The map's frame on screen: where tile 0,0's corner lands, and
+         *  what one column, one row and one level of altitude step by.
+         *  The cell numbers read it in the map view, and the lane graph
+         *  view's sprites in any view. */
+        float f    = cam_px(a);
         float dens = a->win_density > 0.0f ? a->win_density : 1.0f;
-        float ox, oy, cxp, cyp, rxp, ryp;
+        float ox, oy, cxp, cyp, rxp, ryp, axp, ayp;
         grid_to_canvas(a, 0.0f, 0.0f, 0.0f, &ox, &oy);
         grid_to_canvas(a, 1.0f, 0.0f, 0.0f, &cxp, &cyp);
         grid_to_canvas(a, 0.0f, 1.0f, 0.0f, &rxp, &ryp);
-        s->cell_o[0] = (ox - (float)a->gv.scroll_x) * f / dens;
-        s->cell_o[1] = (oy - (float)a->gv.scroll_y) * f / dens;
+        grid_to_window(a, 0.0f, 0.0f, 0.0f, dens, &s->cell_o[0], &s->cell_o[1]);
         s->cell_c[0] = (cxp - ox) * f / dens;
         s->cell_c[1] = (cyp - oy) * f / dens;
         s->cell_r[0] = (rxp - ox) * f / dens;
         s->cell_r[1] = (ryp - oy) * f / dens;
+        grid_to_canvas(a, 0.0f, 0.0f, 1.0f, &axp, &ayp);
+        s->cell_a[0] = (axp - ox) * f / dens;
+        s->cell_a[1] = (ayp - oy) * f / dens;
         s->cell_ok   = 1;
     }
-    /*  The console's status line: which script, how many times it has
-     *  been read, what it sets, and the last thing that went wrong.  The
-     *  rules are counted in the scripts' own state, which a build on its
-     *  own thread owns.  So the line stands as it was until it is done. */
-    if (!a->building)
-    {
-        const char *p = script_path(), *e = script_error();
-        snprintf(s->script_status, sizeof s->script_status, "%s  read %d, %d rules%s%s",
-                 p ? p : "no script", script_generation(), script_rules(),
-                 e ? "  --  " : "", e ? e : "");
-    }
     s->grid        = a->gv.grid;
-    s->markings    = a->gv.markings;
-    s->furniture   = a->gv.furniture;
-    s->margins   = a->gv.margins;
     s->plain_sweep = a->gv.plain_sweep;
+    s->tris        = a->gv.tris;
     s->underground = a->opts.underground;
     s->view        = a->opts.view;
 }
 
 /*  What the UI changed or asked for. */
+/*  The interface numbers the disasters as the simulation does. */
+_Static_assert(RUI_DISASTER_FIRE == SIM_DISASTER_FIRE && RUI_DISASTER_FLOOD == SIM_DISASTER_FLOOD && RUI_DISASTER_RIOT == SIM_DISASTER_RIOT &&
+                   RUI_DISASTER_TORNADO == SIM_DISASTER_TORNADO && RUI_DISASTER_MONSTER == SIM_DISASTER_MONSTER &&
+                   RUI_DISASTER_EARTHQUAKE == SIM_DISASTER_EARTHQUAKE && RUI_DISASTER_HURRICANE == SIM_DISASTER_HURRICANE &&
+                   RUI_DISASTER_CHEMICAL == SIM_DISASTER_CHEMICAL && RUI_DISASTER_AIR_CRASH == SIM_DISASTER_AIR_CRASH &&
+                   RUI_DISASTER_MICROWAVE == SIM_DISASTER_MICROWAVE && RUI_DISASTER_MELTDOWN == SIM_DISASTER_MELTDOWN &&
+                   RUI_DISASTER_VOLCANO == SIM_DISASTER_VOLCANO && RUI_DISASTER_FIRESTORM == SIM_DISASTER_FIRESTORM &&
+                   RUI_DISASTER_POLLUTION == SIM_DISASTER_POLLUTION && RUI_N_DISASTERS == SIM_N_DISASTERS,
+               "the disasters are numbered as the simulation numbers them");
+
 void ui_apply(App *a, SDL_Window *win, int pw, int ph)
 {
     RUiState *s = &a->us;
+    /*  The trees' biome the View menu sets, or the city's own.  Every
+     *  forest tile changes with it, so the world is built again. */
+    {
+        int want = s->biome >= 0 ? s->biome : a->biome_city;
+        if (want != a->biome_shown)
+        {
+            trees_set_biome(want);
+            if (a->biome_shown != -2)
+                a->mesh_dirty = 1;
+            a->biome_shown = want;
+        }
+    }
+    /*  The time of day the View menu sets.  The renderer reads it from
+     *  the store (gpu/frame.c, sun_clock). */
+    {
+        float now = 0.0f;
+        geo_find("sun_hour", &now);
+        if (now != s->hour)
+            geo_put("sun_hour", s->hour);
+    }
     if (s->speed != a->speed)
         set_speed(a, s->speed);
-    /*  A line typed at the console, run against the live state.  Its
-     *  answer is caught from the dump sink rather than printed, so the
-     *  window shows it and stdout stays the program's own.  It waits
-     *  while a build runs on its own thread, which owns the scripts until
-     *  it is done.  A reading of the scripts and a change of the knobs
-     *  wait too. */
-    if (s->script_run && !a->building)
-    {
-        size_t n = strlen(s->script_out);
-        char   got[4096];
-        snprintf(s->script_out + n, sizeof s->script_out - n, "> %s\n", s->script_line);
-        dump_capture(got, sizeof got);
-        script_eval(s->script_line);
-        dump_capture(NULL, 0);
-        n = strlen(s->script_out);
-        if (got[0])
-            snprintf(s->script_out + n, sizeof s->script_out - n, "%s%s", got, got[strlen(got) - 1] == '\n' ? "" : "\n");
-        else if (script_error())
-        {
-            n = strlen(s->script_out);
-            snprintf(s->script_out + n, sizeof s->script_out - n, "%s\n", script_error());
-        }
-        /*  A console that fills up keeps its tail: the older half goes. */
-        if (strlen(s->script_out) > sizeof s->script_out - 1024)
-        {
-            char *cut = strchr(s->script_out + sizeof s->script_out / 2, '\n');
-            memmove(s->script_out, cut ? cut + 1 : s->script_out, cut ? strlen(cut + 1) + 1 : 1);
-        }
-        s->script_line[0] = 0;
-        s->script_run     = 0;
-        if (script_take_dirty())
-            a->mesh_dirty = 1;
-    }
-    if (s->script_reload && !a->building)
-    {
-        s->script_reload = 0;
-        if (script_reload())
-            a->mesh_dirty = 1;
-    }
     if (s->tune_changed && !a->building)
     {
         /*  The knobs are a tuning session's.  The window writes back only
@@ -724,59 +775,30 @@ void ui_apply(App *a, SDL_Window *win, int pw, int ph)
         s->tune_changed = 0;
         a->mesh_dirty   = 1; /* the knobs are geometry: rebuild it */
     }
+    if (s->shading_changed)
+        shading_take(s);
     if (s->geometry != a->gv.geometry)
     {
         a->gv.geometry = s->geometry;
-        a->mesh_dirty  = 1; /* the roads are part of the mesh */
+        a->mesh_dirty  = 1; /* the mesh stands in for the art */
     }
     if (!!s->outline != (TUNE(show_curves) > 0.5f) && !a->building)
     {
-        /*  Outline stands the roads aside and draws the fitted curves and
-         *  the margin network on bare ground.  It is geometry, so the
-         *  mesh is built again, and it is remembered like the grid. */
+        /*  Outline lays the road network's lane graph over the bare
+         *  ground.  It is geometry, so the mesh is built again, and it is
+         *  remembered like the grid. */
         tune_set("show_curves", s->outline ? 1.0f : 0.0f);
-        a->mesh_dirty  = 1;
-        if (a->prefs_ok)
-            prefs_set("curves", s->outline ? "on" : "off");
+        a->mesh_dirty = 1;
     }
     if (!!s->plan != !!a->plan)
         set_plan(a, s->plan, win);
-    if (!!s->grid != !!a->gv.grid)
-        if (a->prefs_ok)
-            prefs_set("grid", s->grid ? "on" : "off"); /* the checkbox, remembered like the key */
-    if (!!s->markings != !!a->gv.markings || !!s->furniture != !!a->gv.furniture || !!s->margins != !!a->gv.margins)
-    {
-        /*  The passes: markings are the shader's and a crosswalk band's,
-         *  furniture and a junction's margin band are built in, so any
-         *  change rebuilds the mesh. */
-        if (!!s->markings != !!a->gv.markings)
-            if (a->prefs_ok)
-                prefs_set("markings", s->markings ? "on" : "off");
-        if (!!s->furniture != !!a->gv.furniture)
-            if (a->prefs_ok)
-                prefs_set("furniture", s->furniture ? "on" : "off");
-        if (!!s->margins != !!a->gv.margins)
-            if (a->prefs_ok)
-                prefs_set("margins", s->margins ? "on" : "off");
-        a->gv.markings  = s->markings;
-        a->gv.furniture = s->furniture;
-        a->gv.margins = s->margins;
-        margin_enable(a->gv.margins); /* markings and margins are draws: instant */
-    }
-    /*  Furniture is built in: a rebuild, once no build is running. */
-    if (furniture_on() != !!a->gv.furniture && !a->building)
-    {
-        furniture_enable(a->gv.furniture);
-        a->mesh_dirty = 1;
-    }
-    if (!!s->show_cells != !!a->cells_pref)
-    {
-        if (a->prefs_ok)
-            prefs_set("cells", s->show_cells ? "on" : "off"); /* remembered too */
-        a->cells_pref = s->show_cells;
-    }
     a->gv.grid        = s->grid;
     a->gv.plain_sweep = s->plain_sweep;
+    a->gv.tris        = s->tris;
+    /*  The switches remembered between runs.  The outline is not applied
+     *  while a build runs, so none is saved until it has been. */
+    if (!a->building)
+        prefs_switches_save(a);
     if (s->underground != a->opts.underground || s->view != a->opts.view)
     {
         if (s->underground != a->opts.underground)
@@ -785,49 +807,37 @@ void ui_apply(App *a, SDL_Window *win, int pw, int ph)
         a->opts.view        = s->view;
         a->dirty            = 1;
     }
-    if (s->want_zoom_step > 0)
-        zoom_to(a, a->zoom_world * 2.0f, (float)pw * 0.5f, (float)ph * 0.5f);
-    else if (s->want_zoom_step < 0)
-        zoom_to(a, a->zoom_world * 0.5f, (float)pw * 0.5f, (float)ph * 0.5f);
-    if (s->want_rotate)
-        app_turn(a, s->want_rotate > 0 ? -90.0f : 90.0f, win);
-    if (s->want_inspect)
-    {
-        a->inspect   = !a->inspect;
-        a->inspect_c = a->inspect_r = -1;
-    }
-    if (s->want_quit)
+    if (s->want.zoom_step > 0)
+        zoom_by(a, 2.0f, (float)pw * 0.5f, (float)ph * 0.5f);
+    else if (s->want.zoom_step < 0)
+        zoom_by(a, 0.5f, (float)pw * 0.5f, (float)ph * 0.5f);
+    if (s->want.rotate)
+        app_turn(a, s->want.rotate > 0 ? -90.0f : 90.0f, win);
+    inspect_apply(a, s);
+    if (s->want.quit)
         a->quit = 1;
-    if (s->want_screenshot)
+    if (s->want.screenshot)
+        a->want_shot = 1;
+    if (s->want.load && s->load_path[0])
     {
-        check_frame(a, win, "arcology-check.png");
-        ui_log(s, "Wrote arcology-check.png");
-    }
-    if (s->want_load && s->load_path[0])
-    {
-        /*  adapt_city runs from a->city every frame, so swapping the
-         *  city is all a load has to do. */
-        City    *fresh = (City *)calloc(1, sizeof *fresh);
-        uint64_t t0    = SDL_GetTicksNS();
+        /*  The view is read off the world at every sweep, so a load
+         *  swaps the world.  The renderer's map then takes the new
+         *  world's size. */
+        uint64_t t0 = SDL_GetTicksNS();
         R_NOTE("city", "loading %s", s->load_path);
-        if (fresh && city_load(s->load_path, fresh))
+        remesh_wait(a);
+        if (app_world_load(a, s->load_path) && r_map_set(app_world_side(a)) == 0)
         {
-            city_free(a->city);
-            free(a->city);
-            a->city = fresh;
+            app_streets_import(a);
             set_city_name(a, s->load_path);
-            {
-                /* opens paused.  The saved speed is what unpausing resumes */
-                int32_t saved = (int32_t)a->city->misc[MISC_SPEED];
-                set_speed(a, 1);
-                a->last_speed             = saved > 1 ? saved : 3;
-                a->city->misc[MISC_SPEED] = (uint16_t)saved;
-            }
+            city_limits_from_args(a->city);
+            open_paused(a);
             /*  the sweep and the terrain mesh are both cached.  So a new
              *  city is not visible until they are asked to rebuild:
              *  without this the map keeps drawing the old one */
             a->dirty      = 1;
             a->mesh_dirty = 1;
+            resident_stale(a); /* and it is built a block at a time, the nearest first */
             /*  and the UI's own copy of the speed, or the next frame
              *  compares the two and puts the old speed back */
             s->speed = a->speed;
@@ -837,13 +847,11 @@ void ui_apply(App *a, SDL_Window *win, int pw, int ph)
         }
         else
         {
-            free(fresh);
             R_WARN("city", "could not load %s", s->load_path);
             ui_log(s, "Could not load %s", s->load_path);
         }
-        s->want_load = 0;
     }
-    if (s->want_music)
+    if (s->want.music)
     {
         if (a->mus)
         {
@@ -853,9 +861,8 @@ void ui_apply(App *a, SDL_Window *win, int pw, int ph)
                 prefs_set("music", s->music_on ? "on" : "off");
             ui_log(s, "Music %s", s->music_on ? "on" : "off");
         }
-        s->want_music = 0;
     }
-    if (s->want_theme)
+    if (s->want.theme)
     {
         char pick[64];
         snprintf(pick, sizeof pick, "%s", s->theme_name);
@@ -867,83 +874,29 @@ void ui_apply(App *a, SDL_Window *win, int pw, int ph)
                 R_WARN("prefs", "could not save the theme preference");
             ui_log(s, "Theme: %s", s->theme_name);
         }
-        s->want_theme = 0;
     }
-    if (s->want_save)
+    if (s->want.save)
     {
-        if (city_save(s->save_path, a->city))
+        if (world_save(a, s->save_path))
             ui_log(s, "Saved %s", s->save_path);
         else
             ui_log(s, "Could not save %s", s->save_path);
     }
-    if (s->want_disaster)
+    if (s->want.disaster)
     {
-        static const char *names[RUI_N_DISASTERS] = {
-            "", "Fire", "Flood", "Riot", "Tornado", "Monster", "Earthquake", "Hurricane", "Chemical spill", "Air crash", "Microwave", "Meltdown", "Volcano", "Firestorm", "Pollution"};
-        int r = 0;
-        switch (s->want_disaster)
-        {
-            case RUI_DISASTER_FIRE:
-                r = sim_disaster_fire(a->city);
-                break;
-            case RUI_DISASTER_FLOOD:
-                r = sim_disaster_flood(a->city);
-                break;
-            case RUI_DISASTER_RIOT:
-                r = sim_disaster_riot(a->city);
-                break;
-            case RUI_DISASTER_TORNADO:
-                r = sim_disaster_tornado(a->city);
-                break;
-            case RUI_DISASTER_MONSTER:
-                r = sim_disaster_monster(a->city);
-                break;
-            case RUI_DISASTER_EARTHQUAKE:
-                r = sim_disaster_earthquake(a->city);
-                break;
-            case RUI_DISASTER_HURRICANE:
-                r = sim_disaster_hurricane(a->city);
-                break;
-            case RUI_DISASTER_CHEMICAL:
-                r = sim_disaster_chemical(a->city);
-                break;
-            case RUI_DISASTER_AIR_CRASH:
-                r = sim_disaster_air_crash(a->city);
-                break;
-            case RUI_DISASTER_MICROWAVE:
-                r = sim_disaster_microwave(a->city);
-                break;
-            case RUI_DISASTER_MELTDOWN:
-                r = sim_disaster_meltdown(a->city);
-                break;
-            case RUI_DISASTER_VOLCANO:
-                r = sim_disaster_volcano(a->city);
-                break;
-            case RUI_DISASTER_FIRESTORM:
-                r = sim_disaster_firestorm(a->city);
-                break;
-            case RUI_DISASTER_POLLUTION:
-                r = sim_disaster_pollution(a->city);
-                break;
-            default:
-                break;
-        }
-        ui_log(s, "%s: %s", names[s->want_disaster], r ? "started" : "nothing happened");
+        /*  What each sounds like, by its number. */
+        static const int sounds[RUI_N_DISASTERS] = {
+            0, R_SND_FIRE_LOOP, R_SND_FLOOD, R_SND_SHOT, R_SND_SIREN, R_SND_ROAR, R_SND_SIREN, R_SND_SIREN, R_SND_EXPLODE, R_SND_MAYDAY, R_SND_ZZAP, R_SND_EXPLODE, R_SND_EXPLODE, R_SND_FIRE_LOOP, 0};
+        int r = s->want.disaster > 0 && s->want.disaster < RUI_N_DISASTERS ? sim_disaster_start(a->city, s->want.disaster) : 0;
+        ui_log(s, "%s: %s", RUI_DISASTER_NAME[s->want.disaster < RUI_N_DISASTERS ? s->want.disaster : 0], r ? "started" : "nothing happened");
         if (r)
-        {
-            static const int sounds[RUI_N_DISASTERS] = {
-                0, R_SND_FIRE_LOOP, R_SND_FLOOD, R_SND_SHOT, R_SND_SIREN, R_SND_ROAR, R_SND_SIREN, R_SND_SIREN, R_SND_EXPLODE, R_SND_MAYDAY, R_SND_ZZAP, R_SND_EXPLODE, R_SND_EXPLODE, R_SND_FIRE_LOOP, 0};
-            sound_play(a->snd, sounds[s->want_disaster]);
-        }
+            sound_play(a->snd, sounds[s->want.disaster]);
         a->dirty      = 1;
         a->mesh_dirty = 1; /* a disaster may move the ground */
     }
-    if (s->want_sound)
-        sound_play(a->snd, s->want_sound);
-    s->want_quit = s->want_screenshot = s->want_save = 0;
-    s->want_load                                     = 0;
-    s->want_disaster                                 = 0;
-    s->want_zoom_step = s->want_rotate = s->want_sound = s->want_inspect = 0;
+    if (s->want.sound)
+        sound_play(a->snd, s->want.sound);
+    memset(&s->want, 0, sizeof s->want);
 }
 
 /*  What a tile sounds like when queried: the original lets a building be
@@ -951,8 +904,8 @@ void ui_apply(App *a, SDL_Window *win, int pw, int ph)
  *  has one and by the piece's range where it has not.  0 for silence. */
 static int building_sound(const City *c, int32_t row, int32_t col)
 {
-    uint8_t     b    = c->xbld[row][col];
-    uint8_t     zone = c->xzon[row][col] & 0x0F;
+    uint8_t     b    = T_XBLD(c, row, col);
+    uint8_t     zone = T_XZON(c, row, col) & 0x0F;
     const char *name = BUILDING[b].name;
     if (zone == 8)
         return R_SND_TAKEOFF;
@@ -986,7 +939,7 @@ static int building_sound(const City *c, int32_t row, int32_t col)
     if (b >= 0x0E && b <= 0x1C)
         return R_SND_ZZAP; /* power lines */
     if (b >= 0x51 && b <= 0x5F)
-        return R_SND_HORNS; /* bridges and spurs */
+        return R_SND_HORNS; /* bridges and ramps */
     return 0;
 }
 
@@ -1006,6 +959,20 @@ typedef char tool_order_matches[(RUI_N_MAP_TOOLS == N_TOOL && RUI_N_SUB == N_SUB
 /*  The gesture under way.  There is one mouse, so there is one gesture,
  *  and App.gesturing says whether it is on. */
 static SimGesture s_gesture;
+static void       gesture_take(App *a, int32_t col, int32_t row);
+
+/*  While a tool that drags a rectangle is down: the rectangle to
+ *  (col,row) as col0, row0, col1, row1, and its price. */
+static int gesture_area(const App *a, int32_t col, int32_t row, ToolPreview *pv, int32_t rect[4])
+{
+    int16_t r[4];
+    int32_t dc, dr;
+    app_city_offset(a, &dc, &dr);
+    if (!a->gesturing || !sim_tool_area(a->city, &s_gesture, (int)(row - dr), (int)(col - dc), pv, r))
+        return 0;
+    rect[0] = r[1] + dc, rect[1] = r[0] + dr, rect[2] = r[3] + dc, rect[3] = r[2] + dr;
+    return 1;
+}
 
 int gesture_ready(const App *a)
 {
@@ -1028,9 +995,21 @@ static void gesture_after(App *a)
         switch (e->kind)
         {
             case TOOL_EV_SOUND_LOOP:
+                sound_loop(a->snd, (int)e->arg);
+                break;
+            case TOOL_EV_SOUND_STOP:
+                sound_stop(a->snd, (int)e->arg);
+                break;
             case TOOL_EV_SOUND:
                 sound_play(a->snd, (int)e->arg);
                 break;
+            case TOOL_EV_COLLAPSE:
+                {
+                    int32_t dc, dr;
+                    app_city_offset(a, &dc, &dr);
+                    collapse_begin(a, TOOL_COLLAPSE_Y(e->arg) + dr, TOOL_COLLAPSE_X(e->arg) + dc, TOOL_COLLAPSE_N(e->arg));
+                    break;
+                }
             case TOOL_EV_PICTURE:
                 a->us.show_picture = e->arg;
                 break;
@@ -1053,8 +1032,40 @@ void gesture_begin(App *a, int32_t col, int32_t row, int cmd_down)
 {
     const RUiState *s     = &a->us;
     const int       flags = (cmd_down ? GESTURE_KEY : 0) | (s->underground ? GESTURE_UNDERGROUND : 0);
-    a->gesturing          = sim_tool_begin(a->city, &s_gesture, s->tool, s->sub[s->tool], flags, row, col);
+    int32_t         cc = col, cr = row;
+    /*  A gesture works in the city whose window holds the tile it starts
+     *  on, and stays in that city until it ends. */
+    if (!app_city_at(a, &cc, &cr))
+        return;
+    gesture_take(a, col, row);
+    a->gesturing = sim_tool_begin(a->city, &s_gesture, s->tool, s->sub[s->tool], flags, cr, cc);
     gesture_after(a);
+}
+
+/*  The area the tool takes at (col,row), as the simulation previews it,
+ *  added to what the drag has taken. */
+static void gesture_take(App *a, int32_t col, int32_t row)
+{
+    RUiState   *s = &a->us;
+    ToolPreview pv;
+    int32_t     r[4], dc, dr;
+    int         k;
+    if (gesture_area(a, col, row, &pv, r))
+    {
+        memcpy(a->taken[0], r, sizeof r);
+        a->n_taken = 1;
+        return;
+    }
+    app_city_offset(a, &dc, &dr);
+    if (!sim_tool_preview(a->city, s->tool, s->sub[s->tool], s->underground ? GESTURE_UNDERGROUND : 0, row - dr, col - dc, &pv) ||
+        !pv.ok)
+        return;
+    r[0] = pv.x0 - pv.n + 1 + dc, r[1] = pv.y0 + dr, r[2] = pv.x0 + dc, r[3] = pv.y0 + pv.n - 1 + dr;
+    for (k = 0; k < a->n_taken; ++k)
+        if (memcmp(a->taken[k], r, sizeof r) == 0)
+            return;
+    if (a->n_taken < (int)(sizeof a->taken / sizeof a->taken[0]))
+        memcpy(a->taken[a->n_taken++], r, sizeof r);
 }
 
 /*  The pointer came onto another tile with the button down. */
@@ -1062,7 +1073,10 @@ void gesture_step(App *a, int32_t col, int32_t row)
 {
     if (!a->gesturing)
         return;
-    sim_tool_step(a->city, &s_gesture, row, col);
+    int32_t dc, dr;
+    app_city_offset(a, &dc, &dr);
+    gesture_take(a, col, row);
+    sim_tool_step(a->city, &s_gesture, row - dr, col - dc);
     gesture_after(a);
 }
 
@@ -1072,13 +1086,16 @@ void gesture_end(App *a, int32_t col, int32_t row)
 {
     if (!a->gesturing)
         return;
+    int32_t dc, dr;
+    app_city_offset(a, &dc, &dr);
     if (col < 0 || row < 0)
     {
-        col = s_gesture.x;
-        row = s_gesture.y;
+        col = s_gesture.x + dc;
+        row = s_gesture.y + dr;
     }
-    sim_tool_end(a->city, &s_gesture, row, col);
+    sim_tool_end(a->city, &s_gesture, row - dr, col - dc);
     a->gesturing = 0;
+    ++a->taken_gen;
     gesture_after(a);
 }
 
@@ -1139,14 +1156,18 @@ void use_tool(App *a, SDL_Window *win)
     RUiState *s   = &a->us;
     int32_t   col = a->q_col, row = a->q_row;
     int       pw, ph;
-    (void)win;
     if (s->tool < 0 || col < 0)
         return;
     switch (s->tool)
     {
         case RUI_TOOL_QUERY:
             s->show_query = 1;
-            sound_play(a->snd, building_sound(a->city, row, col));
+            {
+                int32_t dc, dr;
+                int     qc = app_city_find(a, col, row, &dc, &dr);
+                if (qc >= 0)
+                    sound_play(a->snd, building_sound(a->world->city[qc].city, row - dr, col - dc));
+            }
             break;
         case RUI_TOOL_CENTER:
             SDL_GetWindowSizeInPixels(win, &pw, &ph);
@@ -1158,10 +1179,10 @@ void use_tool(App *a, SDL_Window *win)
                  *  that does not puts the tile clicked in the middle at
                  *  one zoom only, and never in the map view.  The anchor
                  *  already agrees. */
-                int32_t idx   = row * R_MAP + col;
+                int32_t idx   = row * r_map + col;
                 a->anch_c     = (float)col + 0.5f;
                 a->anch_r     = (float)row + 0.5f;
-                a->anch_alt   = (float)rcity_alt_surface(a->view->altm[idx], a->view->xter[idx]);
+                a->anch_alt   = (float)rcity_alt_surface(a->view->map.altm[idx], a->view->map.xter[idx]);
                 a->gv.pivot_c = a->anch_c;
                 a->gv.pivot_r = a->anch_r;
                 cam_hold(a, win);

@@ -1,5 +1,5 @@
 /*  advisor.h: the board of advisors.  This is NOT part of the
- *  reconstruction.  Everything else in src/sim/ is answerable to the
+ *  reconstruction.  Everything in src/sim/ is answerable to the
  *  original's own code.  This file is a layer on top that reads the
  *  model and says something about it.  It writes nothing back, so the
  *  simulation stays exactly as verified.  What is faithful here is WHEN
@@ -42,12 +42,6 @@ enum
     ADVISOR_JOKE  = 1
 };
 void advisor_set(int which); /* default ADVISOR_JOKE */
-int  advisor_get_set(void);
-
-/*  $30E30's ladder: which problem the city would lead with, or -1 for
- *  nothing worth saying.  Ordered by severity and gated by population,
- *  so a village is never told about things a village cannot have. */
-int advisor_topic(const City *c);
 
 /*  Compare a city against how it looked before the tick and fill in up
  *  to `max` messages.  Returns how many.  `prev` may be NULL, in which

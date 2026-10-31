@@ -9,7 +9,7 @@ import sys, os, json, struct
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from m68kemu import Emu
 from thinkdata import build, A5LOW
-from sc2 import load as city_load
+from sc2 import load as city_load, unturn
 
 A5 = Emu.A5
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -49,6 +49,10 @@ class Sim:
             _A5IMAGE = build()
         self.e = Emu(listing, _A5IMAGE, A5LOW)
         self.ch, _ = city_load(city_path)
+        #  The C simulates the city in the grid's own terms (city_load
+        #  decodes the turn the file was saved at), so the original is
+        #  given the same city at turn 0.
+        unturn(self.ch, _A5IMAGE)
         self.misc = struct.unpack(">1200i", self.ch[b"MISC"])
         self.base = {}
         self._blocks()

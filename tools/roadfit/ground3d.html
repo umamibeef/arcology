@@ -1,0 +1,202 @@
+<title>Ground Beside Roads 3D</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* A full-window 3D view, with the place picker and the key over it. */
+:root { --bg:#eef0ec; --panel:rgba(255,255,255,.88); --fg:#20251f; --muted:#5f6a62; --line:#cfd5cc; --accent:#2f5d8a; color-scheme: light; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#151816; --panel:rgba(29,33,30,.9); --fg:#e3e7e3; --muted:#9aa59d; --line:#2f3732; --accent:#7fb2e0; color-scheme: dark; } }
+:root[data-theme="dark"] { --bg:#151816; --panel:rgba(29,33,30,.9); --fg:#e3e7e3; --muted:#9aa59d; --line:#2f3732; --accent:#7fb2e0; color-scheme: dark; }
+html, body { margin:0; height:100%; background:var(--bg); color:var(--fg); font:14px/1.45 system-ui,-apple-system,sans-serif; overflow:hidden; }
+#view { position:fixed; inset:0; }
+.panel { position:fixed; left:max(16px,env(safe-area-inset-left,0px)); top:calc(16px + env(safe-area-inset-top,0px)); right:max(16px,env(safe-area-inset-right,0px)); max-width:560px; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px 14px; display:grid; gap:8px; }
+h1 { font-size:17px; margin:0; }
+.places { display:flex; flex-wrap:wrap; gap:6px; }
+.places button { font:inherit; font-size:13px; padding:5px 10px; border-radius:6px; border:1px solid var(--line); background:transparent; color:var(--fg); cursor:pointer; }
+.places button.on { border-color:var(--accent); color:var(--accent); }
+.key { display:flex; flex-wrap:wrap; gap:12px; font-size:12px; color:var(--muted); }
+.key i { display:inline-block; width:12px; height:12px; border-radius:2px; vertical-align:-2px; margin-right:5px; }
+.note { font-size:12px; color:var(--muted); margin:0; }
+</style>
+<div id="view"></div>
+<div class="panel">
+  <h1>Ground beside the roads</h1>
+  <div class="places" id="places"></div>
+  <div class="key">
+    <span><i style="background:#b9ad8f"></i>land</span>
+    <span><i style="background:#c98a6a"></i>graded to meet the road</span>
+    <span><i style="background:#4a4f55"></i>road</span>
+    <span><i style="background:#5d5348"></i>junction</span>
+    <span><i style="background:#6b5f86"></i>highway deck</span>
+    <span><i style="background:#a9a9a4"></i>wall</span>
+  </div>
+  <p class="note">Drag to turn, scroll or pinch to zoom, right-drag to pan. True proportions: a level is half a tile tall. The land is never changed: the colour shows where the drawn ground is moved to meet a street. A junction's height is not designed yet, so each is drawn at the mean height of the roads that meet it.</p>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+const PLACES = /*DATA*/null;
+const view = document.getElementById("view");
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
+view.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(40, 1, 0.05, 500);
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+scene.add(new THREE.HemisphereLight(0xffffff, 0x6b6250, 0.55));
+const sun = new THREE.DirectionalLight(0xffffff, 0.6);
+sun.position.set(-6, 14, -4);
+scene.add(sun);
+
+const LAND = new THREE.Color(0xb9ad8f), GRADED = new THREE.Color(0xc98a6a);
+let group = null;
+
+/*  A surface.  One laid on the ground (a road, a junction) sits at the
+    ground's own height and wins the depth test by an offset, not by
+    standing above it. */
+function mesh(pos, col, idx, flat, onGround) {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  if (col) g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  const m = new THREE.MeshLambertMaterial({ vertexColors: !!col, color: flat || 0xffffff, side: THREE.DoubleSide });
+  if (onGround) { m.polygonOffset = true; m.polygonOffsetFactor = -2; m.polygonOffsetUnits = -4; }
+  return new THREE.Mesh(g, m);
+}
+
+function build(p) {
+  if (group) scene.remove(group);
+  group = new THREE.Group();
+  const [c0, r0, c1, r1] = p.box;
+  const pos = [], col = [], idx = [];
+  const at = {};
+  for (const t of p.tiles) {
+    const n = t.z.length - 1, base = pos.length / 3;
+    at[t.c + "," + t.r] = t;
+    for (let j = 0; j <= n; j++)
+      for (let i = 0; i <= n; i++) {
+        const x = t.c + i / n, y = t.r + j / n, z = t.z[j][i];
+        pos.push(x, z, y);
+        const c = LAND;
+        col.push(c.r, c.g, c.b);
+      }
+    for (let j = 0; j < n; j++)
+      for (let i = 0; i < n; i++) {
+        const a = base + j * (n + 1) + i;
+        idx.push(a, a + n + 1, a + 1, a + 1, a + n + 1, a + n + 2);
+      }
+  }
+  /* Where the land steps between two tiles, a face closes the gap. */
+  const fpos = [], fidx = [];
+  for (const t of p.tiles) {
+    const n = t.z.length - 1;
+    for (const [dc, dr] of [[1, 0], [0, 1]]) {
+      const o = at[(t.c + dc) + "," + (t.r + dr)];
+      if (!o) continue;
+      for (let k = 0; k < n; k++) {
+        const a0 = dc ? t.z[k][n] : t.z[n][k], a1 = dc ? t.z[k + 1][n] : t.z[n][k + 1];
+        const b0 = dc ? o.z[k][0] : o.z[0][k], b1 = dc ? o.z[k + 1][0] : o.z[0][k + 1];
+        if (Math.abs(a0 - b0) < 1e-3 && Math.abs(a1 - b1) < 1e-3) continue;
+        const x0 = dc ? t.c + 1 : t.c + k / n, y0 = dc ? t.r + k / n : t.r + 1;
+        const x1 = dc ? t.c + 1 : t.c + (k + 1) / n, y1 = dc ? t.r + (k + 1) / n : t.r + 1;
+        const b = fpos.length / 3;
+        fpos.push(x0, a0, y0, x1, a1, y1, x1, b1, y1, x0, b0, y0);
+        fidx.push(b, b + 1, b + 2, b, b + 2, b + 3);
+      }
+    }
+  }
+  /* Only the graded bank beside a street is tinted: the ground under a
+     road or a junction is hidden by it. */
+  let v = 0;
+  for (const t of p.tiles) {
+    const n = t.z.length - 1;
+    for (let j = 0; j <= n; j++)
+      for (let i = 0; i <= n; i++, v++)
+        if (t.g[j][i]) { col[3 * v] = GRADED.r; col[3 * v + 1] = GRADED.g; col[3 * v + 2] = GRADED.b; }
+  }
+  group.add(mesh(pos, col, idx));
+  if (fidx.length) group.add(mesh(fpos, null, fidx, 0x9c8f72));
+  /* The streets. */
+  for (const rib of p.roads) {
+    const rp = [], ri = [];
+    rib.forEach((s, k) => {
+      rp.push(s[0], s[4], s[1], s[2], s[4], s[3]);
+      if (k) { const b = 2 * k; ri.push(b - 2, b - 1, b, b - 1, b + 1, b); }
+    });
+    if (ri.length) group.add(mesh(rp, null, ri, 0x4a4f55, true));
+  }
+  /* The walls: a face from the road's edge down or up to the land, along
+     each run of samples on one side. */
+  const wp = [], wi = [];
+  for (const run of p.walls)
+    for (let k = 1; k < run.length; k++) {
+      const a = run[k - 1], b = run[k], q = wp.length / 3;
+      wp.push(a[0], a[2], a[1], b[0], b[2], b[1], b[0], b[3], b[1], a[0], a[3], a[1]);
+      wi.push(q, q + 1, q + 2, q, q + 2, q + 3);
+    }
+  if (wi.length) group.add(mesh(wp, null, wi, 0xa9a9a4));
+  /* The highways: each deck, and a column at each unit's center from the
+     deck down to the land. */
+  for (const d of p.decks || []) {
+    const dp = [], di = [];
+    d.ribbon.forEach((s, k) => {
+      dp.push(s[0], s[4], s[1], s[2], s[4], s[3]);
+      if (k) { const b = 2 * k; di.push(b - 2, b - 1, b, b - 1, b + 1, b); }
+    });
+    if (di.length) group.add(mesh(dp, null, di, 0x6b5f86));
+    for (const c of d.cols) {
+      const h = c[2] - c[3] - 0.03; /* stops just under the deck, so its top never shows through */
+      if (h <= 0.01) continue;
+      const col = new THREE.Mesh(new THREE.BoxGeometry(0.18, h, 0.18), new THREE.MeshLambertMaterial({ color: 0x9a9690 }));
+      col.position.set(c[0], c[3] + h / 2, c[1]);
+      group.add(col);
+    }
+  }
+  /* A highway junction: from its center, at its own height, out to each
+     corner of its outline at the height of the deck edge there. */
+  for (const j of p.deck_junctions || []) {
+    const n = j.poly.length;
+    const cx = j.poly.reduce((a, q) => a + q[0], 0) / n, cy = j.poly.reduce((a, q) => a + q[1], 0) / n;
+    const jp = [cx, j.z, cy], ji = [];
+    j.poly.forEach(([x, y], k) => jp.push(x, j.zs[k], y));
+    for (let k = 0; k < n; k++) ji.push(0, 1 + k, 1 + (k + 1) % n);
+    group.add(mesh(jp, null, ji, 0x5c5074));
+  }
+  /* The junctions: each outline as a flat surface at its height. */
+  for (const j of p.junctions || []) {
+    const jp = [], ji = [];
+    j.poly.forEach(([x, y]) => jp.push(x, j.z, y));
+    for (let k = 1; k + 1 < j.poly.length; k++) ji.push(0, k, k + 1);
+    group.add(mesh(jp, null, ji, 0x5d5348, true));
+  }
+  scene.add(group);
+  const cx = (c0 + c1) / 2, cz = (r0 + r1) / 2, span = Math.max(c1 - c0, r1 - r0);
+  let zs = p.tiles.flatMap(t => t.z.flat());
+  const mid = (Math.min(...zs) + Math.max(...zs)) / 2;
+  controls.target.set(cx, mid, cz);
+  camera.position.set(cx - span * 0.55, mid + span * 0.6, cz + span * 0.75);
+  controls.update();
+}
+
+const pick = document.getElementById("places");
+PLACES.forEach((p, k) => {
+  const b = document.createElement("button");
+  b.textContent = p.name;
+  b.onclick = () => { [...pick.children].forEach(x => x.classList.remove("on")); b.classList.add("on"); build(p); };
+  pick.appendChild(b);
+  if (!k) b.click();
+});
+
+function size() {
+  const w = view.clientWidth, h = view.clientHeight;
+  renderer.setSize(w, h, false);
+  renderer.domElement.style.width = w + "px";
+  renderer.domElement.style.height = h + "px";
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener("resize", size);
+size();
+renderer.setClearColor(getComputedStyle(document.body).backgroundColor);
+(function loop() { controls.update(); renderer.render(scene, camera); requestAnimationFrame(loop); })();
+</script>

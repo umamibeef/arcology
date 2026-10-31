@@ -3,7 +3,7 @@
 
     python3 tools/gpu_diff.py gpu.png soft.png [diff.png]
 
-Both files are 8-bit RGB PNGs of the same size, as arcology --check writes
+Both files are 8-bit RGB PNGs of the same size, as arcology --compare-renderers writes
 them.  Prints the count of differing pixels, their bounding box, and the
 commonest (software, gpu) colour pairs -- which is usually enough to name
 the cause -- and writes a picture with the differing pixels in red over a

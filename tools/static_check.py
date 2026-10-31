@@ -13,7 +13,7 @@ analysed with exactly the flags it is compiled with.  `src/vendor` is
 other people's and is skipped.
 
     python3 tools/static_check.py                  # everything
-    python3 tools/static_check.py src/render/net   # one directory
+    python3 tools/static_check.py src/render/mesh   # one directory
     python3 tools/static_check.py --list           # what each check found
 
 A finding is a failure.  Where the analyser is wrong the fix is to make

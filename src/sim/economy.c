@@ -136,7 +136,7 @@ void sim_economy(City *c)
     /*  NOT VERIFIABLE ON ITS OWN, for a structural reason worth stating:
      *  economyPass draws random numbers throughout, and the blocks
      *  between here and the two above ($34F44, $35062, $3509C, $350A0)
-     *  are not reconstructed yet.  By the time control reaches this
+     *  have no C (docs/sc2k-report.rst).  By the time control reaches this
      *  loop the C is a few draws out of phase with the original, so the
      *  jittered rate differs and the four indicators land a little
      *  apart.  The transcription below is faithful.  It simply cannot be

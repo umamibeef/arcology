@@ -1,22 +1,37 @@
 /*  mesh/vert.h: one vertex of the terrain mesh.  Its own header because
- *  both sides need it and neither should own it.  It lived in gpu.h,
- *  which made mesh.h include gpu.h: the geometry subsystem depending on
- *  the device that happens to draw it.  The arrow now points from both
- *  at this. */
+ *  both the mesh and the device read it and neither owns it. */
 #ifndef R_MESHVERT_H
 #define R_MESHVERT_H
 
-/*  One vertex of the terrain mesh.  Pos is column, row, altitude in
- *  levels and the tile's painter's index.  Nrm is the face normal in
- *  world units.  Nrm's fourth component is the height field's curvature
- *  at the vertex, col's first two its smoothed gradient, in world units.
+#include <stdint.h>
+
+/*  One vertex of the terrain mesh, 32 bytes, the same in memory and on
+ *  the device.
+ *
+ *      Pos: column, row, altitude in levels, and how far a cliff's lean
+ *      moved the ground there, in levels, nought on any other face.
+ *      The painter's order is the triangle's, kept beside it (mesh.h).
+ *      Paint: across and along a material's paint, a wall's two
+ *      reference heights, or the height field's smoothed gradient in
+ *      world units.
+ *      Nrm: the normal in world units, octahedral, two signed 16-bit
+ *      fractions.
+ *      Aux: two half floats.  The first is the height field's curvature
+ *      on the ground, nought over it.  The second is the material.
+ *
  *  So the ground material can read the topology without the facets.
- *  Col's alpha is the palette index. */
+ *  Every vertex has the same palette index, which the shader holds. */
 typedef struct
 {
-    float pos[4];
-    float nrm[4];
-    float col[4];
+    float    pos[4];
+    float    paint[2];
+    int16_t  nrm[2];
+    uint16_t aux[2];
 } RMeshVert;
+
+/*  Write the normal, the curvature or class and the material.  Read the
+ *  curvature or class and the material back (mesh/list.c). */
+void  mesh_vert_pack(RMeshVert *v, const float nrm[3], float aux, float mat);
+float mesh_vert_mat(const RMeshVert *v);
 
 #endif /* R_MESHVERT_H */

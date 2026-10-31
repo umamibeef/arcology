@@ -14,6 +14,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+static void sim_demand(City *c);
+static void sim_forest(City *c);
+static void sim_news_rolls(City *c);
+static void sim_weather(City *c);
+
 /*  Push the four neighbors that have not been visited yet.  The order is
  *  load bearing and is taken literally from $21250, $2128A, $212C6 and
  *  $21304: west, north, east, south.  Power is handed out in queue order
@@ -21,13 +26,13 @@
  *  when a network is short. */
 static void push_neighbours(City *c, int y, int x)
 {
-    if (x > 0 && !(c->xbit[y][x - 1] & XBIT_VISITED))
+    if (x > 0 && !(T_XBIT(c, y, x - 1) & XBIT_VISITED))
         q_push(c, y, x - 1);
-    if (y > 0 && !(c->xbit[y - 1][x] & XBIT_VISITED))
+    if (y > 0 && !(T_XBIT(c, y - 1, x) & XBIT_VISITED))
         q_push(c, y - 1, x);
-    if (x < MAP_W - 1 && !(c->xbit[y][x + 1] & XBIT_VISITED))
+    if (x < c->w - 1 && !(T_XBIT(c, y, x + 1) & XBIT_VISITED))
         q_push(c, y, x + 1);
-    if (y < MAP_H - 1 && !(c->xbit[y + 1][x] & XBIT_VISITED))
+    if (y < c->h - 1 && !(T_XBIT(c, y + 1, x) & XBIT_VISITED))
         q_push(c, y + 1, x);
 }
 
@@ -39,13 +44,13 @@ static void push_neighbours(City *c, int y, int x)
  *  tiles at all. */
 static void push_marked(City *c, int y, int x)
 {
-    if (x > 0 && (c->xbit[y][x - 1] & XBIT_VISITED))
+    if (x > 0 && (T_XBIT(c, y, x - 1) & XBIT_VISITED))
         q_push(c, y, x - 1);
-    if (y > 0 && (c->xbit[y - 1][x] & XBIT_VISITED))
+    if (y > 0 && (T_XBIT(c, y - 1, x) & XBIT_VISITED))
         q_push(c, y - 1, x);
-    if (x < MAP_W - 1 && (c->xbit[y][x + 1] & XBIT_VISITED))
+    if (x < c->w - 1 && (T_XBIT(c, y, x + 1) & XBIT_VISITED))
         q_push(c, y, x + 1);
-    if (y < MAP_H - 1 && (c->xbit[y + 1][x] & XBIT_VISITED))
+    if (y < c->h - 1 && (T_XBIT(c, y + 1, x) & XBIT_VISITED))
         q_push(c, y + 1, x);
 }
 
@@ -76,7 +81,7 @@ static int32_t plant_output(City *c, int y, int x, uint8_t bld)
     { /* Wind,  $211DA */
         int span = ASR(c->weather1, 3) + 1;
         int r    = (uint16_t)Random(c);
-        int alt  = c->altm[y][x] & 0x1F;
+        int alt  = T_ALTM(c, y, x) & 0x1F;
         return (alt + (span ? r % span : 0)) >> 1;
     }
     { /* Solar, $2119C */
@@ -108,22 +113,22 @@ static void power_flood(City *c, int y0, int x0, int32_t *supply, int32_t *drawn
     {
         uint8_t bits, bld;
         q_pop(c, &y, &x);
-        if (y < 0 || y >= MAP_H || x < 0 || x >= MAP_W)
+        if (y < 0 || y >= c->h || x < 0 || x >= c->w)
             continue;
 
-        bits = c->xbit[y][x];
+        bits = T_XBIT(c, y, x);
         if (bits & XBIT_VISITED)
             continue; /* $2110C */
         if (!(bits & XBIT_CONDUCTIVE))
             continue; /* $21126 */
 
-        bld = c->xbld[y][x];
+        bld = T_XBLD(c, y, x);
         if (bld >= BLD_POWER_FIRST && bld <= BLD_POWER_LAST)
             generated += plant_output(c, y, x, bld); /* $21140 */
         else if (BLD_CONSUMES_POWER(bld))
             consumers++; /* $21226 */
 
-        c->xbit[y][x] |= XBIT_VISITED; /* $2124C */
+        T_XBIT(c, y, x) |= XBIT_VISITED; /* $2124C */
         push_neighbours(c, y, x);
     }
 
@@ -149,18 +154,18 @@ static void power_flood(City *c, int y0, int x0, int32_t *supply, int32_t *drawn
     while (!q_empty(c))
     {
         q_pop(c, &y, &x);
-        if (y < 0 || y >= MAP_H || x < 0 || x >= MAP_W)
+        if (y < 0 || y >= c->h || x < 0 || x >= c->w)
             continue;
-        if (!(c->xbit[y][x] & XBIT_VISITED))
+        if (!(T_XBIT(c, y, x) & XBIT_VISITED))
             continue; /* $213E8 */
 
         if (capacity != 0)
         { /* $21404 */
-            if (c->xbld[y][x] >= BLD_ZONE_FIRST)
+            if (T_XBLD(c, y, x) >= BLD_ZONE_FIRST)
                 capacity--;
-            c->xbit[y][x] |= XBIT_POWERED; /* $21442 */
+            T_XBIT(c, y, x) |= XBIT_POWERED; /* $21442 */
         }
-        c->xbit[y][x] &= (uint8_t)~XBIT_VISITED; /* $2145E */
+        T_XBIT(c, y, x) &= (uint8_t)~XBIT_VISITED; /* $2145E */
         push_marked(c, y, x);
     }
 }
@@ -173,17 +178,18 @@ void sim_power_grid(City *c)
     int32_t supply = 0, drawn = 0;
     int     y, x;
 
-    for (y = 0; y < MAP_H; y++) /* $20FD4 */
-        for (x = 0; x < MAP_W; x++)
-            c->xbit[y][x] &= (uint8_t)~(XBIT_POWERED | XBIT_VISITED);
+    for (y = 0; y < c->h; y++) /* $20FD4, over the city's limits */
+        for (x = 0; x < c->w; x++)
+            if (sim_inside(c, y, x))
+                T_XBIT(c, y, x) &= (uint8_t)~(XBIT_POWERED | XBIT_VISITED);
 
-    for (y = 0; y < MAP_H; y++) /* $2100C */
-        for (x = 0; x < MAP_W; x++)
+    for (y = 0; y < c->h; y++) /* $2100C */
+        for (x = 0; x < c->w; x++)
         {
             uint8_t bld;
-            if (c->xbit[y][x] & XBIT_POWERED)
+            if (T_XBIT(c, y, x) & XBIT_POWERED)
                 continue; /* network already served */
-            bld = c->xbld[y][x];
+            bld = T_XBLD(c, y, x);
             if (bld < BLD_POWER_FIRST || bld > BLD_POWER_LAST)
                 continue;
             power_flood(c, y, x, &supply, &drawn);
@@ -229,13 +235,13 @@ static int fresh_or_salt(const City *c, int y, int x, int want)
     int n = 0, yy, xx;
     for (yy = y - 1; yy <= y + 1; yy++)
     {
-        if (yy < 0 || yy > MAP_H - 1)
+        if (yy < 0 || yy > c->h - 1)
             continue;
         for (xx = x - 1; xx <= x + 1; xx++)
         {
-            if (xx < 0 || xx > MAP_W - 1)
+            if (xx < 0 || xx > c->w - 1)
                 continue;
-            if ((c->xbit[yy][xx] & (XBIT_WATER | XBIT_SALT)) == want)
+            if ((T_XBIT(c, yy, xx) & (XBIT_WATER | XBIT_SALT)) == want)
                 n++;
         }
     }
@@ -254,16 +260,16 @@ static void water_flood(City *c, int y0, int x0, int32_t *cap_out, int32_t *met_
     {
         uint8_t bits, bld;
         q_pop(c, &y, &x);
-        if (y < 0 || y >= MAP_H || x < 0 || x >= MAP_W)
+        if (y < 0 || y >= c->h || x < 0 || x >= c->w)
             continue;
 
-        bits = c->xbit[y][x];
+        bits = T_XBIT(c, y, x);
         if (bits & XBIT_VISITED)
             continue; /* $21884 */
         if (!(bits & XBIT_CONDUCTS_WATER))
             continue; /* 0x20, $21890 */
 
-        bld = c->xbld[y][x];
+        bld = T_XBLD(c, y, x);
         if (bld >= BLD_ZONE_FIRST)
         {
             switch (bld)
@@ -285,7 +291,7 @@ static void water_flood(City *c, int y0, int x0, int32_t *cap_out, int32_t *met_
                     reservoir += 100; /* $21A10 */
                     if (bits & XBIT_WATERED)
                         capacity += 100;
-                    c->xbit[y][x] &= (uint8_t)~XBIT_WATERED; /* $21A4E */
+                    T_XBIT(c, y, x) &= (uint8_t)~XBIT_WATERED; /* $21A4E */
                     break;
                 case 0xF4: /* Water Treatment */
                     break;
@@ -294,7 +300,7 @@ static void water_flood(City *c, int y0, int x0, int32_t *cap_out, int32_t *met_
                     break;
             }
         }
-        c->xbit[y][x] |= XBIT_VISITED; /* $21A6E */
+        T_XBIT(c, y, x) |= XBIT_VISITED; /* $21A6E */
         push_neighbours(c, y, x);
     }
 
@@ -315,17 +321,17 @@ static void water_flood(City *c, int y0, int x0, int32_t *cap_out, int32_t *met_
     {
         uint8_t bld;
         q_pop(c, &y, &x);
-        if (y < 0 || y >= MAP_H || x < 0 || x >= MAP_W)
+        if (y < 0 || y >= c->h || x < 0 || x >= c->w)
             continue;
-        if (!(c->xbit[y][x] & XBIT_VISITED))
+        if (!(T_XBIT(c, y, x) & XBIT_VISITED))
             continue; /* $21BE4 */
 
-        bld = c->xbld[y][x];
+        bld = T_XBLD(c, y, x);
         if (bld == 0xEB)
         { /* $21C36 Reservoir */
-            if ((c->xbit[y][x] & XBIT_POWERED) && reservoir)
+            if ((T_XBIT(c, y, x) & XBIT_POWERED) && reservoir)
             {
-                c->xbit[y][x] |= XBIT_WATERED;
+                T_XBIT(c, y, x) |= XBIT_WATERED;
                 reservoir--; /* spends stored water */
             }
         }
@@ -336,85 +342,54 @@ static void water_flood(City *c, int y0, int x0, int32_t *cap_out, int32_t *met_
              *  whenever they have power, and cost nothing from the
              *  budget.  That is what keeps every source watered, so the
              *  outer sweep skips them and each network floods once. */
-            if (c->xbit[y][x] & XBIT_POWERED)
-                c->xbit[y][x] |= XBIT_WATERED;
+            if (T_XBIT(c, y, x) & XBIT_POWERED)
+                T_XBIT(c, y, x) |= XBIT_WATERED;
         }
         else if (budget)
         { /* $21C84 */
-            c->xbit[y][x] |= XBIT_WATERED;
+            T_XBIT(c, y, x) |= XBIT_WATERED;
             if (bld >= BLD_ZONE_FIRST)
                 budget--;
         }
-        c->xbit[y][x] &= (uint8_t)~XBIT_VISITED; /* $21CC4 */
+        T_XBIT(c, y, x) &= (uint8_t)~XBIT_VISITED; /* $21CC4 */
         push_marked(c, y, x);
     }
 }
 
-/*  $2156E.  The sweep order genuinely depends on the map rotation: the
- *  original branches four ways on g_rotation and runs a different loop
- *  nest for each.  Rotation 0 is column-major, shown here.  Order
- *  decides which source claims a shared network and, since water is
- *  rationed in queue order, which tiles run dry. */
+/*  $2156E.  The original branches four ways on the map turn and runs a
+ *  different loop nest for each.  The grid's own terms are turn 0, and
+ *  its sweep is column-major.  Order decides which source claims a
+ *  shared network and, since water is rationed in queue order, which
+ *  tiles run dry. */
 void sim_water_grid(City *c)
 {
     int32_t capacity = 0, met = 0;
     int     y, x;
 
-    for (y = 0; y < MAP_H; y++)
-        for (x = 0; x < MAP_W; x++)
+    for (y = 0; y < c->h; y++)
+        for (x = 0; x < c->w; x++)
         {
-            if (c->xbld[y][x] != BLD_RESERVOIR) /* $2159A */
-                c->xbit[y][x] &= (uint8_t)~XBIT_WATERED;
-            c->xbit[y][x] &= (uint8_t)~XBIT_VISITED;
+            if (!sim_inside(c, y, x))
+                continue;                         /* the city's limits */
+            if (T_XBLD(c, y, x) != BLD_RESERVOIR) /* $2159A */
+                T_XBIT(c, y, x) &= (uint8_t)~XBIT_WATERED;
+            T_XBIT(c, y, x) &= (uint8_t)~XBIT_VISITED;
         }
 
-    /*  All four sweeps, $215F8 / $21674 / $216EC / $2175E.  They apply
-     *  identical tests and differ only in iteration order, which is not
-     *  cosmetic: water is rationed in queue order, so the order decides
-     *  which source claims a shared network and which tiles run dry.
-     *      rot 0  col 0..127 outer, row 0..127 inner
-     *      rot 1  row 0..127 outer, col 127..0 inner
-     *      rot 2  col 127..0 outer, row 127..0 inner
-     *      rot 3  row 127..0 outer, col 0..127 inner
-     */
-    {
-        int rot = c->rotation & 3, i, j;
-        for (i = 0; i < MAP_W; i++)
+    /*  The sweep of turn 0, $215F8: column 0..127 outer, row 0..127
+     *  inner.  $21674, $216EC and $2175E are the other three turns. */
+    for (x = 0; x < c->w; x++)
+        for (y = 0; y < c->h; y++)
         {
-            for (j = 0; j < MAP_H; j++)
-            {
-                switch (rot)
-                {
-                    case 0:
-                        x = i;
-                        y = j;
-                        break;
-                    case 1:
-                        y = i;
-                        x = MAP_W - 1 - j;
-                        break;
-                    case 2:
-                        x = MAP_W - 1 - i;
-                        y = MAP_H - 1 - j;
-                        break;
-                    default:
-                        y = MAP_H - 1 - i;
-                        x = j;
-                        break;
-                }
-                {
-                    uint8_t bld = c->xbld[y][x];
-                    if (c->xbit[y][x] & XBIT_WATERED)
-                        continue;
-                    if (bld != 0xDC && bld != 0xFA)
-                        continue; /* Pump, Desalinization */
-                    if (!(c->xbit[y][x] & XBIT_POWERED))
-                        continue;
-                    water_flood(c, y, x, &capacity, &met);
-                }
-            }
+            uint8_t bld = T_XBLD(c, y, x);
+            if (T_XBIT(c, y, x) & XBIT_WATERED)
+                continue;
+            if (bld != 0xDC && bld != 0xFA)
+                continue; /* Pump, Desalinization */
+            if (!(T_XBIT(c, y, x) & XBIT_POWERED))
+                continue;
+            water_flood(c, y, x, &capacity, &met);
         }
-    }
 
     /*  $217D2: water treatment, and it has to happen here, before
      *  water_pct is rescaled.  This is because the comparison is against
@@ -448,12 +423,12 @@ void sim_traffic_total(City *c)
 {
     int y, x;
     c->traffic_tot = 0;
-    for (y = 0; y < HALF_H; y++)
-        for (x = 0; x < HALF_W; x++)
+    for (y = 0; y < (c->h >> 1); y++)
+        for (x = 0; x < (c->w >> 1); x++)
         {
-            int v         = c->xtrf[y][x];
-            v             = v - ASR(v, 2); /* $25336: decay 25% */
-            c->xtrf[y][x] = (uint8_t)v;
+            int v           = T_XTRF(c, y, x);
+            v               = v - ASR(v, 2); /* $25336: decay 25% */
+            T_XTRF(c, y, x) = (uint8_t)v;
             c->traffic_tot += v;
         }
 }
@@ -471,61 +446,61 @@ void sim_pollution(City *c)
         divisor_base++; /* $2331C */
 
     /* --- stage 1: raw pollution per half-resolution cell ---------- */
-    for (y2 = 0; y2 < HALF_H; y2++)
+    for (y2 = 0; y2 < (c->h >> 1); y2++)
     {
-        for (x2 = 0; x2 < HALF_W; x2++)
+        for (x2 = 0; x2 < (c->w >> 1); x2++)
         {
             int     y = y2 * 2, x = x2 * 2, i;
-            int32_t acc = c->xplt[y2][x2] + c->xtrf[y2][x2] / 5; /* $231CE */
+            int32_t acc = T_XPLT(c, y2, x2) + T_XTRF(c, y2, x2) / 5; /* $231CE */
 
             for (i = 0; i < 4; i++)
             { /* the 2x2 tile block */
                 int     ty = y + (i & 1), tx = x + (i >> 1);
-                uint8_t b = c->xbld[ty][tx];
+                uint8_t b = T_XBLD(c, ty, tx);
                 if (b >= 0x70)
                     acc += BUILDING[b].pollution; /* $231FC */
                 if (b == 5)
                     acc += 200; /* $2320E, id 5 unidentified */
             }
-            c->pad[y2][x2] = (int16_t)acc;
+            PAD(c, y2, x2) = (int16_t)acc;
         }
     }
 
     /* --- stage 2: 5-point blur, center weighted twice ------------- */
     c->pollution_tot = 0;
-    for (y2 = 0; y2 < HALF_H; y2++)
+    for (y2 = 0; y2 < (c->h >> 1); y2++)
     {
-        for (x2 = 0; x2 < HALF_W; x2++)
+        for (x2 = 0; x2 < (c->w >> 1); x2++)
         {
-            int32_t sum = (int32_t)c->pad[y2][x2] * 2;
+            int32_t sum = (int32_t)PAD(c, y2, x2) * 2;
             int     div = divisor_base < 1 ? 1 : divisor_base;
             int32_t v;
 
             if (y2 > 0)
             {
-                sum += c->pad[y2 - 1][x2];
+                sum += PAD(c, y2 - 1, x2);
                 div++;
             }
-            if (y2 < HALF_H - 1)
+            if (y2 < (c->h >> 1) - 1)
             {
-                sum += c->pad[y2 + 1][x2];
+                sum += PAD(c, y2 + 1, x2);
                 div++;
             }
             if (x2 > 0)
             {
-                sum += c->pad[y2][x2 - 1];
+                sum += PAD(c, y2, x2 - 1);
                 div++;
             }
-            if (x2 < HALF_W - 1)
+            if (x2 < (c->w >> 1) - 1)
             {
-                sum += c->pad[y2][x2 + 1];
+                sum += PAD(c, y2, x2 + 1);
                 div++;
             }
 
             v = sum / div; /* $233E8 */
             if (v > 255)
                 v = 255; /* $233F0 */
-            c->xplt[y2][x2] = (uint8_t)v;
+            T_XPLT(c, y2, x2) = (uint8_t)v;
             c->pollution_tot += v; /* $23412 */
         }
     }
@@ -607,7 +582,7 @@ static float x2z_sgl(ext80 a) { return (float)ext_to_double(a); }
 
 static ext80 z2x_sgl(float f) { return ext_from_float(f); }
 
-void sim_demand(City *c)
+static void sim_demand(City *c)
 {
     /*  room[i] is how much of each zone the city could carry.  The
      *  original keeps it as three singles at -$c(a6). */
@@ -769,17 +744,19 @@ void sim_demand(City *c)
 #define TREE_LAST  11 /* $3482E, the last one that can advance */
 #define RUBBLE     5  /* $347D8 */
 
-void sim_forest(City *c)
+static void sim_forest(City *c)
 {
-    int32_t y = (int32_t)(Random(c) & 0xFFFF) % 128; /* $34794 */
-    int32_t x = (int32_t)(Random(c) & 0xFFFF) % 128; /* $347AE */
-    int32_t b = c->xbld[y][x];
+    int32_t y = (int32_t)(Random(c) & 0xFFFF) % c->h; /* $34794 */
+    int32_t x = (int32_t)(Random(c) & 0xFFFF) % c->w; /* $347AE */
+    int32_t b = T_XBLD(c, y, x);
 
-    /*  $347D8: rubble clears itself one time in sixteen */
-    if (b == RUBBLE && (Random(c) & 0xF) == 0)
+    /*  $347D8: rubble clears itself one time in sixteen.  Every die is
+     *  drawn wherever the tile lies.  A tile outside the city's limits
+     *  only grows nothing, so the dice stay in step with the original's. */
+    if (b == RUBBLE && (Random(c) & 0xF) == 0 && sim_inside(c, (int)y, (int)x))
         sim_set_tile(c, (int)y, (int)x, 0);
 
-    if (c->xbit[y][x] & XBIT_WATER) /* $34804 */
+    if (T_XBIT(c, y, x) & XBIT_WATER) /* $34804 */
         return;
 
     /*  $3480E: a tile that is not already forest only gets a turn one
@@ -787,7 +764,7 @@ void sim_forest(City *c)
     if ((b < TREE_FIRST || b > 13) && (Random(c) & 0xF) != 0)
         return;
 
-    if (b >= TREE_FIRST && b < 12) /* $34828 */
+    if (b >= TREE_FIRST && b < 12 && sim_inside(c, (int)y, (int)x)) /* $34828 */
         sim_set_tile(c, (int)y, (int)x, (uint8_t)(b + 1));
 
     /*  $34846: and now the neighbor, one step in one direction, the map
@@ -795,7 +772,7 @@ void sim_forest(City *c)
     switch (Random(c) & 3)
     {
         case 0:
-            if (y < 127)
+            if (y < c->h - 1)
                 y++;
             break;
         case 1:
@@ -803,7 +780,7 @@ void sim_forest(City *c)
                 y--;
             break;
         case 2:
-            if (x < 127)
+            if (x < c->w - 1)
                 x++;
             break;
         default:
@@ -812,10 +789,10 @@ void sim_forest(City *c)
             break;
     }
 
-    b = c->xbld[y][x];
-    if (c->xbit[y][x] & XBIT_WATER) /* $348A0 */
+    b = T_XBLD(c, y, x);
+    if (T_XBIT(c, y, x) & XBIT_WATER) /* $348A0 */
         return;
-    if (b >= 12 || b == RUBBLE) /* $348A8, $348AE */
+    if (b >= 12 || b == RUBBLE || !sim_inside(c, (int)y, (int)x)) /* $348A8, $348AE */
         return;
     if (b >= TREE_FIRST)
         sim_set_tile(c, (int)y, (int)x, (uint8_t)(b + 1)); /* $348BE */
@@ -836,7 +813,7 @@ void sim_forest(City *c)
  *  real state: $34BF4 walks the seventeen deadlines at A5+0x1E4C and
  *  clears any the calendar has passed.
  * ================================================================== */
-void sim_news_rolls(City *c)
+static void sim_news_rolls(City *c)
 {
     int32_t r;
     int     i;
@@ -899,7 +876,7 @@ void sim_news_rolls(City *c)
  *  the solar plant reads weather2, so the weather is why a city's
  *  generating capacity is never quite the same two months running.
  * ================================================================== */
-void sim_weather(City *c)
+static void sim_weather(City *c)
 {
     /*  $15256: the season is the month shifted one and divided by three,
      *  so December, January and February share one set. */
@@ -925,8 +902,8 @@ void sim_weather(City *c)
 
 /* ================================================================== *
  *  The population model, applied to a map rather than accumulated over
- *  a cycle.  $3170E credits a tile only at the corner selected by the
- *  current rotation, so a multi-tile building counts once.  The amount
+ *  a cycle.  $3170E credits a tile only at the corner ROT_CORNER_MASK
+ *  gives for turn 0, so a multi-tile building counts once.  The amount
  *  is GROWTH_TABLE indexed by the building's tier ($31DDA), and $33FAE
  *  multiplies the total by ten.
  * ================================================================== */
@@ -934,12 +911,12 @@ int32_t sim_map_population(const City *c)
 {
     int     y, x;
     int32_t units = 0;
-    uint8_t mask  = (uint8_t)ROT_CORNER_MASK[c->rotation & 3];
+    uint8_t mask  = (uint8_t)ROT_CORNER_MASK[0];
 
-    for (y = 0; y < MAP_H; y++)
-        for (x = 0; x < MAP_W; x++)
+    for (y = 0; y < c->h; y++)
+        for (x = 0; x < c->w; x++)
         {
-            uint8_t z = c->xzon[y][x], b = c->xbld[y][x];
+            uint8_t z = T_XZON(c, y, x), b = T_XBLD(c, y, x);
             int     zone = XZON_TYPE(z), tier;
 
             if (zone < ZONE_RES_LIGHT || zone > ZONE_IND_DENSE)
@@ -1117,20 +1094,20 @@ void sim_graph_pass(City *c)
 /*  $23432: the city center is the mean row and column of every tile
  *  carrying a developed building.  It also seeds the scratch and clears
  *  the flood bit that stage 4 reuses as a half-res mask. */
-void sim_city_centre(City *c, int *cy, int *cx)
+static void sim_city_centre(City *c, int *cy, int *cx)
 {
     int32_t sy = 0, sx = 0, n = 1;
     int     y, x;
-    for (y = 0; y < MAP_H; y++)
-        for (x = 0; x < MAP_W; x++)
+    for (y = 0; y < c->h; y++)
+        for (x = 0; x < c->w; x++)
         {
-            if (c->xbld[y][x] < BLD_ZONE_FIRST)
+            if (T_XBLD(c, y, x) < BLD_ZONE_FIRST)
                 continue;
             sy += y;
             sx += x;
             n++;
-            c->pad[y][x] = 0x28;                     /* $234A8 */
-            c->xbit[y][x] &= (uint8_t)~XBIT_VISITED; /* $234C6 */
+            PAD(c, y, x) = 0x28;                       /* $234A8 */
+            T_XBIT(c, y, x) &= (uint8_t)~XBIT_VISITED; /* $234C6 */
         }
     /*  $234EA divides by twice the count, and the value kept in a2/a3.
      *  The one the distance term uses.  Is that half-resolution
@@ -1153,18 +1130,20 @@ static void build_planes(City *c)
      *  without this clear the scan adds a second city's worth to the
      *  first and the three averages that divide by it come out half. */
     c->developed = 0;
-    for (y = 0; y < MAP_H; y++)
+    if (c->limits_glow > 0)
+        memset(c->developed_cells, 0, (size_t)(c->w / 2) * (size_t)(c->h / 2));
+    for (y = 0; y < c->h; y++)
     {
         int hy = y / 2, qy = hy / 2;
-        for (x = 0; x < MAP_W; x++)
+        for (x = 0; x < c->w; x++)
         {
             int     hx = x / 2, qx = hx / 2;
-            uint8_t b = c->xbld[y][x], t;
-            int16_t a = c->pad[qy][qx], w = c->pad[qy + 32][qx];
+            uint8_t b = T_XBLD(c, y, x), t;
+            int16_t a = PAD(c, qy, qx), w = PAD(c, qy + (c->h >> 2), qx);
 
             if (b == 0)
             { /* $23582 */
-                if (c->xbit[y][x] & XBIT_WATER)
+                if (T_XBIT(c, y, x) & XBIT_WATER)
                 {
                     a += 12;
                     w += 12;
@@ -1179,23 +1158,26 @@ static void build_planes(City *c)
             else if (b <= 5)
                 a -= 0x14; /* rubble   */
 
-            if (b >= 0x1D || XZON_TYPE(c->xzon[y][x]))
+            if (b >= 0x1D || XZON_TYPE(T_XZON(c, y, x)))
             {
-                c->xbit[hy][hx] |= XBIT_VISITED; /* $2360E half-res mask */
-                c->developed++;                  /* $23614 */
+                if (c->limits_glow > 0)
+                    T_DEVELOPED_CELLS(c, hy, hx) = 1; /* the mask in a layer of its own */
+                else
+                    T_XBIT(c, hy, hx) |= XBIT_VISITED; /* $2360E half-res mask */
+                c->developed++;                        /* $23614 */
             }
-            if (c->xbit[y][x] & XBIT_WATERED)
+            if (T_XBIT(c, y, x) & XBIT_WATERED)
             {
                 a += 4;
                 w += 4;
             }
 
-            t = c->xter[y][x];
+            t = T_XTER(c, y, x);
             if (t != 0 && t < 0x10)
                 a += 12; /* $2365A */
 
-            c->pad[qy][qx]      = a;
-            c->pad[qy + 32][qx] = w;
+            PAD(c, qy, qx)               = a;
+            PAD(c, qy + (c->h >> 2), qx) = w;
         }
     }
 }
@@ -1203,26 +1185,26 @@ static void build_planes(City *c)
 /*  a 5-point mean over one of the 32x32 planes */
 static int32_t stencil(const City *c, int plane_row0, int qy, int qx)
 {
-    int32_t s = c->pad[plane_row0 + qy][qx];
+    int32_t s = PAD(c, plane_row0 + qy, qx);
     int     n = 1;
     if (qy > 0)
     {
-        s += c->pad[plane_row0 + qy - 1][qx];
+        s += PAD(c, plane_row0 + qy - 1, qx);
         n++;
     }
-    if (qy < 31)
+    if (qy < (c->h >> 2) - 1)
     {
-        s += c->pad[plane_row0 + qy + 1][qx];
+        s += PAD(c, plane_row0 + qy + 1, qx);
         n++;
     }
     if (qx > 0)
     {
-        s += c->pad[plane_row0 + qy][qx - 1];
+        s += PAD(c, plane_row0 + qy, qx - 1);
         n++;
     }
-    if (qx < 31)
+    if (qx < (c->w >> 2) - 1)
     {
-        s += c->pad[plane_row0 + qy][qx + 1];
+        s += PAD(c, plane_row0 + qy, qx + 1);
         n++;
     }
     return s / n;
@@ -1256,64 +1238,64 @@ void sim_land_value(City *c)
     build_planes(c);
 
     c->land_value_tot = 0;
-    for (hy = 0; hy < HALF_H; hy++)
+    for (hy = 0; hy < (c->h >> 1); hy++)
     {
         int qy = hy / 2;
-        for (hx = 0; hx < HALF_W; hx++)
+        for (hx = 0; hx < (c->w >> 1); hx++)
         {
             int     qx = hx / 2, zone, dist;
             int32_t v;
             uint8_t b;
 
-            if (!(c->xbit[hy][hx] & XBIT_VISITED))
+            if (c->limits_glow > 0 ? !T_DEVELOPED_CELLS(c, hy, hx) : !(T_XBIT(c, hy, hx) & XBIT_VISITED))
             { /* $2371E */
-                c->xval[hy][hx] = 0;
+                T_XVAL(c, hy, hx) = 0;
                 continue;
             }
-            zone = XZON_TYPE(c->xzon[2 * hy][2 * hx]);
+            zone = XZON_TYPE(T_XZON(c, 2 * hy, 2 * hx));
             if (zone == 0)
-                zone = XZON_TYPE(c->xzon[2 * hy + 1][2 * hx + 1]);
+                zone = XZON_TYPE(T_XZON(c, 2 * hy + 1, 2 * hx + 1));
 
             dist = (cy > hy ? cy - hy : hy - cy) + (cx > hx ? cx - hx : hx - cx);
 
             if (zone == 5 || zone == 6)
             { /* industrial */
-                v = stencil(c, 32, qy, qx);
+                v = stencil(c, c->h >> 2, qy, qx);
                 if (zone == 6)
                     v += 0x15;
                 if (64 - dist > 0)
                     v += (64 - dist) / 4;
-                v -= c->xplt[hy][hx] / 16;
-                v -= c->xcrm[hy][hx] / 4;
+                v -= T_XPLT(c, hy, hx) / 16;
+                v -= T_XCRM(c, hy, hx) / 4;
             }
             else if (zone == 3 || zone == 4)
             { /* commercial */
                 v = stencil(c, 0, qy, qx);
                 if (64 - dist > 0)
                     v += 64 - dist;
-                v -= c->xplt[hy][hx] / 4;
-                v -= c->xcrm[hy][hx] / 3;
-                v += c->xpop[qy][qx] / 3;
+                v -= T_XPLT(c, hy, hx) / 4;
+                v -= T_XCRM(c, hy, hx) / 3;
+                v += T_XPOP(c, qy, qx) / 3;
             }
             else
             { /* residential */
                 v = stencil(c, 0, qy, qx);
-                if (c->xpop[qy][qx] < 0x40)
+                if (T_XPOP(c, qy, qx) < 0x40)
                     v += 0x15; /* $23B08 */
                 if (64 - dist > 0)
                     v += (64 - dist) / 2;
-                v -= c->xplt[hy][hx] / 5;
-                v -= c->xcrm[hy][hx] / 3;
+                v -= T_XPLT(c, hy, hx) / 5;
+                v -= T_XCRM(c, hy, hx) / 3;
             }
 
-            b = c->xbld[2 * hy][2 * hx]; /* $23B96 */
+            b = T_XBLD(c, 2 * hy, 2 * hx); /* $23B96 */
             if (b >= BLD_ZONE_FIRST && BUILDING[b].tier_flag == 2)
                 v -= v / 2;
             if (v > 255)
                 v = 255;
             else if (v < 0)
                 v = 0;
-            c->xval[hy][hx] = (uint8_t)v;
+            T_XVAL(c, hy, hx) = (uint8_t)v;
             c->land_value_tot += v;
         }
     }
@@ -1334,66 +1316,65 @@ void sim_land_value(City *c)
  * ================================================================== */
 void sim_crime(City *c)
 {
-    static uint8_t mask[HALF_H][HALF_W];
-    int            hy, hx, y, x;
+    int hy, hx, y, x;
 
     /*  Stage 4 marks this mask into XBIT bit 3.  But that bit is also
      *  the flood-fill scratch and both flood passes clear it.  So
      *  whether a save still carries it depends on when the save
      *  happened.  Derive it from the map instead: same condition,
      *  $235DA. */
-    memset(mask, 0, sizeof mask);
-    for (y = 0; y < MAP_H; y++)
-        for (x = 0; x < MAP_W; x++)
-            if (c->xbld[y][x] >= 0x1D || XZON_TYPE(c->xzon[y][x]))
-                mask[y / 2][x / 2] = 1;
+    memset(c->scan_mask, 0, (size_t)(c->w / 2) * (size_t)(c->h / 2));
+    for (y = 0; y < c->h; y++)
+        for (x = 0; x < c->w; x++)
+            if (T_XBLD(c, y, x) >= 0x1D || XZON_TYPE(T_XZON(c, y, x)))
+                c->scan_mask[(y / 2) * (c->w / 2) + x / 2] = 1;
 
-    for (hy = 0; hy < HALF_H; hy++)
+    for (hy = 0; hy < (c->h >> 1); hy++)
     {
         int qy = hy / 2;
-        for (hx = 0; hx < HALF_W; hx++)
+        for (hx = 0; hx < (c->w >> 1); hx++)
         {
             int     qx = hx / 2;
             int32_t v;
-            if (!mask[hy][hx])
+            if (!c->scan_mask[hy * (c->w / 2) + hx])
             { /* $23FCA */
-                c->pad[hy][hx] = 0;
+                PAD(c, hy, hx) = 0;
                 continue;
             }
-            v = c->xpop[qy][qx];      /* $23FF0 */
-            v -= c->xplc[qy][qx] / 2; /* $2401E */
-            v -= c->xval[hy][hx] / 4; /* $24044 */
+            v = T_XPOP(c, qy, qx);      /* $23FF0 */
+            v -= T_XPLC(c, qy, qx) / 2; /* $2401E */
+            v -= T_XVAL(c, hy, hx) / 4; /* $24044 */
             if (c->ordinances & 0x04)
                 v += 0x10; /* $2404E */
-            c->pad[hy][hx] = (int16_t)v;
+            PAD(c, hy, hx) = (int16_t)v;
         }
     }
 
     c->crime_tot = 0;
-    for (hy = 0; hy < HALF_H; hy++)
+    for (hy = 0; hy < (c->h >> 1); hy++)
     {
-        for (hx = 0; hx < HALF_W; hx++)
+        for (hx = 0; hx < (c->w >> 1); hx++)
         {
-            int32_t s = c->pad[hy][hx];
+            int32_t s = PAD(c, hy, hx);
             int     n = 1;
             if (hy > 0)
             {
-                s += c->pad[hy - 1][hx];
+                s += PAD(c, hy - 1, hx);
                 n++;
             }
-            if (hy < HALF_H - 1)
+            if (hy < (c->h >> 1) - 1)
             {
-                s += c->pad[hy + 1][hx];
+                s += PAD(c, hy + 1, hx);
                 n++;
             }
             if (hx > 0)
             {
-                s += c->pad[hy][hx - 1];
+                s += PAD(c, hy, hx - 1);
                 n++;
             }
-            if (hx < HALF_W - 1)
+            if (hx < (c->w >> 1) - 1)
             {
-                s += c->pad[hy][hx + 1];
+                s += PAD(c, hy, hx + 1);
                 n++;
             }
             s /= n;
@@ -1401,7 +1382,7 @@ void sim_crime(City *c)
                 s = 255;
             else if (s < 0)
                 s = 0;
-            c->xcrm[hy][hx] = (uint8_t)s;
+            T_XCRM(c, hy, hx) = (uint8_t)s;
             c->crime_tot += s;
         }
     }
@@ -1409,18 +1390,20 @@ void sim_crime(City *c)
 
 /*  $241B2: add to one cell of a coverage layer, clamped to a byte.
  *  Off-map cells are dropped rather than wrapped. */
-static void coverage_point(uint8_t plane[QTR_H][QTR_W], int y, int x, int16_t amount)
+static void coverage_point(City *c, size_t plane, int y, int x, int16_t amount)
 {
-    int32_t v;
+    int32_t  v;
+    uint8_t *p;
 
-    if (y < 0 || x < 0 || y >= QTR_H || x >= QTR_W)
+    if (y < 0 || x < 0 || y >= (c->h >> 2) || x >= (c->w >> 2))
         return; /* $241C4 */
-    v = (int32_t)plane[y][x] + amount;
+    p = t_qtr(c, y, x, plane);
+    v = (int32_t)*p + amount;
     if (v > 255)
         v = 255;
     else if (v < 0)
         v = 0;
-    plane[y][x] = (uint8_t)v;
+    *p = (uint8_t)v;
 }
 
 /*  $24232: stamp the diamond.  The original writes out all thirty-odd
@@ -1428,7 +1411,7 @@ static void coverage_point(uint8_t plane[QTR_H][QTR_W], int y, int x, int16_t am
  *  running it.  Each ring step is done in sixteen bits, so a station
  *  funded hard enough to overflow the intermediate really does wrap.
  *  That is reproduced rather than smoothed over. */
-static void coverage_spread(uint8_t plane[QTR_H][QTR_W], int y, int x, int16_t s)
+static void coverage_spread(City *c, size_t plane, int y, int x, int16_t s)
 {
     int16_t ring[COVERAGE_RINGS];
     int     i;
@@ -1440,7 +1423,7 @@ static void coverage_spread(uint8_t plane[QTR_H][QTR_W], int y, int x, int16_t s
     ring[4] = (int16_t)(ring[3] / 2);
 
     for (i = 0; i < COVERAGE_KERNEL_LEN; i++)
-        coverage_point(plane, y + COVERAGE_KERNEL[i].dy, x + COVERAGE_KERNEL[i].dx, ring[COVERAGE_KERNEL[i].ring]);
+        coverage_point(c, plane, y + COVERAGE_KERNEL[i].dy, x + COVERAGE_KERNEL[i].dx, ring[COVERAGE_KERNEL[i].ring]);
 }
 
 /*  A station that has lost its power covers half as far.  $23E4A */
@@ -1454,66 +1437,68 @@ static int16_t station_range(int32_t product, int powered)
 
 void sim_coverage(City *c)
 {
-    static int16_t acc[QTR_H][QTR_W]; /* A5+0x13BA at quarter res */
-    int            y, x, qy, qx;
+    int y, x, qy, qx;
 
-    memset(acc, 0, sizeof acc); /* $23C46 */
-    memset(c->xplc, 0, sizeof c->xplc);
-    memset(c->xfir, 0, sizeof c->xfir);
+    int16_t  *acc = c->scan_acc; /* A5+0x13BA at quarter res, w / 4 wide */
+    const int aw  = c->w / 4;
+    memset(acc, 0, sizeof *acc * (size_t)aw * (size_t)(c->h / 4)); /* $23C46 */
+    for (qy = 0; qy < (c->h >> 2); qy++)
+        for (qx = 0; qx < (c->w >> 2); qx++)
+            T_XPLC(c, qy, qx) = T_XFIR(c, qy, qx) = 0;
 
     /*  1 .. 0x7E.  The first and last row and column are skipped.  This
      *  is the loop the original writes ($23CB2 sets 1, $23ED0 stops
      *  below 0x7F), not an off-by-one here. */
-    for (y = 1; y < MAP_H - 1; y++)
+    for (y = 1; y < c->h - 1; y++)
     {
-        for (x = 1; x < MAP_W - 1; x++)
+        for (x = 1; x < c->w - 1; x++)
         {
-            uint8_t b = c->xbld[y][x];
+            uint8_t b = T_XBLD(c, y, x);
 
             qy = y / 4;
             qx = x / 4;
 
             if (b >= BLD_ZONE_FIRST && b < BLD_POWER_FIRST)
             { /* $23CFC */
-                acc[qy][qx] = (int16_t)(acc[qy][qx] + BUILDING[b].population);
+                acc[qy * aw + qx] = (int16_t)(acc[qy * aw + qx] + BUILDING[b].population);
                 if ((c->ordinances & ORD_NEIGHBOURHOOD_WATCH) /* $23D2E */
-                    && c->xplc[qy][qx] < 0xFE)
-                    c->xplc[qy][qx] = (uint8_t)(c->xplc[qy][qx] + 2);
+                    && T_XPLC(c, qy, qx) < 0xFE)
+                    T_XPLC(c, qy, qx) = (uint8_t)(T_XPLC(c, qy, qx) + 2);
                 if ((c->ordinances & ORD_VOLUNTEER_FIRE) /* $23D56 */
-                    && c->xfir[qy][qx] < 0xFE)
-                    c->xfir[qy][qx] = (uint8_t)(c->xfir[qy][qx] + 2);
+                    && T_XFIR(c, qy, qx) < 0xFE)
+                    T_XFIR(c, qy, qx) = (uint8_t)(T_XFIR(c, qy, qx) + 2);
                 continue;
             }
             if (b < BLD_POWER_FIRST)
                 continue; /* $23D86 */
 
-            acc[qy][qx] = (int16_t)(acc[qy][qx] + ((b >= 0xFB && b <= 0xFE) ? 12 : 2));
+            acc[qy * aw + qx] = (int16_t)(acc[qy * aw + qx] + ((b >= 0xFB && b <= 0xFE) ? 12 : 2));
 
             /*  Only the corner tile carrying XZON bit 0x80 spreads, so a
              *  3x3 station is stamped once and not nine times. $23DEE */
-            if (!(c->xzon[y][x] & 0x80))
+            if (!(T_XZON(c, y, x) & 0x80))
                 continue;
 
             if (b == 0xD2)
             { /* $23E0C */
                 int32_t r = (int32_t)(int16_t)(c->police_term + 5) * c->dept[DEPT_POLICE].funding;
-                coverage_spread(c->xplc, qy, qx, station_range(r, c->xbit[y][x] & XBIT_POWERED));
+                coverage_spread(c, offsetof(TileChunk, xplc), qy, qx, station_range(r, T_XBIT(c, y, x) & XBIT_POWERED));
             }
             else if (b == 0xD3)
             { /* $23E6C */
                 int32_t r = c->dept[DEPT_FIRE].funding * 5;
-                coverage_spread(c->xfir, qy, qx, station_range(r, c->xbit[y][x] & XBIT_POWERED));
+                coverage_spread(c, offsetof(TileChunk, xfir), qy, qx, station_range(r, T_XBIT(c, y, x) & XBIT_POWERED));
             }
         }
     }
 
     /*  $23EE4.  The multiply by four is a word shift and the clamp is
      *  one sided: the original never floors the result at zero. */
-    for (qy = 0; qy < QTR_H; qy++)
+    for (qy = 0; qy < (c->h >> 2); qy++)
     {
-        for (qx = 0; qx < QTR_W; qx++)
+        for (qx = 0; qx < (c->w >> 2); qx++)
         {
-            int32_t v = (int16_t)(acc[qy][qx] * 4);
+            int32_t v = (int16_t)(acc[qy * aw + qx] * 4);
             int32_t d, r;
             if (v > 255)
                 v = 255;
@@ -1523,15 +1508,15 @@ void sim_coverage(City *c)
              *  weighted seven to one toward the running value.  It is
              *  offset by 128 so that a quarter holding steady reads as
              *  the middle of the range rather than as zero. */
-            d = (v - c->xpop[qy][qx]) * 8 + 128;        /* $23F32 */
-            r = (int16_t)(c->xrog[qy][qx] * 7 + d) / 8; /* $23F52 */
+            d = (v - T_XPOP(c, qy, qx)) * 8 + 128;        /* $23F32 */
+            r = (int16_t)(T_XROG(c, qy, qx) * 7 + d) / 8; /* $23F52 */
             if (r < 0)
                 r = 0; /* $23F6A */
             if (r > 255)
                 r = 255; /* $23F72 */
 
-            c->xpop[qy][qx] = (uint8_t)v; /* $23F3C */
-            c->xrog[qy][qx] = (uint8_t)r; /* $23F7C */
+            T_XPOP(c, qy, qx) = (uint8_t)v; /* $23F3C */
+            T_XROG(c, qy, qx) = (uint8_t)r; /* $23F7C */
         }
     }
 }

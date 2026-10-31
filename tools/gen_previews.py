@@ -45,9 +45,11 @@ def city(name):
 
 
 def run(args, out=None):
+    #  --soft takes the assets, the city and then the picture: args[0] is
+    #  the city.
     cmd = [str(EXE), "--soft", str(ASSETS)] + args
     if out:
-        cmd.insert(3, str(out))
+        cmd.insert(4, str(out))
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
         raise SystemExit("FAILED: %s\n%s" % (" ".join(cmd), r.stderr))
@@ -344,7 +346,38 @@ TERRAIN = ["Volcano City", "Puntjak Putih", "Soutien Gorge", "Seven Spires",
            "St. Christopher", "Egypt Falls", "Bayview", "Hawaii"]
 #  The docs pages that embed the figures, by tab.  The pages are prose and
 #  are written by hand; this table is what --check walks.
+#  The 3D world, as the game draws it: a frame of `arcology CITY --shot`,
+#  the live window's own frame with no interface on it.  A city named by
+#  a string is one the repository ships under cities/.
+FRAME = "--scroll 1750,1400".split()
+FOREST = "--centre 118,118 --zoom 2".split()
+FIGURES += [
+    dict(tab="Sky", key="sky-clouds", tool="game", city="oakland",
+         args=["--zoom", "0.5"], title="Clouds",
+         cap="Oakland at half the art's size: a cloud cover of 41 per cent"),
+    dict(tab="Sky", key="sky-midday", tool="game", city="bayview",
+         args=FRAME, title="Midday",
+         cap="Bayview at the fitted hour, under a clear sky"),
+    dict(tab="Sky", key="sky-dusk", tool="game", city="bayview",
+         args=FRAME + ["--hour", "17.6"], title="Dusk",
+         cap="the same frame at dusk"),
+    dict(tab="Sky", key="sky-night", tool="game", city="bayview",
+         args=FRAME + ["--hour", "22"], title="Night",
+         cap="the same frame at night"),
+    dict(tab="Trees", key="trees-tropical", tool="game", city="bayview",
+         args=FOREST + ["--trees", "tropical"], title="Tropical",
+         cap="Bayview's forest, grown as the tropical biome"),
+    dict(tab="Trees", key="trees-boreal", tool="game", city="bayview",
+         args=FOREST + ["--trees", "boreal"], title="Boreal",
+         cap="the same forest, boreal"),
+    dict(tab="Trees", key="trees-arid", tool="game", city="bayview",
+         args=FOREST + ["--trees", "arid"], title="Arid",
+         cap="the same forest, arid"),
+]
+
 PAGES = {
+    "renderer-sky.rst": ["Sky"],
+    "renderer-trees.rst": ["Trees"],
     "renderer-previews.rst": ["Open", "Manhattan", "Settled"],
     "renderer-views.rst": ["Views"],
     "renderer-terrain.rst": ["Terrain A"],
@@ -362,6 +395,8 @@ for _ti, nm in enumerate(TERRAIN):
 def cmd_of(f):
     """The command that makes figure f, exactly as the docs print it."""
     tool = f.get("tool")
+    if tool == "game":
+        return "arcology %s --shot out.png %s" % (f["city"], " ".join(f["args"]))
     return ("python3 tools/gen_anim.py '%s' out.gif %s" if tool == "anim"
             else "python3 tools/pixel_sbs.py '%s' out.png %s"
             if tool == "pixel_sbs"
@@ -424,6 +459,14 @@ def main(reuse=False):
             if r.returncode != 0 or not png.exists():
                 raise SystemExit("FAILED: %s\n%s" % (" ".join(cmd), r.stderr))
             out = "image %s\n" % r.stdout.split(",")[1].strip()
+        elif f.get("tool") == "game":
+            #  The game's own frame, headless: the live loop's frame with
+            #  no interface on it.
+            cmd = [str(EXE), f["city"], "--shot", str(png)] + f["args"]
+            r = subprocess.run(cmd, capture_output=True, text=True, cwd=ROOT)
+            if r.returncode != 0 or not png.exists():
+                raise SystemExit("FAILED: %s\n%s" % (" ".join(cmd), r.stderr))
+            out = "image %s\n" % _dims_of(png)
         elif f.get("tool") == "pixel_sbs":
             #  A three-panel comparison against the original renderer,
             #  which needs the emulator rather than arcology --soft.

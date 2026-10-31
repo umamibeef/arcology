@@ -1,7 +1,7 @@
 #  Arcology -- the developer modes.
 #
-#  This is TOOLING, not reconstruction.  `arcology --verify`, `--check`,
-#  `--clock`, `--advisor` and the rest drive the simulation and print
+#  This is TOOLING, not reconstruction.  `arcology --verify`, `--clock`,
+#  `--advisor` and the rest drive the simulation and print
 #  what it did; none of them is a routine the original has.  They are
 #  kept apart from arc_core for that reason: a file here may print, may
 #  hold state of its own and may invent a format, and none of those is
@@ -14,7 +14,7 @@ add_library(arc_dev STATIC
     testcity.c  # a city built to order, for a test that needs one
     advisor.c   # the board of advisors: a joke layer over the ranking
 )
-target_include_directories(arc_dev PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(arc_dev PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../cells)
 target_link_libraries(arc_dev PUBLIC arc_core)
 
 #  The same standard the reconstruction is held to: these drive it, and a
@@ -23,3 +23,9 @@ target_compile_options(arc_dev PRIVATE
     $<$<C_COMPILER_ID:GNU,Clang,AppleClang>:
         -Wall -Wextra -Wshadow -Wconversion -Wsign-compare -Wpointer-arith>
     $<$<C_COMPILER_ID:MSVC>:/W4>)
+
+#  What the developer modes read of the network and the mesh, built into
+#  the executable beside them.
+target_sources(arcology PRIVATE
+    area_report.c  # the debug report of an area
+    net_svg.c)     # the lane diagram, written to a file

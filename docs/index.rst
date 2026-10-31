@@ -24,24 +24,32 @@ sounds, music. As if you were playing a port of SimCity 2000 on a modern
 system.** The reconstruction documented here is that baseline, and it
 stays checkable against the original.
 
-**The engine becomes much more flexible than that: huge regions, more
-interesting terrain features such as real cliffs, realistic water that
-flows and resettles, weather.** An existing city imports into the enhanced
-world, and the simulation then runs in a more complicated sandbox.
+**The engine becomes much more flexible than that.** Its goals, briefly:
+
+- **A superset of SimCity 2000.** A whole 1995 city imports. A ``.sc2``
+  is loaded and never saved, and the world saves as ``.arco``.
+- **City limits, not a square.** A city's limits come from its roads,
+  zoning and buildings, plus a glow around them, and they grow with it.
+- **Independent cities that meet.** Cities interact, and they may grow
+  into each other where their limits touch.
+- **The road network from the cells.** C derives the network from the
+  city's data.
+- **Roads drawn better than their cells.** The renderer draws a diagonal
+  instead of a staircase, and a highway bends where the original could
+  only turn. The simulation's data does not change.
+- **A much larger region.** One fixed, very large region, shown as a
+  map, holds the cities.
 
 **The original save format is therefore an import and the reference
 baseline, not the limit of what the engine can hold.** Original content
-round-trips exactly; the enhanced world is a superset of it.
+imports exactly, and a world is saved as ``.arco``, a superset of it.
 
 That is the simulation's aim. The renderer's is its own, and the two must
 not be confused:
 
-**Lua is handed the simulation data, imagines a world on top of it, and
-asks C to draw that world in 3D with primitives.** How the renderer reads
-the simulation — how a road sweeps through its corridor, how an on-ramp
-cell raises a climb to a highway, what an intersection draws, how many
-lanes a road carries — is changed by editing a script. See
-:ref:`scripting`.
+**C derives the road network from the city's cells and stores it, and C
+draws the world.** The network follows from the tiles and the player's
+street layer.
 
 .. toctree::
    :maxdepth: 2
@@ -60,13 +68,14 @@ lanes a road carries — is changed by editing a script. See
    renderer-terrain
    renderer-terrain-b
    renderer-views
+   renderer-sky
+   renderer-trees
 
 .. toctree::
    :maxdepth: 2
    :caption: The enhanced world
 
    enhanced-renderer
-   scripting
    future
 
 .. toctree::
@@ -75,6 +84,5 @@ lanes a road carries — is changed by editing a script. See
 
    conventions
    appendix-routines
-   appendix-script-api
    appendix-road-spec
    notebook

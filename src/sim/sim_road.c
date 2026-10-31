@@ -23,6 +23,11 @@ static int road_joins(int b)
            (b >= 0x5D && b < 0x61);
 }
 
+int sim_road_joins(int b)
+{
+    return road_joins(b);
+}
+
 /* ================================================================== *
  *  $1F632  fit the road piece on (y,x) to its neighbors.  A tile that
  *  does not carry a road piece stays as it is.
@@ -46,10 +51,10 @@ void sim_fit_road(City *c, int y, int x)
 {
     int ter, mask = 0;
 
-    if (!(c->xbld[y][x] >= 0x1D && c->xbld[y][x] < 0x2C))
+    if (!(T_XBLD(c, y, x) >= 0x1D && T_XBLD(c, y, x) < 0x2C))
         return; /* $1F662 */
 
-    ter = c->xter[y][x]; /* $1F676 */
+    ter = T_XTER(c, y, x); /* $1F676 */
     if (ter >= 0x30)
         ter = 0;
     if (NET_SLOPED[ter & 0x0F]) /* $1F68C */
@@ -58,26 +63,26 @@ void sim_fit_road(City *c, int y, int x)
         return;
     }
 
-    if (y > 0 && road_joins(c->xbld[y - 1][x]) && NET_JOIN_Y[c->xter[y - 1][x]])
+    if (y > 0 && road_joins(T_XBLD(c, y - 1, x)) && NET_JOIN_Y[T_XTER(c, y - 1, x)])
         mask += JOIN_Y_BEFORE; /* $1F756 */
-    if (y < 0x7F && road_joins(c->xbld[y + 1][x]) && NET_JOIN_Y[c->xter[y + 1][x]])
+    if (y < c->h - 1 && road_joins(T_XBLD(c, y + 1, x)) && NET_JOIN_Y[T_XTER(c, y + 1, x)])
         mask += JOIN_Y_AFTER; /* $1F800 */
-    if (x > 0 && road_joins(c->xbld[y][x - 1]) && NET_JOIN_X[c->xter[y][x - 1]])
+    if (x > 0 && road_joins(T_XBLD(c, y, x - 1)) && NET_JOIN_X[T_XTER(c, y, x - 1)])
         mask += JOIN_X_BEFORE; /* $1F8B8 */
-    if (x < 0x7F && road_joins(c->xbld[y][x + 1]) && NET_JOIN_X[c->xter[y][x + 1]])
+    if (x < c->w - 1 && road_joins(T_XBLD(c, y, x + 1)) && NET_JOIN_X[T_XTER(c, y, x + 1)])
         mask += JOIN_X_AFTER; /* $1F974 */
 
     /*  $1F98A: the label $FA joins the edge of the map.  The neighbor
      *  test skips that side, so its bit is clear before this. */
-    if (c->xtxt[y][x] == 0xFA)
+    if (T_XTXT(c, y, x) == 0xFA)
     {
         if (y == 0)
             mask += JOIN_Y_BEFORE;
-        if (y == 0x7F)
+        if (y == c->h - 1)
             mask += JOIN_Y_AFTER;
         if (x == 0)
             mask += JOIN_X_BEFORE;
-        if (x == 0x7F)
+        if (x == c->w - 1)
             mask += JOIN_X_AFTER;
     }
 

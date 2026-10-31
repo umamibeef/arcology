@@ -105,17 +105,17 @@ typedef enum
 
 typedef struct
 {
-    int32_t  shape;      /* SHAP id, already in the level's art set          */
-    int32_t  x, y;       /* the art's top-left on the canvas                 */
-    uint32_t order;      /* painter's index of the emitting tile, from 1     */
-    int32_t  stencil;    /* -1, or the palette index a car may paint over    */
-    uint8_t  kind;       /* ROpKind                                          */
-    uint8_t  flip;       /* mirrored                                         */
-    uint8_t  terrain;    /* ground the sprites stand on: the terrain pass    */
-    uint8_t  under_flip; /* the road sprite's own mirror flag          */
-    int16_t  row, col;   /* the emitting tile                               */
-    int16_t  alt;        /* and its altitude in levels, as the sweep drew it.  So a camera off the original's own can put the sprite back where its tile went               */
-    int32_t under_shape, under_x, under_y; /* for a stencilled op it is the line sprite it was stencilled onto.  So a consumer that cannot read its destination can test that sprite's own texel instead.  Under_shape is 0 when there is none */
+    int32_t  shape;                         /* SHAP id, already in the level's art set          */
+    int32_t  x, y;                          /* the art's top-left on the canvas                 */
+    uint32_t order;                         /* painter's index of the emitting tile, from 1     */
+    int32_t  stencil;                       /* -1, or the palette index a car may paint over    */
+    uint8_t  kind;                          /* ROpKind                                          */
+    uint8_t  flip;                          /* mirrored                                         */
+    uint8_t  terrain;                       /* ground the sprites stand on: the terrain pass    */
+    uint8_t  under_flip;                    /* the road sprite's own mirror flag          */
+    int16_t  row, col;                      /* the emitting tile                               */
+    int16_t  alt;                           /* and its altitude in levels, as the sweep drew it.  So a camera off the original's own can put the sprite back where its tile went               */
+    int32_t  under_shape, under_x, under_y; /* for a stencilled op it is the line sprite it was stencilled onto.  So a consumer that cannot read its destination can test that sprite's own texel instead.  Under_shape is 0 when there is none */
 } ROp;
 
 typedef struct
@@ -139,7 +139,14 @@ typedef struct
  *  order.  `ops` starts empty or is reused.  `info` is filled.  Returns
  *  0, or -1 if the atlas has no level for the requested zoom or memory
  *  ran out.  The rasteriser below and the GPU path both consume this. */
-int  soft_sweep(const RAtlas *a, const RCity *c, const RSoftOpts *o, ROpList *ops, RSweep *info);
+int soft_sweep(const RAtlas *a, const RCity *c, const RSoftOpts *o, ROpList *ops, RSweep *info);
+/*  $71A4: a footprint collapsing, as $5FAA shows it, added to a sweep's
+ *  ops.  `tile` holds the footprint's `nt` tiles as column and row pairs
+ *  in the swept city `c`.  Their art is placed as the sweep places its
+ *  own, at the altitude of the first of them.  The first `frames` frames
+ *  are drawn, each over the last.  `seed` draws the shapes and mirrors,
+ *  the same for the same seed. */
+int  soft_debris(const RAtlas *a, const RCity *c, const RSoftOpts *o, const int32_t *tile, int nt, int frames, uint32_t seed, ROpList *ops);
 void ops_free(ROpList *ops);
 
 /*  Render into `out`, which is allocated here.  Returns 0, or -1 if the
@@ -165,7 +172,6 @@ int soft_write_depth_png(const RImage *im, const char *path);
 
 int image_write_png(const RImage *im, const char *path);
 int image_write_png_indices(const RImage *im, const RAtlas *a, const char *path);
-int image_write_png_indexed(const RImage *im, const char *path);
 /*  The provenance plane as a 16-bit greyscale PNG, one sample per pixel. */
 int image_write_png_provenance(const RImage *im, const char *path);
 

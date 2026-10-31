@@ -41,6 +41,14 @@ DIR_FRAME4   = -0x6338   # byte[4]: heading -> frame, for thing types 0/4/9
 DIR_FLIP4    = -0x6334   # byte[4]: heading -> mirror, for the same
 ANIM_PERM_A  = -0x64B0   # word[49]: the palette permutation for run 155..203
 ANIM_PERM_B  = -0x644E   # word[15]: the palette permutation for run 224..238
+#  The view turned a quarter.  The original turns its map, $3AECA, and
+#  these are the tables it reads to do so.  The renderer reads them to
+#  choose the art of a cell seen from a turned view.
+TURN_XBLD    = -0xEE2    # byte[256]: XBLD id, $3AF92 and $3B422
+TURN_XTER    = -0xDE2    # byte[256]: XTER byte, $3B01E
+TURN_XUND    = -0xD9C    # byte[256]: XUND byte, $3B0C2
+TURN_5D_ID   = -0xD68    # byte[8]: the new id of XBLD 0x5D..0x60, copied at $3AED2
+TURN_5D_BIT  = -0xD60    # byte[8]: their new XBIT 0x02, copied at $3AEDE
 OUT = Path(__file__).resolve().parent.parent / "src" / "render" / "generated" / "tables.c"
 
 
@@ -173,6 +181,26 @@ def main():
     a("")
     a("const uint8_t R_TRAFFIC_HEAVY[28] = {")
     a("    " + ", ".join(str(v) for v in bytesat(img, TRAF_HEAVY, 28)) + "};")
+    a("")
+    a("/*  The view turned a quarter clockwise.  The original turns its map")
+    a(" *  ($3AECA), and these are the tables it reads.  XBLD, XTER and XUND")
+    a(" *  ids encode a direction, so each byte goes through its table once")
+    a(" *  a turn.  The original reads each table for all 256 bytes.  So the")
+    a(" *  XTER table runs on into the XUND table and past it. */")
+    for name, off in (("R_TURN_XBLD", TURN_XBLD), ("R_TURN_XTER", TURN_XTER),
+                      ("R_TURN_XUND", TURN_XUND)):
+        t = bytesat(img, off, 256)
+        a("const uint8_t %s[256] = {" % name)
+        for base in range(0, 256, 16):
+            a("    " + ", ".join("%3d" % v for v in t[base:base + 16]) + ",")
+        a("};")
+    a("")
+    a("/*  XBLD 0x5D..0x60 after the same turn ($3B43C..$3B4A4).")
+    a(" *  The index is the id less 0x5D, plus 4 when XBIT bit 0x02 is set.")
+    a(" *  R_TURN_5D_ID gives the new id.  R_TURN_5D_BIT gives the new")
+    a(" *  bit 0x02: set when nonzero, clear when zero. */")
+    a("const uint8_t R_TURN_5D_ID[8] = {" + ", ".join(str(v) for v in bytesat(img, TURN_5D_ID, 8)) + "};")
+    a("const uint8_t R_TURN_5D_BIT[8] = {" + ", ".join(str(v) for v in bytesat(img, TURN_5D_BIT, 8)) + "};")
     a("")
     #  Explicit encoding and newline: Path.write_text has no newline= before
     #  Python 3.10, and a CRLF here would make the generated file differ

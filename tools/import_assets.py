@@ -7,13 +7,15 @@ Arcology ships no art, sound or interface graphics.  They are read out of
 a real SimCity 2000 installation every time, which is why this script
 exists and why `assets/` is not something you can download.
 
-It runs the three extractors in turn:
+It runs the extractors in turn:
 
     artpack.py extract   SHAP  ->  tiles8/16/32.png + JSON      the map art
+    artpack.py split     SHAP  ->  split8/16/32/NNNN.png + .tsx one file a sprite
     pict.py --atlas       PICT  ->  ui.png + ui.json            the interface
     snd.py                snd   ->  sounds/*.wav                the effects
+    music.py              MIDI  ->  music/                      the songs
 
-All three read the game's RESOURCE FORK.  On macOS that fork is still
+All of them read the game's RESOURCE FORK.  On macOS that fork is still
 attached to the file and this script finds it; on any other system you
 need the fork as a separate file (see --rsrc).
 """
@@ -95,6 +97,8 @@ def main():
 
     run("map art  (SHAP)", [str(HERE / "artpack.py"), "extract",
                             "--rsrc", str(fork), "--out", str(out)])
+    run("sprites  (SHAP, one PNG each)", [str(HERE / "artpack.py"), "split",
+                                          "--rsrc", str(fork), "--out", str(out)])
     run("interface (PICT)", [str(HERE / "pict.py"), "--atlas",
                              str(fork), str(out)])
     run("sound     (snd )", [str(HERE / "snd.py"), str(fork),

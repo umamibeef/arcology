@@ -3,16 +3,16 @@
  *  soft.c decides what is drawn and in what order.  This paints it, and
  *  owns the depth plane the 2.5D passes read and write.  Every rule here
  *  is the game's own, checked against it with tools/pixel_diff.py. */
-#include "soft/soft.h"
 #include "project.h"
+#include "soft/soft.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "dump.h"
 #include "lodepng.h"
 #include "tables.h"
-#include "dump.h"
 
 /*  The 2.5D passes. g_pass is 0 for the original's single sweep.  It is
  *  1 while the terrain is painted, which writes depth.  It is 2 while
@@ -154,7 +154,7 @@ static void paint(RImage *im, const RAtlas *a, const RAtlasLevel *l, const ROp *
 
 int soft_render(RImage *out, const RAtlas *a, const RCity *c, const RSoftOpts *o)
 {
-    int dump;
+    int                dump;
     ROpList            ops = {NULL, 0, 0};
     RSweep             sw;
     const RAtlasLevel *l;
